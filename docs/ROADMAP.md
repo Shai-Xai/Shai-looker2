@@ -4,7 +4,7 @@
 > commitments or final specs. Each item keeps the original note verbatim
 > (*italic*) plus a first-pass description and how it ties to the
 > [Experience OS vision](EXPERIENCE_OS_BRIEF.md) and what's already built.
-> Last updated 2026-06-27.
+> Last updated 2026-07-02.
 
 Legend: **Effort** S/M/L/XL · **Status** 💡 idea · 🏗️ in progress ·
 ✅ shipped · ⏸️ parked · **Ties to** = existing module or vision layer.
@@ -18,6 +18,9 @@ Legend: **Effort** S/M/L/XL · **Status** 💡 idea · 🏗️ in progress ·
 > **Status set conservatively on 2026-06-27** from code + git evidence (see
 > `docs/whats-next/2026-06-27__account-sessions-review.md`). Items left 💡 either
 > have no implementation yet or only a spec — those are flagged *confirm*.
+>
+> **Re-reconciled 2026-07-02** against code + git after the 06-28→07-02 sprint
+> (full per-theme stocktake: `docs/whats-next/2026-07-02__stocktake.md`).
 
 ---
 
@@ -34,9 +37,19 @@ Three escalating capabilities: **answer** (recall over data + corpus, cited) →
 campaigns, tasks, messages with human confirm). Ties to `insights.js`, the Owl
 Narrate/Extract/Recall layers, and the action engine (`actions.js`).
 Effort: XL. The flagship of insight → action.
-**Status:** 🏗️ — the analyst drawer (`AnalystDrawer.jsx`, `OwlAddressCard.jsx`,
-`RefineButton.jsx`) + `insights.js`/`actions.js` deliver **answer/analyse**
-today; the full **agentic "act"** layer and the autonomous skills below remain.
+**Status:** 🏗️ — **substantially built (2026-06-28→07-02), dogfood-only.** The
+native Claude tool-use loop is live behind `owlNativeChat` + an allowlist:
+`owlChat.js` (threads, streaming, audit ledger) + `owlTools.js` with **12
+tools** — `askData` over a curated catalogue (scope-gated, fails closed),
+`getGoals`/`getAlerts`/`getCampaigns`/`getDashboard`/`queryDashboard`/
+`eventOps`/`askUpload`/`draftReport`, and the first **act-tools**
+(`createAlert`, `createSegment`, `draftCampaign` — draft → confirm, never a
+silent write). Plus: chat history/share, pin-to-dashboard, memory, guidance,
+uploads, per-client extra explores, auto-charts, citation chips, a WhatsApp
+interface, and Owl-designed themed emails. **Remaining:** rollout + Inventive
+cutover (P1 plan M5), `createTask`/`announce` act-tools (blocked on 5.1), L3
+autonomy lanes, the Skills runtime (SKILLS_BRIEF — not started), Extraction
+(6b) + Recall-over-corpus (6c) from the brief, voice (1.2).
 **Spec:** `docs/specs/AGENTIC_OWL_SPEC.md` — the *native* Claude tool-use loop
 with `askData` (text-to-query) as the foundation, the own-vs-rent decision
 (build native; Inventive/Looker CA only as flagged fallbacks), the autonomy
@@ -71,15 +84,20 @@ loads instantly".
 
 ## 2. Onboarding & client UX
 
-### 2.1 ✅ Product updates on sign-in ("What's new")
+### 2.1 🏗️ Product updates on sign-in ("What's new")
 *"Product Update on sign in — give an update of new features to clients when they
 login; we also need a way to manage this on the backend."*
 A "What's new" announcement shown on login (modal/banner), dismissible, with
 read tracking so it shows once. **Dual-surface:** an admin backend to author,
 schedule, target (all clients / specific tiers / entities) and version these
 updates. Could ride the OS `announce()` spine. Effort: M.
-**Status:** ✅ — `releaseNotes.js` + `releaseNotesSeed.js` engine with admin
-authoring (`/api/admin/release-notes/*`) and scheduled generation.
+**Status:** 🏗️ — *downgraded 2026-07-02: the 06-27 ✅ overstated it.* The
+**internal** half is done: `releaseNotes.js` + `releaseNotesSeed.js`, 3-lens
+daily auto-drafts (summary/how-to/dev), publish gate, admin authoring
+(`/api/admin/release-notes/*`). The **client-facing** half from
+`docs/specs/RELEASE_NOTES_SPEC.md` is NOT built: no `GET /api/my/release-notes`,
+no `release_seen_at`, no What's-new bell/drawer on login, no weekly branded
+email (`release_emails` + `releaseNotesEmail`). Clients still can't see any of it.
 
 ### 2.2 🏗️ Setup wizard for clients
 *"Setup Wizard for clients."*
@@ -87,11 +105,12 @@ Guided first-run onboarding: connect/confirm data scope, set branding
 (logo/colours/background), choose starter dashboards, invite team, enable
 notifications. Reduces AM hand-holding. Ties to integrations, branding, team
 manager. Effort: M–L.
-**Status:** 🏗️ — client self-service onboarding checklist shipped
-(`server/onboarding.js`, `/api/my/onboarding/:entityId`, `OnboardingCard.jsx`,
-auto-detecting branding/team/alerts/digests/segments/campaigns/social). The
-full *guided* first-run wizard is partial — see open **PR #2 "Client onboarding
-wizard"**.
+**Status:** ✅ — the guided **Setup wizard** shipped (`server/setupWizard.js` +
+`SetupWizard` with step tours; Admin → 🧙 Setup wizard), alongside the client
+self-service onboarding checklist (`server/onboarding.js`,
+`/api/my/onboarding/:entityId`, `OnboardingCard.jsx`) and AI-personalised
+setup nudges (`setupNudge.js`). Stale **PR #2** is superseded — close it.
+Keep the wizard current as new setup-critical settings land (CLAUDE.md rule).
 
 ### 2.3 💡 Client background colour / image
 *"Add background colour or images to clients background."*
@@ -143,15 +162,19 @@ Playbook auto-verification ("On sale" completes when the first ticket sells) and
 for turning insights into real operational changes. Ties to the Playbook /
 `event_tasks` and data-signal verification in the brief. Effort: XL.
 
-### 4.2 💡 Outbound API / JSON for third-party AI analysis
+### 4.2 ✅ Outbound API / JSON for third-party AI analysis
 *"Create API/JSON to integrate with a third-party AI data analysis that we
 already have in place."*
 A documented, authenticated API/JSON feed exposing the client's (scoped) data so
-an existing external AI analysis tool can ingest it. Decide: push (webhook) vs
-pull (REST), auth (key per client/entity), scope enforcement (same server-side
-organiser boundary). Effort: M.
-*(confirm: spec drafted — `docs/API_MCP_BRIEF.md` (GraphQL + MCP, per-entity API
-keys) — not yet implemented in code.)*
+an existing external AI analysis tool can ingest it. Effort: M.
+**Status:** ✅ — shipped 2026-07-01/02 as the **public platform surface**:
+per-entity API keys (`apiKeys.js`), `/api/v1` read API (`api.js`; row-level
+tile data behind an explicit `read_rows` scope), a **remote MCP server**
+(`mcp.js`) with OAuth one-click Connect for Claude + trusted platforms
+(`oauth.js`), an OpenAI/ChatGPT connector (search + fetch tools), a per-client
+access switch (off by default) and a shareable client/developer guide
+(`docs/CLIENT_API_GUIDE.md`, `docs/PUBLIC_API.md`). **Follow-ups:** first
+external consumer, per-key usage/rate-limit visibility (pairs with 5.3).
 
 ### 4.3 🏗️ Social actions — Meta / X (Twitter) / TikTok
 *"Build out more actions that can link into Meta/Twitter/TikTok."*
@@ -161,9 +184,13 @@ post/ad publishing. Per-channel OAuth + a sync/send adapter mirroring
 `mailer.js` / `messaging.js`. See **`docs/ENGAGEMENT_ENGINE.md`** for the full
 model. Effort: L (per channel).
 **Status:** 🏗️ — **Meta + TikTok** audience-sync shipped (`meta.js`,
-`tiktok.js`, `socialMetrics.js`, `AudienceHub.jsx`, `/api/my/audiences/sync/*`,
-tables `meta_audiences`/`tiktok_audiences`/`audience_sync_log`). **X (Twitter)**
-not built; post/ad publishing not built.
+`tiktok.js`, `AudienceHub.jsx`, `/api/my/audiences/sync/*`, tables
+`meta_audiences`/`tiktok_audiences`/`audience_sync_log`) and **inbound organic
+social metrics** shipped (`socialMetrics.js`: FB/IG/TikTok account + post
+metrics, Social page). **Not built:** X (Twitter); post/ad publishing;
+surfacing social metrics as **dashboard tiles**; WhatsApp as an *outbound
+campaign channel* (`messaging.js` reserved the slot — `owlWhatsapp.js` is the
+Owl bot, not a campaign channel); Google Customer Match (optional).
 
 ### 4.6 💡 Multiple ad accounts per channel (multi-brand)
 *"Clients may have multiple TikTok / Meta accounts for different brands."*
@@ -197,6 +224,19 @@ Engagement Engine (`docs/ENGAGEMENT_ENGINE.md`). Effort: M (once 4.1 exists).
 *(note: Pulse web-push exists — `server/push.js` — but that targets Pulse users,
 not Howler-app attendees; this item is the attendee channel.)*
 
+### 4.7 🏗️ Journey builder (branching multi-step journeys)
+*Braze-Canvas-style conditional journeys for Engage.*
+Generalise today's linear drip into branching journeys (branch on opened/
+clicked/bought), with a recipe library + AI "describe your journey" drafter.
+Spec: `docs/specs/JOURNEY_BUILDER_SPEC.md`.
+**Status:** 🏗️ — a J1 prototype (AI drafter, 4 recipes, read-only decision
+tree, "create as draft campaign") exists **only on the unmerged
+`claude/journey-builder-sandbox` branch**; nothing on `main` (no
+`journeys.js`/`journey_nodes`). **Next:** promote/rebuild J1, then J2 (persist
+the tree, enrol by `node_id`), J3 (evaluate decision nodes off existing
+open/click signals). True "bought" branching gated on the Howler integration
+(4.1). Effort: L (staged).
+
 ### 4.4 💡 Chotu Links integration
 *"Integrate Chotu Links into the platform."*
 Integrate Chotu Links (link shortening / tracking) so campaign + share links are
@@ -216,9 +256,13 @@ data-signal verification, blocking, and an AM cockpit (cross-client board: due
 this week, overdue, readiness %). Ties directly to `roles.js`, `os.js`, and the
 brief's build order. Effort: XL. Core Experience-OS work.
 **Status:** 🏗️ — roles shipped (`roles.js`: owner/manager/marketing/finance/
-viewer with per-area permissions) and an AM setup checklist (commit `e446527`).
-The **event task system** (`event_tasks`, AM cockpit) is spec-only —
-`docs/specs/EVENT_TASKS_SPEC.md`, no routes yet.
+viewer with per-area permissions), an AM setup checklist, and the Admin →
+Users section **with a full per-user audit log** (`audit.js`, `user_actions`,
+`last_login` — `docs/specs/ADMIN_USERS_SECTION_SPEC.md` ✅). The **event task
+system** (`event_tasks`, AM cockpit) is still spec-only —
+`docs/specs/EVENT_TASKS_SPEC.md` (milestones M1–M4), zero code. It is the
+**largest remaining North-Star gap** (brief layer 4: the Playbook) and blocks
+the Owl's `createTask` act-tool + the Ticketing-Manager skill.
 
 ### 5.2 💡 Packages / tiers with feature gating
 *"As we create packages, we will want to be able to have different packages/tiers
@@ -228,6 +272,8 @@ An entitlements layer: define tiers (e.g. Standard / Premium), map features to
 tiers, gate UI + endpoints per entity's plan, and surface upsell where a feature
 is locked. Needs a per-entity plan field + a `can(feature)` check mirroring the
 permission model. Effort: M–L. Unlocks commercial packaging.
+*(2026-07-02: still unbuilt; now also relevant to gating the public API/MCP
+surface (4.2) and the Owl per plan.)*
 
 ### 5.3 💡 API costs per client (backend)
 *"Ability to see the API costs per client in the backend."*
@@ -235,6 +281,11 @@ Attribute AI (Anthropic) + other metered API usage to each client and show
 cost/usage in the admin console — per client, per period. Log tokens/cost at each
 `insights.js` / assistant call keyed by entity; aggregate for an admin report.
 Effort: M. Informs tier pricing (5.2) and margins.
+*(2026-07-02: most raw data now exists — `owl_messages` already logs
+tokens/cost per turn and `billing.js` has the rate/rollup machinery; remaining
+work is per-entity logging across the other `insights.js` call sites +
+an admin aggregation report. Now a ~1-day build, and more urgent: the Owl and
+digests burn real Anthropic spend daily.)*
 
 ---
 
@@ -263,18 +314,54 @@ it needs further shaping.
 - **Setup nudges** — personalised "complete your setup" reminders (`setupNudge.js`).
 - **Campaign templates** (`campaignTemplates.js`).
 
+Added in the 2026-07-02 reconcile (the 06-28→07-02 sprint):
+
+- **Email block builder** — Mailchimp-style blocks, up to 4 columns,
+  drag-to-reorder, visual themes (Tier 1), AI-designed banners (Tier 2), Owl
+  designs full themed emails (`emailBlocks.js`, `emailTheme.js`,
+  `emailBanner.js`, `emailDesign.js`, `EmailBuilder.jsx`).
+- **Event Ops** — a full logistics module: QR + OCR scanning (live camera),
+  device pairing, checkpoints with mandatory photos, coverage, floor map with
+  drag/resize/rotate, batch moves, per-staff permissions, ops-only role, date
+  reports + live chart; the Owl answers Event Ops questions (`eventops.js`,
+  `EventOps*.jsx`).
+- **Product board & dev loop** — report bugs/ideas (incl. Owl `/report`
+  conversational capture) → AI-drafted ticket → live board with Approved lane →
+  GitHub issue auto-dispatched to Claude → PR webhook auto-ships the ticket
+  (`tickets.js`, `github.js`).
+- **Admin → Users + audit log** — searchable users table, per-user detail,
+  `last_login`, full `user_actions` audit (`audit.js`;
+  `docs/specs/ADMIN_USERS_SECTION_SPEC.md` ✅).
+- **Release notes (internal half)** — 3-lens daily auto-drafts behind a publish
+  gate (`releaseNotes.js`); client-facing surface still open → see 2.1.
+- **Owl-over-WhatsApp + uploads + memory + guidance** — the Owl's surrounding
+  surfaces (`owlWhatsapp.js`, `owlUploads.js`, `owlMemory.js`, `owlGuidance.js`).
+- **Combined-field OR filters** — locked filters + drills can OR across fields.
+
 ---
 
-## Suggested sequencing (for discussion)
-- **Finish what's started:** 1.1 (the agentic "act" layer + autonomous skills),
-  2.2 (close out the guided client wizard — PR #2), 4.3 (X/Twitter + publishing),
-  5.1 (the event-task system on top of shipped roles).
-- **Foundational / high-leverage:** 3.1 (global dashboards — spec exists),
-  4.1 (Howler integration) — these unblock the most.
-- **Quick wins / "wow":** 2.3 (client backgrounds), 3.3 (instant loads).
-- **Commercial:** 5.2 (tiers) + 5.3 (cost visibility) together.
-- **The flagship continues:** 1.1 → 1.2 (voice).
-- **Integrations as demand dictates:** 4.2 (spec exists), 4.4, 4.5, 4.6.
+## Suggested sequencing (updated 2026-07-02)
+- **The big North-Star gap:** 5.1 **event task system / Playbook**
+  (EVENT_TASKS_SPEC M1–M4) — zero code, spec ready, and three threads are
+  queued behind it (Owl `createTask`, Ticketing-Manager skill, Howler
+  auto-verification).
+- **Ship the engine's missing client surfaces (cheap, visible):** 2.1 client
+  "What's new" (bell + `/api/my/release-notes` + weekly email), social metrics
+  as dashboard tiles (4.3), promote the journey builder off its sandbox (4.7).
+- **Commercial:** 5.3 (AI cost per client — now ~1 day on existing data) then
+  5.2 (tiers/entitlements).
+- **The flagship's distribution, not just its build:** 1.1 rollout — widen the
+  Owl allowlist, first client A/B, Inventive cutover; then the Skills runtime
+  (SKILLS_BRIEF P1) and Extraction/Recall (brief 6b/6c).
+- **Foundational:** 3.1 portfolio view (spec ready, slice-able), 4.1 Howler
+  integration (needs a scoping conversation more than code).
+- **Attribution thread:** Goals P2 (campaign goals + contribution,
+  `docs/GOALS_P2_P3_SPEC.md`) + promo-code ROI on campaign reports — natural
+  partners.
+- **Quick wins:** 2.3 client backgrounds, 3.3 dashboard prefetch, Slack
+  inbound (`/api/inbound/slack`), status `/status` page.
+- **Hygiene:** close stale PRs #1/#2 + GitHub issues #6/#7 (both shipped);
+  bring `docs/PRODUCT_OVERVIEW_SALES.md` up to date (nothing since 06-17).
 
 > Next step: pick the top few, flesh each into a proper spec (problem, users,
 > scope, data model, surfaces, acceptance), and slot into the brief's build order.
