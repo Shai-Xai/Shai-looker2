@@ -182,6 +182,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (!cols.includes('recurring')) sql.exec('ALTER TABLE actions ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0');
     if (!cols.includes('parent_id')) sql.exec("ALTER TABLE actions ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
     if (!cols.includes('last_check')) sql.exec("ALTER TABLE actions ADD COLUMN last_check TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('created_via')) sql.exec("ALTER TABLE actions ADD COLUMN created_via TEXT NOT NULL DEFAULT ''"); // provenance: owl | whatsapp | claude | chatgpt | api
     // Approval outcome the creator hasn't seen yet — drives a guaranteed in-app
     // banner (existing rows default to seen so no historical banners appear).
     if (!cols.includes('outcome')) sql.exec("ALTER TABLE actions ADD COLUMN outcome TEXT NOT NULL DEFAULT ''");          // '' | approved | rejected
@@ -216,7 +217,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       results: JSON.parse(r.results || '{}'),
       audienceCount: r.audience_count ?? undefined, // present when read without the blob
       recurring: !!r.recurring, parentId: r.parent_id || '', lastCheck: r.last_check || '',
-      createdBy: r.created_by, approvedBy: r.approved_by, approvedAt: r.approved_at,
+      createdBy: r.created_by, createdVia: r.created_via || '', approvedBy: r.approved_by, approvedAt: r.approved_at,
       createdAt: r.created_at, updatedAt: r.updated_at,
     };
     let aud = null;
@@ -236,7 +237,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   });
   // List reads select everything EXCEPT the audience blob (the count comes from
   // json_array_length — C-side, no JS parse of a multi-MB string per row).
-  const LIST_COLS = 'id, entity_id, type, status, title, config, results, recurring, parent_id, last_check, created_by, approved_by, approved_at, created_at, updated_at, json_array_length(audience) AS audience_count';
+  const LIST_COLS = 'id, entity_id, type, status, title, config, results, recurring, parent_id, last_check, created_by, created_via, approved_by, approved_at, created_at, updated_at, json_array_length(audience) AS audience_count';
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
@@ -1850,11 +1851,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
   // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
   const listForEntity = (entityId) => sql.prepare(`SELECT ${LIST_COLS} FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100`).all(entityId).map((r) => publicAction(rowToAction(r)));
-  // Programmatic create of a DRAFT campaign (the Owl's draftCampaign act-tool commit).
-  // ALWAYS status 'draft' — it never sends; a human reviews, approves and sends it in
-  // Engage. Runs the same entity-ownership + campaigns.approve check + cleanConfig the
-  // POST route uses, so an Owl-drafted campaign is identical to a hand-made draft.
-  function createDraftCampaign({ entityId, title, config, user }) {
+  // Programmatic create of a DRAFT campaign (the Owl/API commit path). ALWAYS
+  // status 'draft' — never sends; a human approves in Engage. Same ownership +
+  // campaigns.approve check + cleanConfig as the POST route (identical drafts).
+  function createDraftCampaign({ entityId, title, config, user, via }) {
     if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
     const isAdmin = user.role === 'admin';
     if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
@@ -1863,8 +1863,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     }
     const id = uuid();
     const cfg = cleanConfig(config || {});
-    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(id, entityId, 'email_campaign', 'draft', String(title || '').slice(0, 120), JSON.stringify(cfg), 0, (user.email || 'owl'), now(), now());
+    sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, recurring, created_by, created_via, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, 'email_campaign', 'draft', String(title || '').slice(0, 120), JSON.stringify(cfg), 0, (user.email || 'owl'), String(via || '').slice(0, 20), now(), now());
     return { ok: true, action: publicAction(getAction(id)) };
   }
   return { awaitingApprovalFor, unseenOutcomesFor, audienceFor, listForEntity, draftCopy, createDraftCampaign };

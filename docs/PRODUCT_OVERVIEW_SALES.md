@@ -667,6 +667,11 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Provenance badges: see WHERE things were made** 🧪: segments,
+  campaigns and alerts created through an AI door now carry a badge in their lists —
+  **🦉 via Owl** (in-app chat), **💬 via WhatsApp**, **✨ via Claude**, **✨ via ChatGPT**,
+  **🔌 via API** — so a human reviewing a draft always knows which channel produced it.
+  Hand-made items stay unbadged.
 - **2026-07-02** — **The connected Owl can now DO things (drafts only)** 🧪: with the
   "creating drafts" permission on a connection/key, the Owl in Claude or ChatGPT can
   **build audience segments** and **draft campaigns** ("draft a win-back email to last

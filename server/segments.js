@@ -45,6 +45,9 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // they never affect resolution or scope (the segment stays entity-scoped).
   try { sql.exec("ALTER TABLE segments ADD COLUMN suite_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   try { sql.exec("ALTER TABLE segments ADD COLUMN folder TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
+  // Provenance: which door created it — '' (in-app manual) | owl | whatsapp |
+  // claude | chatgpt | api — so the UI can badge AI/externally-made segments.
+  try { sql.exec("ALTER TABLE segments ADD COLUMN created_via TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
 
   // Scope: admins see all; clients only their own entities (same boundary as
   // campaigns). Enforced server-side, so a segment can't reach another client.
@@ -115,7 +118,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     suiteId: r.suite_id || '', folder: r.folder || '', // organisation: event link + custom folder
     metaAuto: !!r.meta_auto,
     tiktokAuto: !!r.tiktok_auto,
-    createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
+    createdBy: r.created_by, createdVia: r.created_via || '', createdAt: r.created_at, updatedAt: r.updated_at,
   });
 
   // Resolve a definition live (delegates to the campaign audience resolver).
@@ -323,7 +326,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Programmatic create (the Owl's createSegment act-tool commit path). Runs the SAME
   // cleanDef + entity-ownership + campaigns.approve check the POST route uses, so an
   // Owl-made segment is identical to a hand-made one and obeys the permission model.
-  function createSegmentFor({ entityId, name, definition, user, suiteId, folder }) {
+  function createSegmentFor({ entityId, name, definition, user, suiteId, folder, via }) {
     if (!user || !entityId) return { ok: false, error: 'Missing user or client' };
     const isAdmin = user.role === 'admin';
     if (!(isAdmin || (user.entityIds || []).includes(entityId))) return { ok: false, error: 'Not allowed' };
@@ -336,8 +339,8 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     const sid = cleanSuite(entityId, suiteId);
     const fld = cleanFolder(folder);
     const id = uuid(); const ts = now();
-    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(id, entityId, nm, source, JSON.stringify(def), sid, fld, (user.email || 'owl'), ts, ts);
+    sql.prepare('INSERT INTO segments (id, entity_id, name, source, definition, suite_id, folder, created_by, created_via, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, entityId, nm, source, JSON.stringify(def), sid, fld, (user.email || 'owl'), String(via || '').slice(0, 20), ts, ts);
     return { ok: true, segment: rowToSeg(getSeg(id)) };
   }
   // The client's saved segments (id + name) — so the Owl can target one by name.

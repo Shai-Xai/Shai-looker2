@@ -626,7 +626,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
     const alertsApi = typeof getAlertsApi === 'function' ? getAlertsApi() : null;
     if (!alertsApi || !alertsApi.createAlert) return res.status(503).json({ error: 'Alerts aren\'t available right now.' });
-    const r = alertsApi.createAlert({ suiteId, draft, user: req.user });
+    const r = alertsApi.createAlert({ suiteId, draft, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
   });
@@ -665,7 +665,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     }
     const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
     if (!segmentsApi || !segmentsApi.createSegment) return res.status(503).json({ error: 'Segments aren\'t available right now.' });
-    const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user });
+    const r = segmentsApi.createSegment({ entityId, name, definition: draft, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
     res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
@@ -692,7 +692,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
       if (segmentsApi && segmentsApi.createSegment) {
         const segName = String(audienceName || name || 'Campaign audience').slice(0, 120);
-        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '' });
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '', via: 'owl' });
         if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id }; // reference the saved segment
         // (if the segment couldn't be saved, fall back to the inline query audience — the campaign still resolves)
       }
@@ -709,7 +709,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
       contentMode: cMode === 'blocks' ? 'blocks' : html ? 'html' : 'template', customHtml: html,
       blocks: Array.isArray(blocks) ? blocks : [], theme: theme || {},
     };
-    const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user });
+    const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
     res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
   });

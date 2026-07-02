@@ -369,12 +369,12 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
         if (!suiteId) { await messaging.sendWhatsapp({ to: msisdn, text: 'I need to know which event — please ask again and pick one.' }); return; }
         if (user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) { logEvent(msisdn, 'action-failed', 'no event access'); await messaging.sendWhatsapp({ to: msisdn, text: "You don't have access to that event." }); return; }
         const api = getAlertsApi && getAlertsApi();
-        const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user }) : { ok: false, error: 'Alerts unavailable' };
+        const r = api && api.createAlert ? api.createAlert({ suiteId, draft: pend.draft, user, via: 'whatsapp' }) : { ok: false, error: 'Alerts unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `alert ${r.alert.name}`); const link = actionViewUrl(publicBase(), 'createAlert'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Done — alert *${r.alert.name}* is on. I'll let you know when it triggers.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't switch that alert on: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'createSegment') {
         const api = getSegmentsApi && getSegmentsApi();
-        const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user }) : { ok: false, error: 'Segments unavailable' };
+        const r = api && api.createSegment ? api.createSegment({ entityId: pend.entityId, name: pend.name, definition: pend.draft, user, via: 'whatsapp' }) : { ok: false, error: 'Segments unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `segment ${r.segment.name}`); const link = actionViewUrl(publicBase(), 'createSegment'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Saved the segment *${r.segment.name}*. You can use it for a campaign in the Pulse app.${link ? `\nView it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't save that segment: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'draftCampaign') {
@@ -386,7 +386,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
           if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) { logEvent(msisdn, 'action-failed', 'audience off-catalogue'); await messaging.sendWhatsapp({ to: msisdn, text: 'I can only build that audience from your ticket data — set it up in the Pulse app.' }); return; }
           const segApi = getSegmentsApi && getSegmentsApi();
           if (segApi && segApi.createSegment) {
-            const sr = segApi.createSegment({ entityId: pend.entityId, name: String(pend.name || 'Campaign audience').slice(0, 120), definition: audience, user });
+            const sr = segApi.createSegment({ entityId: pend.entityId, name: String(pend.name || 'Campaign audience').slice(0, 120), definition: audience, user, via: 'whatsapp' });
             if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id };
           }
         }
@@ -401,7 +401,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
           customHtml: '', source: 'owl-whatsapp', // tag where it was drafted (for the Engage badge)
         };
         const api = getActionsApi && getActionsApi();
-        const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user }) : { ok: false, error: 'Campaigns unavailable' };
+        const r = api && api.createDraftCampaign ? api.createDraftCampaign({ entityId: pend.entityId, title: pend.name, config, user, via: 'whatsapp' }) : { ok: false, error: 'Campaigns unavailable' };
         if (r.ok) { logEvent(msisdn, 'action-done', `campaign draft ${r.action.title}`); const link = actionViewUrl(publicBase(), 'draftCampaign'); await messaging.sendWhatsapp({ to: msisdn, text: `✅ Drafted the campaign *${r.action.title}*. It's a DRAFT — review, approve and send it in the Pulse app (Engage). I never send anything to customers.${link ? `\nReview it: ${link}` : ''}` }); }
         else { logEvent(msisdn, 'action-failed', r.error || 'error'); await messaging.sendWhatsapp({ to: msisdn, text: `I couldn't create that draft: ${r.error || 'something went wrong'}.` }); }
       } else if (pend.kind === 'rememberFact') {
