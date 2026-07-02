@@ -307,10 +307,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
-      // when mode = 'query' (a cohort the Owl built in chat) — curated explore + dim filters;
-      // resolved by audienceFor's query branch (identity columns fixed server-side).
+      // when mode = 'query' (an Owl-built cohort) — curated explore + dim filters, resolved by audienceFor's query branch (identity columns fixed server-side).
       model: String(aud.model || ''),
       view: String(aud.view || ''),
+      suiteId: String(aud.suiteId || '').slice(0, 64), // event scope carried on the audience (honoured by audienceFor)
       queryFilters: (aud.queryFilters && typeof aud.queryFilters === 'object' && !Array.isArray(aud.queryFilters))
         ? Object.fromEntries(Object.entries(aud.queryFilters).slice(0, 50).map(([k, v]) => [String(k), String(v)]))
         : {},
@@ -560,11 +560,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (cfg.audience && Array.isArray(cfg.audience.sources) && cfg.audience.sources.length) {
       return combineSources(entityId, cfg, user, depth);
     }
-    // `query` source: a cohort the Owl built in chat (catalogue dims) → scoped people
-    // query. The resolver shapes rows under the SAME scope gate; we apply suppression
-    // + reach here (shared finalizeAudience), exactly like tile/paste.
+    // Event scope: a segment's OWN event (`audience.suiteId`, baked in at create) beats
+    // the campaign's, so a segment scoped to one event never widens when bound to a
+    // campaign that didn't pin one. Falls back to the campaign's event (query + tile).
+    const scopeSuite = (cfg.audience && cfg.audience.suiteId) || cfg.eventSuiteId || '';
     if (cfg.audience && cfg.audience.mode === 'query') {
-      const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: cfg.eventSuiteId || '', limit: capFor(entityId) * 2 });
+      const { raw } = await resolveQueryAudience({ entityId, definition: cfg.audience, user, suiteId: scopeSuite, limit: capFor(entityId) * 2 });
       const { list, excluded, noConsent, reach } = finalizeAudience(raw, suppressed(entityId), capFor(entityId));
       return { list, fields: [], filterFields: [], columns: [], excluded, noConsent, filteredOut: 0, reach };
     }
@@ -599,7 +600,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       if (!cfg.audience.dashboardId || !cfg.audience.tileId) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
       // `lookerFilters` are the dashboard filters captured when a segment was made
       // from a tile — applied at query time so the segment resolves that cohort.
-      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user, filterOverrides: cfg.audience.lookerFilters || {}, suiteId: cfg.eventSuiteId || '', limit: capFor(entityId) * 2 });
+      const res = await resolveAudience({ entityId, dashboardId: cfg.audience.dashboardId, tileId: cfg.audience.tileId, user, filterOverrides: cfg.audience.lookerFilters || {}, suiteId: scopeSuite, limit: capFor(entityId) * 2 });
       fields = res.fields;
       const emailField = cfg.audience.emailField || res.fields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
       const nameField = cfg.audience.nameField || '';
@@ -618,7 +619,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let attrMap = null; let attrFields = [];
       if (cfg.audience.attrDashboardId && cfg.audience.attrTileId) {
         try {
-          const ar = await resolveAudience({ entityId, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId, user, suiteId: cfg.eventSuiteId || '', limit: capFor(entityId) * 2 });
+          const ar = await resolveAudience({ entityId, dashboardId: cfg.audience.attrDashboardId, tileId: cfg.audience.attrTileId, user, suiteId: scopeSuite, limit: capFor(entityId) * 2 });
           attrFields = ar.fields || [];
           const aEmail = cfg.audience.attrEmailField || attrFields.find((f) => /email/i.test(f.name) || /email/i.test(f.label))?.name || '';
           if (aEmail) { attrMap = new Map(); for (const r of ar.rows) { const e = cellVal(r[aEmail]).toLowerCase(); if (e) attrMap.set(e, r); } }
