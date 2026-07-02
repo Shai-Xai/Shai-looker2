@@ -97,8 +97,10 @@ function mount(app, { auth, db }) {
     };
     const byCost = (list) => list.sort((a, b) => b.cost - a.cost);
     const total = agg(() => 'all')[0] || { calls: 0, inTok: 0, outTok: 0, cacheTok: 0, cost: 0 };
+    const recordingSince = (sql.prepare('SELECT MIN(created_at) AS m FROM ai_usage').get() || {}).m || '';
     res.json({
       days,
+      recordingSince,
       total: { calls: total.calls, inTok: total.inTok, outTok: total.outTok, cacheTok: total.cacheTok, cost: total.cost },
       byDay: agg((r) => r.day).sort((a, b) => a.key.localeCompare(b.key)),
       byEntity: byCost(agg((r) => r.entity_id)),

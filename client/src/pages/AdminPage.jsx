@@ -4322,6 +4322,11 @@ function AiUsagePanel() {
         <b style={{ fontSize: 15 }}>{usd(d.total.cost)} est.</b>
         <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{fmt(d.total.calls)} calls · {fmt(d.total.inTok)} in + {fmt(d.total.cacheTok)} cached · {fmt(d.total.outTok)} out</span>
       </div>
+      {d.recordingSince && (
+        <div style={{ fontSize: 12, color: '#b45309', margin: '-4px 0 10px', fontWeight: 600 }}>
+          ⚠ Metering began {new Date(d.recordingSince).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} — this page only covers usage since then, whatever window you pick. Earlier spend lives in the Anthropic console.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
         {table('By client', d.byEntity, entName)}
         {table('By feature (the drivers)', d.byKind, (k) => KIND_LABEL[k] || k)}
