@@ -148,6 +148,7 @@ const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) }), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlEmbed').mount(app, { db, auth, rateLimit }); // Owl inside the Howler organizer portal (pilot) — docs/OWL_EMBED.md
 // ─── Health ───────────────────────────────────────────────────────────────────
 // Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
 app.get('/health', (_req, res) => {
@@ -2736,9 +2737,8 @@ const segmentsApi = require('./segments').mount(app, {
 require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveRecipe, audienceFor: actionsApi.audienceFor, anthropicKeyForEntity, aiInstructionsFor });
 
 // ─── Public platform surface (docs/API_MCP_BRIEF.md) ───────────────────────────
-// Per-entity API keys (the security foundation) + the /api/v1 read API + the
-// remote MCP server for AI agents. Three disposable modules over the SAME
-// service core — external callers ride the app's own scope gates unchanged.
+// Per-entity API keys + /api/v1 read API + remote MCP server for AI agents —
+// disposable modules over the SAME service core; the app's scope gates apply.
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
 const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });

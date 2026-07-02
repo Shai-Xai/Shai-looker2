@@ -38,6 +38,7 @@ const stubs = {
     askData: { run: async (args, ctx) => (args.measure === 'core.count'
       ? { ok: true, rows: [{ 'core.type': 'VIP', 'core.count': 7 }], count: 1, measure: args.measure, dimensions: args.dimensions || [], ctxEntity: ctx.entityId }
       : { ok: false, reason: 'unknown_measure', message: `"${args.measure}" is not a measure I can read.` }) },
+    eventOps: { run: async (args, ctx) => ({ ok: true, query: args.query || 'overview', devices: 3, openIssues: 1, ctxSuite: ctx.suiteId }) },
   }),
   owlCatalogue: { exploreEnabledFor: () => true },
 };
@@ -256,6 +257,27 @@ test('direct data queries: discovery + a scoped query, REST and MCP', async () =
   // Same via MCP.
   const call = await rpc({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'pulse_query_data', arguments: { measure: 'core.count', dimensions: ['core.type'] } } }, secret);
   assert.equal(JSON.parse(call.body.result.content[0].text).count, 1);
+});
+
+test('event ops: read_rows scope only, per-event, suite-tenancy enforced', async () => {
+  const suiteA = h.db.createSuite({ entityId: entityA.id, name: 'Event A1' });
+  const suiteB = h.db.createSuite({ entityId: entityB.id, name: 'Event B1' });
+  const { secret: plain } = await issueKey(entityA.id); // read only
+  const { secret: rows } = await issueKey(entityA.id, { scopes: ['read', 'read_rows'] });
+
+  assert.equal((await app.req('GET', `/api/v1/event-ops?suiteId=${suiteA.id}`, { headers: bearer(plain) })).status, 403, 'plain read key is refused');
+  const ok = await app.req('GET', `/api/v1/event-ops?suiteId=${suiteA.id}`, { headers: bearer(rows) });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.devices, 3);
+  assert.equal(ok.body.ctxSuite, suiteA.id, 'runner receives the validated suite');
+
+  assert.equal((await app.req('GET', '/api/v1/event-ops', { headers: bearer(rows) })).status, 400, 'suiteId required');
+  assert.equal((await app.req('GET', `/api/v1/event-ops?suiteId=${suiteB.id}`, { headers: bearer(rows) })).status, 403, 'another client’s event is refused');
+
+  const plainTools = (await rpc({ jsonrpc: '2.0', id: 50, method: 'tools/list' }, plain)).body.result.tools.map((t) => t.name);
+  assert.ok(!plainTools.includes('pulse_event_ops'), 'plain key never sees the tool');
+  const call = await rpc({ jsonrpc: '2.0', id: 51, method: 'tools/call', params: { name: 'pulse_event_ops', arguments: { suiteId: suiteA.id, query: 'overview' } } }, rows);
+  assert.equal(JSON.parse(call.body.result.content[0].text).openIssues, 1);
 });
 
 test('MCP: OpenAI-compatible search + fetch tools (structuredContent shape)', async () => {
