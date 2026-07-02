@@ -112,6 +112,9 @@ event-site traffic it's ruinous for cost and latency. Split it:
     appended. The Owl never constructs or edits URLs itself — it can only hand
     out links that exist in the catalogue.
   - `logInterest(kind, payload)` — feeds the insight flywheel (§6).
+  - `captureLead(name, email, consent)` — saves the fan's details +
+    conversation-derived preferences to a `fan_profiles` record (§6b). Only
+    ever offered as a value exchange, never as a gate (§2.3).
 
   No `askData`, no dashboards, no organiser tools — the fan toolbox is a
   hard-separate, minimal set.
@@ -163,6 +166,12 @@ Fans are **anonymous**; nothing organiser-grade may reach this surface.
 - **Prompt-injection posture:** the fan message stream is hostile input. The
   toolbox is read-only + link-building; there is nothing to escalate to, and
   promo codes are validated server-side against `actions.js`, never invented.
+- **Lead capture is consent-first.** The chat is never gated on an email, and
+  details are never harvested silently from conversation. Capture happens as a
+  **value exchange** the fan says yes to (§6b), with an explicit,
+  unticked-by-default marketing opt-in — the pilots sit under POPIA (ZA) and
+  GDPR (Kappa/Italy), so consent wording, purpose, and a working unsubscribe
+  (the mailer already does suppression) are launch requirements, not polish.
 - **Abuse controls:** per-site-key domain allowlist, anonymous session tokens
   (short-lived, minted by the widget loader), per-session + per-IP + per-site
   rate limits, per-site daily LLM budget with a graceful "ribbon-only" degrade.
@@ -227,7 +236,12 @@ fan_knowledge  id, entity_id, suite_id?, kind(faq|policy|info), question?, body,
 fan_catalogue  per-suite offer list: ticket/addon/bundle, label, price, currency,
                deep_link (Howler-SUPPLIED, admin/client-entered — not derived),
                availability_bucket (API-fed, cached), public(bool)
-fan_sessions   id, site_id, anon_id, page_ctx, started_at, ua_hash
+fan_profiles   id, entity_id, email(unique per entity), name?, preferences(json:
+               interests, tiers considered, language, budget hints — conversation-
+               derived), consent{marketing:bool, at, wording_version}, source_site_id,
+               created_at/updated_at
+fan_sessions   id, site_id, anon_id, profile_id?(set on capture), page_ctx,
+               started_at, ua_hash
 fan_messages   id, session_id, role, body, tool_calls(json), at
 fan_events     id, session_id, kind(ribbon_view|chat_open|reco_shown|reco_click|
                deeplink_click|conversion|faq_gap|interest), payload(json), at
@@ -249,13 +263,41 @@ insight → action loops:
   resolve into campaign audiences for the engagement engine — the promoter can
   retarget them in two clicks.
 
+### 6b. Lead capture & remarketing
+
+The anonymous session becomes an **identified fan** the moment there's a reason
+the fan cares about. Capture moments are offers, not gates — each one is the
+Owl doing the fan a favour:
+
+- *"Want me to email you this?"* — send the recommendation/summary (rides the
+  existing mailer).
+- *"Tickets are moving — want a heads-up before this tier sells out / the price
+  steps up?"* — an alert worth an email address.
+- *"Save your picks for when you're ready?"* — resume later, any device.
+- Post-deep-link: *"I'll send your picks so they're one tap away at checkout."*
+
+On capture: `fan_profiles` stores name, email, the **explicit marketing
+consent** (opt-in checkbox, wording versioned), and `preferences` distilled
+from the conversation (interests, tiers considered, language, budget hints).
+Sessions link to the profile from then on, so conversion tracking and future
+visits attach to a person, not a browser.
+
+**Remarketing runs on rails that already exist:** profiles with
+`consent.marketing` resolve into campaign audiences exactly like any segment —
+the promoter emails "everyone who asked about VIP but didn't buy" through
+`actions.js` (approval workflow, suppression, conversion tracking included).
+No new send machinery; the fan Owl is a new *source* of audience, not a new
+channel. Later (phase 4) the email becomes the join key to Howler purchase
+history — captured preferences + actual purchases = the personalisation layer.
+
 ## 7. Phasing
 
 1. **Booking guide (this spec's build target).** Snippet + ribbon + grounded
    chat over knowledge/catalogue — the friend-who-knows-the-event voice (§2.2b)
    guiding fans to the right ticket/add-ons — + supplied deep-links with
-   conversion tracking + the admin/self-service knowledge and mapping surfaces.
-   Proves conversion lift.
+   conversion tracking + consent-first lead capture (§6b) + the
+   admin/self-service knowledge and mapping surfaces. Proves conversion lift
+   and starts building the remarketable fan base from day one.
 2. **Commerce-aware.** Live urgency, bundles, promo codes (engine exists),
    "hold one while you read" if/when the Howler API exposes holds.
 3. **In-widget checkout.** Headless Howler checkout inside the widget — no
@@ -291,6 +333,8 @@ Deliberately opposite ends of the spectrum:
 - Add-on/upsell take rate on assisted vs unassisted purchases.
 - Answer rate (questions answered from knowledge vs "I don't know") and FAQ-gap
   closure over time.
+- Lead capture rate (profiles / chat sessions), marketing opt-in rate, and
+  revenue from remarketing campaigns sourced from fan-Owl audiences.
 - Cost per assisted conversion (LLM spend / conversions) — the number that
   decides how aggressive the proactive layer can get.
 
