@@ -399,6 +399,12 @@ in one place that updates itself."
 - **Preview as a client** to see exactly what they see.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
+- **Product collateral you control** ✅ — Admin → Product holds the living **feature
+  matrix** and this overview, plus a shareable public **sales site** (`/sales`) built
+  from them. Every matrix section/feature and every section of this page has a
+  **Shown / Hidden toggle**, so anything still in the works (or not ready for
+  internal announcement) stays off the public pages until it's ready — admins
+  always see the full picture, dimmed.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -646,6 +652,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Pulse sales site + admin-curated feature matrix** ✅: a shareable
+  public **sales website at `/sales`** built from the (freshly updated) feature matrix,
+  and the matrix itself moved server-side with **Shown / Hidden toggles** on every
+  section, feature and overview section (Admin → Product → Feature matrix). Hide
+  anything still being built or not ready for internal announcement and it vanishes
+  from the sales site and the public overview page; admins still see it, dimmed.
 - **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
   Owl's first **consumer-facing** surface — promoters drop one script tag on their public
   event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for

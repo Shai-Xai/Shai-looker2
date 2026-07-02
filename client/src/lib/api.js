@@ -247,6 +247,9 @@ export const api = {
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  // Admin — Product: the feature matrix + what the public pages get to show
+  adminProductMatrix: () => fetch('/api/admin/product/matrix').then(json),
+  adminSetProductVisibility: (kind, id, hidden) => fetch('/api/admin/product/visibility', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, hidden }) }).then(json),
   // Admin — Product: daily release notes
   adminListReleaseNotes: () => fetch('/api/admin/release-notes').then(json),
   adminCreateReleaseNote: (n) => fetch('/api/admin/release-notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),

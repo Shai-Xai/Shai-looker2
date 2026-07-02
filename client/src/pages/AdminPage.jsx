@@ -443,8 +443,10 @@ function OnboardingInsights() {
 
 // ─── Product ──────────────────────────────────────────────────────────────────
 // One home for product collateral: the living sales overview (HTML that renders
-// docs/PRODUCT_OVERVIEW_SALES.md), a curated feature matrix, and the daily
-// release notes the team authors here (persisted, newest-first).
+// docs/PRODUCT_OVERVIEW_SALES.md), the public sales site, the curated feature
+// matrix, and the daily release notes the team authors here. The matrix
+// catalogue itself lives server-side (server/productSite.js) so the admin's
+// include/exclude choices persist and every public surface respects them.
 
 // Status key mirrors the sales overview doc.
 const PRODUCT_STATUS = {
@@ -453,78 +455,6 @@ const PRODUCT_STATUS = {
   beta: { icon: '🧪', label: 'Beta', color: '#7C3AED', bg: 'rgba(124,58,237,0.12)' },
   soon: { icon: '🔜', label: 'Coming soon', color: '#5a6270', bg: 'rgba(110,110,115,0.14)' },
 };
-// Curated catalogue — keep in step with docs/PRODUCT_OVERVIEW_SALES.md.
-const PRODUCT_FEATURES = [
-  ['Dashboards & insight', [
-    ['Live dashboards (KPIs, tables & charts on real data)', 'live'],
-    ['Per-tile AI insight + follow-up questions', 'live'],
-    ['Personalised home briefing', 'live'],
-    ['Mobile-first, installable PWA', 'live'],
-  ]],
-  ['Scheduled digests', [
-    ['Role-written email digests (exec / marketing / finance / ops)', 'live'],
-    ['Configurable cadence & focus', 'live'],
-    ['Admin-managed + client self-service', 'live'],
-  ]],
-  ['Messaging inbox', [
-    ['Two-way client ↔ Howler threads (read/unread, attachments)', 'live'],
-    ['Must-acknowledge messages', 'live'],
-    ['In-app, web-push & email notifications', 'live'],
-  ]],
-  ['Settlements & documents', [
-    ['Settlement PDF → interactive statement', 'live'],
-    ['Event documents area', 'live'],
-  ]],
-  ['Engage · Segments', [
-    ['Always-live audiences (tile / CSV / paste / Google Sheet)', 'live'],
-    ['Column matching (email / name / mobile)', 'live'],
-    ['Target on any column', 'live'],
-    ['Multi-source combine (Union / Intersect / Exclude)', 'live'],
-  ]],
-  ['Engage · Campaigns', [
-    ['Email, SMS or both to a segment / tile / list', 'live'],
-    ['AI-drafted copy, branded templates, hero image', 'live'],
-    ['Merge fields from any column', 'live'],
-    ['Promo / discount codes', 'live'],
-    ['UTM + per-recipient open & click tracking', 'live'],
-    ['Consent-aware (POPIA), one-click unsubscribe', 'live'],
-    ['Approval workflow', 'live'],
-  ]],
-  ['Engage · Drip sequences', [
-    ['Multi-step journeys with delays', 'live'],
-    ['Timing modes (fresh-abandonment / forward-from-send)', 'live'],
-    ['Auto-stop on purchase or unsubscribe', 'live'],
-    ['Journey waterfall (open / click / convert + drop-off)', 'live'],
-  ]],
-  ['Engage · Ad audience sync', [
-    ['Push a segment to Meta / TikTok Custom Audiences', 'setup'],
-    ['Mirror membership + daily auto-sync', 'setup'],
-    ['Hashed identities before they leave Pulse', 'setup'],
-  ]],
-  ['Branding & integrations', [
-    ['Per-client branding (logo / colours / sender)', 'live'],
-    ['Looker / Anthropic keys', 'live'],
-    ['Email (Resend) / SMS (Clickatell)', 'live'],
-    ['Meta / TikTok ad accounts', 'setup'],
-    ['Inventive embedded AI analyst ("Ask")', 'beta'],
-  ]],
-  ['Admin console', [
-    ['Manage clients, sets/suites, tile library, AI, settlements', 'live'],
-    ['Preview as a client', 'live'],
-    ['AI audit ("Everything the AI is told")', 'live'],
-  ]],
-  ['Trust, security & scope', [
-    ['Server-side multi-tenant scoping (fails closed)', 'live'],
-    ['POPIA-minded consent + hashed ad sync', 'live'],
-    ['Roles & permissions', 'live'],
-  ]],
-  ['On the horizon', [
-    ['Conversational / agentic Owl', 'soon'],
-    ['Portfolio / "all events" view', 'soon'],
-    ['Event tasks + AM cockpit', 'soon'],
-    ['WhatsApp & app-push channels', 'soon'],
-  ]],
-];
 
 function StatusBadge({ status }) {
   const s = PRODUCT_STATUS[status] || PRODUCT_STATUS.live;
@@ -549,21 +479,91 @@ function Product() {
         ))}
       </div>
       {sub === 'tickets' && <TicketBoard />}
-      {sub === 'matrix' && (
-        <>
-          <p style={hint}>What the product does today — the living sales overview and the feature matrix.</p>
-          <ProductOverviewCard />
-          <ProductFeatureTable />
-        </>
-      )}
+      {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
     </div>
   );
 }
 
+// The matrix tab: what the product does today — and what the outside world gets
+// to see. The catalogue + visibility live server-side; hiding a feature/section
+// removes it from the public sales site (/sales), and hiding an overview section
+// strips it from the public overview page — for work still in flight or not
+// ready for internal announcement. Admins always see everything here, dimmed.
+function ProductMatrixTab() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.adminProductMatrix().then(setData).catch((e) => setErr(e.message)); }, []);
+  const toggle = async (kind, id, hidden) => {
+    setData((d) => d && ({
+      ...d,
+      sections: d.sections.map((s) => {
+        if (kind === 'section' && s.id === id) return { ...s, hidden };
+        if (kind === 'feature') return { ...s, features: s.features.map((f) => (f.id === id ? { ...f, hidden } : f)) };
+        return s;
+      }),
+      overview: kind === 'overview' ? d.overview.map((o) => (o.slug === id ? { ...o, hidden } : o)) : d.overview,
+    }));
+    try { await api.adminSetProductVisibility(kind, id, hidden); }
+    catch (e) { setErr(e.message); api.adminProductMatrix().then(setData).catch(() => {}); }
+  };
+  return (
+    <>
+      <p style={hint}>
+        What the product does today — and what the outside world gets to see. Toggle anything
+        <b> Hidden</b> (still building it? not ready to announce?) and it disappears from the public
+        sales site and overview page. You always see the full list here, dimmed.
+      </p>
+      {err && <p style={{ ...hint, color: '#c0392b' }}>{err}</p>}
+      <ProductSalesSiteCard />
+      <ProductOverviewCard sections={data?.overview} onToggle={toggle} />
+      <ProductFeatureTable sections={data?.sections} onToggle={toggle} />
+    </>
+  );
+}
+
+// The shown/hidden switch used across the matrix tab (≥40px tap target).
+function VisToggle({ hidden, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={hidden ? 'Hidden from the public pages — tap to include' : 'Shown on the public pages — tap to hide'}
+      style={{
+        ...miniBtnOutline, minHeight: 34, minWidth: 86, whiteSpace: 'nowrap',
+        color: hidden ? 'var(--muted)' : '#1a8a4a',
+        borderColor: hidden ? 'var(--hairline)' : 'rgba(26,138,74,0.4)',
+      }}
+    >
+      {hidden ? '🚫 Hidden' : '👁️ Shown'}
+    </button>
+  );
+}
+
+// The public sales website — renders the feature matrix (shown items only).
+function ProductSalesSiteCard() {
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 26 }}>🌐</span>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Pulse sales website</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
+            A shareable public page built from the feature matrix below — only items marked <b>Shown</b> appear on it.
+          </div>
+        </div>
+        <a href="/sales" target="_blank" rel="noopener noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          Open site ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // The living overview opens in a new tab — it renders docs/PRODUCT_OVERVIEW_SALES.md
-// live, so it always reflects the current doc.
-function ProductOverviewCard() {
+// live. The section list controls which `##` sections of the doc the public page
+// shows; hidden ones are stripped server-side before the markdown leaves Pulse.
+function ProductOverviewCard({ sections, onToggle }) {
+  const shown = (sections || []).filter((o) => !o.hidden).length;
   return (
     <div style={cardStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -578,13 +578,28 @@ function ProductOverviewCard() {
           Open page ↗
         </a>
       </div>
+      {sections && (
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, padding: '6px 0' }}>
+            Sections on the public page ({shown}/{sections.length} shown)
+          </summary>
+          <div style={{ marginTop: 6 }}>
+            {sections.map((o) => (
+              <div key={o.slug} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderTop: '1px solid var(--hairline)' }}>
+                <div style={{ flex: 1, fontSize: 13, color: o.hidden ? 'var(--muted)' : 'var(--text)', opacity: o.hidden ? 0.6 : 1 }}>{o.title}</div>
+                <VisToggle hidden={o.hidden} onToggle={() => onToggle('overview', o.slug, !o.hidden)} />
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
 
-// Curated feature matrix: each section with its features + status. Grouped rows
-// on desktop; the wrapper scrolls horizontally on narrow phones.
-function ProductFeatureTable() {
+// Curated feature matrix: each section with its features + status + a show/hide
+// toggle. Grouped rows on desktop; the wrapper scrolls sideways on narrow phones.
+function ProductFeatureTable({ sections, onToggle }) {
   const legend = ['live', 'setup', 'beta', 'soon'];
   return (
     <div style={cardStyle}>
@@ -595,32 +610,44 @@ function ProductFeatureTable() {
           {legend.map((k) => <StatusBadge key={k} status={k} />)}
         </div>
       </div>
-      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 360 }}>
-          <tbody>
-            {PRODUCT_FEATURES.map(([section, feats]) => (
-              <FeatureSection key={section} section={section} feats={feats} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {!sections ? (
+        <div style={{ fontSize: 13, color: 'var(--muted)', padding: '10px 0' }}>Loading the matrix…</div>
+      ) : (
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 360 }}>
+            <tbody>
+              {sections.map((s) => <FeatureSection key={s.id} section={s} onToggle={onToggle} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
-function FeatureSection({ section, feats }) {
+function FeatureSection({ section, onToggle }) {
+  const dimSection = section.hidden;
   return (
     <>
       <tr>
-        <th colSpan={2} style={{ textAlign: 'left', padding: '14px 10px 6px', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--brand)' }}>
-          {section}
+        <th colSpan={2} style={{ textAlign: 'left', padding: '14px 10px 6px', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: dimSection ? 'var(--muted)' : 'var(--brand)', opacity: dimSection ? 0.7 : 1 }}>
+          {section.emoji} {section.title}
+        </th>
+        <th style={{ textAlign: 'right', padding: '14px 10px 6px' }}>
+          <VisToggle hidden={section.hidden} onToggle={() => onToggle('section', section.id, !section.hidden)} />
         </th>
       </tr>
-      {feats.map(([feature, status]) => (
-        <tr key={feature}>
-          <td style={{ ...td, width: '100%' }}>{feature}</td>
-          <td style={{ ...td, textAlign: 'right' }}><StatusBadge status={status} /></td>
-        </tr>
-      ))}
+      {section.features.map((f) => {
+        const dim = dimSection || f.hidden;
+        return (
+          <tr key={f.id} style={dim ? { opacity: 0.55 } : undefined}>
+            <td style={{ ...td, width: '100%', textDecoration: f.hidden ? 'line-through' : 'none' }}>{f.label}</td>
+            <td style={{ ...td, textAlign: 'right' }}><StatusBadge status={f.status} /></td>
+            <td style={{ ...td, textAlign: 'right' }}>
+              <VisToggle hidden={f.hidden} onToggle={() => onToggle('feature', f.id, !f.hidden)} />
+            </td>
+          </tr>
+        );
+      })}
     </>
   );
 }

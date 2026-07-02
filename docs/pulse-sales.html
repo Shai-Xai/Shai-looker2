@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — The Experience OS for live events</title>
+<meta name="description" content="Pulse by Howler turns event data into insight → action → results: live dashboards, AI reads, digests, a client inbox, settlements and a full email/SMS campaign engine.">
+<style>
+:root{
+  --brand:#FF385C;
+  --g:linear-gradient(120deg,#FF385C 0%,#FF6B35 45%,#7C3AED 100%);
+  --ink:#1d1d1f; --muted:#6e6e73; --line:#ececef; --bg:#fff; --soft:#f7f7f9;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;
+}
+
+/* sticky header */
+header.bar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.84);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);}
+.bar .wrap{display:flex;align-items:center;gap:12px;max-width:1060px;margin:0 auto;padding:13px 22px;}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--g);box-shadow:0 8px 22px -8px rgba(124,58,237,.55);flex:none;}
+.bar b{font-size:16px;font-weight:800;letter-spacing:-.02em;}
+.bar .sub{font-size:12px;color:var(--muted);font-weight:600;}
+.bar a.cta{margin-left:auto;background:var(--ink);color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:9px 16px;border-radius:980px;min-height:40px;display:inline-flex;align-items:center;}
+
+/* hero */
+.hero{max-width:1060px;margin:0 auto;padding:64px 22px 30px;text-align:center;}
+.hero h1{font-size:clamp(34px,7vw,60px);line-height:1.05;letter-spacing:-.035em;font-weight:850;}
+.hero h1 .grad{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.hero p.lead{max-width:640px;margin:18px auto 0;font-size:clamp(16px,2.6vw,19px);color:#3a3a3e;}
+.hero .ctas{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:26px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 22px;border-radius:980px;font-size:14.5px;font-weight:750;text-decoration:none;}
+.btn.primary{background:var(--g);color:#fff;box-shadow:0 12px 26px -12px rgba(255,56,92,.6);}
+.btn.ghost{border:1.5px solid var(--line);color:var(--ink);background:#fff;}
+
+/* the loop */
+.loop{max-width:1060px;margin:34px auto 0;padding:0 22px;}
+.loop .card{background:var(--soft);border-radius:20px;padding:26px 22px;}
+.loop h2{font-size:clamp(20px,3.4vw,26px);letter-spacing:-.02em;font-weight:820;text-align:center;}
+.loop .steps{display:grid;grid-template-columns:1fr;gap:10px;margin-top:18px;}
+@media(min-width:760px){.loop .steps{grid-template-columns:repeat(5,1fr);}}
+.step{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;font-size:13px;color:#3a3a3e;}
+.step b{display:block;font-size:13.5px;margin-bottom:3px;color:var(--ink);}
+.step .n{display:inline-flex;width:22px;height:22px;border-radius:50%;background:var(--g);color:#fff;font-size:11.5px;font-weight:800;align-items:center;justify-content:center;margin-bottom:8px;}
+
+/* features */
+main{max-width:1060px;margin:0 auto;padding:20px 22px 90px;}
+.features-head{margin:52px 0 6px;text-align:center;}
+.features-head h2{font-size:clamp(24px,4vw,34px);letter-spacing:-.025em;font-weight:840;}
+.features-head p{color:var(--muted);font-size:14.5px;margin-top:6px;}
+.legend{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:16px 0 26px;}
+.grid{display:grid;grid-template-columns:1fr;gap:16px;}
+@media(min-width:700px){.grid{grid-template-columns:1fr 1fr;}}
+.sec{border:1px solid var(--line);border-radius:18px;padding:20px;background:#fff;box-shadow:0 10px 30px -24px rgba(29,29,31,.25);}
+.sec h3{font-size:17px;letter-spacing:-.01em;font-weight:800;display:flex;align-items:center;gap:9px;}
+.sec h3 .e{font-size:20px;}
+.sec p.blurb{font-size:13.5px;color:var(--muted);margin:7px 0 12px;}
+.sec ul{list-style:none;}
+.sec li{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:13.5px;color:#2c2c30;border-top:1px solid var(--soft);}
+.sec li:first-child{border-top:none;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:980px;font-size:10.5px;font-weight:750;white-space:nowrap;flex:none;margin-top:1px;}
+.badge.live{color:#1a8a4a;background:rgba(26,138,74,.12);}
+.badge.setup{color:#9a6a00;background:rgba(214,158,46,.16);}
+.badge.beta{color:#7C3AED;background:rgba(124,58,237,.12);}
+.badge.soon{color:#5a6270;background:rgba(110,110,115,.14);}
+
+/* closing CTA */
+.closing{margin-top:64px;text-align:center;background:var(--g);border-radius:24px;padding:46px 24px;color:#fff;}
+.closing h2{font-size:clamp(22px,4vw,32px);letter-spacing:-.02em;font-weight:840;}
+.closing p{opacity:.92;max-width:520px;margin:10px auto 22px;font-size:15px;}
+.closing a{background:#fff;color:var(--ink);}
+footer{max-width:1060px;margin:0 auto;padding:26px 22px 60px;color:var(--muted);font-size:12.5px;text-align:center;}
+footer a{color:var(--muted);}
+
+/* states */
+.state{display:flex;align-items:center;justify-content:center;min-height:30vh;flex-direction:column;gap:14px;color:var(--muted);}
+.spinner{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <div class="mark"></div>
+    <div>
+      <b>Pulse</b>
+      <div class="sub">by Howler</div>
+    </div>
+    <a class="cta" href="/">Log in</a>
+  </div>
+</header>
+
+<section class="hero">
+  <h1><span class="grad">Insight → action → results.</span><br>On a loop. In one place.</h1>
+  <p class="lead"><strong>Pulse is Howler's Experience OS</strong> — a white-label platform that turns your event data
+  into live dashboards, AI reads, scheduled digests, a direct line to Howler, readable settlements and a full
+  email/SMS campaign engine. Mobile-first, installable, and you only ever see <strong>your own data</strong>.</p>
+  <div class="ctas">
+    <a class="btn primary" href="#features">See what Pulse does</a>
+    <a class="btn ghost" href="/">Open Pulse</a>
+  </div>
+</section>
+
+<section class="loop">
+  <div class="card">
+    <h2>One loop that never stops turning</h2>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><b>Live data lands</b>Ticketing, cashless and GA4 flow in continuously.</div>
+      <div class="step"><span class="n">2</span><b>The Owl reads it</b>Briefings & digests push what matters — and what to do about it.</div>
+      <div class="step"><span class="n">3</span><b>You act</b>Turn a suggestion into a branded email/SMS campaign in a click.</div>
+      <div class="step"><span class="n">4</span><b>Results come back</b>Opens, clicks, conversions and revenue flow into the dashboards.</div>
+      <div class="step"><span class="n">5</span><b>The loop tightens</b>Every cycle makes the next read and the next action sharper.</div>
+    </div>
+  </div>
+</section>
+
+<main>
+  <div class="features-head" id="features">
+    <h2>Everything Pulse does</h2>
+    <p>The living feature map — updated as features ship.</p>
+  </div>
+  <div class="legend" id="legend" hidden>
+    <span class="badge live">✅ Live</span>
+    <span class="badge setup">🟡 Live, needs connection</span>
+    <span class="badge beta">🧪 Beta</span>
+    <span class="badge soon">🔜 Coming soon</span>
+  </div>
+  <div class="grid" id="grid">
+    <div class="state" style="grid-column:1/-1;"><div class="spinner"></div><div>Loading the feature map…</div></div>
+  </div>
+
+  <div class="closing">
+    <h2>Your data already knows what to do next.</h2>
+    <p>Pulse makes sure you do too — on your phone, in your brand, without exporting to five tools. Talk to your Howler account manager to get set up.</p>
+    <a class="btn" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a demo</a>
+  </div>
+</main>
+
+<footer>
+  Pulse · the Experience OS by <a href="https://howler.co.za" rel="noopener">Howler</a> ·
+  <span id="updated"></span>
+</footer>
+
+<script>
+(async function () {
+  const grid = document.getElementById('grid');
+  const BADGE = {
+    live: ['live', '✅ Live'],
+    setup: ['setup', '🟡 Needs connection'],
+    beta: ['beta', '🧪 Beta'],
+    soon: ['soon', '🔜 Coming soon'],
+  };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  try {
+    const res = await fetch('/api/product/site', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    grid.innerHTML = (data.sections || []).map((s) => (
+      '<section class="sec">' +
+        '<h3><span class="e">' + esc(s.emoji || '•') + '</span>' + esc(s.title) + '</h3>' +
+        (s.blurb ? '<p class="blurb">' + esc(s.blurb) + '</p>' : '') +
+        '<ul>' + s.features.map((f) => {
+          const [cls, label] = BADGE[f.status] || BADGE.live;
+          return '<li><span class="badge ' + cls + '">' + label + '</span><span>' + esc(f.label) + '</span></li>';
+        }).join('') + '</ul>' +
+      '</section>'
+    )).join('');
+    document.getElementById('legend').hidden = false;
+    if (data.updatedAt) {
+      const d = new Date(data.updatedAt);
+      if (!isNaN(d)) document.getElementById('updated').textContent = 'feature map updated ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+  } catch (e) {
+    grid.innerHTML = '<div class="state" style="grid-column:1/-1;"><div>Couldn’t load the feature map — please refresh.</div></div>';
+  }
+})();
+</script>
+</body>
+</html>
