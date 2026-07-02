@@ -28,11 +28,12 @@ after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
   sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live', pages: [
-    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'] },
+    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'], pitch: 'Catch every artist with a Weekend Pass' },
   ], ...site }],
   catalogue: [
     { label: 'Weekend Pass', kind: 'ticket', price: '950', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=wk', availability: 'selling fast', public: true },
     { label: 'Camping', kind: 'addon', price: '300', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=camp', public: true, images: ['https://fest.example/img/camp1.jpg', 'not-a-url'] },
+    { label: 'Glamping Pod', kind: 'accommodation', price: '1500', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=pod', public: true },
     { label: 'Crew comp', kind: 'ticket', price: '0', currency: 'ZAR', deepLink: '', public: false },
   ],
   knowledge: [
@@ -65,8 +66,10 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.match(site.pages[0].content, /two stages/); // page info round-trips
   assert.deepEqual(site.pages[0].starters, ['Who plays Saturday?']); // per-page chips round-trip
   assert.deepEqual(r.body.catalogue.find((c) => c.label === 'Camping').images, ['https://fest.example/img/camp1.jpg']); // non-URL dropped
-  assert.equal(r.body.catalogue.length, 3);
+  assert.equal(r.body.catalogue.length, 4);
   assert.equal(r.body.catalogue.find((c) => c.label === 'Crew comp').public, false);
+  assert.equal(r.body.catalogue.find((c) => c.label === 'Glamping Pod').kind, 'accommodation'); // new kinds round-trip
+  assert.equal(site.pages[0].pitch, 'Catch every artist with a Weekend Pass'); // pitch round-trips
   assert.equal(r.body.knowledge.length, 2);
   // Saving again with the same site id keeps the key stable.
   const r2 = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, name: 'Renamed' }] } });
@@ -117,10 +120,24 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {
   const { e, admin, site } = await provision('ptype');
-  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, pages: [{ urlPattern: '/venue', pageType: 'venue', itemIds: [], note: '' }] }] } });
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, pages: [{ urlPattern: '/venue', pageType: 'venue', itemIds: [], note: '' }, { urlPattern: '/sleep', pageType: 'accommodation', itemIds: [], note: '' }] }] } });
   const r = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/venue' }, headers: ORIGIN });
   assert.equal(r.body.pageType, 'venue');
-  assert.equal(r.body.offer.label, 'Camping'); // add-on first on venue/attraction pages
+  assert.equal(r.body.offer.label, 'Camping'); // venue: transport then add-ons first
+  const r2 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/sleep' }, headers: ORIGIN });
+  assert.equal(r2.body.offer.label, 'Glamping Pod'); // accommodation pages lead with accommodation
+});
+
+test('pitches endpoint: gated + needs a real site + configured AI; context serves the saved pitch', async () => {
+  const { e, admin, site } = await provision('pitch');
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/pitches`, { body: { siteId: site.id } })).status, 401);
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/pitches`, { as: admin, body: { siteId: 'nope' } })).status, 404);
+  const r = await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/pitches`, { as: admin, body: { siteId: site.id } });
+  assert.equal(r.status, 400); // AI unconfigured in tests — clear error, no call out
+  assert.match(r.body.error, /AI is not configured/);
+  // The saved pitch rides the public context payload for its page.
+  const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x' }, headers: ORIGIN });
+  assert.equal(ctx.body.pitch, 'Catch every artist with a Weekend Pass');
 });
 
 test('disabled site serves nothing, and non-public items never reach fans', async () => {

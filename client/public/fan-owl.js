@@ -114,8 +114,11 @@
   // offer changes. Called on first render and after every navigation.
   var teaserTitle, teaserBody;
   function updateTeaser() {
+    // Priority: the page's approved AI sales pitch → the offer shelf-tag → the
+    // site's generic teaser. All served pre-written; no AI at view time.
     var line = '';
-    if (ctx.offer) line = ctx.offer.label + (ctx.offer.price ? ' · ' + ctx.offer.currency + ' ' + ctx.offer.price : '') + (ctx.offer.availability ? ' · ' + ctx.offer.availability : '');
+    if (ctx.pitch) line = ctx.pitch;
+    else if (ctx.offer) line = ctx.offer.label + (ctx.offer.price ? ' · ' + ctx.offer.currency + ' ' + ctx.offer.price : '') + (ctx.offer.availability ? ' · ' + ctx.offer.availability : '');
     else if (ctx.site && ctx.site.teaser) line = ctx.site.teaser;
     var key = (ctx.offer ? ctx.offer.id : 'site') + '|' + (ctx.pageType || '') + '|' + line;
     if (!line || (frameWrap && frameWrap.style.display !== 'none')) return; // nothing to say, or chat already open

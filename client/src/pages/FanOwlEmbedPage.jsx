@@ -144,7 +144,7 @@ export default function FanOwlEmbedPage() {
           <div style={S.hello}>
             <div style={{ fontSize: 30, marginBottom: 6 }}>🦉</div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>Hey! I know this event inside out.</div>
-            <div style={{ fontSize: 13.5, opacity: 0.75 }}>Ask me anything — which ticket you need, what’s included, how to add extras.</div>
+            <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || 'Ask me anything — which ticket you need, what’s included, how to add extras.'}</div>
             {boot.offer && (
               <div style={{ ...S.offerCard, marginTop: 14 }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
