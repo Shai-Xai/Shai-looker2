@@ -35,6 +35,18 @@ test('day-of-month (1..31) and week numbers stay ascending; ISO dates sort ascen
   assert.deepEqual(orientSeries(cats, 'ticket_types.name').map((p) => p.t), ['VIP', 'GA']);
 });
 
+test('stray totals/null rows: dropped on a numeric axis, mixed/categorical left alone', () => {
+  // 10 numeric countdown points + a blank-label totals row → strays dropped, sorted desc.
+  const pts = [];
+  for (let d = 0; d <= 9; d++) pts.push({ t: String(d), v: d + 1 });
+  pts.push({ t: '', v: 55 }); // totals row — would double-count once accumulated
+  const out = orientSeries(pts, 'days_before_event');
+  assert.deepEqual(out.map((p) => p.t), ['9', '8', '7', '6', '5', '4', '3', '2', '1', '0']);
+  // Half numeric / half labels (<80%) → not an axis; keep the tile's row order.
+  const mixed = [{ t: 'VIP', v: 1 }, { t: '3', v: 2 }, { t: 'GA', v: 3 }, { t: '1', v: 4 }];
+  assert.deepEqual(orientSeries(mixed, 'ticket_types.name').map((p) => p.t), ['VIP', '3', 'GA', '1']);
+});
+
 test('regression: ascending countdown rows now yield the true "last time by now"', () => {
   // Last event: 117d of DAILY sales (jittered like real data — a constant series would
   // read as already-cumulative), back-loaded toward the event.
