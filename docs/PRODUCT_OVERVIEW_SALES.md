@@ -630,6 +630,11 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **API: Event Ops data (row-level keys)** 🧪: connected tools and AI
+  agents with the row-level scope can now pull **live Event Ops** per event — device
+  totals per station, locate a device by code, open issues, staff, checkpoints
+  (`GET /api/v1/event-ops` / the `pulse_event_ops` MCP tool). Honours the per-client
+  Event Ops switch; per-event only; same audit trail.
 - **2026-07-02** — **Connected AI assistants speak as the Owl** 🧪: connect Claude (or
   ChatGPT) and it presents itself as **the Owl 🦉** — Pulse's data analyst — same persona
   as in-app: warm, numbers-first, grounded in tool results, read-only. The connection

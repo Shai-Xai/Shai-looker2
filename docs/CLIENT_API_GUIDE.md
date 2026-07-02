@@ -65,6 +65,7 @@ What's available:
 | `/api/v1/data-sources` | What you can query directly — measures, group-bys, filters |
 | `POST /api/v1/query` | Ask for any curated number with your own breakdown/filters/dates — no dashboard needed |
 | `/api/v1/tiles/rows?dashboardId=…&tileId=…` | *Row-level keys only* — the table behind a tile |
+| `/api/v1/event-ops?suiteId=…&query=…` | *Row-level keys only* — live Event Ops: devices, stations, staff, open issues, checkpoints |
 
 Everything comes back as JSON. A typical first call:
 
