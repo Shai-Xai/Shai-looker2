@@ -179,9 +179,11 @@ export default function GoalsPage() {
   // One event at a time: a tab strip picks which event's goals show. Fall back to
   // the first event when nothing's selected yet (or the selection went away).
   // '*' = the All tab — every event's goals on one page, split by event and type.
+  // Only events that actually HAVE goals show there (still-loading ones keep a
+  // skeleton until we know) — empty events would just clutter the page.
   const showAll = activeSuite === '*' && rows.length > 1;
   const activeSuiteId = showAll ? '*' : (rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || ''));
-  const shownRows = showAll ? rows : rows.filter((r) => r.suite.id === activeSuiteId);
+  const shownRows = showAll ? rows.filter((r) => !r.loaded || goalsIn(r).length > 0) : rows.filter((r) => r.suite.id === activeSuiteId);
 
   const suiteData = (detail && bySuite[detail.suiteId]) || {};
   const detailGoal = detail && [...(suiteData.goals || []), ...(suiteData.personalGoals || [])].find((g) => g.id === detail.goalId);
@@ -229,6 +231,13 @@ export default function GoalsPage() {
           stacked list. Horizontally scrollable so it stays tidy on a phone. */}
       {rows.length > 1 && (
         <EventTabs rows={rows} active={activeSuiteId} onPick={setActiveSuite} onReorder={reorderEvents} />
+      )}
+
+      {/* All view with nothing to show — every event is goal-less. */}
+      {showAll && !shownRows.length && (
+        <div style={{ padding: '28px 18px', textAlign: 'center', color: 'var(--muted)', border: '1px dashed var(--hairline)', borderRadius: 14 }}>
+          No goals set yet — pick an event tab above to set its first goal.
+        </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>

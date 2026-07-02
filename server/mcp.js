@@ -140,7 +140,7 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
       name: 'pulse_create_segment',
       title: 'Create a segment (draft work)',
       scope: 'write',
-      description: 'CREATE a saved audience segment from a cohort (e.g. {"ticket type": "VIP", "city": "Cape Town"} using dimension names from pulse_list_data_sources). It saves an audience DEFINITION — no message is sent, consent applies if it is ever messaged. Contact fields (email/phone/name) can never define a cohort. Confirm the cohort with the user in chat BEFORE calling. Returns the saved segment + its size/reach.',
+      description: 'CREATE a saved audience segment from a cohort (e.g. {"ticket type": "VIP", "city": "Cape Town"} using dimension names from pulse_list_data_sources). It saves an audience DEFINITION — no message is sent, consent applies if it is ever messaged. Contact fields (email/phone/name) can never define a cohort. Pass suiteId to scope the cohort to ONE event — the scope is persisted and honoured on every later resolution (reach checks, campaigns), not just at creation. Confirm the cohort with the user in chat BEFORE calling. Returns the saved segment + its size/reach + the resolved event `scope`.',
       input: {
         name: z.string().optional().describe('Segment name (auto-generated from the cohort if omitted)'),
         filters: z.record(z.string(), z.string()).describe('{dimension: value} cohort filters — curated dimensions only'),
@@ -153,7 +153,7 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
       name: 'pulse_draft_campaign',
       title: 'Draft a campaign (needs your approval to send)',
       scope: 'write',
-      description: 'DRAFT an email/SMS campaign — it lands as a DRAFT in Pulse for a human to review, approve and send; this tool CANNOT send anything. Audience = a saved segment (segmentName) OR a cohort (filters). Pulse\'s own AI writes/designs the content server-side from your goal. Confirm goal + audience with the user in chat BEFORE calling. Tell the user afterwards it is a draft awaiting their approval in Pulse.',
+      description: 'DRAFT an email/SMS campaign — it lands as a DRAFT in Pulse for a human to review, approve and send; this tool CANNOT send anything. Audience = a saved segment (segmentName) OR a cohort (filters). Pulse\'s own AI writes/designs the content server-side from your goal. The response includes the resolved event `scope` (which event the audience resolves to, or entity-wide) — check it against what the user intended before telling them it is drafted. Confirm goal + audience with the user in chat BEFORE calling. Tell the user afterwards it is a draft awaiting their approval in Pulse.',
       input: {
         goal: z.string().describe('Who to reach and what to get them to do, e.g. "win back last year\'s VIP buyers who haven\'t rebooked"'),
         channel: z.enum(['email', 'sms', 'both']).optional().describe('Default email'),

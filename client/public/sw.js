@@ -5,7 +5,7 @@
    during a deploy. Normal loads are unaffected; users just see "Pulse is
    updating…" (which auto-returns them) instead of a browser/gateway error. */
 
-const MAINT_CACHE = 'pulse-maint-v1';
+const MAINT_CACHE = 'pulse-maint-v2';
 const MAINT_PAGE = '/maintenance.html';
 
 self.addEventListener('install', (event) => {
