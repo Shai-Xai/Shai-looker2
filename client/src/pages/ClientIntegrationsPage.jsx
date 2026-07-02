@@ -15,6 +15,8 @@ import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
+import { useAuth } from '../lib/auth.jsx';
+import { fanOwlSettingsEnabled } from '../lib/features.js';
 
 // Client self-service Settings — one place for everything the client manages
 // themselves, organised by a section nav: Integrations, Branding, CC-the-Owl.
@@ -36,6 +38,7 @@ const SECTIONS = [
 export default function ClientIntegrationsPage() {
   const isMobile = useIsMobile();
   const { can, role, isAdmin } = useAccess();
+  const { user: authUser } = useAuth();
   const { active } = useProfile(); // every section is scoped to the active client profile
   const ctx = useOutletContext() || {};
   const [items, setItems] = useState(null);
@@ -50,7 +53,8 @@ export default function ClientIntegrationsPage() {
   // derived from the resolved settings row.
   const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
-  const sections = SECTIONS.filter(([, , , perm]) => !perm || can(perm));
+  // Fan Owl is dogfood-gated to allowlisted accounts (server enforces the same).
+  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)));
   // Deep link: /settings?section=integrations|team|notifications|email… opens that
   // section (used by the onboarding "Go" buttons). Falls back to the first allowed.
   const [params] = useSearchParams();

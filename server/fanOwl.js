@@ -215,10 +215,22 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     if (req.user.role === 'admin' || (req.user.entityIds || []).includes(eid)) return next();
     return res.status(403).json({ error: 'Not allowed.' });
   };
-  app.get('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, (req, res) => res.json(configView(req.params.entityId)));
-  app.put('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
-  app.get('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, (req, res) => res.json(configView(req.params.entityId)));
-  app.put('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
+  // Dogfood gate on the SETTINGS surfaces (config/ingest/insights/leads) while the
+  // Fan Owl matures: only allowlisted accounts may manage it — FANOWL_ADMIN_ALLOW
+  // env (comma-separated emails, or "all" to open it), same pattern as the native
+  // Owl chat. The client hides the tabs via features.fanOwlSettingsEnabled; this
+  // enforces it. The PUBLIC widget endpoints (/api/fan/*) are unaffected.
+  const managerAllowed = (user) => {
+    const allow = String(process.env.FANOWL_ADMIN_ALLOW || 'shai.evian@howler.co.za').toLowerCase();
+    if (allow === 'all') return true;
+    const email = String(user?.email || '').trim().toLowerCase();
+    return !!email && allow.split(',').map((s) => s.trim()).filter(Boolean).includes(email);
+  };
+  const requireManager = (req, res, next) => (managerAllowed(req.user) ? next() : res.status(403).json({ error: 'The Fan Owl isn’t enabled for your account yet.' }));
+  app.get('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, requireManager, (req, res) => res.json(configView(req.params.entityId)));
+  app.put('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
+  app.get('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(configView(req.params.entityId)));
+  app.put('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
 
   // Insight flywheel (spec §6): interaction funnel + FAQ gaps + interest topics, per
   // site — the promoter-facing read; same payload on both surfaces.
@@ -236,12 +248,12 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     const l = leadsByEntity.get(entityId) || {};
     return { sites, leads: { total: l.c || 0, optedIn: l.m || 0 } };
   }
-  app.get('/api/admin/entities/:entityId/fan-owl/insights', auth.requireAdmin, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
-  app.get('/api/my/fan-owl/:entityId/insights', auth.requireAuth, requireMyEntity, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
+  app.get('/api/admin/entities/:entityId/fan-owl/insights', auth.requireAdmin, requireManager, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
+  app.get('/api/my/fan-owl/:entityId/insights', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
   // Captured fans (name/email/preferences/consent) — the remarketable list.
   const leadView = (p) => ({ id: p.id, email: p.email, name: p.name, preferences: J(p.preferences, []), consentMarketing: !!p.consent_marketing, consentAt: p.consent_at, at: p.created_at });
-  app.get('/api/admin/entities/:entityId/fan-owl/leads', auth.requireAdmin, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
-  app.get('/api/my/fan-owl/:entityId/leads', auth.requireAuth, requireMyEntity, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
+  app.get('/api/admin/entities/:entityId/fan-owl/leads', auth.requireAdmin, requireManager, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
+  app.get('/api/my/fan-owl/:entityId/leads', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
 
   // ── "Read the website" — crawl → AI-suggest → human review (spec §3C) ─────────
   // Fetches the given page + a handful of same-site links (SSRF-safe via
@@ -302,8 +314,8 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
         .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300) })),
     });
   });
-  app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, ingestLimit, ingestHandler);
-  app.post('/api/my/fan-owl/:entityId/ingest', auth.requireAuth, requireMyEntity, ingestLimit, ingestHandler);
+  app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, requireManager, ingestLimit, ingestHandler);
+  app.post('/api/my/fan-owl/:entityId/ingest', auth.requireAuth, requireMyEntity, requireManager, ingestLimit, ingestHandler);
 
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls

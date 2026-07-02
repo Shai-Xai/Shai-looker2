@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
+import { fanOwlSettingsEnabled } from '../lib/features.js';
 import { useTheme } from '../lib/theme.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
@@ -2567,13 +2568,15 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   const [section, setSection] = useState('checklist');
   const navigate = useNavigate();
   const { setProfile } = useProfile();
+  const { user: authUser } = useAuth();
+  const showFanOwl = fanOwlSettingsEnabled(authUser); // dogfood gate — server enforces the same list
   // Switch the detail panel AND scroll to the top, so a "Go →" jump is obvious.
   const goSection = (s) => { setSection(s); try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* ignore */ } };
   // Enter THIS client's live experience (scoped to them), landing on `path` — used
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['eventops', 'Event Ops'], ['fanowl', '🦉 Fan Owl'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2587,7 +2590,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={goSection} preview={previewAccount} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
-          {section === 'fanowl' && <div style={cardStyle}><FanOwlAdmin scope="admin-client" entityId={entity.id} /></div>}
+          {section === 'fanowl' && showFanOwl && <div style={cardStyle}><FanOwlAdmin scope="admin-client" entityId={entity.id} /></div>}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
           {section === 'briefing' && (

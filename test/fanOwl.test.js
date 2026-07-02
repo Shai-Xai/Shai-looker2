@@ -12,6 +12,7 @@ const rateLimit = require('../server/ratelimit');
 const { errorMiddleware } = require('../server/http');
 
 delete process.env.ANTHROPIC_API_KEY; // chat must 503 (unconfigured), never call out
+process.env.FANOWL_ADMIN_ALLOW = 'all'; // open the dogfood gate for these tests (re-locked in its own test)
 
 let app;
 before(async () => {
@@ -138,6 +139,23 @@ test('lead capture: consent is explicit, sticky, and surfaces on the admin lead 
   assert.equal(leads.body.leads[0].email, 'fan@example.com');
   assert.equal(leads.body.leads[0].consentMarketing, true);
   assert.equal(leads.body.leads[0].name, 'Fan One'); // a later blank/name change never wipes the name to ''
+});
+
+test('dogfood gate: settings routes are allowlisted (FANOWL_ADMIN_ALLOW); public widget unaffected', async () => {
+  const { e, admin, site } = await provision('gate');
+  process.env.FANOWL_ADMIN_ALLOW = 'shai.evian@howler.co.za';
+  try {
+    // A random admin (not on the list) is refused on every settings surface…
+    assert.equal((await app.req('GET', `/api/admin/entities/${e.id}/fan-owl`, { as: admin })).status, 403);
+    assert.equal((await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/leads`, { as: admin })).status, 403);
+    assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/ingest`, { as: admin, body: { url: 'https://x.example' } })).status, 403);
+    // …the allowlisted account gets in…
+    const shai = h.makeAdmin('shai.evian@howler.co.za');
+    assert.equal((await app.req('GET', `/api/admin/entities/${e.id}/fan-owl`, { as: shai })).status, 200);
+    // …and FANS are untouched: the public widget keeps working regardless.
+    const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
+    assert.equal(ctx.status, 200);
+  } finally { process.env.FANOWL_ADMIN_ALLOW = 'all'; }
 });
 
 test('preview page: serves the widget for a valid key, hints on off/unknown, rejects junk', async () => {
