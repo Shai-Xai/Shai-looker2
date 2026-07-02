@@ -262,8 +262,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // visible measure/table-calc (else first visible field), resolve the latest
   // pivot column, and use the RENDERED value so the magnitude matches the
   // dashboard ("64%" → 64, not the hidden count 20976, and not the ratio 0.64).
-  function resolvePivotCellSrv(cell, pivots) {
+  // `preferKey` (when given) pins a specific pivot column — e.g. the CURRENT event on
+  // a current-vs-past comparison tile — rather than defaulting to the latest column.
+  function resolvePivotCellSrv(cell, pivots, preferKey) {
     if (!cell || cell.value !== undefined || cell.rendered !== undefined) return cell;
+    if (preferKey && cell[preferKey] && (cell[preferKey].value != null || (cell[preferKey].rendered != null && cell[preferKey].rendered !== ''))) return cell[preferKey];
     const keys = (pivots && pivots.length) ? pivots.map((p) => p.key) : Object.keys(cell);
     for (let i = keys.length - 1; i >= 0; i--) { const c = cell[keys[i]]; if (c && (c.value != null || (c.rendered != null && c.rendered !== ''))) return c; }
     return cell[keys[keys.length - 1]] || null;
@@ -278,7 +281,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const v = Number(cell.value);
     return Number.isFinite(v) ? v : null;
   }
-  function primaryTileValue(data, visConfig = {}) {
+  function primaryTileValue(data, visConfig = {}, preferKey) {
     const fields = data?.fields || {};
     const rows = data?.data || [];
     if (!rows.length) return null;
@@ -287,7 +290,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const dims = (fields.dimensions || []).filter((f) => !hidden.has(f.name));
     const primary = measures[0] || [...measures, ...dims][0];
     if (!primary) return null;
-    return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || []));
+    return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || [], preferKey));
   }
 
   return {
