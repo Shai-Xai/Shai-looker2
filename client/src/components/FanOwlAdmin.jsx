@@ -74,9 +74,16 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
         const newKnow = (d.knowledge || []).filter((k) => !haveQ.has((k.question || k.body).toLowerCase().trim()));
         const sites = c.sites.map((s, j) => {
           if (j !== siteIndex) return s;
-          const havePat = new Set((s.pages || []).map((p) => p.urlPattern.toLowerCase().trim()));
-          const newPages = (d.pages || []).filter((p) => !havePat.has(p.urlPattern.toLowerCase().trim())).map((p) => ({ ...p, itemIds: [] }));
-          return { ...s, pages: [...(s.pages || []), ...newPages] };
+          const byPat = new Map((d.pages || []).map((p) => [p.urlPattern.toLowerCase().trim(), p]));
+          // Existing mappings: fill in page info the crawl found where ours is
+          // still empty (never overwrite something the promoter wrote).
+          const merged = (s.pages || []).map((p) => {
+            const sug = byPat.get(p.urlPattern.toLowerCase().trim());
+            if (sug) byPat.delete(p.urlPattern.toLowerCase().trim());
+            return sug && !String(p.content || '').trim() ? { ...p, content: sug.content || '', note: p.note || sug.note || '' } : p;
+          });
+          const newPages = [...byPat.values()].map((p) => ({ ...p, itemIds: [] }));
+          return { ...s, pages: [...merged, ...newPages] };
         });
         setIngestNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${newKnow.length} knowledge entries + ${(d.pages || []).length} page mappings. Review below, edit freely, then Save.`);
         return { ...c, sites, knowledge: [...c.knowledge, ...newKnow] };
@@ -142,8 +149,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
             <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={ingesting} onClick={() => ingest(i)}>{ingesting ? 'Reading…' : 'Read & suggest'}</button>
           </div>
           {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
-          <H>Page mappings</H>
-          <p style={small}>When the page URL contains the pattern (use * as a wildcard), the ribbon + Owl lead with the ticked items. Longest match wins; unmatched pages get the whole catalogue.</p>
+          <H>Pages — what the Owl knows & sells per page</H>
+          <p style={small}>When the page URL contains the pattern (use * as a wildcard), the Owl leads with the ticked items AND answers from that page's info box. Longest match wins; unmatched pages get the whole catalogue. Page info is also searchable from anywhere — a fan on the home page asking about camping gets the accommodation page's info.</p>
           {(s.pages || []).map((p, pi) => (
             <div key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)', padding: '8px 0' }}>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr auto', gap: 8 }}>
@@ -153,7 +160,10 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                 </select>
                 <button type="button" style={btn} onClick={() => setSite(i, { pages: s.pages.filter((_, xi) => xi !== pi) })}>Remove</button>
               </div>
-              <input style={{ ...input, marginTop: 6 }} value={p.note} placeholder="Note for the Owl (e.g. Luna X plays Saturday night)" onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, note: e.target.value } : x)) })} />
+              <input style={{ ...input, marginTop: 6 }} value={p.note} placeholder="One-liner: what is this page? (e.g. Luna X plays Saturday night)" onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, note: e.target.value } : x)) })} />
+              <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={p.content || ''}
+                placeholder="Page info — everything the Owl may tell fans about this page's topic (e.g. all the accommodation options). Filled by “Read the website”; add or edit freely."
+                onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, content: e.target.value } : x)) })} />
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                 {cfg.catalogue.map((c) => {
                   const on = (p.itemIds || []).includes(c.id);
@@ -204,8 +214,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       ))}
       <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ catalogue: [...cfg.catalogue, { label: '', kind: 'ticket', price: '', currency: 'ZAR', deepLink: '', description: '', availability: '', public: true }] })}>+ Add item</button>
 
-      <H>Knowledge — FAQs, policies & info</H>
-      <p style={small}>The ONLY source the Owl may quote for rules and logistics (refunds, kids, what's included…). If it's not here, the Owl says it doesn't know — and logs the gap below.</p>
+      <H>General knowledge — event-wide FAQs & policies</H>
+      <p style={small}>Rules and answers that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box above. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap below.</p>
       {cfg.knowledge.map((k, i) => (
         <div key={k.id || i} style={card}>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>

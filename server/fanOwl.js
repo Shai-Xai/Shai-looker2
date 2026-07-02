@@ -61,12 +61,12 @@ FOLLOW-UPS: at the very END of your reply, on its own final line, output <<<FOLL
 const FAN_INGEST_SYSTEM = `You read the text of an event's public website pages and produce SUGGESTED content for that event's website ticket assistant, for a human to review and edit before anything goes live.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
-{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…"}]}
+{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…","content":"…"}]}
 
 Rules:
 - Ground EVERYTHING in the provided page text. NEVER invent facts, dates, rules or policies that aren't in the text. Fewer solid entries beat many padded ones.
-- knowledge (max 20): distil what a ticket-buying fan would ask — policies (refunds, age limits, accessibility, what's allowed in), practical info (dates, venue, getting there, camping), what's included in tiers/experiences. Question in a fan's words; body closely following the site's own wording.
-- pages (max 12): for each distinct page/section identifiable from the URLs and text, give a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, and a one-line note telling the assistant what that page is about.
+- knowledge (max 20) = GENERAL, event-wide entries only: policies (refunds, age limits, accessibility, what's allowed in) and cross-cutting FAQs a fan could ask from any page. Question in a fan's words; body closely following the site's own wording. Do NOT duplicate page-specific detail here.
+- pages (max 12) = one entry per distinct page/section identifiable from the URLs and text: a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, a one-line note saying what the page is, and "content" — the useful PAGE-SPECIFIC information from that page, distilled (up to ~250 words), closely following the site's wording. Page detail (e.g. everything about accommodation options) belongs in that page's content, not in knowledge.
 - Do NOT suggest ticket prices or checkout links — the catalogue comes from the ticketing system, not the website.`;
 
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
@@ -122,6 +122,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     );
     CREATE INDEX IF NOT EXISTS idx_fan_events_site ON fan_events(site_id, created_at);
   `);
+  // Migration: page mappings gained long-form "page info" — the organiser-approved
+  // content the Owl serves for that page (general FAQs stay in fan_knowledge).
+  try { sql.exec("ALTER TABLE fan_pages ADD COLUMN content TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -150,7 +153,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note })),
+      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
       id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price,
@@ -182,8 +185,8 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
           for (const p of (s.pages || []).slice(0, 200)) {
             if (!String(p.urlPattern || '').trim()) continue;
-            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note) VALUES (?,?,?,?,?,?)')
-              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300));
+            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note,content) VALUES (?,?,?,?,?,?,?)')
+              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300), String(p.content || '').slice(0, 6000));
           }
         }
         for (const s of sitesByEntity.all(entityId)) {
@@ -311,7 +314,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
         .map((k) => ({ kind: KKINDS.has(k.kind) ? k.kind : 'faq', question: String(k.question || '').slice(0, 300), body: String(k.body).slice(0, 4000) })),
       pages: (Array.isArray(parsed.pages) ? parsed.pages : []).slice(0, 12)
         .filter((p) => String(p.urlPattern || '').trim())
-        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300) })),
+        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300), content: String(p.content || '').slice(0, 6000) })),
     });
   });
   app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, requireManager, ingestLimit, ingestHandler);
@@ -488,10 +491,15 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         },
       },
       searchKnowledge: {
-        schema: { name: 'searchKnowledge', description: "Search the organiser's own FAQs, policies and event info. The ONLY source for policy/logistics answers.", input_schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] } },
+        schema: { name: 'searchKnowledge', description: "Search the organiser's own FAQs, policies and per-page event info. The ONLY source for policy/logistics answers.", input_schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] } },
         run: async ({ question }) => {
           const words = String(question || '').toLowerCase().split(/\W+/).filter((w) => w.length > 2);
-          const scored = kb().map((k) => {
+          // General knowledge + every page's approved "page info" — so a fan on the
+          // home page can still ask about camping and get the accommodation page's
+          // content, labelled with where it came from.
+          const pageInfo = pagesBySite.all(site.id).filter((p) => p.content)
+            .map((p) => ({ kind: 'info', question: `the ${p.page_type} page (${p.url_pattern})`, body: p.content }));
+          const scored = [...kb(), ...pageInfo].map((k) => {
             const hay = `${k.question} ${k.body}`.toLowerCase();
             return { k, score: words.reduce((n, w) => n + (hay.includes(w) ? 1 : 0), 0) };
           }).filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 4);
@@ -594,9 +602,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const instructions = [
       `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
+      page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
-    ].join('\n\n');
+    ].filter(Boolean).join('\n\n');
 
     const tools = fanTools(site, session);
     const toolSchemas = Object.values(tools).map((t) => t.schema);

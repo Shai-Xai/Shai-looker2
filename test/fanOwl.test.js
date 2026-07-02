@@ -28,7 +28,7 @@ after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
   sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live', pages: [
-    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages' },
+    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.' },
   ], ...site }],
   catalogue: [
     { label: 'Weekend Pass', kind: 'ticket', price: '950', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=wk', availability: 'selling fast', public: true },
@@ -62,6 +62,7 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.match(site.siteKey, /^fw_[0-9a-f]{24}$/);
   assert.deepEqual(site.domains, ['fest.example']); // scheme/path stripped, deduped
   assert.equal(site.pages.length, 1);
+  assert.match(site.pages[0].content, /two stages/); // page info round-trips
   assert.equal(r.body.catalogue.length, 3);
   assert.equal(r.body.catalogue.find((c) => c.label === 'Crew comp').public, false);
   assert.equal(r.body.knowledge.length, 2);
