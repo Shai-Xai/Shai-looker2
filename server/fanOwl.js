@@ -579,24 +579,38 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.flushHeaders?.();
     let clientGone = false;
     req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+    // Heartbeat (same as the organiser Owl): a tool round can sit silent for many
+    // seconds; re-sending the last status keeps proxies from killing the stream
+    // and keeps the typing indicator honest.
+    let lastStatus = 'Thinking…';
+    const writeStatus = (s) => { lastStatus = String(s).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* gone */ } };
+    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* gone */ } } }, 10000);
     try {
       const client = insights.requireClient(apiKey);
       const llmTurn = async ({ messages, tools: schemas, onText }) => {
         const stream = client.messages.stream({
-          model: insights.MODEL, max_tokens: 700, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+          // 1400 tokens, not less: adaptive thinking + a tool round eat into this
+          // budget, and running dry MID-TOOL-CALL ends the turn with no text and
+          // no tool_use — the "stuck empty bubble" failure.
+          model: insights.MODEL, max_tokens: 1400, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
           system: insights.systemWith(FAN_OWL_SYSTEM, instructions), tools: schemas || [], messages: messages || [],
         });
         stream.on('text', (d) => { if (onText) onText(d); });
-        return stream.finalMessage();
+        const final = await stream.finalMessage();
+        if (final.stop_reason === 'max_tokens') console.warn('[fanOwl] turn hit max_tokens — answer may be truncated');
+        return final;
       };
       const { text, trail } = await runOwlLoop({
         llmTurn, toolMap, tools: toolSchemas,
         messages: [...history, { role: 'user', content: message }],
         ctx: {}, maxRounds: 4, shouldStop: () => clientGone,
         onText: (t) => res.write(t),
-        onStatus: (s) => { try { res.write(STATUS_OPEN + String(s).replace(/[<>]/g, '') + STATUS_CLOSE); } catch { /* gone */ } },
+        onStatus: writeStatus,
       });
-      const clean = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      let clean = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      // Never end a turn on silence: if the loop came back empty (budget/round
+      // exhaustion), say so instead of leaving a blank bubble.
+      if (!clean) { clean = 'Sorry — I lost my thread there. Ask me that again?'; try { res.write(clean); } catch { /* gone */ } }
       insMsg.run(uid(), session.id, 'owl', clean, JSON.stringify(trail.map((t) => ({ name: t.name, input: t.input }))), now());
       // Offer cards: any buy links issued this turn (label + price + button URL).
       const offers = trail.filter((t) => t.name === 'getCheckoutLink' && t.result?.ok).map((t) => ({ ...t.result.item, url: t.result.url }));
@@ -606,7 +620,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       console.error('[POST /api/fan/chat]', err.message);
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a snag — try again.' });
       else { res.write('\n\n[error: the Owl hit a snag — please try again.]'); res.end(); }
-    }
+    } finally { clearInterval(heartbeat); }
   });
 
   console.log('[fanOwl] fan-facing Owl (booking guide) mounted');
