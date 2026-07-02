@@ -292,17 +292,23 @@ client → Integrations. 12 tests (`test/googleDrive.test.js`); full suite 421 g
 **Remaining:** live verification with a real Google service account + key
 (GOOGLE_SERVICE_ACCOUNT_KEY env or per client), then it's self-service.
 
-### 4.9 💡 Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
+### 4.9 🏗️ Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
 *"Deep Meta integration."* (Shai, 2026-07-02)
 Go beyond today's audience-sync + organic metrics to the full paid loop.
 Today: `meta.js` (Custom Audience sync via a hand-pasted long-lived token +
 ad-account id) and `socialMetrics.js` (organic page/IG insights). Missing, in
 value order:
-- **P1 — Paid performance ingestion** (M–L): ad-account insights (spend,
-  impressions, clicks, conversions, ROAS) per campaign/adset → dashboard
-  tiles, the Goals `social_paid` adapter (GOALS P4), and campaign reports —
-  closing the loop on the audiences we already push. The Owl answers "what's
-  my ROAS this week".
+- **✅ P1 — Paid performance ingestion (shipped 2026-07-02):**
+  `server/metaAds.js` pulls per-campaign DAILY insights (spend, impressions,
+  clicks, purchases + purchase value, account currency) from the Graph API
+  using the SAME per-client token/ad-account as audience-sync — nothing new to
+  configure. Stored in `meta_ad_insights`; report view computes CPC,
+  cost-per-purchase and **ROAS**; once-a-day self-guarded tick (kill switch
+  `meta_ads_sync_enabled`) + "Sync ads" on both surfaces. Surfaced as a
+  **Paid ads section on the Social page** and a new Owl tool
+  **`getPaidPerformance`** ("how are my ads doing / what's my ROAS"). 6 tests
+  (`test/metaAds.test.js`); suite green. *Still open from P1's wider scope:*
+  goals `social_paid` adapter + dashboard tiles (join the social-tiles item).
 - **P2 — Meta OAuth connect** (M): a proper app-login flow replacing pasted
   tokens (token refresh, clearer client self-service); natural moment to do
   **4.6 multi ad-accounts** (`ad_connections`) so multi-brand clients work.

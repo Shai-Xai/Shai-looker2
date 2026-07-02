@@ -363,6 +363,24 @@ each platform without leaving Pulse."
 followers, reach and the posts that landed — next to their ticketing numbers, all
 in one place that updates itself."
 
+### 5f. Paid ads performance — Meta  🟡 (needs connection)
+Your Meta (Facebook/Instagram) **ad spend and results, inside Pulse** — pulled
+daily from the same ad account you already connected for audience sync (nothing
+new to set up).
+- **What you see** (Social page → Paid ads): spend, clicks, purchases and purchase
+  value per campaign, with **CPC, cost-per-purchase and ROAS** worked out for you —
+  plus a Sync-now button; it also refreshes automatically once a day.
+- **Ask the Owl:** "how are my ads doing?", "what did we spend this month?",
+  "which campaign converts best?" — the Owl reads the same numbers and answers in
+  plain language, honest about what's Meta-attributed vs actual ticket sales.
+- **Closes the loop:** push a segment to Meta as a Custom Audience (5d), run the
+  ads, and see what they returned — all in one place.
+- **Status 🟡:** needs the Meta token + ad account (the audience-sync connection);
+  purchase value requires the client's Meta pixel to track purchases.
+
+**Pitch:** "Your ad account and your ticket data finally in one place — see the
+spend, the return, and ask the Owl which campaign is worth more budget."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client, sent from Howler's verified domain.
@@ -682,6 +700,9 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Meta paid-ads performance in Pulse** 🟡: per-campaign spend,
+  clicks, purchases and ROAS pulled daily from the connected ad account — a Paid
+  ads section on the Social page, and the Owl answers "how are my ads doing?".
 - **2026-07-02** — **The Owl reads your Google Drive** 🟡: share budgets, plans,
   decks or contracts (files or whole folders) with the Owl's Google account, paste
   the link in Settings → Integrations, and ask questions across those files AND

@@ -201,6 +201,11 @@ export const api = {
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
   owlSetThreadFolder: (id, folder) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }).then(json),
+  // Meta paid-performance (deep Meta P1) — dual-surface
+  myMetaAds: (entityId, days) => fetch(`/api/my/meta-ads/${entityId}${days ? `?days=${days}` : ''}`).then(json),
+  syncMyMetaAds: (entityId) => fetch(`/api/my/meta-ads/${entityId}/sync`, { method: 'POST' }).then(json),
+  adminMetaAds: (entityId, days) => fetch(`/api/admin/entities/${entityId}/meta-ads${days ? `?days=${days}` : ''}`).then(json),
+  syncAdminMetaAds: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-ads/sync`, { method: 'POST' }).then(json),
   // Google Drive sources (the Owl reads the client's shared files) — dual-surface
   myDriveView: (entityId) => fetch(`/api/my/drive/${entityId}`).then(json),
   myDriveSetKey: (entityId, body) => fetch(`/api/my/drive/${entityId}/key`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

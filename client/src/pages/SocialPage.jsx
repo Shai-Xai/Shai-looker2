@@ -145,9 +145,79 @@ export default function SocialPage() {
           </div>
         </>
       )}
+
+      {activeEntityId && !loading && <PaidPerformance entityId={activeEntityId} isMobile={isMobile} />}
     </div>
   );
 }
+
+// Paid Meta ads performance (deep Meta P1): spend, clicks, purchases, ROAS —
+// totals + per-campaign, pulled daily from the ad account already connected for
+// audience-sync. Renders nothing until Meta is connected for this client.
+function PaidPerformance({ entityId, isMobile }) {
+  const [rep, setRep] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.myMetaAds(entityId).then(setRep).catch(() => setRep(null)); }, [entityId]);
+  if (!rep || !rep.configured) return null;
+  const money = (v) => (v == null ? '—' : `${rep.currency ? `${rep.currency} ` : ''}${Intl.NumberFormat('en-ZA', { maximumFractionDigits: 2 }).format(v)}`);
+  const sync = async () => {
+    setBusy(true); setErr('');
+    try { setRep(await api.syncMyMetaAds(entityId)); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const t = rep.totals || {};
+  return (
+    <div style={{ ...card, marginTop: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>💸 Paid ads — Meta (last {rep.days} days)</div>
+        <button onClick={sync} disabled={busy} style={btn}>{busy ? 'Syncing…' : '↻ Sync ads'}</button>
+      </div>
+      {err && <div style={errBox}>{err}</div>}
+      {!rep.campaigns?.length ? (
+        <div style={muted}>No paid activity pulled yet — tap “Sync ads” (it also refreshes automatically once a day).</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: isMobile ? 14 : 22, flexWrap: 'wrap', marginBottom: 14 }}>
+            <Stat label="Spend" value={money(t.spend)} />
+            <Stat label="Clicks" value={fmt(t.clicks)} />
+            <Stat label="Purchases" value={fmt(t.purchases)} />
+            <Stat label="Purchase value" value={money(t.purchaseValue)} />
+            <Stat label="ROAS" value={t.roas != null ? `${t.roas}×` : '—'} />
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 520 }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)', textAlign: 'right' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px 6px 0', fontWeight: 600 }}>Campaign</th>
+                  <th style={th}>Spend</th><th style={th}>Clicks</th><th style={th}>CPC</th>
+                  <th style={th}>Purch.</th><th style={th}>Cost/purch.</th><th style={th}>ROAS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rep.campaigns.slice(0, 12).map((c) => (
+                  <tr key={c.campaignId} style={{ borderTop: '1px solid var(--hairline)', textAlign: 'right' }}>
+                    <td style={{ textAlign: 'left', padding: '7px 8px 7px 0', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name || c.campaignId}</td>
+                    <td style={td}>{money(c.spend)}</td><td style={td}>{fmt(c.clicks)}</td><td style={td}>{c.cpc != null ? money(c.cpc) : '—'}</td>
+                    <td style={td}>{fmt(c.purchases)}</td><td style={td}>{c.costPerPurchase != null ? money(c.costPerPurchase) : '—'}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>{c.roas != null ? `${c.roas}×` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+            Purchases &amp; values are Meta-attributed pixel conversions (not Howler ticket sales). ROAS = purchase value ÷ spend.
+            {rep.lastSync && <> · Last synced {new Date(rep.lastSync).toLocaleString()}</>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+const th = { padding: '6px 8px', fontWeight: 600 };
+const td = { padding: '7px 8px', whiteSpace: 'nowrap' };
 
 function Stat({ label, value }) {
   return (

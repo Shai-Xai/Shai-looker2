@@ -19,7 +19,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -640,6 +640,32 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     } },
   };
 
+  // ── getPaidPerformance — Meta ads results (deep Meta P1) ───────────────────────
+  // Read-only report over meta_ad_insights (synced by server/metaAds.js): spend,
+  // clicks, purchases + purchase value, CPC, cost-per-purchase, ROAS — totals and
+  // per-campaign. Entity-scoped; numbers come straight from the table, never invented.
+  function runGetPaidPerformance(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!eid) return refuse('no_client', 'Open or pick a client first.');
+    const api = typeof getMetaAdsApi === 'function' ? getMetaAdsApi() : null;
+    if (!api || !api.report) return refuse('unavailable', 'Paid performance isn\'t available right now.');
+    const rep = api.report(eid, Number(args.days) || 28);
+    if (!rep.configured) return { ok: false, reason: 'not_configured', message: 'Meta ads aren\'t connected for this client — the token + ad account go in Settings → Integrations → Meta.' };
+    if (!rep.campaigns.length) return { ok: true, days: rep.days, totals: rep.totals, campaigns: [], note: 'No paid activity recorded in this window — try Sync on the Social page, or a longer period.' };
+    return {
+      ok: true, days: rep.days, currency: rep.currency || 'account currency', lastSync: rep.lastSync,
+      totals: rep.totals, campaigns: rep.campaigns.slice(0, 15),
+      note: 'roas = purchase value ÷ spend (Meta-attributed). Quote spend/ROAS with the currency. purchases/purchaseValue are Meta pixel conversions, not Howler ticket sales — say so if asked about revenue.',
+    };
+  }
+  const getPaidPerformanceSchema = {
+    name: 'getPaidPerformance',
+    description: 'Meta (Facebook/Instagram) PAID ads performance for this client: spend, impressions, clicks, purchases, purchase value, CPC, cost-per-purchase and ROAS — totals, per-campaign and last-sync time. Use for "how are my ads doing", "what did we spend", "which campaign converts best". Read-only.',
+    input_schema: { type: 'object', properties: { days: { type: 'number', description: 'Window in days (default 28, max 90).' } } },
+  };
+
   // ── createAlert (ACT) ─────────────────────────────────────────────────────────
   // The FIRST act-tool. It DRAFTS a metric alert for the user to confirm — it does
   // NOT create anything (no DB write here). Self-affecting only: an alert notifies the
@@ -1049,6 +1075,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     askUpload: { schema: askUploadSchema, run: runAskUpload, menu: { cmd: 'uploads', label: 'Attached files', icon: '📎', example: "What's in my attached data?" } },
     searchDriveDocs: { schema: searchDriveDocsSchema, run: runSearchDriveDocs, menu: { cmd: 'drive', label: 'Drive documents', icon: '📁', example: 'What does the marketing plan say about launch week?' } },
     readDriveDoc: { schema: readDriveDocSchema, run: runReadDriveDoc },
+    getPaidPerformance: { schema: getPaidPerformanceSchema, run: runGetPaidPerformance, menu: { cmd: 'ads', label: 'Paid ads (Meta)', icon: '💸', example: 'How are my Meta ads performing — spend and ROAS?' } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
     draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
