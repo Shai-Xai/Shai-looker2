@@ -9,6 +9,7 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
+import TwoFactorCard from '../components/TwoFactorCard.jsx';
 import TeamManager from '../components/TeamManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -24,6 +25,7 @@ const SECTIONS = [
   ['team', 'Team', '👥', PERMS.TEAM_MANAGE],
   ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
   ['notifications', 'Notifications', '🔔', null],
+  ['security', 'Security', '🔐', null],
   ['email', 'Branding', '🎨', PERMS.BRANDING_MANAGE],
   ['fees', 'Fees & billing', '💳', PERMS.CAMPAIGNS_VIEW],
   ['sentmail', 'Sent emails', '📤', PERMS.INTEGRATIONS_MANAGE],
@@ -89,6 +91,8 @@ export default function ClientIntegrationsPage() {
           <p style={hint}>Choose how Howler reaches you. These apply to your login across all your profiles — the in-app inbox always receives messages regardless.</p>
           <NotificationPrefs />
         </div>
+      ) : section === 'security' ? (
+        <TwoFactorCard />
       ) : !items ? (
         <p style={{ color: 'var(--muted)' }}>Loading…</p>
       ) : items.length === 0 ? (

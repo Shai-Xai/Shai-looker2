@@ -38,6 +38,16 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const r = await api.login(email, password);
+    // 2FA step-up: the server withholds the session and returns a pending token.
+    // Surface it to the caller (LoginPage) instead of setting a user.
+    if (r && r.twofa) return { twofa: true, pendingToken: r.pendingToken };
+    setUser(r.user);
+    return r.user;
+  }, []);
+
+  // Complete a 2FA step-up (pending token + code) → real session.
+  const complete2fa = useCallback(async (pendingToken, code) => {
+    const r = await api.verify2fa(pendingToken, code);
     setUser(r.user);
     return r.user;
   }, []);
@@ -50,7 +60,7 @@ export function AuthProvider({ children }) {
   const isAdmin = user?.role === 'admin';
 
   return (
-    <AuthCtx.Provider value={{ user, loading, isAdmin, insightsEnabled, login, logout, refresh }}>
+    <AuthCtx.Provider value={{ user, loading, isAdmin, insightsEnabled, login, complete2fa, logout, refresh }}>
       {children}
     </AuthCtx.Provider>
   );

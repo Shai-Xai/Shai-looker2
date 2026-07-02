@@ -209,6 +209,14 @@ export const api = {
   resetPassword: (token, password) => fetch('/api/auth/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) }).then(json),
   requestMagicLink: (email) => fetch('/api/auth/magic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).then(json),
   consumeMagicLink: (token) => fetch('/api/auth/magic/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
+  // Two-factor auth. verify2fa completes a login step-up (pending token + code).
+  verify2fa: (pendingToken, code) => fetch('/api/auth/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken, code }) }).then(json),
+  twoFactorStatus: () => fetch('/api/my/2fa').then(json),
+  twoFactorSetup: () => fetch('/api/my/2fa/setup', { method: 'POST' }).then(json),
+  twoFactorEnable: (code) => fetch('/api/my/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorDisable: (code) => fetch('/api/my/2fa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  twoFactorBackupCodes: (code) => fetch('/api/my/2fa/backup-codes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }).then(json),
+  adminResetUser2fa: (userId) => fetch(`/api/admin/users/${userId}/2fa/reset`, { method: 'POST' }).then(json),
 
   // Admin — Entities (clients), Sets (reusable collections), Suites (event ctx)
   adminListInventiveWorkspaces: () => fetch('/api/admin/inventive-workspaces').then(json),
