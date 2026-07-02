@@ -80,6 +80,18 @@ ahead of open so it's instant, instead of generating on view. Ties to
 `scheduler.js`; commit `9cf0682` "persist + background-warm so the home briefing
 loads instantly".
 
+### 1.4 💡 Fan-facing Owl — the HowlerOne Smart Commerce Assistant
+*"The consumer-facing Owl embedded on promoters' event websites."*
+An embeddable widget (one script tag) on public event sites: a deterministic
+context ribbon per page (right ticket for this artist/attraction, live
+availability) + a grounded Owl chat (promoter-authored FAQs/knowledge, bundles,
+upsells) + a prefilled deep-link into Howler checkout, with every interaction
+flowing back into Pulse as insight (FAQ gaps, interest segments → campaign
+audiences). The Owl's **third door** — same loop as 1.1, new persona, public
+data only. Spec: **`docs/specs/FAN_OWL_SPEC.md`** (workshopped 2026-07-02;
+pilots: Retreat Yourself, then Kappa Futur Festival). Effort: L staged (phase 1
+concierge: M).
+
 ---
 
 ## 2. Onboarding & client UX
