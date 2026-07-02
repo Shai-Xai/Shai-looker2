@@ -28,6 +28,9 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [leads, setLeads] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(0);
+  const [ingestUrl, setIngestUrl] = useState('');
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestNote, setIngestNote] = useState('');
 
   useEffect(() => {
     let on = true;
@@ -55,6 +58,32 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   }
 
   const snippet = (siteKey) => `<script async src="${window.location.origin}/fan-owl.js" data-site-key="${siteKey}"></script>`;
+
+  // "Read the website": crawl → AI suggestions merged into the UNSAVED editor
+  // state (deduped) — the human reviews/edits and hits Save. Nothing auto-commits.
+  async function ingest(siteIndex) {
+    const url = ingestUrl.trim();
+    if (!url) { setIngestNote('Enter the site URL first (https://…).'); return; }
+    setIngesting(true); setIngestNote('Reading the site — this takes ~30–60s…');
+    try {
+      const r = await fetch(`${base}/ingest`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: /^https?:\/\//i.test(url) ? url : `https://${url}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The crawl failed — try again.');
+      setCfg((c) => {
+        const haveQ = new Set(c.knowledge.map((k) => (k.question || k.body).toLowerCase().trim()));
+        const newKnow = (d.knowledge || []).filter((k) => !haveQ.has((k.question || k.body).toLowerCase().trim()));
+        const sites = c.sites.map((s, j) => {
+          if (j !== siteIndex) return s;
+          const havePat = new Set((s.pages || []).map((p) => p.urlPattern.toLowerCase().trim()));
+          const newPages = (d.pages || []).filter((p) => !havePat.has(p.urlPattern.toLowerCase().trim())).map((p) => ({ ...p, itemIds: [] }));
+          return { ...s, pages: [...(s.pages || []), ...newPages] };
+        });
+        setIngestNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${newKnow.length} knowledge entries + ${(d.pages || []).length} page mappings. Review below, edit freely, then Save.`);
+        return { ...c, sites, knowledge: [...c.knowledge, ...newKnow] };
+      });
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setIngesting(false); }
+  }
 
   if (!cfg) return <p style={small}>Loading the Fan Owl config…</p>;
   return (
@@ -106,6 +135,13 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
             </div>
           )}
+          <H>🔮 Read the website</H>
+          <p style={small}>Point the Owl at the event site — it reads the pages and SUGGESTS knowledge entries + page mappings below. Nothing goes live until you review and Save.</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ingestUrl} placeholder={`https://${(s.domains || [])[0] || 'your-event-site.com'}`} onChange={(e) => setIngestUrl(e.target.value)} />
+            <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={ingesting} onClick={() => ingest(i)}>{ingesting ? 'Reading…' : 'Read & suggest'}</button>
+          </div>
+          {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
           <H>Page mappings</H>
           <p style={small}>When the page URL contains the pattern (use * as a wildcard), the ribbon + Owl lead with the ticked items. Longest match wins; unmatched pages get the whole catalogue.</p>
           {(s.pages || []).map((p, pi) => (
