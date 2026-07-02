@@ -28,11 +28,11 @@ after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
   sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live', pages: [
-    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.' },
+    { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'] },
   ], ...site }],
   catalogue: [
     { label: 'Weekend Pass', kind: 'ticket', price: '950', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=wk', availability: 'selling fast', public: true },
-    { label: 'Camping', kind: 'addon', price: '300', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=camp', public: true },
+    { label: 'Camping', kind: 'addon', price: '300', currency: 'ZAR', deepLink: 'https://fest.example/buy?t=camp', public: true, images: ['https://fest.example/img/camp1.jpg', 'not-a-url'] },
     { label: 'Crew comp', kind: 'ticket', price: '0', currency: 'ZAR', deepLink: '', public: false },
   ],
   knowledge: [
@@ -63,6 +63,8 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.deepEqual(site.domains, ['fest.example']); // scheme/path stripped, deduped
   assert.equal(site.pages.length, 1);
   assert.match(site.pages[0].content, /two stages/); // page info round-trips
+  assert.deepEqual(site.pages[0].starters, ['Who plays Saturday?']); // per-page chips round-trip
+  assert.deepEqual(r.body.catalogue.find((c) => c.label === 'Camping').images, ['https://fest.example/img/camp1.jpg']); // non-URL dropped
   assert.equal(r.body.catalogue.length, 3);
   assert.equal(r.body.catalogue.find((c) => c.label === 'Crew comp').public, false);
   assert.equal(r.body.knowledge.length, 2);
@@ -106,6 +108,11 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const r4 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', sessionId: r.body.sessionId }, headers: ORIGIN });
   assert.equal(r4.body.sessionId, r.body.sessionId);
   assert.equal(r4.body.offer.label, 'Weekend Pass');
+  // Boot on a mapped page serves that page's chips + the offer's images.
+  const back = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x', sessionId: r.body.sessionId }, headers: ORIGIN });
+  const boot = await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`);
+  assert.deepEqual(boot.body.starters, ['Who plays Saturday?']);
+  assert.deepEqual(boot.body.offer.images, ['https://fest.example/img/camp1.jpg']);
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {

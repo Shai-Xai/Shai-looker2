@@ -3,12 +3,12 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 // ─── Fan Owl config — dual-surface editor (docs/specs/FAN_OWL_SPEC.md §3B) ─────
 // The same component serves Admin → client detail (scope="admin-client") and the
-// client's own Settings (scope="my"), like MailTemplateEditor. It manages the
-// three things the fan-facing widget grounds on: SITES (the embed key + domain
-// allowlist + ribbon teaser), the CATALOGUE (tickets/add-ons with their
-// Howler-supplied buy links — the Owl's only price facts), and KNOWLEDGE (the
-// FAQs/policies the Owl may quote). Plus a read of the flywheel: funnel counts,
-// interest topics / FAQ gaps, and captured (consented) fans.
+// client's own Settings (scope="my"), like MailTemplateEditor. Organised as four
+// sections: SITES & PAGES (embed key, domain allowlist, page mappings with their
+// per-page info + chips, the website reader), CATALOGUE (tickets/add-ons with
+// Howler-supplied buy links + images — the Owl's only price facts), FAQs
+// (event-wide knowledge the Owl may quote), and REPORTS (funnel, FAQ gaps,
+// captured fans).
 
 const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'faq', 'other'];
 const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
@@ -18,6 +18,7 @@ const btn = { padding: '8px 14px', borderRadius: 8, border: '1.5px solid var(--h
 const primaryBtn = { ...btn, background: 'var(--text)', color: 'var(--bg, #fff)', border: 0, fontWeight: 700 };
 const card = { border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginTop: 10 };
 const H = ({ children }) => <h3 style={{ fontSize: 14, fontWeight: 700, margin: '18px 0 2px' }}>{children}</h3>;
+const summaryStyle = { cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: '8px 0', listStyle: 'none' };
 
 export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const isMobile = useIsMobile();
@@ -31,6 +32,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [ingestUrl, setIngestUrl] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestNote, setIngestNote] = useState('');
+  const [tab, setTab] = useState('sites');
+  const TABS = [['sites', '🌐 Sites & pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
     let on = true;
@@ -48,6 +51,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const setSite = (i, patch) => set({ sites: cfg.sites.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const setCat = (i, patch) => set({ catalogue: cfg.catalogue.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const setKnow = (i, patch) => set({ knowledge: cfg.knowledge.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+  const setPage = (i, pi, patch) => setSite(i, { pages: cfg.sites[i].pages.map((x, xi) => (xi === pi ? { ...x, ...patch } : x)) });
 
   async function save() {
     setSaving(true);
@@ -56,11 +60,10 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       if (r.ok) { setCfg(await r.json()); setSavedAt(Date.now()); }
     } finally { setSaving(false); }
   }
-
   const snippet = (siteKey) => `<script async src="${window.location.origin}/fan-owl.js" data-site-key="${siteKey}"></script>`;
 
   // "Read the website": crawl → AI suggestions merged into the UNSAVED editor
-  // state (deduped) — the human reviews/edits and hits Save. Nothing auto-commits.
+  // state (deduped; never overwriting promoter edits) — review, then Save.
   async function ingest(siteIndex) {
     const url = ingestUrl.trim();
     if (!url) { setIngestNote('Enter the site URL first (https://…).'); return; }
@@ -75,17 +78,21 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
         const sites = c.sites.map((s, j) => {
           if (j !== siteIndex) return s;
           const byPat = new Map((d.pages || []).map((p) => [p.urlPattern.toLowerCase().trim(), p]));
-          // Existing mappings: fill in page info the crawl found where ours is
-          // still empty (never overwrite something the promoter wrote).
           const merged = (s.pages || []).map((p) => {
             const sug = byPat.get(p.urlPattern.toLowerCase().trim());
             if (sug) byPat.delete(p.urlPattern.toLowerCase().trim());
-            return sug && !String(p.content || '').trim() ? { ...p, content: sug.content || '', note: p.note || sug.note || '' } : p;
+            if (!sug) return p;
+            return {
+              ...p,
+              content: String(p.content || '').trim() ? p.content : (sug.content || ''),
+              note: p.note || sug.note || '',
+              starters: (p.starters || []).length ? p.starters : (sug.starters || []),
+            };
           });
           const newPages = [...byPat.values()].map((p) => ({ ...p, itemIds: [] }));
           return { ...s, pages: [...merged, ...newPages] };
         });
-        setIngestNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${newKnow.length} knowledge entries + ${(d.pages || []).length} page mappings. Review below, edit freely, then Save.`);
+        setIngestNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${newKnow.length} FAQ entries + ${(d.pages || []).length} pages (info + chips). Review, edit freely, then Save.`);
         return { ...c, sites, knowledge: [...c.knowledge, ...newKnow] };
       });
     } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
@@ -93,151 +100,198 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   }
 
   if (!cfg) return <p style={small}>Loading the Fan Owl config…</p>;
+
+  const saveBar = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+      <button type="button" style={primaryBtn} disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save Fan Owl config'}</button>
+      {savedAt > 0 && Date.now() - savedAt < 4000 && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Saved ✓</span>}
+    </div>
+  );
+
   return (
     <div style={{ marginTop: 14 }}>
       <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>🦉 Fan Owl — website booking guide</h2>
-      <p style={small}>The Owl on the event's public website: it guides fans to the right ticket, answers from the knowledge base below, and hands out the buy links you supply. Nothing here is private — only publish what any fan may see.</p>
+      <p style={small}>The Owl on the event's public website: it guides fans to the right ticket, answers only from what you approve here, and hands out the buy links you supply. Nothing here is private — only publish what any fan may see.</p>
 
-      <H>Sites</H>
-      <p style={small}>One per website. Paste the embed snippet once, site-wide. Domains lock which websites may use the key (leave empty while testing).</p>
-      {cfg.sites.map((s, i) => (
-        <div key={s.id || i} style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
-            <div>
-              <div style={small}>Site name</div>
-              <input style={input} value={s.name} onChange={(e) => setSite(i, { name: e.target.value })} placeholder="e.g. Retreat Yourself website" />
-            </div>
-            <div>
-              <div style={small}>Event</div>
-              <select style={input} value={s.suiteId || ''} onChange={(e) => setSite(i, { suiteId: e.target.value })}>
-                <option value="">— whole client —</option>
-                {suites.map((su) => <option key={su.id} value={su.id}>{su.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={small}>Allowed domains (comma-separated, e.g. ry.howler.co.za)</div>
-              <input style={input} value={(s.domains || []).join(', ')} onChange={(e) => setSite(i, { domains: e.target.value.split(',').map((d) => d.trim()).filter(Boolean) })} />
-            </div>
-            <div>
-              <div style={small}>Teaser (the ribbon line when no page mapping matches)</div>
-              <input style={input} value={s.teaser} onChange={(e) => setSite(i, { teaser: e.target.value })} placeholder="e.g. Tickets are live — ask me anything" />
-            </div>
-            <div>
-              <div style={small}>Brand colour (hex)</div>
-              <input style={input} value={s.brandColor} onChange={(e) => setSite(i, { brandColor: e.target.value })} placeholder="#111111" />
-            </div>
-            <div>
-              <div style={small}>Daily chat budget (messages/day, then the widget degrades to ribbon-only)</div>
-              <input style={input} type="number" value={s.dailyBudget} onChange={(e) => setSite(i, { dailyBudget: e.target.value })} />
-            </div>
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0' }}>
-            <input type="checkbox" checked={!!s.enabled} onChange={(e) => setSite(i, { enabled: e.target.checked })} style={{ width: 16, height: 16 }} />
-            Enabled (fans can see the widget)
-          </label>
-          {s.siteKey && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <code style={{ fontSize: 11, background: 'var(--hairline)', padding: '6px 8px', borderRadius: 6, overflowX: 'auto', maxWidth: '100%' }}>{snippet(s.siteKey)}</code>
-              <button type="button" style={btn} onClick={() => navigator.clipboard?.writeText(snippet(s.siteKey))}>Copy snippet</button>
-              <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
-            </div>
-          )}
-          <H>🔮 Read the website</H>
-          <p style={small}>Point the Owl at the event site — it reads the pages and SUGGESTS knowledge entries + page mappings below. Nothing goes live until you review and Save.</p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ingestUrl} placeholder={`https://${(s.domains || [])[0] || 'your-event-site.com'}`} onChange={(e) => setIngestUrl(e.target.value)} />
-            <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={ingesting} onClick={() => ingest(i)}>{ingesting ? 'Reading…' : 'Read & suggest'}</button>
-          </div>
-          {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
-          <H>Pages — what the Owl knows & sells per page</H>
-          <p style={small}>When the page URL contains the pattern (use * as a wildcard), the Owl leads with the ticked items AND answers from that page's info box. Longest match wins; unmatched pages get the whole catalogue. Page info is also searchable from anywhere — a fan on the home page asking about camping gets the accommodation page's info.</p>
-          {(s.pages || []).map((p, pi) => (
-            <div key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)', padding: '8px 0' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr auto', gap: 8 }}>
-                <input style={input} value={p.urlPattern} placeholder="/artists/luna-x or /tickets*" onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, urlPattern: e.target.value } : x)) })} />
-                <select style={input} value={p.pageType} onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, pageType: e.target.value } : x)) })}>
-                  {PAGE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <button type="button" style={btn} onClick={() => setSite(i, { pages: s.pages.filter((_, xi) => xi !== pi) })}>Remove</button>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', padding: '10px 0', marginBottom: 4 }}>
+        {TABS.map(([key, label]) => (
+          <button key={key} type="button" onClick={() => setTab(key)}
+            style={{ ...btn, fontWeight: tab === key ? 700 : 500, background: tab === key ? 'var(--text)' : 'transparent', color: tab === key ? 'var(--bg, #fff)' : 'var(--text)', border: tab === key ? 0 : btn.border }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'sites' && (
+        <>
+          <p style={small}>One site per website. Paste the embed snippet once, site-wide. Domains lock which websites may use the key (leave empty while testing).</p>
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+                <div>
+                  <div style={small}>Site name</div>
+                  <input style={input} value={s.name} onChange={(e) => setSite(i, { name: e.target.value })} placeholder="e.g. Retreat Yourself website" />
+                </div>
+                <div>
+                  <div style={small}>Event</div>
+                  <select style={input} value={s.suiteId || ''} onChange={(e) => setSite(i, { suiteId: e.target.value })}>
+                    <option value="">— whole client —</option>
+                    {suites.map((su) => <option key={su.id} value={su.id}>{su.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={small}>Allowed domains (comma-separated, e.g. ry.howler.co.za)</div>
+                  <input style={input} value={(s.domains || []).join(', ')} onChange={(e) => setSite(i, { domains: e.target.value.split(',').map((d) => d.trim()).filter(Boolean) })} />
+                </div>
+                <div>
+                  <div style={small}>Teaser (the ribbon line when no page mapping matches)</div>
+                  <input style={input} value={s.teaser} onChange={(e) => setSite(i, { teaser: e.target.value })} placeholder="e.g. Tickets are live — ask me anything" />
+                </div>
+                <div>
+                  <div style={small}>Brand colour (hex)</div>
+                  <input style={input} value={s.brandColor} onChange={(e) => setSite(i, { brandColor: e.target.value })} placeholder="#111111" />
+                </div>
+                <div>
+                  <div style={small}>Daily chat budget (messages/day; over it the widget degrades to ribbon-only)</div>
+                  <input style={input} type="number" value={s.dailyBudget} onChange={(e) => setSite(i, { dailyBudget: e.target.value })} />
+                </div>
               </div>
-              <input style={{ ...input, marginTop: 6 }} value={p.note} placeholder="One-liner: what is this page? (e.g. Luna X plays Saturday night)" onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, note: e.target.value } : x)) })} />
-              <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={p.content || ''}
-                placeholder="Page info — everything the Owl may tell fans about this page's topic (e.g. all the accommodation options). Filled by “Read the website”; add or edit freely."
-                onChange={(e) => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, content: e.target.value } : x)) })} />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                {cfg.catalogue.map((c) => {
-                  const on = (p.itemIds || []).includes(c.id);
-                  return (
-                    <button key={c.id} type="button"
-                      style={{ ...btn, minHeight: 32, padding: '5px 10px', fontSize: 12, background: on ? 'var(--text)' : 'transparent', color: on ? 'var(--bg, #fff)' : 'var(--text)' }}
-                      onClick={() => setSite(i, { pages: s.pages.map((x, xi) => (xi === pi ? { ...x, itemIds: on ? x.itemIds.filter((id) => id !== c.id) : [...(x.itemIds || []), c.id] } : x)) })}>
-                      {c.label}
-                    </button>
-                  );
-                })}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0' }}>
+                <input type="checkbox" checked={!!s.enabled} onChange={(e) => setSite(i, { enabled: e.target.checked })} style={{ width: 16, height: 16 }} />
+                Enabled (fans can see the widget)
+              </label>
+              {s.siteKey && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <code style={{ fontSize: 11, background: 'var(--hairline)', padding: '6px 8px', borderRadius: 6, overflowX: 'auto', maxWidth: '100%' }}>{snippet(s.siteKey)}</code>
+                  <button type="button" style={btn} onClick={() => navigator.clipboard?.writeText(snippet(s.siteKey))}>Copy snippet</button>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
+                </div>
+              )}
+
+              <details style={{ marginTop: 10 }}>
+                <summary style={summaryStyle}>🔮 Read the website</summary>
+                <p style={small}>Point the Owl at the event site — it reads the pages and SUGGESTS page info, chips and FAQs. Nothing goes live until you review and Save.</p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ingestUrl} placeholder={`https://${(s.domains || [])[0] || 'your-event-site.com'}`} onChange={(e) => setIngestUrl(e.target.value)} />
+                  <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={ingesting} onClick={() => ingest(i)}>{ingesting ? 'Reading…' : 'Read & suggest'}</button>
+                </div>
+                {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
+              </details>
+
+              <details style={{ marginTop: 4 }} open={(s.pages || []).length > 0}>
+                <summary style={summaryStyle}>📄 Pages ({(s.pages || []).length}) — what the Owl knows & sells per page</summary>
+                <p style={small}>When the page URL contains the pattern (* = wildcard), the Owl leads with the ticked items, answers from that page's info, and shows that page's chips. Longest match wins; unmatched pages get the whole catalogue. Page info is searchable from anywhere.</p>
+                {(s.pages || []).map((p, pi) => (
+                  <div key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)', padding: '8px 0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr auto', gap: 8 }}>
+                      <input style={input} value={p.urlPattern} placeholder="/accommodation or /artists/*" onChange={(e) => setPage(i, pi, { urlPattern: e.target.value })} />
+                      <select style={input} value={p.pageType} onChange={(e) => setPage(i, pi, { pageType: e.target.value })}>
+                        {PAGE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <button type="button" style={btn} onClick={() => setSite(i, { pages: s.pages.filter((_, xi) => xi !== pi) })}>Remove</button>
+                    </div>
+                    <input style={{ ...input, marginTop: 6 }} value={p.note} placeholder="One-liner: what is this page? (e.g. Luna X plays Saturday night)" onChange={(e) => setPage(i, pi, { note: e.target.value })} />
+                    <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={p.content || ''}
+                      placeholder="Page info — everything the Owl may tell fans about this page's topic (e.g. all the accommodation options). Filled by “Read the website”; add or edit freely."
+                      onChange={(e) => setPage(i, pi, { content: e.target.value })} />
+                    <input style={{ ...input, marginTop: 6 }} value={(p.starters || []).join(', ')}
+                      placeholder="Suggested chips for this page, comma-separated (e.g. What are the glamping options?, Is bedding included?)"
+                      onChange={(e) => setPage(i, pi, { starters: e.target.value.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 4) })} />
+                    <div style={{ ...small, marginTop: 6 }}>Lead with these catalogue items on this page:</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {cfg.catalogue.map((c) => {
+                        const on = (p.itemIds || []).includes(c.id);
+                        return (
+                          <button key={c.id} type="button"
+                            style={{ ...btn, minHeight: 32, padding: '5px 10px', fontSize: 12, background: on ? 'var(--text)' : 'transparent', color: on ? 'var(--bg, #fff)' : 'var(--text)' }}
+                            onClick={() => setPage(i, pi, { itemIds: on ? p.itemIds.filter((id) => id !== c.id) : [...(p.itemIds || []), c.id] })}>
+                            {c.label}
+                          </button>
+                        );
+                      })}
+                      {!cfg.catalogue.length && <span style={small}>No catalogue items yet — add them in the Catalogue section.</span>}
+                    </div>
+                  </div>
+                ))}
+                <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => setSite(i, { pages: [...(s.pages || []), { urlPattern: '', pageType: 'other', itemIds: [], note: '', content: '', starters: [] }] })}>+ Page</button>
+              </details>
+
+              <div style={{ textAlign: 'right', marginTop: 8 }}>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ sites: cfg.sites.filter((_, j) => j !== i) })}>Delete site</button>
               </div>
             </div>
           ))}
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button type="button" style={btn} onClick={() => setSite(i, { pages: [...(s.pages || []), { urlPattern: '', pageType: 'other', itemIds: [], note: '' }] })}>+ Page mapping</button>
-            <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ sites: cfg.sites.filter((_, j) => j !== i) })}>Delete site</button>
-          </div>
-        </div>
-      ))}
-      <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, pages: [] }] })}>+ Add site</button>
+          {saveBar}
+        </>
+      )}
 
-      <H>Catalogue — tickets, add-ons & bundles</H>
-      <p style={small}>The Owl's ONLY price/product facts, and the only links it can hand out. Paste the Howler checkout link per item (Pulse adds tracking automatically).</p>
-      {cfg.catalogue.map((c, i) => (
-        <div key={c.id || i} style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '2fr 1fr 1fr 1fr 1fr', gap: 8 }}>
-            <input style={input} value={c.label} placeholder="Label (e.g. Weekend Pass)" onChange={(e) => setCat(i, { label: e.target.value })} />
-            <select style={input} value={c.kind} onChange={(e) => setCat(i, { kind: e.target.value })}>
-              <option value="ticket">ticket</option><option value="addon">add-on</option><option value="bundle">bundle</option>
-            </select>
-            <input style={input} value={c.price} placeholder="Price (e.g. 950)" onChange={(e) => setCat(i, { price: e.target.value })} />
-            <input style={input} value={c.currency} placeholder="ZAR" onChange={(e) => setCat(i, { currency: e.target.value })} />
-            <select style={input} value={c.availability} onChange={(e) => setCat(i, { availability: e.target.value })}>
-              {AVAILABILITY.map((a) => <option key={a} value={a}>{a || '— availability —'}</option>)}
-            </select>
-          </div>
-          <input style={{ ...input, marginTop: 6 }} value={c.deepLink} placeholder="Howler checkout link (https://…)" onChange={(e) => setCat(i, { deepLink: e.target.value })} />
-          <input style={{ ...input, marginTop: 6 }} value={c.description} placeholder="One-liner the Owl can use (what's included, who it's for)" onChange={(e) => setCat(i, { description: e.target.value })} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
-              <input type="checkbox" checked={c.public !== false} onChange={(e) => setCat(i, { public: e.target.checked })} style={{ width: 16, height: 16 }} />
-              Visible to fans
-            </label>
-            <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ catalogue: cfg.catalogue.filter((_, j) => j !== i) })}>Remove</button>
-          </div>
-        </div>
-      ))}
-      <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ catalogue: [...cfg.catalogue, { label: '', kind: 'ticket', price: '', currency: 'ZAR', deepLink: '', description: '', availability: '', public: true }] })}>+ Add item</button>
+      {tab === 'catalogue' && (
+        <>
+          <p style={small}>Tickets, add-ons & bundles — the Owl's ONLY price/product facts, and the only links it can hand out. Paste the Howler checkout link per item (Pulse adds tracking automatically). Images show as a scrollable strip on the offer card.</p>
+          {cfg.catalogue.map((c, i) => (
+            <div key={c.id || i} style={card}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '2fr 1fr 1fr 1fr 1fr', gap: 8 }}>
+                <input style={input} value={c.label} placeholder="Label (e.g. Weekend Pass)" onChange={(e) => setCat(i, { label: e.target.value })} />
+                <select style={input} value={c.kind} onChange={(e) => setCat(i, { kind: e.target.value })}>
+                  <option value="ticket">ticket</option><option value="addon">add-on</option><option value="bundle">bundle</option>
+                </select>
+                <input style={input} value={c.price} placeholder="Price (e.g. 950)" onChange={(e) => setCat(i, { price: e.target.value })} />
+                <input style={input} value={c.currency} placeholder="ZAR" onChange={(e) => setCat(i, { currency: e.target.value })} />
+                <select style={input} value={c.availability} onChange={(e) => setCat(i, { availability: e.target.value })}>
+                  {AVAILABILITY.map((a) => <option key={a} value={a}>{a || '— availability —'}</option>)}
+                </select>
+              </div>
+              <input style={{ ...input, marginTop: 6 }} value={c.deepLink} placeholder="Howler checkout link (https://…)" onChange={(e) => setCat(i, { deepLink: e.target.value })} />
+              <input style={{ ...input, marginTop: 6 }} value={c.description} placeholder="One-liner the Owl can use (what's included, who it's for)" onChange={(e) => setCat(i, { description: e.target.value })} />
+              <input style={{ ...input, marginTop: 6 }} value={(c.images || []).join(', ')}
+                placeholder="Image URLs, comma-separated (https://… — fans scroll through them on the offer card)"
+                onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              {(c.images || []).filter((u) => /^https?:\/\//i.test(u)).length > 0 && (
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 6 }}>
+                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => <img key={u} src={u} alt="" style={{ height: 54, borderRadius: 8, flex: '0 0 auto', objectFit: 'cover' }} />)}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                  <input type="checkbox" checked={c.public !== false} onChange={(e) => setCat(i, { public: e.target.checked })} style={{ width: 16, height: 16 }} />
+                  Visible to fans
+                </label>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ catalogue: cfg.catalogue.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            </div>
+          ))}
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ catalogue: [...cfg.catalogue, { label: '', kind: 'ticket', price: '', currency: 'ZAR', deepLink: '', description: '', availability: '', public: true, images: [] }] })}>+ Add item</button>
+          {saveBar}
+        </>
+      )}
 
-      <H>General knowledge — event-wide FAQs & policies</H>
-      <p style={small}>Rules and answers that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box above. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap below.</p>
-      {cfg.knowledge.map((k, i) => (
-        <div key={k.id || i} style={card}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>
-            <select style={input} value={k.kind} onChange={(e) => setKnow(i, { kind: e.target.value })}>
-              <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option>
-            </select>
-            <input style={input} value={k.question} placeholder="Question (e.g. What's the refund policy?)" onChange={(e) => setKnow(i, { question: e.target.value })} />
-          </div>
-          <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={k.body} placeholder="The answer, in the organiser's words — the Owl sticks closely to this." onChange={(e) => setKnow(i, { body: e.target.value })} />
-          <div style={{ textAlign: 'right', marginTop: 6 }}>
-            <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ knowledge: cfg.knowledge.filter((_, j) => j !== i) })}>Remove</button>
-          </div>
-        </div>
-      ))}
-      <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ knowledge: [...cfg.knowledge, { kind: 'faq', question: '', body: '' }] })}>+ Add entry</button>
+      {tab === 'knowledge' && (
+        <>
+          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports.</p>
+          {cfg.knowledge.map((k, i) => (
+            <div key={k.id || i} style={card}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>
+                <select style={input} value={k.kind} onChange={(e) => setKnow(i, { kind: e.target.value })}>
+                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option>
+                </select>
+                <input style={input} value={k.question} placeholder="Question (e.g. What's the refund policy?)" onChange={(e) => setKnow(i, { question: e.target.value })} />
+              </div>
+              <textarea style={{ ...input, marginTop: 6, resize: 'vertical' }} rows={3} value={k.body} placeholder="The answer, in the organiser's words — the Owl sticks closely to this." onChange={(e) => setKnow(i, { body: e.target.value })} />
+              <div style={{ textAlign: 'right', marginTop: 6 }}>
+                <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => set({ knowledge: cfg.knowledge.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            </div>
+          ))}
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ knowledge: [...cfg.knowledge, { kind: 'faq', question: '', body: '' }] })}>+ Add entry</button>
+          {saveBar}
+        </>
+      )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-        <button type="button" style={primaryBtn} disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save Fan Owl config'}</button>
-        {savedAt > 0 && Date.now() - savedAt < 4000 && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Saved ✓</span>}
-      </div>
-
-      {stats && <Flywheel stats={stats} leads={leads} loadLeads={() => fetch(`${base}/leads`).then((r) => r.json()).then((d) => setLeads(d.leads || [])).catch(() => setLeads([]))} />}
+      {tab === 'reports' && (
+        stats ? <Flywheel stats={stats} leads={leads} loadLeads={() => fetch(`${base}/leads`).then((r) => r.json()).then((d) => setLeads(d.leads || [])).catch(() => setLeads([]))} />
+          : <p style={small}>Loading reports…</p>
+      )}
     </div>
   );
 }
@@ -255,7 +309,7 @@ function Flywheel({ stats, leads, loadLeads }) {
     </div>
   );
   return (
-    <div style={{ marginTop: 20 }}>
+    <div style={{ marginTop: 8 }}>
       <H>Last 30 days</H>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
         {stat('Ribbon views', total.ribbon_view)}

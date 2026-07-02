@@ -47,6 +47,19 @@ export default function FanOwlEmbedPage() {
   useEffect(() => { scroller.current?.scrollTo({ top: 1e9, behavior: 'smooth' }); }, [messages, busy]);
 
   const brand = boot?.site?.brandColor || '#111';
+  // Scrollable image strip on an offer card (image URLs the promoter supplied).
+  const ImageStrip = ({ images }) => {
+    const safe = (images || []).filter((u) => /^https?:\/\//i.test(u));
+    if (!safe.length) return null;
+    return (
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 8, WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
+        {safe.map((u) => (
+          <img key={u} src={u} alt="" loading="lazy"
+            style={{ height: 110, maxWidth: 200, objectFit: 'cover', borderRadius: 10, flex: '0 0 auto', scrollSnapAlign: 'start' }} />
+        ))}
+      </div>
+    );
+  };
   const close = () => { try { window.parent.postMessage('howler-fan-owl:close', '*'); } catch { /* not framed */ } };
   const clickOffer = (o) => {
     fetch('/api/fan/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, kind: 'deeplink_click', payload: { itemId: o.id, label: o.label } }) }).catch(() => {});
@@ -139,6 +152,7 @@ export default function FanOwlEmbedPage() {
                   {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : 'See tickets'}
                   {boot.offer.availability ? ` · ${boot.offer.availability}` : ''}
                 </div>
+                <ImageStrip images={boot.offer.images} />
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>Tell me more</button>
               </div>
             )}
@@ -156,6 +170,7 @@ export default function FanOwlEmbedPage() {
                   {o.price ? `${o.currency} ${o.price}` : ''}
                   {o.availability ? ` · ${o.availability}` : ''}
                 </div>
+                <ImageStrip images={o.images} />
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => clickOffer(o)}>Get tickets ↗</button>
               </div>
             ))}

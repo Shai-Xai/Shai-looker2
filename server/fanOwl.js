@@ -61,12 +61,12 @@ FOLLOW-UPS: at the very END of your reply, on its own final line, output <<<FOLL
 const FAN_INGEST_SYSTEM = `You read the text of an event's public website pages and produce SUGGESTED content for that event's website ticket assistant, for a human to review and edit before anything goes live.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
-{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…","content":"…"}]}
+{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…","content":"…","starters":["…"]}]}
 
 Rules:
 - Ground EVERYTHING in the provided page text. NEVER invent facts, dates, rules or policies that aren't in the text. Fewer solid entries beat many padded ones.
 - knowledge (max 20) = GENERAL, event-wide entries only: policies (refunds, age limits, accessibility, what's allowed in) and cross-cutting FAQs a fan could ask from any page. Question in a fan's words; body closely following the site's own wording. Do NOT duplicate page-specific detail here.
-- pages (max 12) = one entry per distinct page/section identifiable from the URLs and text: a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, a one-line note saying what the page is, and "content" — the useful PAGE-SPECIFIC information from that page, distilled (up to ~250 words), closely following the site's wording. Page detail (e.g. everything about accommodation options) belongs in that page's content, not in knowledge.
+- pages (max 12) = one entry per distinct page/section identifiable from the URLs and text: a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, a one-line note saying what the page is, "content" — the useful PAGE-SPECIFIC information from that page, distilled (up to ~250 words), closely following the site's wording — and "starters": up to 3 SHORT (≤6 words) questions a fan on that page would most likely tap, answerable from that page's content (e.g. on accommodation: "What are the glamping options?"). Page detail (e.g. everything about accommodation options) belongs in that page's content, not in knowledge.
 - Do NOT suggest ticket prices or checkout links — the catalogue comes from the ticketing system, not the website.`;
 
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
@@ -125,6 +125,10 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // Migration: page mappings gained long-form "page info" — the organiser-approved
   // content the Owl serves for that page (general FAQs stay in fan_knowledge).
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN content TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  // Migration: per-page suggested chips (the tappable starter questions in the chat).
+  try { sql.exec("ALTER TABLE fan_pages ADD COLUMN starters TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+  // Migration: catalogue items gained images (URLs; a scrollable strip on offer cards).
+  try { sql.exec("ALTER TABLE fan_catalogue ADD COLUMN images TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -153,11 +157,12 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '' })),
+      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []) })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
       id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price,
       currency: c.currency, deepLink: c.deep_link, availability: c.availability, public: !!c.public, suiteId: c.suite_id,
+      images: J(c.images, []),
     })),
     knowledge: knowByEntity.all(entityId).map((k) => ({ id: k.id, kind: k.kind, question: k.question, body: k.body })),
   });
@@ -185,8 +190,8 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
           for (const p of (s.pages || []).slice(0, 200)) {
             if (!String(p.urlPattern || '').trim()) continue;
-            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note,content) VALUES (?,?,?,?,?,?,?)')
-              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300), String(p.content || '').slice(0, 6000));
+            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note,content,starters) VALUES (?,?,?,?,?,?,?,?)')
+              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300), String(p.content || '').slice(0, 6000), JSON.stringify((p.starters || []).map((x) => String(x).slice(0, 80)).filter(Boolean).slice(0, 4)));
           }
         }
         for (const s of sitesByEntity.all(entityId)) {
@@ -197,8 +202,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
         sql.prepare('DELETE FROM fan_catalogue WHERE entity_id = ?').run(entityId);
         b.catalogue.slice(0, 300).forEach((c, i) => {
           if (!String(c.label || '').trim()) return;
-          sql.prepare('INSERT INTO fan_catalogue (id,entity_id,suite_id,kind,label,description,price,currency,deep_link,availability,public,position) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-            .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i);
+          sql.prepare('INSERT INTO fan_catalogue (id,entity_id,suite_id,kind,label,description,price,currency,deep_link,availability,public,position,images) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i,
+              JSON.stringify((c.images || []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 8)));
         });
       }
       if (Array.isArray(b.knowledge)) {
@@ -314,7 +320,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
         .map((k) => ({ kind: KKINDS.has(k.kind) ? k.kind : 'faq', question: String(k.question || '').slice(0, 300), body: String(k.body).slice(0, 4000) })),
       pages: (Array.isArray(parsed.pages) ? parsed.pages : []).slice(0, 12)
         .filter((p) => String(p.urlPattern || '').trim())
-        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300), content: String(p.content || '').slice(0, 6000) })),
+        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300), content: String(p.content || '').slice(0, 6000), starters: (Array.isArray(p.starters) ? p.starters : []).map((x) => String(x).slice(0, 80)).filter(Boolean).slice(0, 3) })),
     });
   });
   app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, requireManager, ingestLimit, ingestHandler);
@@ -404,7 +410,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     }
     return best;
   }
-  const publicItem = (c) => ({ id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price, currency: c.currency, availability: c.availability });
+  const publicItem = (c) => ({ id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price, currency: c.currency, availability: c.availability, images: J(c.images, []) });
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
     const page = matchPage(site, url);
@@ -465,15 +471,18 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const site = session && siteById.get(session.site_id);
     if (!site || !site.enabled) return res.status(404).json({ error: 'Session not found — reopen the assistant.' });
     const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
-    const { items, primary } = offerFor(site, session.page_url);
+    const { page, items, primary } = offerFor(site, session.page_url);
     logEvent(site.id, session.id, 'chat_open', {});
+    // Chips: the current page's configured starters (set by hand or drafted by the
+    // website reader) win; otherwise sensible generic defaults.
+    const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
     res.json({
       site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
       event: suite ? { name: suite.name } : null,
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
-      starters: ['Which ticket do I need?', "What's included?", 'Refund policy?'],
+      starters: pageStarters.length ? pageStarters.slice(0, 4) : ['Which ticket do I need?', "What's included?", 'Refund policy?'],
       consentVersion: CONSENT_WORDING_VERSION,
     });
   });
