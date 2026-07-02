@@ -47,10 +47,10 @@ const pkce = () => {
   return { verifier, challenge: crypto.createHash('sha256').update(verifier).digest('base64url') };
 };
 // Drive the approve form like the browser would (cookie-authed POST, no redirect-follow).
-async function approve(clientId, challenge, { entityId = entityA.id, rows = false, as = ownerA } = {}) {
+async function approve(clientId, challenge, { entityId = entityA.id, rows = false, drafts = false, as = ownerA } = {}) {
   const form = new URLSearchParams({
     client_id: clientId, redirect_uri: REDIRECT, state: 'st4te', code_challenge: challenge,
-    code_challenge_method: 'S256', entityId, ...(rows ? { rows: '1' } : {}),
+    code_challenge_method: 'S256', entityId, ...(rows ? { rows: '1' } : {}), ...(drafts ? { drafts: '1' } : {}),
   });
   return fetch(`${app.base}/oauth/approve`, {
     method: 'POST', redirect: 'manual',
@@ -166,4 +166,13 @@ test('rows opt-in on the approval form yields a read_rows key', async () => {
   const body = await (await exchange(clientId, code, verifier)).json();
   const me = await app.req('GET', '/api/v1/me', { headers: { Authorization: `Bearer ${body.access_token}` } });
   assert.deepEqual(me.body.key.scopes, ['read', 'read_rows']);
+});
+
+test('drafts opt-in on the approval form yields a write key', async () => {
+  const clientId = await registerClient();
+  const { verifier, challenge } = pkce();
+  const code = new URL((await approve(clientId, challenge, { drafts: true })).headers.get('location')).searchParams.get('code');
+  const body = await (await exchange(clientId, code, verifier)).json();
+  const me = await app.req('GET', '/api/v1/me', { headers: { Authorization: `Bearer ${body.access_token}` } });
+  assert.deepEqual(me.body.key.scopes, ['read', 'write']);
 });

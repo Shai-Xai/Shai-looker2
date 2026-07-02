@@ -667,6 +667,13 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **The connected Owl can now DO things (drafts only)** 🧪: with the
+  "creating drafts" permission on a connection/key, the Owl in Claude or ChatGPT can
+  **build audience segments** and **draft campaigns** ("draft a win-back email to last
+  year's VIP buyers") — Pulse's own AI writes/designs the content, and everything lands
+  as a **draft in Engage awaiting human review and approval**. The connected Owl can
+  never send. It also now receives the client's stored AI context (same grounding as
+  in-app), so answers are business-aware.
 - **2026-07-02** — **API: Event Ops data (row-level keys)** 🧪: connected tools and AI
   agents with the row-level scope can now pull **live Event Ops** per event — device
   totals per station, locate a device by code, open issues, staff, checkpoints

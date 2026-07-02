@@ -239,6 +239,53 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     return { suiteId, ...data, asOf: asOf() };
   }
 
+  // ── writes (P3 — DRAFTS ONLY, behind the `write` scope) ──
+  // Both delegate to the Owl's act runners for validation (curated cohort
+  // fields, PII refused) and then the SAME commit functions the in-app confirm
+  // buttons call — so an API-made segment/draft is identical to an Owl-made
+  // one. A campaign is ALWAYS created status 'draft' (enforced inside
+  // createDraftCampaign): a human reviews, approves and sends in Engage.
+  // Nothing on this surface can send.
+  async function createSegment(user, { name, filters, suiteId, folder } = {}) {
+    if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
+    const t = getOwlTools().createSegment;
+    if (!t) throw new HttpError(404, 'Segments aren’t available');
+    const out = await t.run({ name, filters }, { user, suiteId: suiteId || '', entityId: entityOf(user) });
+    if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That segment couldn’t be built.');
+    const a = out.action;
+    const sr = segmentsApi.createSegment({ entityId: entityOf(user), name: a.name, definition: a.draft, user, suiteId: suiteId || '', folder });
+    if (!sr.ok) throw new HttpError(400, sr.error || 'The segment couldn’t be saved.');
+    return { segment: { id: sr.segment.id, name: sr.segment.name }, cohort: a.summary, count: a.count, reach: a.reach, asOf: asOf() };
+  }
+  async function draftCampaign(user, { goal, channel, segmentName, filters, name, ctaUrl, language, suiteId } = {}) {
+    if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
+    const t = getOwlTools().draftCampaign;
+    if (!t) throw new HttpError(404, 'Campaigns aren’t available');
+    const entityId = entityOf(user);
+    const out = await t.run({ goal, channel, segmentName, filters, name, ctaUrl, language }, { user, suiteId: suiteId || '', entityId });
+    if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That campaign couldn’t be drafted.');
+    const a = out.action;
+    // A chat-built cohort is saved as a reusable segment first (same as the
+    // in-app confirm), so the audience is visible + reusable in Engage.
+    let audience = a.audience;
+    if (audience && audience.mode === 'query') {
+      const sr = segmentsApi.createSegment({ entityId, name: `${a.name} audience`.slice(0, 120), definition: audience, user, suiteId: suiteId || '' });
+      if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id };
+    }
+    const config = {
+      channel: a.channel, audience, subject: a.subject || '', body: a.body || '', ctaText: a.ctaText || '',
+      ctaUrl: a.ctaUrl || '', goal: a.goal || '', eventSuiteId: suiteId || '', campaignMode: 'once',
+      language: a.language || '', contentMode: a.contentMode === 'blocks' ? 'blocks' : 'template',
+      customHtml: '', blocks: a.blocks || [], theme: a.theme || {},
+    };
+    const r = actionsApi.createDraftCampaign({ entityId, title: a.name, config, user });
+    if (!r.ok) throw new HttpError(r.error === 'Not allowed' ? 403 : 400, r.error || 'The draft couldn’t be created.');
+    return {
+      campaign: { id: r.action.id, title: r.action.title, status: r.action.status, channel: a.channel, subject: a.subject || '' },
+      audience: a.summary, reach: a.reach, note: 'Draft only — a human reviews, approves and sends it in Pulse (Engage).', asOf: asOf(),
+    };
+  }
+
   // ── OpenAI/ChatGPT-compatible search + fetch (over the same read core) ──
   // ChatGPT connectors require an MCP server to expose `search` and `fetch`.
   // A "document" here is any addressable read item — a dashboard, segment,
@@ -309,7 +356,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     throw new HttpError(404, 'Unknown document id');
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData, eventOps };
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData, eventOps, createSegment, draftCampaign };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });
@@ -335,6 +382,14 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   app.get('/api/v1/data-sources', ...guard, (req, res) => res.json({ sources: listDataSources(req.user) }));
   app.post('/api/v1/query', ...guard, heavy, asyncHandler(async (req, res) => {
     res.json(await queryData(req.user, req.body || {}));
+  }));
+  // Writes — `write` scope: drafts only, never sends (see core comments).
+  const write = apiKeys.requireScope('write');
+  app.post('/api/v1/segments', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), write, heavy, asyncHandler(async (req, res) => {
+    res.status(201).json(await createSegment(req.user, req.body || {}));
+  }));
+  app.post('/api/v1/campaigns/draft', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), write, heavy, asyncHandler(async (req, res) => {
+    res.status(201).json(await draftCampaign(req.user, req.body || {}));
   }));
   // Event Ops — read_rows scope (operational row-level data: staff, devices).
   app.get('/api/v1/event-ops', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
