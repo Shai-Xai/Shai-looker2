@@ -21,7 +21,10 @@ while ticketing lives on a separate, utilitarian checkout page. Fans browsing an
 artist page have to *leave the story* to work out which of seven ticket tiers
 gets them in front of that artist — and many never come back.
 
-**What we're building:** a small widget a promoter drops onto their site once.
+**What we're building (phase 1 = a booking assistant):** a small widget a
+promoter drops onto their site once. Its first job is not "commerce engine" —
+it's **guiding the fan to the right purchase**: which ticket do I need, what's
+the difference between the tiers, what should I add, am I missing something.
 On every page it knows where the fan is and shows, instantly, the one thing that
 matters there — *"To see Luna X on Saturday you need a Saturday Pass (R950) ·
 selling fast."* If the fan wants more, it opens into a chat where the Owl
@@ -112,6 +115,33 @@ event-site traffic it's ruinous for cost and latency. Split it:
 
   No `askData`, no dashboards, no organiser tools — the fan toolbox is a
   hard-separate, minimal set.
+
+### 2.2b The voice (as much a spec as the tools)
+
+The fan Owl is **not a salesperson — it's the friend who's already going and
+knows the event inside out.** Well-informed, genuinely excited, warm, personal.
+That framing is what makes recommendations land as help rather than upsell.
+Concretely, the persona prompt encodes:
+
+- **Excited, but honest.** Real enthusiasm for the event ("Saturday's lineup is
+  ridiculous — Luna X closes the main stage"), never manufactured hype.
+  Urgency only from real data (`availability_bucket`), **never invented
+  scarcity** — fake pressure is a dark pattern and it torches the trust the
+  whole product depends on.
+- **Guide first, sell second.** Lead with "here's what you need and why," offer
+  the upgrade/add-on as a friend's tip ("if you're staying both days, camping
+  saves you the drive"), and take "no" gracefully the first time.
+- **Personal.** First person, uses the fan's context (page they're on, what
+  they've said this session), remembers within the conversation, mirrors the
+  fan's energy and brevity. Answers in the page's language.
+- **Plain-spoken.** Short sentences, no ticketing jargon, prices and facts
+  stated cleanly (from tool data — the grounding rules in §2.3 always win over
+  enthusiasm).
+
+The persona ships as a platform-level system prompt registered in
+`insights.promptRegistry()` (auditable like every Owl prompt), with a
+per-client tone layer to follow when white-labelled assistants arrive
+(decision 3) — same layered-guidance pattern as `owlGuidance.js`.
 
 ### 2.3 The trust boundary (non-negotiables)
 
@@ -221,9 +251,11 @@ insight → action loops:
 
 ## 7. Phasing
 
-1. **Concierge (this spec's build target).** Snippet + ribbon + grounded chat
-   over knowledge/catalogue + prefilled deep-link + conversion tracking + the
-   admin/self-service knowledge and mapping surfaces. Proves conversion lift.
+1. **Booking guide (this spec's build target).** Snippet + ribbon + grounded
+   chat over knowledge/catalogue — the friend-who-knows-the-event voice (§2.2b)
+   guiding fans to the right ticket/add-ons — + supplied deep-links with
+   conversion tracking + the admin/self-service knowledge and mapping surfaces.
+   Proves conversion lift.
 2. **Commerce-aware.** Live urgency, bundles, promo codes (engine exists),
    "hold one while you read" if/when the Howler API exposes holds.
 3. **In-widget checkout.** Headless Howler checkout inside the widget — no
