@@ -548,7 +548,7 @@ function ProductSalesSiteCard() {
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>Pulse sales website</div>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
-            A shareable public page built from the feature matrix below — only items marked <b>Shown</b> appear on it.
+            A shareable public story page (with a full feature index at <code style={codeChip}>/sales/features</code>) — only items marked <b>Shown</b> below appear on either.
           </div>
         </div>
         <a href="/sales" target="_blank" rel="noopener noreferrer" style={{ ...miniBtn, textDecoration: 'none', color: 'var(--text)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>

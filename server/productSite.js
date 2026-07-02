@@ -6,7 +6,7 @@
 // not ready for internal announcement — and every public surface (the /sales
 // site, the rendered overview page, the public matrix API) respects it.
 // Admin surfaces always see everything, with hidden items flagged.
-// Remove the mount() line in index.js + this file (+ docs/pulse-sales.html)
+// Remove the mount() line in index.js + this file (+ docs/pulse-sales*.html)
 // to uninstall.
 
 const fs = require('fs');
@@ -165,6 +165,7 @@ const CATALOGUE = [
 const OVERVIEW_MD = path.join(__dirname, '../docs/PRODUCT_OVERVIEW_SALES.md');
 const OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html');
 const SALES_HTML = path.join(__dirname, '../docs/pulse-sales.html');
+const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features.html');
 
 // Stable slug for a `##` heading — survives status-emoji / punctuation edits.
 function slugify(heading) {
@@ -260,11 +261,16 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
     });
   });
 
-  // The public Pulse sales website — a self-contained page that renders the
-  // filtered matrix from /api/product/site.
+  // The public Pulse sales website: a value-led story page at /sales (its Owl
+  // channel cards + sections still honour the admin's Shown/Hidden choices),
+  // and the full matrix on its own page at /sales/features.
   app.get(['/sales', '/sales.html', '/pulse-sales'], (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(SALES_HTML);
+  });
+  app.get(['/sales/features', '/sales/features.html', '/pulse-sales-features'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.sendFile(SALES_FEATURES_HTML);
   });
 
   // ── Admin: the full picture + include/exclude toggles ────────────────────────
