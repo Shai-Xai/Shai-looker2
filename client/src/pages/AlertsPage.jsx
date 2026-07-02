@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import { useProfile } from '../lib/profile.jsx';
 import HomeButton from '../components/HomeButton.jsx';
 import AlertEditor from '../components/AlertEditor.jsx';
@@ -170,6 +171,7 @@ function AlertRow({ alert, canManage, onEdit, onToggle }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 700, fontSize: 14.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.name}</span>
           <span style={{ fontSize: 10.5, fontWeight: 800, padding: '2px 8px', borderRadius: 980, background: chip.bg, color: chip.fg }}>{chip.label}</span>
+          {viaBadge(alert.createdVia) && <span title="Where this alert was created" style={viaChipStyle}>{viaBadge(alert.createdVia).icon} via {viaBadge(alert.createdVia).label}</span>}
           {alert.priority === 'important' && <span title="Important — ignores quiet hours" style={{ fontSize: 11 }}>🔴</span>}
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3, lineHeight: 1.4 }}>{ruleText(alert)}</div>

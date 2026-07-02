@@ -119,6 +119,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     add('metric_filters', "metric_filters TEXT NOT NULL DEFAULT '{}'");
     add('metric_label', "metric_label TEXT NOT NULL DEFAULT ''");
     add('tag', "tag TEXT NOT NULL DEFAULT ''");
+    add('created_via', "created_via TEXT NOT NULL DEFAULT ''"); // provenance: owl | whatsapp | claude | chatgpt | api
   } catch (e) { console.error('[alerts] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -138,7 +139,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
       quietStart: r.quiet_start, quietEnd: r.quiet_end, timezone: r.timezone,
       status: r.status, state: r.state, lastValue: r.last_value,
       lastCheckedAt: r.last_checked_at, lastFiredAt: r.last_fired_at, fireCount: r.fire_count,
-      createdBy: r.created_by, createdAt: r.created_at, updatedBy: r.updated_by, updatedAt: r.updated_at,
+      createdBy: r.created_by, createdVia: r.created_via || '', createdAt: r.created_at, updatedBy: r.updated_by, updatedAt: r.updated_at,
     };
   }
   const alertById = (id) => rowToAlert(sql.prepare('SELECT * FROM alerts WHERE id=?').get(id));
@@ -636,7 +637,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
   // alert the Owl proposes-then-confirms is identical to a hand-made one and obeys
   // alerts.manage (the Owl can never create an alert the user couldn't make by hand).
   // Returns { ok, alert } or { ok:false, error }. No throwing — the caller is a route.
-  function createAlertFor({ suiteId, draft, user }) {
+  function createAlertFor({ suiteId, draft, user, via }) {
     if (!enabled()) return { ok: false, error: 'Alerts are disabled' };
     const su = db.getSuite(suiteId);
     if (!su) return { ok: false, error: 'Event not found' };
@@ -644,7 +645,11 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     const c = clean({ ...(draft || {}), source: 'metric' }, su.entityId, su.id);
     if (!c.name) return { ok: false, error: 'Give the alert a name.' };
     if (!c.model || !c.view || !c.measure) return { ok: false, error: 'Pick the metric to watch.' };
-    return { ok: true, alert: upsert(null, c, (user && user.email) || 'owl') };
+    const alert = upsert(null, c, (user && user.email) || 'owl');
+    // Provenance stamp (owl | whatsapp | claude | chatgpt | api) — post-insert so
+    // the shared upsert (also used by hand-made routes) stays untouched.
+    if (via && alert) { try { sql.prepare('UPDATE alerts SET created_via=? WHERE id=?').run(String(via).slice(0, 20), alert.id); alert.createdVia = String(via).slice(0, 20); } catch { /* cosmetic */ } }
+    return { ok: true, alert };
   }
 
   console.log('[alerts] mounted', enabled() ? '(enabled)' : '(disabled — set alerts_enabled=1)');

@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import PlatformIcon from './PlatformIcon.jsx';
 import { AudienceFilters } from './CampaignManager.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 
 // Built-in recipes we can materialise into a real segment right now by
 // auto-resolving the source from the client's data (key = actionTemplates key).
@@ -146,6 +147,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
             <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
+            {viaBadge(s.createdVia) && <span style={viaChipStyle}>{viaBadge(s.createdVia).icon} via {viaBadge(s.createdVia).label}</span>}
           </div>
           {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
           {lbl.detail && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lbl.detail}</div>}

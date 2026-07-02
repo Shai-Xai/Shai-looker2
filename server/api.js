@@ -246,6 +246,16 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // one. A campaign is ALWAYS created status 'draft' (enforced inside
   // createDraftCampaign): a human reviews, approves and sends in Engage.
   // Nothing on this surface can send.
+  // Provenance for anything the API creates: derive the platform from the key
+  // name (OAuth-minted keys are named after the connecting app — "Claude
+  // (connected …)", "ChatGPT (…)"; hand-made keys → plain 'api').
+  const viaOf = (user) => {
+    const m = /^apikey:(.*)$/.exec(user.email || '');
+    if (!m) return 'api';
+    const n = m[1].toLowerCase();
+    return /claude/.test(n) ? 'claude' : /(chatgpt|openai|gpt)/.test(n) ? 'chatgpt' : 'api';
+  };
+
   async function createSegment(user, { name, filters, suiteId, folder } = {}) {
     if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
     const t = getOwlTools().createSegment;
@@ -253,7 +263,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     const out = await t.run({ name, filters }, { user, suiteId: suiteId || '', entityId: entityOf(user) });
     if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That segment couldn’t be built.');
     const a = out.action;
-    const sr = segmentsApi.createSegment({ entityId: entityOf(user), name: a.name, definition: a.draft, user, suiteId: suiteId || '', folder });
+    const sr = segmentsApi.createSegment({ entityId: entityOf(user), name: a.name, definition: a.draft, user, suiteId: suiteId || '', folder, via: viaOf(user) });
     if (!sr.ok) throw new HttpError(400, sr.error || 'The segment couldn’t be saved.');
     return { segment: { id: sr.segment.id, name: sr.segment.name }, cohort: a.summary, count: a.count, reach: a.reach, asOf: asOf() };
   }
@@ -269,7 +279,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     // in-app confirm), so the audience is visible + reusable in Engage.
     let audience = a.audience;
     if (audience && audience.mode === 'query') {
-      const sr = segmentsApi.createSegment({ entityId, name: `${a.name} audience`.slice(0, 120), definition: audience, user, suiteId: suiteId || '' });
+      const sr = segmentsApi.createSegment({ entityId, name: `${a.name} audience`.slice(0, 120), definition: audience, user, suiteId: suiteId || '', via: viaOf(user) });
       if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id };
     }
     const config = {
@@ -278,7 +288,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
       language: a.language || '', contentMode: a.contentMode === 'blocks' ? 'blocks' : 'template',
       customHtml: '', blocks: a.blocks || [], theme: a.theme || {},
     };
-    const r = actionsApi.createDraftCampaign({ entityId, title: a.name, config, user });
+    const r = actionsApi.createDraftCampaign({ entityId, title: a.name, config, user, via: viaOf(user) });
     if (!r.ok) throw new HttpError(r.error === 'Not allowed' ? 403 : 400, r.error || 'The draft couldn’t be created.');
     return {
       campaign: { id: r.action.id, title: r.action.title, status: r.action.status, channel: a.channel, subject: a.subject || '' },

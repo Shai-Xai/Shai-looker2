@@ -28,15 +28,15 @@ const stubs = {
     listSegmentsFull: (entityId) => segmentsByEntity[entityId] || [],
     resolveSegment: async (entityId, id) => ((segmentsByEntity[entityId] || []).some((s) => s.id === id)
       ? { list: [{ email: 'a@x' }], reach: { email: 1, sms: 0 } } : null),
-    createSegment: ({ entityId, name, definition, user }) => {
-      created.segments.push({ entityId, name, definition, by: user.email });
+    createSegment: ({ entityId, name, definition, user, via }) => {
+      created.segments.push({ entityId, name, definition, by: user.email, via });
       return { ok: true, segment: { id: 'new-seg', name } };
     },
   },
   actionsApi: {
     listForEntity: (entityId) => (entityId === (entityA && entityA.id) ? [{ id: 'c1', title: 'Launch', type: 'campaign', status: 'done', audienceCount: 10, results: { sent: 10, clicks: 5 }, config: { channel: 'email', subject: 'Go' }, createdAt: '', updatedAt: '' }] : []),
-    createDraftCampaign: ({ entityId, title, config, user }) => {
-      created.campaigns.push({ entityId, title, config, by: user.email });
+    createDraftCampaign: ({ entityId, title, config, user, via }) => {
+      created.campaigns.push({ entityId, title, config, by: user.email, via });
       return { ok: true, action: { id: 'new-camp', title, status: 'draft' } };
     },
   },
@@ -349,6 +349,13 @@ test('writes: `write` scope creates drafts only; plain keys refused; tools scope
   assert.equal(camp.body.campaign.status, 'draft');
   assert.match(camp.body.note, /human reviews/);
   assert.equal(created.campaigns.at(-1).config.audience.mode, 'segment');
+
+  // Provenance: hand-named key → 'api'; a Claude-named key stamps 'claude'.
+  assert.equal(created.segments.at(-1).via, 'api');
+  assert.equal(created.campaigns.at(-1).via, 'api');
+  const { secret: claudeKey } = await issueKey(entityA.id, { name: 'Claude (connected 2026-07-02)', scopes: ['read', 'write'] });
+  await app.req('POST', '/api/v1/segments', { headers: bearer(claudeKey), body: { filters: { 'core.type': 'VIP' } } });
+  assert.equal(created.segments.at(-1).via, 'claude');
 
   // MCP: write tools invisible to a read key, present + working for a writer,
   // and the write guidance ships in the writer's instructions.
