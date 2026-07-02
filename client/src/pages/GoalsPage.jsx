@@ -31,7 +31,7 @@ export default function GoalsPage() {
   const handled = useRef(false);
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [tab, setTab] = useState('goals');        // 'goals' | 'templates'
-  const [activeSuite, setActiveSuite] = useState(''); // which event's goals are shown (one at a time)
+  const [activeSuite, setActiveSuite] = useState(''); // which event's goals are shown ('*' = all events)
   const [templates, setTemplates] = useState(null); // reusable templates for this client (+ global)
 
   const loadTemplates = useCallback(() => {
@@ -178,8 +178,10 @@ export default function GoalsPage() {
 
   // One event at a time: a tab strip picks which event's goals show. Fall back to
   // the first event when nothing's selected yet (or the selection went away).
-  const activeSuiteId = rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || '');
-  const activeRow = rows.find((r) => r.suite.id === activeSuiteId) || null;
+  // '*' = the All tab — every event's goals on one page, split by event and type.
+  const showAll = activeSuite === '*' && rows.length > 1;
+  const activeSuiteId = showAll ? '*' : (rows.some((r) => r.suite.id === activeSuite) ? activeSuite : (rows[0]?.suite.id || ''));
+  const shownRows = showAll ? rows : rows.filter((r) => r.suite.id === activeSuiteId);
 
   const suiteData = (detail && bySuite[detail.suiteId]) || {};
   const detailGoal = detail && [...(suiteData.goals || []), ...(suiteData.personalGoals || [])].find((g) => g.id === detail.goalId);
@@ -230,7 +232,7 @@ export default function GoalsPage() {
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {(activeRow ? [activeRow] : []).map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
+        {shownRows.map(({ suite, goals = [], personalGoals = [], canManage, loaded }) => (
           <section key={suite.id}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <h2 style={eventName}>{suite.name}</h2>
@@ -399,8 +401,20 @@ function EventTabs({ rows, active, onPick, onReorder }) {
   // Drag a tab onto another to reorder (desktop pointer drag; taps still switch).
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
+  const allOn = active === '*';
+  const totalN = rows.reduce((n, r) => n + (r.goals?.length || 0) + (r.personalGoals?.length || 0), 0);
   return (
     <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, marginBottom: 18, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+      {/* All — every event's goals on one page, split by event and type. */}
+      <button type="button" onClick={() => onPick('*')} title="All goals across your events on one page"
+        style={{
+          flexShrink: 0, whiteSpace: 'nowrap', cursor: 'pointer', font: 'inherit',
+          border: `1px solid ${allOn ? 'var(--brand)' : 'var(--hairline)'}`,
+          background: allOn ? 'var(--brand)' : 'var(--card)', color: allOn ? '#fff' : 'var(--text)',
+          borderRadius: 980, padding: '8px 15px', fontSize: 13, fontWeight: allOn ? 800 : 600,
+        }}>
+        All{totalN > 0 && <span style={{ marginLeft: 7, opacity: 0.75, fontWeight: 600 }}>{totalN}</span>}
+      </button>
       {rows.map(({ suite, goals = [], personalGoals = [], loaded }) => {
         const n = (goals.length || 0) + (personalGoals.length || 0);
         const on = suite.id === active;
