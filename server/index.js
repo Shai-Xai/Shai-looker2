@@ -924,8 +924,7 @@ const maskSecret = (v) => (v && v.length ? `••••••${String(v).slice(
 
 // Combined AI instructions: the global standing instructions, plus the
 // per-client context when the request is in a suite (client) context.
-// Clip AI copy at a word boundary with an ellipsis — a hard .slice() cuts mid-word
-// ("…before cheaper phases c"), which reads as a rendering bug on the briefing cards.
+// Clip AI copy at a word boundary + ellipsis — a hard .slice() cuts mid-word ("…cheaper phases c"), reading as a bug on the briefing cards.
 const clipWords = (s, n) => { const t = String(s || ''); if (t.length <= n) return t; const cut = t.slice(0, n); const i = cut.lastIndexOf(' '); return `${(i > n * 0.6 ? cut.slice(0, i) : cut).trimEnd()}…`; };
 
 function aiInstructionsFor(suiteId, entityId, langOverride) {
@@ -2733,11 +2732,13 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   if (!entityId) return res.status(400).json({ error: 'No client context' });
   const body = req.body || {};
   db.setUserPref(req.user.id, `briefing_tune:${entityId}`, String(body.tune || '').slice(0, 1500));
-  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing).
+  // Focus tiles (reader-chosen dashboards/tiles to always feed the briefing). Each
+  // pick may carry a lifecycle-phase scope — it then feeds the briefing only while
+  // its event is in that phase (blank/invalid → all phases).
   if (Array.isArray(body.tiles)) {
     const tiles = body.tiles.slice(0, 40)
       .filter((t) => t && t.dashboardId && t.tileId)
-      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId) }));
+      .map((t) => ({ dashboardId: String(t.dashboardId), tileId: String(t.tileId), ...(PHASES.some((p) => p.key === t.phase) ? { phase: t.phase } : {}) }));
     db.setUserPref(req.user.id, `briefing_tiles:${entityId}`, JSON.stringify(tiles));
   }
   // Always-include categories the reader has enabled (Tune → "What the briefing covers").

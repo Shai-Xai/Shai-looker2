@@ -115,7 +115,8 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                 <div style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 2px', lineHeight: 1.45 }}>
                   Optional — for boards that aren't event-driven (e.g. management) point the briefing at the exact tiles that matter. Leave empty to let the Owl sweep the whole catalogue.
                 </div>
-                <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} />
+                <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} phases={cfg?.phases || []} />
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>Each pick can be scoped to a <b>lifecycle phase</b> — e.g. lead with a launch board during Launch, the gates board on Event Day. "All phases" feeds the briefing all the time.</div>
                 {cats.length > 0 && (
                   <>
                     <Label>What every event's briefing covers</Label>
