@@ -199,11 +199,13 @@ const rpc = (body, secret) => app.req('POST', '/mcp', {
   headers: { ...bearer(secret), Accept: 'application/json, text/event-stream' }, body,
 });
 
-test('MCP: initialize handshake works and identifies the pulse server', async () => {
+test('MCP: initialize handshake works, identifies pulse, and sends efficiency instructions', async () => {
   const { secret } = await issueKey(entityA.id);
   const r = await rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }, secret);
   assert.equal(r.status, 200);
   assert.equal(r.body.result.serverInfo.name, 'pulse');
+  // Server-level guidance is delivered so the model plans the fast path up front.
+  assert.match(r.body.result.instructions || '', /pulse_get_me ONCE/);
 });
 
 test('MCP: tools are listed and a tool call returns THIS key’s entity', async () => {

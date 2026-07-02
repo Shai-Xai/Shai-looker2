@@ -18,6 +18,32 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   const entityOf = (user) => (user.entityIds || [])[0];
   const asOf = () => new Date().toISOString();
 
+  // Building the client catalogue walks suites→sets→dashboards in SQLite; the
+  // read tools call it on nearly every request. Memoise it per entity for a few
+  // seconds so a burst of tool calls (list → metric → fetch) doesn't rebuild it
+  // each time. Short TTL so a newly-added dashboard still appears promptly.
+  const CAT_TTL = 15_000;
+  const catCache = new Map(); // entityId -> { at, val }
+  const catalogueFor = (entityId) => {
+    const hit = catCache.get(entityId);
+    if (hit && Date.now() - hit.at < CAT_TTL) return hit.val;
+    const val = clientCatalogue(entityId);
+    catCache.set(entityId, { at: Date.now(), val });
+    if (catCache.size > 200) catCache.delete(catCache.keys().next().value);
+    return val;
+  };
+
+  // Run async tasks with a concurrency cap — fast without hammering Looker.
+  async function mapLimit(items, limit, fn) {
+    const out = new Array(items.length);
+    let i = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); }
+    });
+    await Promise.all(workers);
+    return out;
+  }
+
   // ── core (shared by REST + MCP — one implementation, two transports) ──
 
   function me(user, key) {
@@ -34,12 +60,12 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // exactly as the app's navigation resolves it. suiteId is the event context a
   // metric read needs (which event's locks apply).
   function listDashboards(user) {
-    return clientCatalogue(entityOf(user)).catalogue
+    return catalogueFor(entityOf(user)).catalogue
       .map((c) => ({ id: c.dashboardId, title: c.title, setName: c.setName, suiteId: c.suiteId, suiteName: c.suiteName }));
   }
 
   function getDashboard(user, dashboardId) {
-    const entries = clientCatalogue(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
+    const entries = catalogueFor(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
     if (!entries.length) throw new HttpError(404, 'Dashboard not found for this client');
     const def = db.getDashboard(dashboardId);
     if (!def) throw new HttpError(404, 'Dashboard not found for this client');
@@ -56,7 +82,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // (tileValues.js), so an API read equals the dashboard and can't widen scope.
   async function metric(user, { dashboardId, tileId, suiteId }) {
     if (!dashboardId || !tileId) throw new HttpError(400, 'dashboardId and tileId are required');
-    const entries = clientCatalogue(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
+    const entries = catalogueFor(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
     if (!entries.length) throw new HttpError(404, 'Dashboard not found for this client');
     const entry = suiteId ? entries.find((c) => c.suiteId === suiteId) : entries[0];
     if (!entry) throw new HttpError(404, 'That dashboard is not in that event (suite) for this client');
@@ -142,7 +168,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // surface; same catalogue + scope enforcement as the KPI reader.
   async function tileRows(user, { dashboardId, tileId, suiteId, limit }) {
     if (!dashboardId || !tileId) throw new HttpError(400, 'dashboardId and tileId are required');
-    const entries = clientCatalogue(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
+    const entries = catalogueFor(entityOf(user)).catalogue.filter((c) => c.dashboardId === dashboardId);
     if (!entries.length) throw new HttpError(404, 'Dashboard not found for this client');
     const entry = suiteId ? entries.find((c) => c.suiteId === suiteId) : entries[0];
     if (!entry) throw new HttpError(404, 'That dashboard is not in that event (suite) for this client');
@@ -187,15 +213,15 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
       const [, dashId, suiteId] = parts;
       const d = getDashboard(user, dashId); // 404s if not visible to this client
       const CAP = 12;
+      const shown = d.tiles.slice(0, CAP);
+      // Resolve the tile values concurrently (capped) rather than one-at-a-time —
+      // a dashboard fetch was the slowest path when done serially.
+      const values = await mapLimit(shown, 6, async (t) => {
+        try { return (await metric(user, { dashboardId: dashId, tileId: t.id, suiteId })).value; } catch { return null; }
+      });
       const lines = [`Dashboard: ${d.title}`, 'Live tile values:'];
-      let n = 0;
-      for (const t of d.tiles) {
-        if (n >= CAP) { lines.push(`… and ${d.tiles.length - CAP} more tiles`); break; }
-        let v = null;
-        try { v = (await metric(user, { dashboardId: dashId, tileId: t.id, suiteId })).value; } catch { v = null; }
-        lines.push(v == null ? `- ${t.title || t.id}` : `- ${t.title || t.id}: ${v}`);
-        n += 1;
-      }
+      shown.forEach((t, idx) => lines.push(values[idx] == null ? `- ${t.title || t.id}` : `- ${t.title || t.id}: ${values[idx]}`));
+      if (d.tiles.length > CAP) lines.push(`… and ${d.tiles.length - CAP} more tiles`);
       return { id, title: `Dashboard — ${d.title}`, text: lines.join('\n'), metadata: { type: 'dashboard', suiteId: suiteId || '' } };
     }
     if (type === 'segment') {

@@ -25,25 +25,25 @@ function mount(app, { apiKeys, core, rateLimit }) {
   const TOOLS = [
     {
       name: 'pulse_get_me',
-      description: 'Who am I? The client (entity) this API key belongs to, the key\'s scopes, and the client\'s events (suites). Call this first — suite ids are needed for metrics and goals.',
+      description: 'START HERE (instant). Who am I: the client this key belongs to, its scopes, and the client\'s events (suites) with their ids. Call ONCE at the start and reuse the suite ids for the rest of the conversation — metrics and goals need them.',
       input: {},
       run: (u, _a, key) => core.me(u, key),
     },
     {
       name: 'pulse_list_dashboards',
-      description: 'List the dashboards this client can see, one entry per (dashboard, event) pairing with its suiteId — the event context a metric read needs.',
+      description: 'Instant (no data query). Lists the client\'s dashboards, one entry per (dashboard, event) with its suiteId. Use this to find the dashboardId + suiteId for a metric.',
       input: {},
       run: (u) => ({ dashboards: core.listDashboards(u) }),
     },
     {
       name: 'pulse_get_dashboard',
-      description: 'One dashboard\'s tiles (id, title, type) and filters, plus which events (suites) it appears in. Use tile ids with pulse_get_metric.',
+      description: 'Instant (no data query). One dashboard\'s tile list (id, title, type) and filters. Use it ONLY to discover the tileId you need, then call pulse_get_metric for the number.',
       input: { dashboardId: z.string().describe('Dashboard id from pulse_list_dashboards') },
       run: (u, a) => core.getDashboard(u, a.dashboardId),
     },
     {
       name: 'pulse_get_metric',
-      description: 'The live number a dashboard tile currently shows (KPI tiles), read through the same scope-enforced query path as the dashboard itself. Pass suiteId to pick which event\'s locks apply (defaults to the dashboard\'s first event).',
+      description: 'PREFERRED for a single number. One live KPI value a tile shows (~1–3s, cached after). Use THIS — not fetch or pulse_get_dashboard — when the user asks about one metric. Pass suiteId to pick the event (defaults to the dashboard\'s first event).',
       input: {
         dashboardId: z.string(),
         tileId: z.string().describe('Tile id from pulse_get_dashboard'),
@@ -53,32 +53,32 @@ function mount(app, { apiKeys, core, rateLimit }) {
     },
     {
       name: 'pulse_list_segments',
-      description: 'The client\'s saved audience segments with their cached size and per-channel contactable reach (email / sms). Reach here is the last-resolved cache; use pulse_get_segment_reach for a live figure.',
+      description: 'Instant (cached counts). The client\'s saved audience segments with size + per-channel reach (email/sms). Good enough for most questions; only use pulse_get_segment_reach if the user needs an up-to-the-second figure.',
       input: {},
       run: (u) => ({ segments: core.listSegments(u) }),
     },
     {
       name: 'pulse_get_segment_reach',
-      description: 'Re-resolve one segment LIVE and return its current size and consent-aware per-channel reach. Slower than the list (runs the real audience query).',
+      description: 'LIVE, slower (runs the real audience query). Re-resolves ONE segment for a current size + consent-aware reach. Only call when the cached numbers from pulse_list_segments aren\'t fresh enough.',
       input: { segmentId: z.string().describe('Segment id from pulse_list_segments') },
       run: (u, a) => core.segmentReach(u, a.segmentId),
     },
     {
       name: 'pulse_list_campaigns',
-      description: 'The client\'s campaigns (email/SMS) with status and results counters (sent, clicks, opens, CTR). Optionally filter by status: draft | pending | running | done | failed.',
+      description: 'Instant. The client\'s campaigns with status + results (sent, clicks, opens, CTR). This list already includes the headline numbers — you usually do NOT need pulse_get_campaign_report as well. Optional status filter: draft | pending | running | done | failed.',
       input: { status: z.string().optional().describe('Filter: draft | pending | running | done | failed') },
       run: (u, a) => ({ campaigns: core.listCampaigns(u, { status: a.status }) }),
     },
     {
       name: 'pulse_get_campaign_report',
-      description: 'One campaign\'s delivery + engagement report: sent, failed, clicks, opens, CTR, per-channel sends, conversion counter.',
+      description: 'Instant. Full per-channel report for ONE campaign (sent, failed, clicks, opens, CTR, per-channel splits, conversions). Only needed when pulse_list_campaigns doesn\'t already answer the question.',
       input: { campaignId: z.string().describe('Campaign id from pulse_list_campaigns') },
       run: (u, a) => core.getCampaign(u, a.campaignId),
     },
     {
       name: 'pulse_get_tile_rows',
       scope: 'read_rows', // only registered for keys that explicitly carry it
-      description: 'ROW-LEVEL data: the table behind a dashboard tile — every column (including ones the tile hides for display) and up to `limit` rows, e.g. customer/ticketing records. Requires a key with the read_rows scope; rows may contain personal data, handle accordingly.',
+      description: 'ROW-LEVEL data, LIVE (one query; payload can be large — keep `limit` as small as the task allows). The table behind a tile, every column incl. display-hidden ones, e.g. customer/ticketing records. Requires the read_rows scope; rows may contain personal data.',
       input: {
         dashboardId: z.string(),
         tileId: z.string().describe('Tile id from pulse_get_dashboard'),
@@ -94,23 +94,23 @@ function mount(app, { apiKeys, core, rateLimit }) {
     {
       name: 'search',
       openai: true,
-      description: 'Search this client\'s Pulse data — dashboards, segments, campaigns and goals — by keyword. Returns matching items with ids to pass to `fetch`. (ChatGPT/OpenAI deep-research compatible.)',
+      description: 'Instant. Find this client\'s Pulse items — dashboards, segments, campaigns, goals — by keyword; returns ids to pass to `fetch`. (ChatGPT/OpenAI deep-research compatible.) If you already know you need one KPI number, skip this and use pulse_get_metric.',
       input: { query: z.string().describe('Keywords, e.g. a dashboard, segment, campaign or goal name') },
       run: (u, a) => core.search(u, a.query),
     },
     {
       name: 'fetch',
       openai: true,
-      description: 'Fetch one Pulse item by an id from `search`: a dashboard (with its live tile numbers), a segment, a campaign report, or a goal — returned as readable text. (ChatGPT/OpenAI deep-research compatible.)',
+      description: 'Fetch one Pulse item by an id from `search`. NOTE: fetching a DASHBOARD runs several live queries (slower) to include its tile numbers — for a single number prefer pulse_get_metric. Segments, campaigns and goals are instant.',
       input: { id: z.string().describe('An id returned by search, e.g. "segment:…" or "dashboard:…"') },
       run: (u, a) => core.fetchDoc(u, a.id),
     },
     {
       name: 'pulse_get_goals',
-      description: 'The goals set for one event (suite): targets, direction, deadline — and, when withProgress is true, live progress resolved through the same scoped readers the app uses (slower).',
+      description: 'Instant for targets/deadlines. The goals set for one event (suite). Set withProgress ONLY when the user asks about pace/progress — it runs one live query per goal (slower).',
       input: {
         suiteId: z.string().describe('Event (suite) id from pulse_get_me'),
-        withProgress: z.boolean().optional().describe('Also resolve live progress per goal (one data read each)'),
+        withProgress: z.boolean().optional().describe('Also resolve live progress per goal — one data read each; leave off unless progress is asked for'),
       },
       run: (u, a) => core.listGoals(u, { suiteId: a.suiteId, progress: !!a.withProgress }),
     },
@@ -118,8 +118,20 @@ function mount(app, { apiKeys, core, rateLimit }) {
 
   // Fresh McpServer per request (stateless): tools close over THIS request's
   // principal, so nothing user-scoped outlives the response.
+  // Top-level guidance the client shows the model at connect time — steers it to
+  // the correct AND fast path (fewer, cheaper calls) before any tool is picked.
+  const INSTRUCTIONS = [
+    'Pulse gives read-only access to ONE Howler client\'s live event data (dashboards, metrics, segments, campaigns, goals).',
+    'Efficient workflow:',
+    '1. Call pulse_get_me ONCE at the start to get the client + its events (suite ids). Reuse those ids; do not call it again.',
+    '2. For a single KPI number, go straight to pulse_get_metric (find the dashboardId/tileId via pulse_list_dashboards → pulse_get_dashboard). Do NOT fetch a whole dashboard just to read one number.',
+    '3. List tools (pulse_list_dashboards, pulse_list_segments, pulse_list_campaigns) are instant and already carry headline numbers — prefer them and avoid redundant per-item calls.',
+    '4. Only these do a slower live query: pulse_get_metric, pulse_get_segment_reach, pulse_get_tile_rows, pulse_get_goals with withProgress, and fetch of a dashboard. Use them deliberately.',
+    '5. Make independent lookups in parallel. Answer from the data you have rather than re-fetching.',
+  ].join('\n');
+
   function buildServer(req) {
-    const server = new McpServer({ name: 'pulse', version: '1.0.0' });
+    const server = new McpServer({ name: 'pulse', version: '1.0.0' }, { instructions: INSTRUCTIONS });
     const base = `${req.protocol}://${req.get('host')}`;
     // OpenAI's search/fetch want a `url` on every result/document (ChatGPT only
     // builds a citation when url is a non-empty string). We don't have per-item
@@ -131,7 +143,10 @@ function mount(app, { apiKeys, core, rateLimit }) {
       // Scope-gated tools are invisible to keys that lack the scope — an agent
       // is never offered a tool it can't use.
       if (t.scope && !apiKeys.hasScope(req, t.scope)) continue;
-      server.registerTool(t.name, { description: t.description, inputSchema: t.input }, async (args) => {
+      // Every tool is read-only and reaches external data (Looker/DB). The hints
+      // let clients badge them and skip write-confirmation prompts.
+      const annotations = { readOnlyHint: true, openWorldHint: true, destructiveHint: false };
+      server.registerTool(t.name, { description: t.description, inputSchema: t.input, annotations }, async (args) => {
         try {
           const out = await t.run(req.user, args || {}, req.apiKey);
           apiKeys.audit(req, 'mcp', `tool:${t.name}`, 200);

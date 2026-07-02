@@ -84,6 +84,20 @@ plain read key is never even offered it).
 Start with `pulse_get_me` (suite ids), then `pulse_list_dashboards` →
 `pulse_get_dashboard` → `pulse_get_metric` for live numbers.
 
+## Performance
+- **Two speeds of endpoint.** Catalogue/list reads (dashboards, segments,
+  campaigns, goals-without-progress, `me`, `search`) are served from SQLite —
+  effectively instant. Live reads hit Looker: `metric`, `segment reach`,
+  `tiles/rows`, `goals?progress=1`, and a `fetch` of a dashboard.
+- **Live reads are cached** ~5 min fresh + 30 min stale-while-revalidate, with
+  in-flight de-duplication, so repeat/parallel questions are fast; only a cold
+  metric pays full Looker latency. Tune with `QUERY_CACHE_TTL` (seconds).
+- **A dashboard `fetch`** resolves its tiles' values concurrently (capped), not
+  serially — but for a single number, `metric` (one query) is always cheaper.
+- **MCP guidance:** the server sends top-level instructions + per-tool latency
+  hints so the agent picks the cheap path and avoids redundant calls. If you
+  wrap the tools yourself, keep those hints.
+
 ## Guarantees
 - **One security boundary:** the key's synthetic principal rides the app's own
   scope gates (organiser locks, suite access, entity ownership). Fail closed.
