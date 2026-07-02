@@ -12,12 +12,14 @@ const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnec
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
 const catLabel = (c) => CAT_LABEL[c] || String(c || '').replace(/_/g, ' ').replace(/\b\w/g, (x) => x.toUpperCase());
 const STATE_LABEL = { in_stock: 'Hive', deployed: 'Deployed', returned: 'Returned', lost: 'Lost', damaged: 'Damaged' };
+const whereText = (d) => d.state === 'deployed' ? (d.stationName || (d.holderName ? `with ${d.holderName}` : 'a station')) : 'the Hive';
 // One-line description of a device event, mirroring the back-end activity feed.
 function feedText(e) {
   const by = e.staffLabel ? ` · ${e.staffLabel}` : '';
   if (e.kind === 'create') return '➕ Added to inventory';
   if (e.kind === 'check') return `⚠️ ${e.note || 'Issue logged'}${by}`;
   if (e.kind === 'status') return `🔁 Marked ${STATE_LABEL[e.toState] || e.toState}${e.unusual ? ' ⚑' : ''}${by}`;
+  if (e.toHolder) return `🤝 To ${e.toHolder}${e.unusual ? ' ⚑' : ''}${by}`;
   const dest = e.toStation || (e.toState === 'in_stock' ? 'Hive' : STATE_LABEL[e.toState] || e.toState);
   const from = e.fromStation || (e.fromState === 'in_stock' ? 'Hive' : STATE_LABEL[e.fromState] || '');
   return `↪️ ${from ? from + ' → ' : ''}${dest}${e.unusual ? ' ⚑' : ''}${by}`;
@@ -182,7 +184,7 @@ export default function EventOpsPortalPage({ suiteId, token }) {
       )}
       {moveDevice && (
         <PortalMoveSheet
-          suiteId={suiteId} token={token} staffId={staff.id} device={moveDevice} stations={info.stations} events={scanEvents}
+          suiteId={suiteId} token={token} staffId={staff.id} device={moveDevice} stations={info.stations} roster={info.staff || []} events={scanEvents}
           onClose={() => setMoveDevice(null)}
           onDone={(msg) => { setMoveDevice(null); if (msg) flash(msg); refreshMe(); }}
         />
@@ -251,7 +253,7 @@ function IssueSheet({ suiteId, token, staffId, device, categories = [], events =
           <strong style={{ fontSize: 16 }}>{device.label || device.qrCode || 'Device'}</strong>
           <button onClick={onClose} style={iconBtn}>✕</button>
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {device.state === 'deployed' ? (device.stationName || 'a station') : 'the Hive'}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {whereText(device)}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={lbl}>What&apos;s the issue?</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -269,13 +271,14 @@ function IssueSheet({ suiteId, token, staffId, device, categories = [], events =
 
 // Simple one-device move for the portal: staff scanned a device, now pick where it goes.
 // (The bulk Single/Multiple station-first flow lives on the client console, not here.)
-function PortalMoveSheet({ suiteId, token, staffId, device, stations, events = [], onClose, onDone }) {
+function PortalMoveSheet({ suiteId, token, staffId, device, stations, roster = [], events = [], onClose, onDone }) {
   const [busy, setBusy] = useState(false);
-  async function move(stationId, label) {
+  async function move(body, label) {
     setBusy(true);
-    try { await api.eopPortalMove(suiteId, token, { deviceId: device.id, stationId, staffId }); onDone(`${device.label || 'Device'} → ${label}`); }
+    try { await api.eopPortalMove(suiteId, token, { deviceId: device.id, staffId, ...body }); onDone(`${device.label || 'Device'} → ${label}`); }
     catch (e) { alert(e.message); setBusy(false); }
   }
+  const colleagues = roster.filter((s) => s.id !== staffId);
   return (
     <div style={overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div style={sheet}>
@@ -283,12 +286,18 @@ function PortalMoveSheet({ suiteId, token, staffId, device, stations, events = [
           <strong style={{ fontSize: 16 }}>{device.label || device.qrCode || 'Device'}</strong>
           <button onClick={onClose} style={iconBtn}>✕</button>
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {device.state === 'deployed' ? (device.stationName || 'a station') : 'the Hive'} · send to:</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>now at {whereText(device)} · send to:</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-          <button disabled={busy} onClick={() => move('hive', 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
+          <button disabled={busy} onClick={() => move({ stationId: 'hive' }, 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
           {stations.map((s) => (
-            <button key={s.id} disabled={busy} onClick={() => move(s.id, s.name)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
+            <button key={s.id} disabled={busy} onClick={() => move({ stationId: s.id }, s.name)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name}</button>
           ))}
+          {colleagues.length > 0 && (
+            <select value="" disabled={busy} onChange={(e) => { const s = colleagues.find((x) => x.id === e.target.value); if (s) move({ holderStaffId: s.id }, `🤝 ${s.number ? `#${s.number} ` : ''}${s.name}`); }} style={{ ...destBtn, cursor: 'pointer' }}>
+              <option value="">🤝 Hand to a colleague…</option>
+              {colleagues.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+            </select>
+          )}
           {stations.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>No stations set up yet.</div>}
         </div>
         <PortalActivity events={events} />

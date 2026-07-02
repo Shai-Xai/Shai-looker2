@@ -215,6 +215,10 @@ function mount(app, { db, auth }) {
   // Per-staff capabilities in the portal: move devices (default ON), do checkpoints (default OFF).
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_move INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_checkpoint INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
+  // A device can be handed to a staff member (custody) instead of a station; the event log
+  // records the recipient's label so past hand-offs survive a later staff delete.
+  try { sql.exec("ALTER TABLE eventops_devices ADD COLUMN holder_staff_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
+  try { sql.exec("ALTER TABLE eventops_device_events ADD COLUMN to_holder TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
   const entityEnabled = (entityId) => {
@@ -256,11 +260,18 @@ function mount(app, { db, auth }) {
 
   // ── shapers ──────────────────────────────────────────────────────────────────
   const stationName = (id) => (id ? (sql.prepare('SELECT name FROM eventops_stations WHERE id=?').get(id) || {}).name || '' : '');
+  const staffName = (id) => {
+    if (!id) return '';
+    const s = sql.prepare('SELECT name, number FROM eventops_staff WHERE id=?').get(id);
+    if (!s) return '';
+    return [s.number ? `#${s.number}` : '', s.name].filter(Boolean).join(' ').trim() || s.number || s.name || '';
+  };
   const deviceRow = (d) => d && ({
     id: d.id, entityId: d.entity_id, suiteId: d.suite_id, label: d.label, type: d.type,
     qrCode: d.qr_code, serialNumber: d.serial_number, state: d.state,
     stationId: d.station_id || null, stationName: stationName(d.station_id),
-    location: d.station_id ? stationName(d.station_id) : 'Hive',
+    holderStaffId: d.holder_staff_id || null, holderName: staffName(d.holder_staff_id),
+    location: d.station_id ? stationName(d.station_id) : (d.holder_staff_id ? `With ${staffName(d.holder_staff_id) || 'staff'}` : 'Hive'),
     createdAt: d.created_at, updatedAt: d.updated_at,
   });
   const stationRow = (s) => s && ({
@@ -272,7 +283,7 @@ function mount(app, { db, auth }) {
   });
   const eventRow = (e) => ({
     id: e.id, deviceId: e.device_id, kind: e.kind, fromState: e.from_state, toState: e.to_state,
-    fromStation: stationName(e.from_station_id), toStation: stationName(e.to_station_id),
+    fromStation: stationName(e.from_station_id), toStation: stationName(e.to_station_id), toHolder: e.to_holder || '',
     actor: e.actor, staffLabel: e.staff_label || '', note: e.note, unusual: !!e.unusual, at: e.at,
   });
   const issueRow = (i) => ({
@@ -305,13 +316,13 @@ function mount(app, { db, auth }) {
     return { id: s.id, label };
   }
 
-  function logEvent(d, { kind, toState, toStation, note, actor, unusual, staff }) {
+  function logEvent(d, { kind, toState, toStation, toHolder, note, actor, unusual, staff }) {
     sql.prepare(`INSERT INTO eventops_device_events
-      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at, staff_id, staff_label)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, device_id, entity_id, suite_id, kind, from_state, to_state, from_station_id, to_station_id, actor, note, unusual, at, staff_id, staff_label, to_holder)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(uuid(), d.id, d.entity_id, d.suite_id, kind, d.state, toState ?? d.state,
         d.station_id || '', toStation ?? (d.station_id || ''), actor || '', String(note || '').slice(0, 2000),
-        unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '');
+        unusual ? 1 : 0, now(), staff?.id || '', staff?.label || '', str(toHolder, 120));
   }
   const str = (v, max = 200) => String(v == null ? '' : v).slice(0, max);
 
@@ -323,9 +334,15 @@ function mount(app, { db, auth }) {
     || sql.prepare('SELECT * FROM eventops_devices WHERE suite_id=? AND label=? COLLATE NOCASE').get(suiteId, code);
 
   // Apply a move/status change + write the audit row. Returns { device, unusual } or { error }.
-  function applyMove(su, d, { stationId, state, staffId, actor, note }) {
-    let toState; let toStation = '';
-    if (state && STATES.includes(state)) {
+  // A move can target a station, the Hive, a status (lost/damaged), or a staff member's custody
+  // (holderStaffId) — the last clears the station and records who now holds the device.
+  function applyMove(su, d, { stationId, state, holderStaffId, staffId, actor, note }) {
+    let toState; let toStation = ''; let toHolderId = ''; let toHolderLabel = '';
+    if (holderStaffId) {
+      const holder = resolveStaff(su.id, holderStaffId);
+      if (!holder) return { error: 'Unknown staff member.' };
+      toState = 'deployed'; toStation = ''; toHolderId = holder.id; toHolderLabel = holder.label;
+    } else if (state && STATES.includes(state)) {
       toState = state;
       toStation = state === 'deployed' ? str(stationId, 60) : '';
     } else {
@@ -338,8 +355,8 @@ function mount(app, { db, auth }) {
       }
     }
     const unusual = isUnusual(d.state, toState);
-    logEvent(d, { kind: state ? 'status' : 'move', toState, toStation, actor, note, unusual, staff: resolveStaff(su.id, staffId) });
-    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, updated_at=? WHERE id=?').run(toState, toStation, now(), d.id);
+    logEvent(d, { kind: state ? 'status' : 'move', toState, toStation, toHolder: toHolderLabel, actor, note, unusual, staff: resolveStaff(su.id, staffId) });
+    sql.prepare('UPDATE eventops_devices SET state=?, station_id=?, holder_staff_id=?, updated_at=? WHERE id=?').run(toState, toStation, toHolderId, now(), d.id);
     return { device: deviceRow(getDevice(d.id)), unusual };
   }
 
@@ -549,7 +566,6 @@ function mount(app, { db, auth }) {
     return rows;
   }
   const defaultCategory = (su) => { const rows = issueCategories(su); return (rows.find((c) => c.is_default) || rows[0])?.label || 'other'; };
-  const clearDefault = (su) => sql.prepare('UPDATE eventops_issue_categories SET is_default=0 WHERE suite_id=?').run(su.id);
 
   app.get('/api/eventops/suites/:suiteId/issue-categories', auth.requireAuth, (req, res) => {
     const su = gateSuite(req, res); if (!su) return;
@@ -562,7 +578,6 @@ function mount(app, { db, auth }) {
     issueCategories(su); // ensure seeded
     if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE').get(su.id, label)) return res.status(409).json({ error: 'That category already exists.' });
     const pos = (sql.prepare('SELECT MAX(position) m FROM eventops_issue_categories WHERE suite_id=?').get(su.id).m ?? -1) + 1;
-    if (req.body?.isDefault) clearDefault(su);
     sql.prepare('INSERT INTO eventops_issue_categories (id, entity_id, suite_id, label, is_default, position, created_at) VALUES (?,?,?,?,?,?,?)').run(uuid(), su.entityId, su.id, label, req.body?.isDefault ? 1 : 0, pos, now());
     res.status(201).json({ categories: issueCategories(su).map(issueCategoryRow) });
   });
@@ -574,7 +589,7 @@ function mount(app, { db, auth }) {
     if (!label) return res.status(400).json({ error: 'Give the category a name.' });
     if (sql.prepare('SELECT id FROM eventops_issue_categories WHERE suite_id=? AND label=? COLLATE NOCASE AND id<>?').get(su.id, label, c.id)) return res.status(409).json({ error: 'That category already exists.' });
     if (label !== c.label) sql.prepare('UPDATE eventops_issues SET category=? WHERE suite_id=? AND category=? COLLATE NOCASE').run(label, su.id, c.label); // re-tag existing issues
-    if (req.body?.isDefault === true) clearDefault(su);
+    // Default is an independent flag — more than one category can be a default.
     const isDefault = req.body?.isDefault === true ? 1 : req.body?.isDefault === false ? 0 : c.is_default;
     sql.prepare('UPDATE eventops_issue_categories SET label=?, is_default=? WHERE id=?').run(label, isDefault, c.id);
     res.json({ categories: issueCategories(su).map(issueCategoryRow) });
@@ -584,8 +599,9 @@ function mount(app, { db, auth }) {
     const c = sql.prepare('SELECT * FROM eventops_issue_categories WHERE id=? AND suite_id=?').get(req.params.id, su.id);
     if (!c) return res.status(404).json({ error: 'Category not found' });
     sql.prepare('DELETE FROM eventops_issue_categories WHERE id=?').run(c.id);
-    // Keep a default alive: if we removed the default, promote the first remaining one.
-    if (c.is_default) { const first = listCategories(su)[0]; if (first) sql.prepare('UPDATE eventops_issue_categories SET is_default=1 WHERE id=?').run(first.id); }
+    // Keep at least one default alive: if none remain, promote the first.
+    const rest = listCategories(su);
+    if (rest.length && !rest.some((x) => x.is_default)) sql.prepare('UPDATE eventops_issue_categories SET is_default=1 WHERE id=?').run(rest[0].id);
     res.json({ categories: issueCategories(su).map(issueCategoryRow) });
   });
 
@@ -700,7 +716,7 @@ function mount(app, { db, auth }) {
     const b = req.body || {};
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-    const out = applyMove(su, d, { stationId: b.stationId, state: b.state, staffId: b.staffId, actor: req.user.email, note: b.note });
+    const out = applyMove(su, d, { stationId: b.stationId, state: b.state, holderStaffId: b.holderStaffId, staffId: b.staffId, actor: req.user.email, note: b.note });
     if (out.error) return res.status(400).json({ error: out.error });
     res.json(out);
   });
@@ -843,7 +859,14 @@ function mount(app, { db, auth }) {
   // Event basics (name + stations) so the portal can show context before login.
   app.get('/api/eventops/portal/:suiteId/:token', (req, res) => {
     const su = portalSuite(req, res); if (!su) return;
-    res.json({ suite: { id: su.id, name: su.name }, stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow), checkpoints: listCheckpoints(su.id), issueCategories: issueCategories(su).map(issueCategoryRow) });
+    res.json({
+      suite: { id: su.id, name: su.name },
+      stations: sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow),
+      checkpoints: listCheckpoints(su.id),
+      issueCategories: issueCategories(su).map(issueCategoryRow),
+      // Roster (name + number only) so a staffer can hand a device to a colleague.
+      staff: sql.prepare('SELECT id, name, number FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(su.id),
+    });
   });
 
   // Log in by staff number → the staff record (used to attribute their actions).
@@ -897,7 +920,7 @@ function mount(app, { db, auth }) {
     if (s.can_move != null && !s.can_move) return res.status(403).json({ error: 'You don’t have permission to move devices.' });
     const d = getDevice(b.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
-    const out = applyMove(su, d, { stationId: b.stationId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
+    const out = applyMove(su, d, { stationId: b.stationId, holderStaffId: b.holderStaffId, staffId: s.id, actor: `portal:${s.number || s.name}`, note: b.note });
     if (out.error) return res.status(400).json({ error: out.error });
     res.json(out);
   });

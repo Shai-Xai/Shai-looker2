@@ -223,6 +223,7 @@ function feedText(e) {
   if (e.kind === 'create') return '➕ Device added to inventory';
   if (e.kind === 'check') return `⚠️ ${e.note || 'Issue logged'}${by}`;
   if (e.kind === 'status') return `🔁 Marked ${STATE_LABEL[e.toState] || e.toState}${e.unusual ? ' ⚑' : ''}${by}`;
+  if (e.toHolder) return `🤝 Handed to ${e.toHolder}${e.unusual ? ' ⚑' : ''}${by}`;
   const dest = e.toStation || (e.toState === 'in_stock' ? 'Hive' : STATE_LABEL[e.toState] || e.toState);
   const from = e.fromStation || (e.fromState === 'in_stock' ? 'Hive' : STATE_LABEL[e.fromState] || '');
   return `↪️ Moved ${from ? from + ' → ' : ''}${dest}${e.unusual ? ' ⚑ unusual' : ''}${by}`;
@@ -346,7 +347,9 @@ function LocationBadge({ device }) {
   const deployed = device.state === 'deployed';
   const bg = deployed ? 'rgba(var(--brand-rgb),0.14)' : device.state === 'lost' || device.state === 'damaged' ? 'rgba(220,60,60,0.14)' : 'var(--bg)';
   const color = deployed ? 'var(--brand)' : device.state === 'lost' || device.state === 'damaged' ? 'var(--error)' : 'var(--muted)';
-  const text = deployed ? device.stationName || 'Deployed' : device.state === 'in_stock' || device.state === 'returned' ? 'Hive' : STATE_LABEL[device.state];
+  const text = deployed
+    ? (device.stationName || (device.holderName ? `🤝 ${device.holderName}` : 'Deployed'))
+    : device.state === 'in_stock' || device.state === 'returned' ? 'Hive' : STATE_LABEL[device.state];
   return <span style={{ ...badge, background: bg, color, flexShrink: 0 }}>{text}</span>;
 }
 
@@ -490,8 +493,8 @@ function ManageTypesModal({ suiteId, types, onClose, onChange, flash }) {
   );
 }
 
-// Add / rename / remove issue categories and pick the default (⭐, pre-selected when logging).
-// Renaming re-tags existing issues server-side so their category carries over.
+// Add / rename / remove issue categories and star defaults (⭐). More than one can be a
+// default; the first starred is pre-selected when logging. Renaming re-tags existing issues.
 function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }) {
   const [list, setList] = useState(categories);
   const [adding, setAdding] = useState('');
@@ -514,9 +517,9 @@ function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }
     catch (e) { alert(e.message); }
     setBusy(false);
   }
-  async function setDefault(id) {
+  async function toggleDefault(c) {
     setBusy(true);
-    try { apply(await api.eventopsUpdateIssueCategory(suiteId, id, { isDefault: true })); }
+    try { apply(await api.eventopsUpdateIssueCategory(suiteId, c.id, { isDefault: !c.isDefault })); }
     catch (e) { alert(e.message); }
     setBusy(false);
   }
@@ -528,7 +531,7 @@ function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }
   }
 
   return (
-    <Modal title="Issue categories" subtitle="Shown when logging an issue · ⭐ is the default" onClose={onClose}>
+    <Modal title="Issue categories" subtitle="Shown when logging an issue · ⭐ = default (pick one or more)" onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {list.length === 0 && <Empty>No categories yet — add one below.</Empty>}
         {list.map((c) => (
@@ -541,7 +544,7 @@ function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }
               </>
             ) : (
               <>
-                <button onClick={() => setDefault(c.id)} disabled={busy} title={c.isDefault ? 'Default' : 'Set as default'} style={{ ...iconBtn, border: 'none', fontSize: 16 }}>{c.isDefault ? '⭐' : '☆'}</button>
+                <button onClick={() => toggleDefault(c)} disabled={busy} title={c.isDefault ? 'A default — tap to unset' : 'Set as a default'} style={{ ...iconBtn, border: 'none', fontSize: 16 }}>{c.isDefault ? '⭐' : '☆'}</button>
                 <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{catLabel(c.label)}</span>
                 <button onClick={() => { setEditId(c.id); setEditVal(c.label); }} style={iconBtn}>✏️</button>
                 <button onClick={() => remove(c.id)} disabled={busy} style={iconBtn}>🗑️</button>
@@ -791,6 +794,17 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
             </button>
           ))}
           {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
+          {staff.length > 0 && (
+            <select
+              value=""
+              disabled={busy}
+              onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) move({ holderStaffId: s.id }, `🤝 ${s.number ? `#${s.number} ` : ''}${s.name}`); }}
+              style={{ ...destBtn, cursor: 'pointer' }}
+            >
+              <option value="">🤝 Hand to a staff member…</option>
+              {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+            </select>
+          )}
           {!statusForm ? (
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button disabled={busy} onClick={() => setStatusForm({ state: 'lost', comment: '' })} style={dangerBtn}>Mark lost</button>
@@ -914,7 +928,8 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
     setBusy(true);
     try {
       const dev = (await api.eventopsScan(suiteId, code)).device;
-      const mv = await api.eventopsMove(suiteId, { deviceId: dev.id, stationId: dest.id, staffId });
+      const moveBody = dest.staff ? { deviceId: dev.id, holderStaffId: dest.id, staffId } : { deviceId: dev.id, stationId: dest.id, staffId };
+      const mv = await api.eventopsMove(suiteId, moveBody);
       const label = dev.label || dev.qrCode || 'Device';
       setMoved((m) => [...m, label]);
       onDone(`${label} → ${destLabel}${mv.unusual ? ' (⚑ unusual)' : ''}`);
@@ -960,6 +975,12 @@ function ConsoleMoveFlow({ suiteId, onClose, onDone, flash }) {
               {stations.map((s) => (
                 <button key={s.id} onClick={() => setDest(s)} style={destBtn}>{KIND_ICON[s.kind] || '📍'} {s.name} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({s.deviceCount})</span></button>
               ))}
+              {staff.length > 0 && (
+                <select value="" onChange={(e) => { const s = staff.find((x) => x.id === e.target.value); if (s) setDest({ id: s.id, name: `${s.number ? `#${s.number} ` : ''}${s.name}`, staff: true }); }} style={{ ...destBtn, cursor: 'pointer' }}>
+                  <option value="">🤝 A staff member…</option>
+                  {staff.map((s) => <option key={s.id} value={s.id}>{s.number ? `#${s.number} ` : ''}{s.name}</option>)}
+                </select>
+              )}
               {stations.length === 0 && <Empty>No stations — add one first to deploy devices.</Empty>}
             </div>
           </div>

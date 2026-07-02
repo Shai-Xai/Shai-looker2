@@ -244,12 +244,17 @@ test('issue categories: seed + default, add/rename (re-tags issues)/set-default/
   assert.ok(seeded.length >= 5);
   assert.equal(seeded.filter((c) => c.isDefault).length, 1);
 
-  // Add a custom category as the new default.
+  // Add a custom category, also flagged default — more than one default is allowed now.
   const added = call(r['POST /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P, body: { label: 'Overheating', isDefault: true } });
   assert.equal(added.code, 201);
   const over = added.body.categories.find((c) => c.label === 'Overheating');
   assert.equal(over.isDefault, true);
-  assert.equal(added.body.categories.filter((c) => c.isDefault).length, 1); // exactly one default
+  assert.equal(added.body.categories.filter((c) => c.isDefault).length, 2); // seeded default + Overheating
+  // Unsetting a default is independent (doesn't touch the others).
+  const un = call(r['PUT /api/eventops/suites/:suiteId/issue-categories/:id'], { user: owner, params: { ...P, id: over.id }, body: { isDefault: false } });
+  assert.equal(un.body.categories.find((c) => c.id === over.id).isDefault, false);
+  assert.equal(un.body.categories.filter((c) => c.isDefault).length, 1);
+  call(r['PUT /api/eventops/suites/:suiteId/issue-categories/:id'], { user: owner, params: { ...P, id: over.id }, body: { isDefault: true } }); // re-flag for later steps
   // Case-insensitive duplicate rejected.
   assert.equal(call(r['POST /api/eventops/suites/:suiteId/issue-categories'], { user: owner, params: P, body: { label: 'overheating' } }).code, 409);
 
@@ -287,6 +292,31 @@ test('staff link: a custom slug works and the old token is revoked', () => {
 
   // Too-short slugs are rejected.
   assert.equal(call(r['PUT /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P, body: { slug: 'ab' } }).code, 400);
+});
+
+test('move to a staff member: device is held by them, logged, and reversible', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Jane', number: '101' } }).body.staff;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'H1', qrCode: 'H1' } }).body.device;
+
+  // Hand it to Jane → deployed, no station, holder set, location reads "With #101 Jane".
+  const moved = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, holderStaffId: staff.id } });
+  assert.equal(moved.body.device.state, 'deployed');
+  assert.equal(moved.body.device.stationId, null);
+  assert.equal(moved.body.device.holderStaffId, staff.id);
+  assert.match(moved.body.device.location, /With #101 Jane/);
+
+  // The hand-off is in the device's activity log.
+  const detail = call(r['GET /api/eventops/suites/:suiteId/devices/:id'], { user: owner, params: { ...P, id: dev.id } });
+  assert.ok(detail.body.events.some((e) => e.toHolder === '#101 Jane'));
+
+  // Moving it back to the Hive clears the holder.
+  const back = call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: 'hive' } });
+  assert.equal(back.body.device.holderStaffId, null);
+  assert.equal(back.body.device.state, 'in_stock');
 });
 
 test('deleting a device removes it and cascades its history + issues', () => {
