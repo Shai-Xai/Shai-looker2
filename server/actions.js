@@ -187,24 +187,46 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (!ccols.includes('step')) sql.exec('ALTER TABLE action_clicks ADD COLUMN step INTEGER NOT NULL DEFAULT -1');
     const ocols = sql.prepare('PRAGMA table_info(action_opens)').all().map((c) => c.name);
     if (!ocols.includes('step')) sql.exec('ALTER TABLE action_opens ADD COLUMN step INTEGER NOT NULL DEFAULT -1');
+    // Point lookup for the public open/click routes (actionTracking.js). A blast
+    // to N recipients produces a burst of N+ pixel/click hits within minutes —
+    // without this expression index each hit is a full-table scan.
+    sql.exec(`CREATE INDEX IF NOT EXISTS idx_actions_click_token ON actions(json_extract(config,'$.clickToken'))`);
   } catch (e) { console.error('[actions] migration skipped:', e.message); }
 
   // ── helpers ──
-  const rowToAction = (r) => ({
-    id: r.id, entityId: r.entity_id, type: r.type, status: r.status, title: r.title,
-    config: JSON.parse(r.config || '{}'), audience: JSON.parse(r.audience || '[]'),
-    results: JSON.parse(r.results || '{}'),
-    recurring: !!r.recurring, parentId: r.parent_id || '', lastCheck: r.last_check || '',
-    createdBy: r.created_by, approvedBy: r.approved_by, approvedAt: r.approved_at,
-    createdAt: r.created_at, updatedAt: r.updated_at,
-  });
+  // The audience snapshot can be tens of MB of JSON (50k recipients). Most
+  // readers (list, tracking, approvals, conversion sweeps) never need it, so it
+  // parses LAZILY on first access — and non-enumerable, so `{ ...action }`
+  // spreads and res.json never drag it along. Rows selected WITHOUT the
+  // audience column (the list route) fetch it on demand.
+  const rowToAction = (r) => {
+    const a = {
+      id: r.id, entityId: r.entity_id, type: r.type, status: r.status, title: r.title,
+      config: JSON.parse(r.config || '{}'),
+      results: JSON.parse(r.results || '{}'),
+      audienceCount: r.audience_count ?? undefined, // present when read without the blob
+      recurring: !!r.recurring, parentId: r.parent_id || '', lastCheck: r.last_check || '',
+      createdBy: r.created_by, approvedBy: r.approved_by, approvedAt: r.approved_at,
+      createdAt: r.created_at, updatedAt: r.updated_at,
+    };
+    let aud = null;
+    Object.defineProperty(a, 'audience', {
+      enumerable: false, configurable: true,
+      get() { if (!aud) aud = JSON.parse(r.audience ?? sql.prepare('SELECT audience FROM actions WHERE id=?').get(a.id)?.audience ?? '[]'); return aud; },
+      set(v) { aud = v; },
+    });
+    return a;
+  };
   const getAction = (id) => { const r = sql.prepare('SELECT * FROM actions WHERE id=?').get(id); return r ? rowToAction(r) : null; };
   // Public list shape: omit the full audience (can be thousands of emails).
   const publicAction = (a) => ({
-    ...a, audience: undefined, audienceCount: a.audience.length,
+    ...a, audience: undefined, audienceCount: a.audienceCount ?? a.audience.length,
     promoCodes: (a.config?.promo || {}).source === 'unique' ? promoStats(a.id) : null,
     approval: (a.config?.approvers || []).length ? approvalSummary(a) : null,
   });
+  // List reads select everything EXCEPT the audience blob (the count comes from
+  // json_array_length — C-side, no JS parse of a multi-MB string per row).
+  const LIST_COLS = 'id, entity_id, type, status, title, config, results, recurring, parent_id, last_check, created_by, approved_by, approved_at, created_at, updated_at, json_array_length(audience) AS audience_count';
   const saveResults = (id, results) => sql.prepare('UPDATE actions SET results=?, updated_at=? WHERE id=?').run(JSON.stringify(results), now(), id);
   const setStatus = (id, status) => sql.prepare('UPDATE actions SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
 
@@ -914,7 +936,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // List + CRUD (one set of handlers serves admin and client self-service).
   app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
-    const rows = sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(req.params.entityId);
+    const rows = sql.prepare(`SELECT ${LIST_COLS} FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100`).all(req.params.entityId);
     // People who can be named as approvers: client members whose role grants
     // campaigns.approve. (Plus a 'Howler' option offered client-side.)
     const candidates = db.listUsers()
@@ -1788,91 +1810,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   setTimeout(() => checkConversions().catch(() => {}), 45000);
 
   // ── public routes (no auth; registered before the SPA fallback) ──
-  // Tracked CTA click → count + redirect, appending the campaign's UTMs to the
-  // destination (existing query keys win). Open-tracking pixel records an email open
-  // (attributed when the recipient token is present) then returns a 1x1 GIF.
-  const OPEN_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-  app.get('/o/:token/:rtok?/:step?', (req, res) => {
-    try {
-      const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
-      if (r) {
-        const a = rowToAction(r);
-        const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
-        const step = Number.isInteger(Number(req.params.step)) ? Number(req.params.step) : -1;
-        sql.prepare('INSERT INTO action_opens (action_id, email, at, step) VALUES (?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), step);
-        saveResults(a.id, { ...a.results, opens: (a.results.opens || 0) + 1, lastOpenAt: now() });
-      }
-    } catch { /* never block the pixel */ }
-    res.set('Content-Type', 'image/gif');
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.end(OPEN_PIXEL);
-  });
-
-  app.get('/c/:token/:rtok?/:ch?/:step?', (req, res) => {
-    const r = sql.prepare(`SELECT * FROM actions WHERE json_extract(config,'$.clickToken')=?`).get(req.params.token);
-    if (!r) return res.redirect('/');
-    const a = rowToAction(r);
-    // Attribute the click when the link carries a valid recipient token, and the
-    // channel from the link suffix (/e = email, /s = sms), and the drip step index.
-    const who = req.params.rtok ? parseUnsubToken(req.params.rtok) : null;
-    const channel = req.params.ch === 'e' ? 'email' : req.params.ch === 's' ? 'sms' : '';
-    const step = Number.isInteger(Number(req.params.step)) ? Number(req.params.step) : -1;
-    try { sql.prepare('INSERT INTO action_clicks (action_id, email, at, channel, step) VALUES (?,?,?,?,?)').run(a.id, who?.e ? String(who.e).toLowerCase() : '', now(), channel, step); } catch { /* never block the redirect */ }
-    // Bump total + per-channel counters in results so rollups (list/master) get
-    // per-channel clicks cheaply without re-querying action_clicks.
-    const results = { ...a.results, clicks: (a.results.clicks || 0) + 1, lastClickAt: now() };
-    if (channel === 'email') results.emailClicks = (a.results.emailClicks || 0) + 1;
-    else if (channel === 'sms') results.smsClicks = (a.results.smsClicks || 0) + 1;
-    saveResults(a.id, results);
-    // Per-link tracking (custom HTML): ?k=<code> names this specific link's
-    // destination (stored server-side). Falls back to the campaign's buy link.
-    let dest = a.config.ctaUrl || '/';
-    if (req.query.k) {
-      try { const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(String(req.query.k)); if (row?.target) dest = row.target; } catch { /* fall back to ctaUrl */ }
-    }
-    const promo = req.query.promo ? String(req.query.promo) : ''; // promo code rides the tracked link → forward to the destination
-    try {
-      const u = new URL(dest);
-      // Promo goes on FIRST (right after the Howler link), THEN the UTM params.
-      if (promo && !u.searchParams.has('promo')) u.searchParams.set('promo', promo);
-      const utm = a.config.utm || {};
-      for (const [k, v] of Object.entries({ utm_source: utm.source, utm_medium: utm.medium, utm_campaign: utm.campaign, utm_term: utm.term, utm_content: utm.content })) {
-        if (v && !u.searchParams.has(k)) u.searchParams.set(k, v);
-      }
-      dest = u.toString();
-    } catch {
-      // relative or odd URL — still carry the promo code through if present.
-      if (promo && !/[?&]promo=/.test(dest)) dest += (dest.includes('?') ? '&' : '?') + 'promo=' + encodeURIComponent(promo);
-    }
-    res.redirect(dest);
-  });
-  // Short-link redirect (SMS) → the real tracked /c/ or opt-out /u/ URL (which then records/redirects).
-  app.get('/k/:code', (req, res) => {
-    try {
-      const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(req.params.code);
-      if (row?.target) return res.redirect(row.target);
-    } catch { /* fall through to home */ }
-    res.redirect('/');
-  });
-  // Unsubscribe → suppression list + tiny confirmation page.
-  app.get('/u/:token', (req, res) => {
-    const t = parseUnsubToken(req.params.token);
-    if (t) {
-      sql.prepare('INSERT OR REPLACE INTO action_suppressions (entity_id, email, at, reason) VALUES (?,?,?,?)')
-        .run(t.n, String(t.e).toLowerCase(), now(), 'unsubscribed');
-    }
-    res.set('Content-Type', 'text/html').send(`<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f7;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-      <div style="background:#fff;border:1px solid #e8e8ec;border-radius:14px;padding:32px 36px;text-align:center;max-width:420px;">
-        <div style="font-size:26px;margin-bottom:10px;">${t ? '✓' : '⚠'}</div>
-        <div style="font-size:16px;font-weight:700;color:#111;margin-bottom:6px;">${t ? "You're unsubscribed" : 'Invalid link'}</div>
-        <div style="font-size:13.5px;color:#6e6e73;line-height:1.5;">${t ? 'You will no longer receive campaign emails for this event organiser.' : 'This unsubscribe link is not valid.'}</div>
-      </div></body></html>`);
-  });
+  // Open pixel /o, tracked click /c, SMS short link /k, unsubscribe /u — the
+  // burst-hot paths a blast generates. Extracted to actionTracking.js: indexed
+  // token lookup, never parses the audience blob.
+  require('./actionTracking').mount(app, { sql, now, saveResults, parseUnsubToken });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
   // used by the Owl's getCampaigns tool. publicAction hides the audience + adds a count.
-  const listForEntity = (entityId) => sql.prepare('SELECT * FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100').all(entityId).map((r) => publicAction(rowToAction(r)));
+  const listForEntity = (entityId) => sql.prepare(`SELECT ${LIST_COLS} FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100`).all(entityId).map((r) => publicAction(rowToAction(r)));
   // Programmatic create of a DRAFT campaign (the Owl's draftCampaign act-tool commit).
   // ALWAYS status 'draft' — it never sends; a human reviews, approves and sends it in
   // Engage. Runs the same entity-ownership + campaigns.approve check + cleanConfig the

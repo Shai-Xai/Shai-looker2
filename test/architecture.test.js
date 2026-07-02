@@ -21,7 +21,7 @@ const DEFAULT_CAP = 1500; // any new/untracked server file must stay under this
 // Per-file ceilings (lines). Lower these as files shrink; never raise them.
 const BUDGETS = {
   'index.js': 3100,    // composition root — keep extracting; ratchet down
-  'actions.js': 1900,
+  'actions.js': 1875,   // tracking routes extracted to actionTracking.js
   'db.js': 1800,
   'insights.js': 1150,
   'goals.js': 1100,

@@ -20,6 +20,12 @@ module.exports = function createQueryEngine({ looker, auth }) {
   const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;
   const QCACHE_STALE = (Number(process.env.QUERY_CACHE_STALE) || 1800) * 1000;
   const QCACHE_MAX = Number(process.env.QUERY_CACHE_MAX) || 500;
+  // Entry-size guard: QCACHE_MAX bounds the COUNT, not the bytes. A campaign
+  // audience pull can be 50k+ rows (~25-100 MB parsed) — on a 512 MB instance a
+  // handful of those pinned in the cache is an OOM. Results over this row count
+  // are served but never stored (in-flight dedupe still coalesces callers).
+  // Normal tile queries are ≤500 rows, so they're unaffected.
+  const QCACHE_MAX_ROWS = Number(process.env.QUERY_CACHE_MAX_ROWS) || 2000;
   const qCache = new Map();    // key -> { at, data }
   const qInflight = new Map(); // key -> Promise
 
@@ -33,8 +39,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const p = looker.lookerRequest('POST', path, body)
       .then((data) => {
         qInflight.delete(key);
-        qCache.set(key, { at: Date.now(), data });
-        if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
+        const rows = Array.isArray(data?.data) ? data.data.length : 0;
+        if (rows <= QCACHE_MAX_ROWS) {
+          qCache.set(key, { at: Date.now(), data });
+          if (qCache.size > QCACHE_MAX) qCache.delete(qCache.keys().next().value);
+        }
         return data;
       })
       .catch((e) => { qInflight.delete(key); throw e; });
