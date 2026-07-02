@@ -27,7 +27,7 @@ from *seeing* a cohort to *acting* on it in one place, scoped and branded to the
 
 ---
 
-## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" 🔜)
+## The continuous comms loop  ✅ (one-tap "Owl auto-pilot" ✅)
 Pulse isn't a pile of separate tools — it's **one loop that never stops turning.**
 Every part feeds the next, so insight becomes action and results become the next
 insight:
@@ -52,9 +52,10 @@ notifications even when it's closed**, that flow reaches people on their phone
 without them having to log in — a nudge lands, they tap, they're in the right
 place to act.
 
-> Today Pulse **surfaces** the insight + suggested action and **measures** the
-> result. Closing the loop with a single tap — the **agentic Owl** drafting the
-> campaign straight from a suggestion — is the flagship roadmap item (🔜).
+> Pulse **surfaces** the insight + suggested action, **measures** the result —
+> and now closes the loop with a single tap: the **agentic Owl auto-pilot** ✅
+> drafts the campaign straight from a suggestion. The draft still rides the
+> normal review + approval gates before anything sends.
 
 **Pitch:** "It's not dashboards *and* email *and* reports — it's one living loop.
 Your data tells you what to do, you do it in the same place, the result makes the
@@ -620,9 +621,11 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 ---
 
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
-Use these to set direction, **not** to promise dates.
-- **Conversational/agentic Owl** — chat that answers, analyses and *executes*
-  (draft a campaign, remind an organiser…). The flagship.
+Use these to set direction, **not** to promise dates. *(The conversational/agentic
+Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
+see "The continuous comms loop" above.)*
+- **Campaigns — conditional sequencing** — branch a journey on behaviour (opened /
+  clicked / purchased → a different next step), on top of today's linear drips.
 - **Portfolio / "all events" view** — roll up KPIs and audiences across a client's
   many events/profiles (today everything is per-event).
 - **Automations · Connections** tabs (shown as "SOON" in Engage). *(Templates is now live — see §5.)*
@@ -652,6 +655,12 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Agentic Owl auto-pilot is live** ✅: the one-tap close of the loop —
+  the Owl drafts the campaign straight from an insight/suggested action. Drafts still
+  ride the normal review + approval gates; nothing sends without a human. (Roadmap's
+  flagship item, now shipped; the feature matrix Owl section also now separates the
+  **native Pulse Owl**, the **Owl in Claude / ChatGPT**, and the third-party
+  **Inventive "Ask"** analyst.)
 - **2026-07-02** — **Pulse sales site + admin-curated feature matrix** ✅: a shareable
   public **sales website at `/sales`** built from the (freshly updated) feature matrix,
   and the matrix itself moved server-side with **Shown / Hidden toggles** on every

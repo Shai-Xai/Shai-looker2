@@ -34,6 +34,7 @@ const CATALOGUE = [
     ['owl.whatsapp', 'Native Owl on WhatsApp — charts as images, reply buttons, scheduled updates', 'beta'],
     ['owl.portal', 'Native Owl inside the Howler organizer portal (one-iframe embed)', 'beta'],
     ['owl.fan', 'Fan Owl — a booking guide on the event’s own website', 'beta'],
+    ['owl.autopilot', 'Agentic Owl auto-pilot — one-tap insight → campaign', 'live'],
     // The same native Owl reached through a connected AI assistant (MCP).
     ['owl.claude', 'The Owl in Claude — one-click MCP connect; answers + drafts, never sends', 'beta'],
     ['owl.chatgpt', 'The Owl in ChatGPT / OpenAI — custom connector, works with Deep Research', 'beta'],
@@ -153,7 +154,7 @@ const CATALOGUE = [
     ['trust.secrets', 'Write-only secrets — Pulse never shows a stored value', 'live'],
   ] },
   { id: 'horizon', emoji: '🔭', title: 'On the horizon', blurb: 'Where Pulse goes next — for roadmap conversations, not promises.', features: [
-    ['soon.agentic', 'Agentic Owl auto-pilot — one-tap insight → campaign', 'soon'],
+    ['soon.conditional', 'Campaigns — conditional sequencing (branch a journey on open / click / purchase)', 'soon'],
     ['soon.portfolio', 'Portfolio / “all events” view', 'soon'],
     ['soon.tasks', 'Event tasks + AM cockpit', 'soon'],
     ['soon.channels', 'WhatsApp & Howler app-push message channels', 'soon'],
