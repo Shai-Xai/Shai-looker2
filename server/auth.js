@@ -90,7 +90,11 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE != null
   : process.env.NODE_ENV === 'production';
 const COOKIE_OPTS = { httpOnly: true, sameSite: 'lax', secure: COOKIE_SECURE };
 function issueCookie(res, user) {
-  const token = jwt.sign({ sub: user.id }, getSecret(), { expiresIn: TOKEN_TTL });
+  // `tv` (token version) pins the session to the user's current password epoch —
+  // attachUser rejects a token whose tv is behind, so a password reset evicts
+  // every previously-issued session. HS256 pinned (see attachUser) as defence-
+  // in-depth against algorithm-confusion.
+  const token = jwt.sign({ sub: user.id, tv: user.tokenVersion || 0 }, getSecret(), { algorithm: 'HS256', expiresIn: TOKEN_TTL });
   res.cookie(COOKIE, token, { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
@@ -115,8 +119,14 @@ function invalidateUser(id) { userCache.delete(id); }
 function attachUser(req, _res, next) {
   const token = req.cookies?.[COOKIE];
   if (token) {
-    try { const { sub } = jwt.verify(token, getSecret()); req.user = cachedUser(sub) || null; }
-    catch { req.user = null; }
+    try {
+      const { sub, tv } = jwt.verify(token, getSecret(), { algorithms: ['HS256'] });
+      const user = cachedUser(sub) || null;
+      // Reject a token minted before the user's current password epoch. Legacy
+      // tokens (pre-tv, undefined) are accepted only against tokenVersion 0, so
+      // the first reset after this ships still evicts them.
+      req.user = (user && (tv || 0) === (user.tokenVersion || 0)) ? user : null;
+    } catch { req.user = null; }
   }
   next();
 }
@@ -455,7 +465,7 @@ module.exports = {
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
-  issueCookie, clearCookie, attachUser, requireAuth, requireAdmin,
+  issueCookie, clearCookie, attachUser, requireAuth, requireAdmin, invalidateUser,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
   // suites / navigation

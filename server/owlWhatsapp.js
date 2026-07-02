@@ -584,7 +584,15 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // turn never times the webhook out. Optional shared secret (?key= or x-webhook-secret).
   app.post('/api/whatsapp/inbound', (req, res) => {
     const secret = (db.getSetting('whatsapp_webhook_secret', '') || '').trim();
-    if (secret && req.query.key !== secret && req.get('x-webhook-secret') !== secret) {
+    // The sender is identified purely by the (spoofable) MSISDN, which then drives
+    // a scoped Owl turn — so transport auth is MANDATORY, not optional. With no
+    // secret configured the endpoint is closed (fail closed): set
+    // whatsapp_webhook_secret and put ?key=<secret> on the Clickatell webhook URL.
+    if (!secret) {
+      logEvent('', 'rejected', 'inbound WhatsApp disabled — set whatsapp_webhook_secret to enable');
+      return res.status(503).json({ error: 'not configured' });
+    }
+    if (req.query.key !== secret && req.get('x-webhook-secret') !== secret) {
       logEvent('', 'rejected', 'bad/missing webhook secret — Clickatell URL is missing ?key=');
       return res.status(401).json({ error: 'bad secret' });
     }

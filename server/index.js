@@ -56,6 +56,23 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
+// Security headers (dependency-free — mirrors the essentials of helmet). Cookie
+// auth means clickjacking and MIME-sniff matter; a CSP is defence-in-depth for
+// any XSS. Kept deliberately minimal so it can't break the SPA:
+//   • frame-ancestors 'none'  — no embedding (clickjacking)
+//   • nosniff                 — no MIME sniffing of downloads/mail assets
+//   • Referrer-Policy         — don't leak full URLs to third parties
+//   • HSTS (prod only)        — force https once seen
+// A full script-src CSP is intentionally NOT set here yet (the built bundle +
+// echarts would need nonce/hashing work); frame-ancestors is safe today.
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Content-Security-Policy', "frame-ancestors 'none'");
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 // Global JSON parser at a modest limit, EXCEPT routes that take large bodies
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
@@ -223,10 +240,11 @@ app.post('/api/auth/reset', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip'
   if (!password || String(password).length < 8) return res.status(400).json({ error: 'Choose a password of at least 8 characters.' });
   const userId = db.consumeAuthToken(token, 'reset');
   if (!userId) return res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
-  db.updateUser(userId, { password });
+  db.updateUser(userId, { password }); // bumps token_version → old sessions die
   db.clearAuthTokens(userId, 'reset'); // any other outstanding reset links are now dead
+  auth.invalidateUser(userId);         // evict the 2s user cache so old cookies are rejected at once
   const user = db.getUser(userId);
-  auth.issueCookie(res, user);
+  auth.issueCookie(res, user);         // this browser gets a fresh cookie at the new epoch
   db.recordAction({ userId, action: 'auth.reset', label: 'Reset password', method: 'POST', path: '/api/auth/reset' });
   res.json({ user: meUser(user) });
 });

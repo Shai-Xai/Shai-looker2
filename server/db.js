@@ -149,10 +149,8 @@ addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // intern
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
-// Most recent successful login (ISO; null = never logged in). Powers Admin → Users.
-addColumn('users', 'last_login', 'TEXT');
-// Identity captured at creation (optional; blank for legacy users). Names give the
-// admin directory a human label beyond email; mobile is a contact / SMS handle.
+addColumn('users', 'last_login', 'TEXT'); // most recent successful login (ISO; null = never). Powers Admin → Users
+// Identity captured at creation (optional; blank for legacy). Names label the admin directory; mobile is a contact / SMS handle.
 addColumn('users', 'first_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'last_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'mobile', "TEXT NOT NULL DEFAULT ''");
@@ -162,6 +160,7 @@ addColumn('users', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // legacy pe
 addColumn('users', 'inventive_workspace_id', "TEXT NOT NULL DEFAULT ''"); // link to a reusable inventive_workspaces row
 addColumn('users', 'howler_role', "TEXT NOT NULL DEFAULT ''"); // Howler-staff job title (Senior KAM / KAM / AM) — admins only
 addColumn('users', 'roles', "TEXT NOT NULL DEFAULT '[]'"); // extra global designations/tags (JSON array, e.g. ["dev"]) — a user can hold several
+addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0'); // bumped on password change → kills outstanding session JWTs
 addColumn('entities', 'howler_owner_user_id', "TEXT NOT NULL DEFAULT ''"); // the Howler admin who created this client (legacy/primary)
 addColumn('entities', 'howler_support_ids', "TEXT NOT NULL DEFAULT '[]'"); // Howler admins who support this client (shown as "Your Howler Support")
 // Persistent per-folder settings for the dashboard library. Folders are "/"-path
@@ -947,7 +946,7 @@ function rowToUser(r) {
   if (!r) return null;
   const memberships = membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
-  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', howlerRole: r.howler_role || '', roles: jsonArr(r.roles), entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
+  return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', howlerRole: r.howler_role || '', roles: jsonArr(r.roles), tokenVersion: r.token_version || 0, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
 function publicUser(u) {
   if (!u) return null;
@@ -1107,6 +1106,7 @@ function updateUser(id, patch) {
     if (clash) throw new Error('That email is already used by another login.');
   }
   const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
+  const tokenVersion = (cur.token_version || 0) + (patch.password ? 1 : 0); // password change → old session JWTs die
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
   const lastName = patch.lastName !== undefined ? String(patch.lastName || '').trim() : cur.last_name;
@@ -1114,7 +1114,7 @@ function updateUser(id, patch) {
   const invWs = patch.inventiveWorkspaceId !== undefined ? String(patch.inventiveWorkspaceId || '').trim() : cur.inventive_workspace_id;
   // Howler job title only applies to admins; clearing role to client drops it.
   const howlerRole = role !== 'admin' ? '' : (patch.howlerRole !== undefined ? String(patch.howlerRole || '').trim() : cur.howler_role);
-  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=?, howler_role=?, roles=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, howlerRole, patch.roles !== undefined ? normRoles(patch.roles) : (cur.roles || '[]'), id);
+  db.prepare('UPDATE users SET email=?, password_hash=?, role=?, first_name=?, last_name=?, mobile=?, inventive_workspace_id=?, howler_role=?, roles=?, token_version=? WHERE id=?').run(email, hash, role, firstName, lastName, mobile, invWs, howlerRole, patch.roles !== undefined ? normRoles(patch.roles) : (cur.roles || '[]'), tokenVersion, id);
   if ('entityIds' in patch) setUserEntities(id, patch.entityIds);
   return publicUser(getUser(id));
 }

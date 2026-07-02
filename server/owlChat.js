@@ -356,7 +356,11 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.body }));
 
   // POST /api/owl/chat — ask the Owl. Streams the grounded answer as plain text.
-  app.post('/api/owl/chat', auth.requireAuth, async (req, res) => {
+  // Rate-limited per user: this is the most expensive endpoint (agentic multi-tool
+  // LLM loop on a per-entity Anthropic key), so one account can't run up unbounded
+  // spend/load. Tunable via OWL_CHAT_MAX (default 20/min).
+  const owlChatLimit = require('./ratelimit')({ windowMs: 60_000, max: Number(process.env.OWL_CHAT_MAX) || 20, by: 'user', scope: 'owl-chat', message: 'You’re sending messages very fast — give the Owl a moment and try again.' });
+  app.post('/api/owl/chat', auth.requireAuth, owlChatLimit, async (req, res) => {
     if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
     const { suiteId, message, entityId, dashboardId, mode } = req.body || {};
     let { threadId } = req.body || {};
