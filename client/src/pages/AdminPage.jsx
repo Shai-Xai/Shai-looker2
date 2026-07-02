@@ -18,6 +18,7 @@ import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
@@ -3799,6 +3800,14 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
     ...presets.map((p) => ({ value: p.key, label: p.label || p.title })),
     ...otherFields.map((f) => ({ value: f.field, label: f.byName ? `${f.title} — filter` : `${f.title} (${f.field})` })),
   ];
+  // Primary field picker options (grouped like the old optgroups) — fed to the
+  // searchable dropdown so admins can type to filter long dimension lists.
+  const fieldOptions = [
+    ...LOCK_CATEGORIES.filter((cat) => presets.some((p) => p.category === cat)).flatMap((cat) =>
+      presets.filter((p) => p.category === cat).map((p) => ({ value: p.key, label: `${p.label || p.title}${p.feeds ? ' →' : ''}`, group: cat, keywords: p.key }))),
+    ...otherFields.map((f) => ({ value: f.field, label: f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`, group: 'Other fields', keywords: f.field })),
+    ...(showCustom ? [{ value: '__custom', label: '✎ Custom field…' }] : []),
+  ];
   // Scope Event-category pickers to the chosen organiser: when Organiser Name has
   // a value, every other Event filter (Event Name, Current/Past/Comparison, Slug)
   // only suggests events for that organiser. Each explore has its own organiser
@@ -3851,24 +3860,14 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
           return (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <select
-                  style={{ ...input, minWidth: 240 }}
+                <SearchableSelect
                   value={isCustom ? '__custom' : r.field}
-                  onChange={(e) => (e.target.value === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: e.target.value }))}
-                >
-                  <option value="">Choose a filter…</option>
-                  {LOCK_CATEGORIES.filter((cat) => presets.some((p) => p.category === cat)).map((cat) => (
-                    <optgroup key={cat} label={cat}>
-                      {presets.filter((p) => p.category === cat).map((p) => <option key={p.key} value={p.key}>{p.label || p.title}{p.feeds ? ' →' : ''}</option>)}
-                    </optgroup>
-                  ))}
-                  {otherFields.length > 0 && (
-                    <optgroup label="Other fields">
-                      {otherFields.map((f) => <option key={f.field} value={f.field}>{f.byName ? `${f.title} — filter` : `${f.title} (${f.field})`}</option>)}
-                    </optgroup>
-                  )}
-                  {showCustom && <option value="__custom">✎ Custom field…</option>}
-                </select>
+                  onChange={(v) => (v === '__custom' ? setRow(i, { custom: true, field: '' }) : setRow(i, { custom: false, field: v }))}
+                  options={fieldOptions}
+                  placeholder="Choose a filter…"
+                  minWidth={240}
+                  ariaLabel="Locked filter field"
+                />
                 {isCustom && (
                   <input
                     style={{ ...input, minWidth: 220 }}
@@ -3890,10 +3889,14 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
                     {(r.orFields || []).map((of, k) => (
                       <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--brand)' }}>OR</span>
-                        <select style={{ ...input, minWidth: 200 }} value={of} onChange={(e) => setOrField(i, k, e.target.value)}>
-                          <option value="">Choose a field…</option>
-                          {orFieldOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={of}
+                          onChange={(v) => setOrField(i, k, v)}
+                          options={orFieldOptions.map((o) => ({ ...o, keywords: o.value }))}
+                          placeholder="Choose a field…"
+                          minWidth={200}
+                          ariaLabel="OR field"
+                        />
                         <button style={{ ...delBtn, padding: '0 4px' }} onClick={() => removeOrField(i, k)} title="Remove this OR field">✕</button>
                       </span>
                     ))}
