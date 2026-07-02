@@ -103,6 +103,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <code style={{ fontSize: 11, background: 'var(--hairline)', padding: '6px 8px', borderRadius: 6, overflowX: 'auto', maxWidth: '100%' }}>{snippet(s.siteKey)}</code>
               <button type="button" style={btn} onClick={() => navigator.clipboard?.writeText(snippet(s.siteKey))}>Copy snippet</button>
+              <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
             </div>
           )}
           <H>Page mappings</H>

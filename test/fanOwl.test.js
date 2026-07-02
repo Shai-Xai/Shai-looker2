@@ -140,6 +140,20 @@ test('lead capture: consent is explicit, sticky, and surfaces on the admin lead 
   assert.equal(leads.body.leads[0].name, 'Fan One'); // a later blank/name change never wipes the name to ''
 });
 
+test('preview page: serves the widget for a valid key, hints on off/unknown, rejects junk', async () => {
+  const { e, admin, site } = await provision('prev');
+  const html = await fetch(`${app.base}/fan-owl-test?k=${site.siteKey}`).then((r) => r.text());
+  assert.ok(html.includes(`data-site-key="${site.siteKey}"`), 'widget script wired to the key');
+  assert.ok(!html.includes('⚠️'), 'no warning for an enabled site');
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, enabled: false }] } });
+  assert.ok((await fetch(`${app.base}/fan-owl-test?k=${site.siteKey}`).then((r) => r.text())).includes('switched OFF'));
+  assert.equal((await fetch(`${app.base}/fan-owl-test?k=<script>alert(1)</script>`)).status, 400);
+  // Same-host preview passes even with a domain allowlist set (the promoter's lock
+  // must not break Pulse's own preview page).
+  const r = await app.req('POST', '/api/fan/context', { body: { siteKey: (await provision('prev2')).site.siteKey, url: `${app.base}/fan-owl-test` }, headers: { Origin: app.base } });
+  assert.equal(r.status, 200);
+});
+
 test('funnel: beacons are whitelisted and roll up in the insights view', async () => {
   const { e, admin, site } = await provision('funnel');
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });

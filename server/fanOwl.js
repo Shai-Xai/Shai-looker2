@@ -253,7 +253,38 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     next();
   });
 
-  const originHost = (o) => String(o || '').toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  // GET /fan-owl-test?k=fw_… — a hosted preview page (linked from the "Preview"
+  // button in FanOwlAdmin): a pretend event page with the widget already wired to
+  // the given site key, so nobody has to hand-edit an HTML file to try the Owl.
+  // Same-host origins always pass the domain allowlist (see /api/fan/context).
+  app.get('/fan-owl-test', (req, res) => {
+    const k = String(req.query.k || '').trim();
+    if (!/^fw_[0-9a-f]{6,64}$/.test(k)) return res.status(400).send('Add ?k=<your fw_ site key> to the URL (Pulse → client → Fan Owl).');
+    const site = siteByKey.get(k);
+    const hint = !site ? 'That site key doesn’t exist — check it in Pulse → Fan Owl.'
+      : (!site.enabled ? 'This site is switched OFF — tick “Enabled” in Pulse → Fan Owl and save, then refresh.' : '');
+    res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fan Owl preview</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;color:#222}header{background:#1a1a2e;color:#fff;padding:56px 24px;text-align:center}h1{margin:0 0 8px;font-size:32px}main{max-width:680px;margin:0 auto;padding:24px;line-height:1.6}nav a{margin-right:14px}.warn{background:#fff3cd;border:1px solid #eedca6;border-radius:10px;padding:10px 14px;font-size:14px}</style>
+</head><body>
+<header><h1>🎪 ${site && (site.name || '') ? String(site.name).replace(/[<>&]/g, '') : 'Preview event site'}</h1><p>A pretend event page for previewing the Fan Owl widget.</p></header>
+<main>
+${hint ? `<p class="warn">⚠️ ${hint}</p>` : ''}
+<nav><a href="?k=${k}&p=artist">Artist page</a><a href="?k=${k}&p=tickets">Tickets page</a><a href="?k=${k}&p=venue">Venue page</a></nav>
+<h2>About the festival</h2>
+<p>This copy is set dressing — the thing you're previewing is the 🦉 button
+bottom-right and the teaser bubble above it. The links above change the page URL,
+so you can watch your page mappings change the ribbon.</p>
+<p>Try in the chat: “Which ticket do I need?” · “What's the refund policy?” ·
+something NOT in your knowledge base (it should honestly say it doesn't know) ·
+“I'll take one” (→ buy button) · tap 🔔 for the consent form.</p>
+</main>
+<script async src="/fan-owl.js" data-site-key="${k}"></script>
+</body></html>`);
+  });
+
+  const originHost = (o) => String(o || '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/^www\./, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
   const originAllowed = (site, origin) => {
     const domains = J(site.domains, []);
     if (!domains.length) return true; // pilot-friendly: no allowlist yet = open; setting one locks it
@@ -290,7 +321,10 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       const b = req.body || {};
       const site = siteByKey.get(String(b.siteKey || '').trim());
       if (!site || !site.enabled) throw new HttpError(404, 'This assistant isn’t available.');
-      if (!originAllowed(site, req.headers.origin || req.headers.referer)) throw new HttpError(403, 'This site isn’t allowed to use this assistant.');
+      // Pulse's own /fan-owl-test preview page is always allowed (same host), even
+      // once the promoter has locked the domain list down to their site.
+      const sameHost = originHost(req.headers.origin || req.headers.referer || '') === String(req.hostname || '').toLowerCase();
+      if (!sameHost && !originAllowed(site, req.headers.origin || req.headers.referer)) throw new HttpError(403, 'This site isn’t allowed to use this assistant.');
       const pageUrl = String(b.url || '').slice(0, 500);
       // One session per loader boot; the anon id (loader-side localStorage) threads a
       // returning fan's visits together without any identity.
