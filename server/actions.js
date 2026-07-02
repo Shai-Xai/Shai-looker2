@@ -1830,10 +1830,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   if (convTimer.unref) convTimer.unref();
   setTimeout(() => checkConversions().catch(() => {}), 45000);
 
-  // Crash recovery: a deploy mid-blast leaves campaigns stuck 'running' with no
-  // loop attached. Resume shortly after boot — the action_sends ledger skips
-  // everyone already reached, so the blast finishes and nobody is emailed twice.
+  // Crash recovery: a deploy mid-blast leaves campaigns stuck 'running'. Resume
+  // after boot — the action_sends ledger means nobody is ever emailed twice.
   setTimeout(() => {
+    if (!enabled()) return; // kill switch also stops resumes
     for (const r of sql.prepare("SELECT id FROM actions WHERE status='running'").all()) {
       console.log('[actions] resuming campaign interrupted by restart:', r.id);
       runCampaign(r.id).catch((e) => { console.error('[actions] resume failed', r.id, e.message); setStatus(r.id, 'failed'); });
