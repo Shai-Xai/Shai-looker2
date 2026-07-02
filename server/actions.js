@@ -959,11 +959,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   app.get('/api/actions/:entityId', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const rows = sql.prepare(`SELECT ${LIST_COLS} FROM actions WHERE entity_id=? ORDER BY created_at DESC LIMIT 100`).all(req.params.entityId);
-    // People who can be named as approvers: client members whose role grants
-    // campaigns.approve. (Plus a 'Howler' option offered client-side.)
-    const candidates = db.listUsers()
-      .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(req.params.entityId) && auth.hasPermission(u, req.params.entityId, 'campaigns.approve'))
-      .map((u) => ({ userId: u.id, email: u.email }));
+    // People who can be named as approvers: client members whose role grants campaigns.approve (plus a 'Howler' option offered client-side).
+    const allUsers = db.listUsers();
+    const candidates = allUsers.filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(req.params.entityId) && auth.hasPermission(u, req.params.entityId, 'campaigns.approve')).map((u) => ({ userId: u.id, email: u.email }));
+    // Howler admins LINKED to this client can be named individually (a specific AM signs off); the generic 'Howler' slot = any of them (see howlerAdminsFor).
+    const howlerCandidates = allUsers.filter((u) => u.role === 'admin' && (u.entityIds || []).includes(req.params.entityId)).map((u) => ({ userId: u.id, email: u.email, name: u.fullName || '', howlerRole: u.howlerRole || '' }));
     // Roll up opens/clicks for JUST the campaigns we're listing — scoped to this
     // entity's own action ids (already in hand from `rows`), never a full-table
     // scan across every tenant's action_opens/action_clicks (those tables grow
@@ -987,7 +987,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       if (pub.config?.channel !== 'sms' && sent > 0) pub.openRate = Math.min(100, Math.round(((openMap[pub.id] || 0) / sent) * 100));
       return pub;
     });
-    res.json({ actions, requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates });
+    res.json({ actions, requireApproval: requireApprovalFor(req.params.entityId), approverCandidates: candidates, howlerCandidates });
   });
   // Per-client "require approval" governance setting. (Before the :id routes so
   // 'approval-setting' isn't swallowed by :id.)

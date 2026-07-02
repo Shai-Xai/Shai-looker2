@@ -95,7 +95,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     return <CampaignEditor entityId={entityId} isAdmin={isAdmin} action={editing === 'new' ? null : editing} initialGoal={editing === 'new' ? initialGoal : ''}
       initialSuiteId={editing === 'new' ? initialSuiteId : ''} initialSegmentName={editing === 'new' ? initialSegmentName : ''}
       initialTemplate={editing === 'new' ? tpl : null} initialMaster={editing === 'new' ? presetMaster : ''} masterNames={masterNames}
-      requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []}
+      requireApproval={!!data.requireApproval} approverCandidates={data.approverCandidates || []} howlerCandidates={data.howlerCandidates || []}
       onClose={() => { setEditing(null); setTpl(null); setPresetMaster(''); }} onSaved={() => { setEditing(null); setTpl(null); setPresetMaster(''); load(); loadMasters(); }} />;
   }
   if (reporting) {
@@ -322,7 +322,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
   );
 }
 
-function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSuiteId = '', initialSegmentName = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], onClose, onSaved }) {
+function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSuiteId = '', initialSegmentName = '', initialTemplate = null, initialMaster = '', masterNames = [], requireApproval = false, approverCandidates = [], howlerCandidates = [], onClose, onSaved }) {
   const cfg = action?.config || {};
   const tpl = initialTemplate;           // a resolved template (recipe), when creating from one
   const tp = tpl?.preset || {};          // the template's copy/utm presets
@@ -1169,16 +1169,21 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           <Accordion title={`Approval${requireApproval ? ' (required for this client)' : ''}`} {...acc('approval')}>
             <div style={hintS}>Pick who must sign off before this sends. Each approver gets an inbox message + notification with a link to approve. {requireApproval ? 'This client requires approval, so a campaign can only send once everyone approves.' : 'Optional — leave empty to send directly, or add approvers to route it.'}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-              {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email })), { type: 'howler', name: 'Howler' }].map((c) => {
+              {/* Named approvers: the client's own approvers, then the Howler team
+                  members LINKED to this account (a specific AM), then the generic
+                  'Howler' slot = any of the account's Howler team. */}
+              {[...approverCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.email, label: c.email })),
+                ...howlerCandidates.map((c) => ({ type: 'user', userId: c.userId, email: c.email, name: c.name || c.email, label: `🦉 ${c.name || c.email}${c.howlerRole ? ` · ${c.howlerRole}` : ''}` })),
+                { type: 'howler', name: 'Howler', label: `🦉 Howler (any${howlerCandidates.length ? ' of the account team' : ''})` }].map((c) => {
                 const on = f.approvers.some((a) => (c.type === 'howler' ? a.type === 'howler' : a.userId === c.userId));
                 return (
-                  <button key={c.userId || 'howler'} type="button" onClick={() => toggleApprover(c)}
+                  <button key={c.userId || 'howler'} type="button" onClick={() => toggleApprover(c)} title={c.type === 'user' ? c.email : 'Any Howler member on this account can sign this slot'}
                     style={{ fontSize: 12, fontWeight: on ? 700 : 500, padding: '4px 10px', borderRadius: 980, cursor: 'pointer', border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, color: on ? 'var(--brand)' : 'var(--text)', background: on ? 'rgba(var(--brand-rgb,255,56,92),0.08)' : 'transparent' }}>
-                    {on ? '✓ ' : ''}{c.type === 'howler' ? '🦉 Howler' : c.email}
+                    {on ? '✓ ' : ''}{c.label}
                   </button>
                 );
               })}
-              {approverCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
+              {approverCandidates.length === 0 && howlerCandidates.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No client approvers yet — you can still require Howler.</span>}
             </div>
             <div style={{ marginTop: 12 }}>
               <div style={hintLbl}>Message to approvers (optional)</div>

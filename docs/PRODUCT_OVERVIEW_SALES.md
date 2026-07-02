@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-02 (event-scoped segments fix) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-02 (named Howler approvers) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -271,7 +271,9 @@ lists, subtract a suppression list, and it stays live."
   preview and enforced at send; one-click unsubscribe; a transactional override
   for genuinely non-marketing messages.
 - **Approval workflow** ✅ — nothing sends without explicit approval; route to
-  named or "Howler" approvers, notified via inbox/push/email.
+  named client approvers, a **specific Howler team member on the account**, or the
+  generic "Howler" slot (any Howler member linked to the client) — notified via
+  inbox/push/email.
 - **Send caps (cost safety)** ✅ — a per-client **audience cap** limits how many
   recipients one campaign can reach, and a tighter **SMS sub-cap** stops a large
   email send from accidentally firing an equally-large (costly) SMS blast (set it
@@ -658,6 +660,10 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Pick a specific Howler approver** ✅ (Engage → campaigns): the
+  approval picker now lists the Howler team members linked to the client account
+  individually (name + role), alongside the generic "Howler (any of the account team)"
+  slot — so a sign-off can go to your AM instead of pinging every Howler admin.
 - **2026-07-02** — **Move a whole subfolder in one action** ✅ (Dashboard Console): admins
   can now reparent a subfolder — with **all** its nested subfolders and dashboards — in a
   single move, instead of relocating dashboards one by one. Use the **↗ Move** button on any
