@@ -1,0 +1,26 @@
+name: Mirror main → deploy branch
+
+# Render's live service (Howler Pulse V2) is wired to the branch
+# claude/ecstatic-thompson-vUFsS, not main. Until that service is repointed at
+# main (Render → the service → Settings → Build & Deploy → Branch), keep that
+# branch an EXACT mirror of main so "push to main" remains the only thing anyone
+# does — Render sees the mirror push and deploys as usual.
+#
+# The mirror branch is write-only from here (no session pushes to it any more),
+# so the force push can never discard real work. DELETE THIS FILE once the
+# Render service tracks main directly.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git push --force origin main:claude/ecstatic-thompson-vUFsS
