@@ -711,24 +711,26 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
   const [stations, setStations] = useState([]);
   const [staff, setStaff] = useState([]);
   const [staffId, setStaffId] = useState(''); // optional attribution — who's doing this
-  const [view, setView] = useState('move'); // move | issue | pair
+  const [view, setView] = useState('move'); // move | issue | pair | log
   const [categories, setCategories] = useState([]);
   const [issue, setIssue] = useState({ category: '', note: '', resolution: '' });
   const [statusForm, setStatusForm] = useState(null); // { state, comment } when marking lost/damaged
   const [pairing, setPairing] = useState(false); // scanner open to pair a QR
   const [manualQr, setManualQr] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [events, setEvents] = useState(null); // this device's full activity log
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {});
     api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => {});
+    api.eventopsDevice(suiteId, device.id).then((r) => setEvents(r.events || [])).catch(() => setEvents([]));
     api.eventopsIssueCategories(suiteId).then((r) => {
       const cats = r.categories || [];
       setCategories(cats);
       setIssue((iss) => iss.category ? iss : { ...iss, category: (cats.find((c) => c.isDefault) || cats[0])?.label || 'damaged' });
     }).catch(() => {});
-  }, [suiteId]);
+  }, [suiteId, device.id]);
 
   async function move(body, label) {
     setBusy(true);
@@ -774,9 +776,12 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
         <Chip on={view === 'move'} onClick={() => setView('move')}>Move</Chip>
         <Chip on={view === 'issue'} onClick={() => setView('issue')}>Log issue</Chip>
         <Chip on={view === 'pair'} onClick={() => { setView('pair'); setPairing(true); }}>🔗 Pair QR</Chip>
+        <Chip on={view === 'log'} onClick={() => setView('log')}>📋 Activity{events ? ` (${events.length})` : ''}</Chip>
       </div>
 
-      {view === 'move' ? (
+      {view === 'log' ? (
+        <DeviceActivity events={events} />
+      ) : view === 'move' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)' }}>Send to:</div>
           <button disabled={busy} onClick={() => move({ stationId: 'hive' }, 'Hive')} style={destBtn}>🏠 Hive (in stock)</button>
@@ -861,6 +866,22 @@ function DeviceActionSheet({ suiteId, device, onClose, onDone }) {
         </Suspense>
       )}
     </Modal>
+  );
+}
+
+// A device's full activity log (moves, status changes, checks, creation) — newest first.
+function DeviceActivity({ events }) {
+  if (events === null) return <Loading />;
+  if (!events.length) return <Empty>No activity yet for this device.</Empty>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {events.map((e) => (
+        <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--hairline)' }}>
+          <span style={{ fontSize: 13 }}>{feedText(e)}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }} title={new Date(e.at).toLocaleString()}>{timeAgo(e.at)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

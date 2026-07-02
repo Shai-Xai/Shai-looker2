@@ -884,7 +884,8 @@ function mount(app, { db, auth }) {
     const d = findDeviceByCode(su.id, code);
     if (!d) return res.status(404).json({ error: `No device matches “${code}” at this event.`, code });
     const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE device_id=? AND status='open'").get(d.id).c;
-    res.json({ device: deviceRow(d), openIssues });
+    const events = sql.prepare('SELECT * FROM eventops_device_events WHERE device_id=? ORDER BY at DESC LIMIT 20').all(d.id).map(eventRow);
+    res.json({ device: deviceRow(d), openIssues, events });
   });
 
   // A staff member moves a device (attributed to them). Requires their staffId.

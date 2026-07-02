@@ -411,6 +411,22 @@ test('portal reflects per-staff permissions: login returns canMove/canCheckpoint
   assert.equal(ok.code, 200);
 });
 
+test('portal scan returns the device activity log', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar', kind: 'bar' } }).body.station;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'A1', qrCode: 'A1' } }).body.device;
+  call(r['POST /api/eventops/suites/:suiteId/move'], { user: owner, params: P, body: { deviceId: dev.id, stationId: station.id } });
+  const KP = { suiteId: suite.id, token: call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body.token };
+
+  const scan = call(r['POST /api/eventops/portal/:suiteId/:token/scan'], { params: KP, body: { code: 'A1' } });
+  assert.ok(Array.isArray(scan.body.events) && scan.body.events.length >= 2, 'scan returns the event history');
+  assert.ok(scan.body.events.some((e) => e.kind === 'create'));
+  assert.ok(scan.body.events.some((e) => e.kind === 'move' && e.toStation === 'Bar'));
+});
+
 test('map: stations carry scale/rotation + an open-issue marker count', () => {
   const r = mount();
   const { entity, suite, owner, admin } = seedEvent();
