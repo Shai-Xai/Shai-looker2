@@ -33,9 +33,19 @@ export default function EventOpsScanner({ onCode, onClose, onDone, doneLabel = '
           const mod = await import('html5-qrcode');
           if (cancelled) return;
           setCamState('starting');
-          const inst = new mod.Html5Qrcode(REGION_ID, { verbose: false });
+          const inst = new mod.Html5Qrcode(REGION_ID, {
+            verbose: false,
+            // Prefer the browser's native, GPU-accelerated detector where available
+            // (Android Chrome) — much faster/steadier than the JS fallback.
+            useBarCodeDetectorIfSupported: true,
+          });
           scannerRef.current = inst;
-          await inst.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 170 } },
+          // A big SQUARE scan box (~80% of the viewfinder) so a QR doesn't have to be
+          // squeezed into a small rectangle — the #1 cause of "it won't read on my phone".
+          const qrbox = (vw, vh) => { const s = Math.round(Math.min(vw, vh) * 0.8); return { width: s, height: s }; };
+          await inst.start(
+            { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            { fps: 15, qrbox, experimentalFeatures: { useBarCodeDetectorIfSupported: true } },
             (decoded) => emit(decoded), () => {});
           if (!cancelled) setCamState('live');
         } catch { if (!cancelled) setCamState('unavailable'); }
@@ -120,7 +130,7 @@ export default function EventOpsScanner({ onCode, onClose, onDone, doneLabel = '
               <div id={REGION_ID} style={region} />
               {camState !== 'live' && <div style={regionMsg}>{camState === 'starting' ? 'Starting camera…' : '📷 Camera unavailable — type the code below.'}</div>}
             </div>
-            {camState === 'live' && <p style={hintStyle}>Point at the QR code or barcode</p>}
+            {camState === 'live' && <p style={hintStyle}>Fill the box with the QR — hold steady ~15&nbsp;cm away. Can’t read it? Type the code below.</p>}
           </>
         ) : (
           <div>
