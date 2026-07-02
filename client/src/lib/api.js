@@ -274,7 +274,8 @@ export const api = {
   getGithubConfig: () => fetch('/api/admin/github').then(json),
   saveGithubConfig: (b) => fetch('/api/admin/github', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   adminUpdateTicket: (id, b) => fetch(`/api/admin/tickets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
-  adminTicketComment: (id, body) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
+  adminTicketComment: (id, body, visibility) => fetch(`/api/admin/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, visibility }) }).then(json),
+  myTicketComment: (id, body) => fetch(`/api/my/tickets/${id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }).then(json),
   adminRedraftTicket: (id) => fetch(`/api/admin/tickets/${id}/redraft`, { method: 'POST' }).then(json),
   // Custom (client-owned) sets
   getRoles: () => fetch('/api/admin/roles').then(json),
