@@ -102,6 +102,28 @@ at it.
 
 ---
 
+### 7. CI-gated deploys (strongly recommended)
+Out of the box Render's **Auto-Deploy** redeploys the moment `main` is pushed —
+*before* GitHub Actions finishes, so broken code can go live with a red test
+suite. The CI workflow already contains a `deploy` job that triggers Render
+only after lint + tests + build are green. Activate it once (5 minutes):
+
+1. Render → `howler-pulse` → **Settings → Deploy Hook** → copy the URL.
+2. GitHub repo → **Settings → Secrets and variables → Actions** → new secret
+   `RENDER_DEPLOY_HOOK` = that URL.
+3. Render → **Settings** → turn **Auto-Deploy OFF**.
+
+From then on every push to `main` deploys only after CI passes. (Until the
+secret is set, the job skips harmlessly and Auto-Deploy keeps working as
+before.)
+
+### 8. Ops alerts (know when the night went wrong)
+Set `OPS_SLACK_WEBHOOK_URL` to a **Howler-internal** Slack incoming webhook.
+Backup failures, failed scheduled digests, email delivery failures and
+unhandled errors then post to that channel (throttled to one per kind per
+15 min) instead of dying quietly in the Render log stream. Without it,
+everything still logs to stdout as before.
+
 ## Pre-production checklist
 - [ ] **Rotate the Looker API3 secret** (it was shared in chat during dev) and set the new one.
 - [ ] Strong `SESSION_SECRET` and admin password.

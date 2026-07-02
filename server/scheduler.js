@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const ROLES = ['exec', 'marketing', 'finance', 'ops'];
 
-function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLenses, recordDigest, feedbackUrl, replyTo }) {
+function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLenses, recordDigest, feedbackUrl, replyTo, notifyOps }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -256,6 +256,10 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       // advanced / 'once' retired) — here we only record the outcome.
       sql.prepare('UPDATE scheduled_jobs SET last_run_at=?, last_status=?, updated_at=? WHERE id=?')
         .run(now(), `${result.status}: ${result.detail}`.slice(0, 300), now(), job.id);
+      // A failed scheduled digest used to die silently in last_status — raise ops.
+      if (result.status === 'error' && notifyOps) {
+        try { notifyOps(`Scheduled digest failed — "${job.title || job.role}" for ${db.getEntity(job.entityId)?.name || job.entityId}: ${result.detail}`); } catch { /* alerting must never break the tick */ }
+      }
     }
     return result;
   }

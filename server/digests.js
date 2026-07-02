@@ -8,7 +8,7 @@
 // VERBATIM out of index.js — collaborators arrive as injected deps.
 const crypto = require('crypto');
 
-module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView }) {
+module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps }) {
   // ─── Digest history + feedback (the knowledge-base loop) ─────────────────────
   function digestFbSecret() { let s = db.getSetting('digest_fb_secret', ''); if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('digest_fb_secret', s); } return s; }
   function signDigestToken(o) { const p = Buffer.from(JSON.stringify(o)).toString('base64url'); const sig = crypto.createHmac('sha256', digestFbSecret()).update(p).digest('base64url').slice(0, 16); return `${p}.${sig}`; }
@@ -132,6 +132,6 @@ module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging,
     res.json({ prefs: db.getDigestPrefs(req.params.id) });
   });
 
-  const sched = require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES, recordDigest: recordDigestHistory, feedbackUrl: digestFeedbackUrl, replyTo: digestReplyTo });
+  const sched = require('./scheduler').mount(app, { db, auth, mailer, messaging, push, generateContent: buildDigestContent, roleLenses: ROLE_LENSES, recordDigest: recordDigestHistory, feedbackUrl: digestFeedbackUrl, replyTo: digestReplyTo, notifyOps });
   return { whatsappDigestFor: sched && sched.whatsappDigestFor }; // for the WhatsApp Owl scheduler
 };

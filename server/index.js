@@ -49,6 +49,8 @@ const app = express();
 // behaviour there (the platform restarts; SQLite is on a persistent disk).
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', (reason && reason.stack) || reason);
+  // Raise ops (throttled) — these used to die invisibly in the log stream.
+  try { require('./ops').alert('process', `unhandledRejection: ${(reason && reason.message) || reason}`); } catch { /* never crash the net */ }
 });
 
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
@@ -105,7 +107,7 @@ auth.seedAdmin();
 // git history to summarise). Idempotent — each entry is applied exactly once.
 require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
-mailer.init({ db });
+mailer.init({ db, notifyOps: (m) => ops.alert('mailer', m) });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
@@ -138,7 +140,12 @@ osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) }), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+// Health touches SQLite — a wedged DB/disk must fail the check (Render restarts
+// on failing health), not report ok while every real request errors.
+app.get('/health', (_req, res) => {
+  try { db.db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
+  catch (e) { res.status(500).json({ status: 'db_error', error: e.message }); }
+});
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 // publicUser + the user's client(s) (name + logo) for header branding.
@@ -2625,7 +2632,7 @@ function recentMessages(entityId, userId, limit = 6) {
 // Disposable module: /df feedback pages, in-app digest archive, the preference-
 // learning loop, and the scheduler mount (recurring digest delivery). Mounted
 // here, after its content builder (buildDigestContent) + role lenses exist.
-waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView }) || {}).whatsappDigestFor;
+waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
 
 // Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
 require('./onboarding').mount(app, { db, auth });

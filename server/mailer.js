@@ -19,9 +19,11 @@
 let db = null;
 let lastError = '';
 let lastSentAt = '';
+let notifyOps = null; // optional ops-alert hook (server/ops.js) — failures page a human
 
 function init(deps) {
   db = deps.db;
+  if (deps.notifyOps) notifyOps = deps.notifyOps;
   // System-wide send log: every email the mailer attempts (sent / failed /
   // skipped) with its kind + client, so admins get one place to audit all
   // outbound mail. Survives restarts. Owned by this module; drop mail_log to
@@ -140,6 +142,9 @@ async function send({ to, subject, html, text, fromName, kind = 'other', entity 
     lastError = err.message;
     log(recipients.join(', '), subject, 'failed', err.message, kind, entity);
     console.error(`[mailer] FAILED "${subject}" → ${recipients.join(', ')}: ${err.message}`);
+    // Raise ops (throttled per kind in ops.js) — a Resend outage during a digest
+    // window or campaign blast should page a human, not just fill mail_log.
+    if (notifyOps) try { notifyOps(`Email send failed (${kind}): ${err.message}`); } catch { /* never break a send */ }
     return { ok: false, error: err.message };
   }
 }

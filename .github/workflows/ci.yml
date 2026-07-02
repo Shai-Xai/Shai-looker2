@@ -42,3 +42,30 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+  # Deploy to Render ONLY after lint + tests + build are green. This is the
+  # CI gate the technical review flagged: Render's own autoDeploy fires the
+  # moment main is pushed, before these jobs finish — a red suite and a live
+  # deploy can coexist. To activate the gate (5 minutes, see DEPLOY.md
+  # "CI-gated deploys"):
+  #   1. Render → howler-pulse → Settings → Deploy Hook → copy the URL
+  #   2. GitHub → repo Settings → Secrets and variables → Actions → new secret
+  #      RENDER_DEPLOY_HOOK = that URL
+  #   3. Render → Settings → turn Auto-Deploy OFF (or set autoDeploy: false in
+  #      render.yaml and re-sync the blueprint)
+  # Until the secret exists this job skips harmlessly, so merging it is safe.
+  deploy:
+    name: Deploy (Render, gated on green CI)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK secret not set — skipping (Render autoDeploy is still driving deploys, UNGATED by CI)."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" > /dev/null && echo "Render deploy triggered after green CI."
