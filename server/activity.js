@@ -142,6 +142,36 @@ module.exports = function createActivity({ sql, now, J, getSuite, getEntity, get
       totals: { views: totalViews, actions: totalActions }, topUsers, topDashboards, topFeatures,
     };
   }
+  // Daily engagement series for the admin charts: DISTINCT users per day — the
+  // platform total, split by client (a view's suite → its entity; an audited
+  // action carries entity_id directly) and split by feature (audit action key).
+  // Top 7 series each; the rest are omitted with a count (distinct users can't
+  // be summed into an honest "Other" line).
+  function dailyEngagement(days = 30) {
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const dayList = []; for (let i = days - 1; i >= 0; i--) dayList.push(new Date(Date.now() - i * 864e5).toISOString().slice(0, 10));
+    const idx = new Map(dayList.map((d, i) => [d, i]));
+    const suiteEnt = new Map();
+    const entOf = (sid) => { if (!sid) return ''; if (!suiteEnt.has(sid)) suiteEnt.set(sid, getSuite(sid)?.entityId || ''); return suiteEnt.get(sid); };
+    const clientSets = new Map(); const featSets = new Map();
+    const totalSets = dayList.map(() => new Set());
+    const bump = (map, key, day, userId, extra) => { const i = idx.get(day); if (i === undefined || !key) return; let e = map.get(key); if (!e) { e = { sets: dayList.map(() => new Set()), ...extra }; map.set(key, e); } e.sets[i].add(userId); };
+    for (const r of sql.prepare('SELECT substr(at,1,10) AS day, user_id, suite_id FROM user_views WHERE at>=?').all(since)) {
+      const i = idx.get(r.day); if (i !== undefined) totalSets[i].add(r.user_id);
+      bump(clientSets, entOf(r.suite_id), r.day, r.user_id);
+    }
+    for (const r of sql.prepare('SELECT substr(at,1,10) AS day, user_id, entity_id, action, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY day, user_id, entity_id, action').all(since)) {
+      const i = idx.get(r.day); if (i !== undefined) totalSets[i].add(r.user_id);
+      bump(clientSets, r.entity_id, r.day, r.user_id);
+      bump(featSets, r.action, r.day, r.user_id, { label: r.label || r.action });
+    }
+    const top = (map, nameOf, n = 7) => {
+      const list = [...map.entries()].map(([key, e]) => ({ key, name: nameOf(key, e), series: e.sets.map((s) => s.size), total: e.sets.reduce((t, s) => t + s.size, 0) })).sort((a, b) => b.total - a.total);
+      return { series: list.slice(0, n), omitted: Math.max(0, list.length - n) };
+    };
+    return { days: dayList, total: totalSets.map((s) => s.size), clients: top(clientSets, (id) => getEntity(id)?.name || id), features: top(featSets, (k, e) => e.label || k) };
+  }
+
   // Clients (entities) with no client-side engagement in `days` — last login /
   // dashboard open / audited action across their non-admin logins. `never` = none ever.
   function inactivity(days = 30, limit = 60) {
@@ -203,7 +233,7 @@ module.exports = function createActivity({ sql, now, J, getSuite, getEntity, get
 
   return {
     recordView, viewProfile, recentViewsForUser, usageByClientForUser, lastViewForUsers,
-    recentUsageForUser, adminActivityReport, inactivity,
+    recentUsageForUser, adminActivityReport, dailyEngagement, inactivity,
     recordAction, listActionsForUser, lastActionsForUsers,
   };
 };

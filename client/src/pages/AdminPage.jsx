@@ -1941,6 +1941,19 @@ function ActivityReport() {
               </div>
             </div>
           </div>
+          {rep.daily && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div style={{ ...card, flex: '1 1 300px' }}><div style={head}>Daily active users</div>
+                <UsageChart days={rep.daily.days} series={[{ name: 'Active users', series: rep.daily.total }]} />
+              </div>
+              <div style={{ ...card, flex: '1 1 300px' }}><div style={head}>Daily users by client{rep.daily.clients.omitted ? ` · top 7 (${rep.daily.clients.omitted} more)` : ''}</div>
+                <UsageChart days={rep.daily.days} series={rep.daily.clients.series} />
+              </div>
+              <div style={{ ...card, flex: '1 1 300px' }}><div style={head}>Daily users by feature{rep.daily.features.omitted ? ` · top 7 (${rep.daily.features.omitted} more)` : ''}</div>
+                <UsageChart days={rep.daily.days} series={rep.daily.features.series} />
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div style={card}><div style={head}>Top users</div>
               {rep.topUsers.length ? rep.topUsers.map((u) => row(<span title={u.name}>{u.name}{u.role === 'admin' ? ' · Howler' : ''}</span>, u.total)) : <Muted>No activity yet.</Muted>}
@@ -1975,6 +1988,78 @@ function ActivityReport() {
         </>
         );
       })()}
+    </div>
+  );
+}
+
+// Small multi-line chart for the activity report (daily distinct users).
+// Colors come from a CVD-validated categorical palette assigned in FIXED slot
+// order (per the series' rank at load — a series keeps its color while shown);
+// identity is never color-alone: legend + hover tooltip name every series.
+const VIZ_LIGHT = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
+const VIZ_DARK = ['#3987e5', '#199e70', '#c98500', '#008300', '#9085e9', '#e66767', '#d55181', '#d95926'];
+function UsageChart({ days, series }) {
+  const [hover, setHover] = useState(null); // day index or null
+  const dark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const COLORS = dark ? VIZ_DARK : VIZ_LIGHT;
+  if (!days?.length || !series?.length) return <Muted>Nothing recorded yet.</Muted>;
+  const W = 640, H = 170, PAD = { l: 26, r: 8, t: 8, b: 18 };
+  const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
+  const maxV = Math.max(1, ...series.flatMap((s) => s.series));
+  const yMax = maxV <= 4 ? 4 : Math.ceil(maxV / 5) * 5;
+  const x = (i) => PAD.l + (days.length === 1 ? iw / 2 : (i / (days.length - 1)) * iw);
+  const y = (v) => PAD.t + ih - (v / yMax) * ih;
+  const path = (vals) => vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const fmtDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
+  const ticks = [0, Math.round(yMax / 2), yMax];
+  const step = days.length > 1 ? iw / (days.length - 1) : iw;
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Daily users chart">
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
+            <text x={PAD.l - 5} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill="var(--muted)">{t}</text>
+          </g>
+        ))}
+        {[0, Math.floor((days.length - 1) / 2), days.length - 1].filter((v, i, a) => a.indexOf(v) === i).map((i) => (
+          <text key={i} x={x(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle'} fontSize="10" fill="var(--muted)">{fmtDay(days[i])}</text>
+        ))}
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={PAD.t + ih} stroke="var(--muted)" strokeWidth="1" strokeDasharray="3 3" />}
+        {series.map((s, si) => (
+          <path key={s.key || s.name} d={path(s.series)} fill="none" stroke={COLORS[si % COLORS.length]} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        ))}
+        {hover != null && series.map((s, si) => (
+          <circle key={`h${si}`} cx={x(hover)} cy={y(s.series[hover])} r="4" fill={COLORS[si % COLORS.length]} stroke="var(--card)" strokeWidth="2" />
+        ))}
+        {days.map((d, i) => (
+          <rect key={d} x={x(i) - step / 2} y={0} width={step} height={H} fill="transparent"
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onTouchStart={() => setHover(i)} />
+        ))}
+      </svg>
+      {hover != null && (
+        <div style={{ position: 'absolute', top: 4, [hover > days.length / 2 ? 'left' : 'right']: 8, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 8, padding: '6px 9px', fontSize: 11.5, pointerEvents: 'none', boxShadow: '0 2px 10px rgba(0,0,0,0.12)', zIndex: 2 }}>
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>{fmtDay(days[hover])}</div>
+          {[...series].map((s, si) => ({ s, si })).sort((a, b) => b.s.series[hover] - a.s.series[hover]).slice(0, 8).map(({ s, si }) => (
+            <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: COLORS[si % COLORS.length], flexShrink: 0 }} />
+              <span style={{ color: 'var(--text)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+              <b style={{ marginLeft: 'auto', paddingLeft: 8 }}>{s.series[hover]}</b>
+            </div>
+          ))}
+        </div>
+      )}
+      {series.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 12px', marginTop: 6 }}>
+          {series.map((s, si) => (
+            <span key={s.key || s.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: COLORS[si % COLORS.length] }} />
+              <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.name}>{s.name}</span>
+              <span style={{ color: 'var(--muted)' }}>{s.total ?? s.series.reduce((a, b) => a + b, 0)}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

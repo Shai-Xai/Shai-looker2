@@ -336,7 +336,7 @@ app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: 
 app.get('/api/admin/users/activity-report', auth.requireAdmin, (req, res) => {
   const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
   const inact = db.inactivity(days);
-  res.json({ ...db.adminActivityReport({ days }), inactiveClients: inact.clients, inactiveUsers: inact.users });
+  res.json({ ...db.adminActivityReport({ days }), daily: db.dailyEngagement(Math.min(90, days)), inactiveClients: inact.clients, inactiveUsers: inact.users });
 });
 
 // Friendly labels for the merged activity feed's non-audit sources.
