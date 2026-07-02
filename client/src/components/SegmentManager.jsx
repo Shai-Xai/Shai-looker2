@@ -87,7 +87,15 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
       onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
   }
 
-  const refresh = (s) => { setBusyId(s.id); api.previewSegment(entityId, s.id).then(load).catch(() => {}).finally(() => setBusyId(null)); };
+  // A failed count must SAY so — swallowing the error made a broken segment's
+  // Refresh look like the button did nothing.
+  const refresh = (s) => {
+    setBusyId(s.id);
+    setSyncMsg((m) => ({ ...m, [s.id]: '' }));
+    api.previewSegment(entityId, s.id).then(load)
+      .catch((e) => setSyncMsg((m) => ({ ...m, [s.id]: `✗ Couldn’t count this segment — ${e.message || 'something went wrong'}. Open Edit to check its source tile/filters.` })))
+      .finally(() => setBusyId(null));
+  };
   const del = (s) => { if (confirm(`Delete segment “${s.name}”?`)) api.deleteSegment(entityId, s.id).then(load); };
   const viewPeople = (s) => { setViewing({ segment: s, data: null }); api.segmentMembers(entityId, s.id).then((d) => setViewing({ segment: s, data: d })).catch((e) => setViewing({ segment: s, data: { error: e.message } })); };
   const syncMeta = async (s) => {
