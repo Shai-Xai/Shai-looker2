@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Outlet, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import VersionStamp from '../components/VersionStamp.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useProfile } from '../lib/profile.jsx';
@@ -860,6 +861,7 @@ function ProfileFooter({ user, isAdmin, activeEntityId, brand, onNavigate }) {
         </span>
         <span style={{ color: 'var(--muted)', fontSize: 14, flexShrink: 0 }}>⋯</span>
       </button>
+      <VersionStamp />
     </div>
   );
 }

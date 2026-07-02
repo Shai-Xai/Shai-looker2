@@ -30,6 +30,7 @@ import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { languageList } from '../lib/language.js';
 import { makeCombinedKey, parseCombinedKey } from '../lib/combinedFilters.js';
+import VersionStamp from '../components/VersionStamp.jsx';
 import { GUIDES } from '../lib/guides.js';
 
 // Icon control: an emoji, or an uploaded image (downscaled to a small data-URL).
@@ -2677,6 +2678,7 @@ function AdminProfileFooter() {
         </span>
         <span style={{ color: 'var(--muted)', fontSize: 14, flexShrink: 0 }}>⋯</span>
       </button>
+      <VersionStamp />
     </div>
   );
 }

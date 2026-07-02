@@ -379,6 +379,9 @@ export const api = {
       body: JSON.stringify(payload),
     }).then(json),
 
+  // The running build's version stamp (shown in the profile footer).
+  version: () => fetch('/api/version').then(json),
+
   // Drill-down: run a Looker drill link
   drill: (url, suiteId, combinedFilters = []) =>
     fetch('/api/drill', {
