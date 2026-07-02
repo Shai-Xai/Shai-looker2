@@ -46,10 +46,14 @@ consumers for the first time.
    gains a client-editable **event knowledge** section (FAQs, policies, richer
    descriptions) that feeds the assistant, supplemented by reading the
    promoter's website itself.
-2. **Checkout v1 = deep link.** The assistant recommends and answers; purchase
-   happens via a prefilled cart / ticket deep-link into Howler checkout, tagged
-   (UTM + promo where relevant) so Pulse measures conversion. In-widget headless
-   checkout is phase 3, once the conversion-lift thesis has numbers behind it.
+2. **Checkout v1 = deep link, and the links are *supplied*.** Howler provides
+   ready-made checkout links per ticket/add-on for now — no link-construction
+   API needed. Each catalogue entry stores its link (entered in the same
+   admin/self-service surface as the knowledge base); Pulse appends UTM + promo
+   params when handing it to a fan so conversion stays measurable. The v1
+   limitation is accepted: the link lands the fan on the right ticket, they
+   pick quantity there — programmatic cart-prefill (quantities, multi-item
+   bundles in one cart) is phase 2, in-widget headless checkout phase 3.
 3. **Branding.** It is visibly **the Howler Owl 🦉** for now. A per-promoter
    branded assistant (their name/mascot on the same brain) is a future layer —
    the widget's look already flows from a per-site `branding` blob so this is a
@@ -100,8 +104,10 @@ event-site traffic it's ruinous for cost and latency. Split it:
   - `searchKnowledge(question)` — promoter-authored FAQs/policies + approved
     site content; answers are **quoted from this corpus, never composed from
     thin air**.
-  - `buildCheckoutLink(items, promo?)` — the deterministic deep-link into
-    Howler checkout, UTM-tagged for conversion tracking.
+  - `getCheckoutLink(item, promo?)` — returns the item's **stored,
+    Howler-supplied** checkout link with UTM (+ validated promo) params
+    appended. The Owl never constructs or edits URLs itself — it can only hand
+    out links that exist in the catalogue.
   - `logInterest(kind, payload)` — feeds the insight flywheel (§6).
 
   No `askData`, no dashboards, no organiser tools — the fan toolbox is a
@@ -188,8 +194,9 @@ fan_pages      id, site_id, url_pattern, page_type(home|lineup|artist|tickets|
                source(crawl|manual), status(suggested|confirmed|dismissed)
 fan_knowledge  id, entity_id, suite_id?, kind(faq|policy|info), question?, body,
                position, source(manual|crawl_suggested), updated_by/at
-fan_catalogue  cached slice of the Howler API per suite: ticket/addon/bundle,
-               label, price, currency, deep_link, availability_bucket, public(bool)
+fan_catalogue  per-suite offer list: ticket/addon/bundle, label, price, currency,
+               deep_link (Howler-SUPPLIED, admin/client-entered — not derived),
+               availability_bucket (API-fed, cached), public(bool)
 fan_sessions   id, site_id, anon_id, page_ctx, started_at, ua_hash
 fan_messages   id, session_id, role, body, tool_calls(json), at
 fan_events     id, session_id, kind(ribbon_view|chat_open|reco_shown|reco_click|
@@ -257,9 +264,12 @@ Deliberately opposite ends of the spectrum:
 
 ## 10. Risks
 
-- **Howler API surface** (holds, cart-prefill formats, per-market checkout
-  differences) — audit against the Howler app's headless integration before
-  committing phase-2/3 shapes.
+- **Howler API surface** — phase 1 is insulated (links are supplied, inventory
+  is read-only), but holds, programmatic cart-prefill and per-market checkout
+  differences gate phases 2–3; audit against the Howler app's headless
+  integration before committing those shapes. Supplied links can also rot
+  (tier renamed/replaced) — the catalogue should periodically HEAD-check its
+  links and flag dead ones to the promoter.
 - **Wrong answers to consumers** → the §2.3 non-negotiables; policy answers are
   quotes; measure answer accuracy in pilot before widening.
 - **On-sale traffic spikes** → cacheable ribbon, LLM budget + ribbon-only
