@@ -256,6 +256,52 @@ the tree, enrol by `node_id`), J3 (evaluate decision nodes off existing
 open/click signals). True "bought" branching gated on the Howler integration
 (4.1). Effort: L (staged).
 
+### 4.8 💡 Google Drive integration — the Owl reads third-party files
+*"Google Drive integration so the Owl can read third-party files."* (Shai,
+2026-07-02)
+Let a client (or an AM on their behalf) connect Google Drive and point the Owl
+at the files their event actually runs on — budgets, marketing plans,
+sponsor decks, settlement sheets — so answers can ground on them alongside
+ticketing data. Today's nearest thing is `owlUploads.js` (CSV upload or a
+*publicly published* Sheet CSV link) + `owlIngest.js` (emailed PDFs); there is
+no Drive API/OAuth anywhere.
+**Shape:** per-entity Google OAuth connection (write-only tokens, dual-surface:
+Admin → client → Integrations *and* client Settings), a file/folder picker for
+what the Owl may see (explicit allow, never whole-Drive), then staged depth:
+- **P1 — private Sheets via the Drive API** (M): replace the publish-to-web
+  hack; a picked Sheet lands in the existing `owl_uploads` table machinery and
+  `askUpload` just works, now with live private data.
+- **P2 — Docs/PDF/Slides text extraction into the corpus** (M–L): extracted
+  text becomes Owl-recallable with per-file citations — this is a concrete
+  on-ramp to the brief's **Recall (6c)** layer.
+- **P3 — watched folders** (M): new files auto-ingest (e.g. a settlements
+  folder mirrors what CC-the-Owl email ingestion does today).
+Ties to `owlUploads.js`, `owlIngest.js`, `owlTools.js`, Extraction/Recall
+(1.1 remaining). Effort: L total, but P1 stands alone.
+
+### 4.9 💡 Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
+*"Deep Meta integration."* (Shai, 2026-07-02)
+Go beyond today's audience-sync + organic metrics to the full paid loop.
+Today: `meta.js` (Custom Audience sync via a hand-pasted long-lived token +
+ad-account id) and `socialMetrics.js` (organic page/IG insights). Missing, in
+value order:
+- **P1 — Paid performance ingestion** (M–L): ad-account insights (spend,
+  impressions, clicks, conversions, ROAS) per campaign/adset → dashboard
+  tiles, the Goals `social_paid` adapter (GOALS P4), and campaign reports —
+  closing the loop on the audiences we already push. The Owl answers "what's
+  my ROAS this week".
+- **P2 — Meta OAuth connect** (M): a proper app-login flow replacing pasted
+  tokens (token refresh, clearer client self-service); natural moment to do
+  **4.6 multi ad-accounts** (`ad_connections`) so multi-brand clients work.
+- **P3 — Lookalike audiences** (S–M): spawn lookalikes from synced Custom
+  Audiences in the Ad audiences hub.
+- **P4 — Conversions API** (M): send purchase/click events back (promo-code +
+  tracked-link signals now; full purchase signal once Howler 4.1 lands) so
+  Meta optimises toward real buyers.
+- **P5 — publishing** (posts/ads) — the act-layer end, behind approvals (4.3).
+Ties to `meta.js`, `socialMetrics.js`, `AudienceHub.jsx`, goals/forecast,
+campaign ROI. Effort: XL staged; P1 alone is the biggest analytics win.
+
 ### 4.4 💡 Chotu Links integration
 *"Integrate Chotu Links into the platform."*
 Integrate Chotu Links (link shortening / tracking) so campaign + share links are
@@ -294,17 +340,15 @@ permission model. Effort: M–L. Unlocks commercial packaging.
 *(2026-07-02: still unbuilt; now also relevant to gating the public API/MCP
 surface (4.2) and the Owl per plan.)*
 
-### 5.3 💡 API costs per client (backend)
+### 5.3 ✅ API costs per client (backend)
 *"Ability to see the API costs per client in the backend."*
 Attribute AI (Anthropic) + other metered API usage to each client and show
-cost/usage in the admin console — per client, per period. Log tokens/cost at each
-`insights.js` / assistant call keyed by entity; aggregate for an admin report.
-Effort: M. Informs tier pricing (5.2) and margins.
-*(2026-07-02: most raw data now exists — `owl_messages` already logs
-tokens/cost per turn and `billing.js` has the rate/rollup machinery; remaining
-work is per-entity logging across the other `insights.js` call sites +
-an admin aggregation report. Now a ~1-day build, and more urgent: the Owl and
-digests burn real Anthropic spend daily.)*
+cost/usage in the admin console — per client, per period. Effort: M.
+**Status:** ✅ — shipped 2026-07-02 (parallel session): `server/aiUsage.js`
+wraps EVERY Anthropic client via `insights.clientFor` (no call site can forget
+to meter), attributes each call to entity + feature via AsyncLocalStorage, and
+serves the Admin → AI **Usage** report (per day / client / feature / model
+with estimated cost + metering start date). Informs tier pricing (5.2).
 
 ---
 
@@ -367,8 +411,8 @@ Added in the 2026-07-02 reconcile (the 06-28→07-02 sprint):
 - **Ship the engine's missing client surfaces (cheap, visible):** 2.1 client
   "What's new" (bell + `/api/my/release-notes` + weekly email), social metrics
   as dashboard tiles (4.3), promote the journey builder off its sandbox (4.7).
-- **Commercial:** 5.3 (AI cost per client — now ~1 day on existing data) then
-  5.2 (tiers/entitlements).
+- **Commercial:** 5.2 (tiers/entitlements) — 5.3 cost visibility shipped
+  2026-07-02, so pricing now has real per-client cost data behind it.
 - **The flagship's distribution, not just its build:** 1.1 rollout — widen the
   Owl allowlist, first client A/B, Inventive cutover; then the Skills runtime
   (SKILLS_BRIEF P1) and Extraction/Recall (brief 6b/6c).
@@ -377,6 +421,9 @@ Added in the 2026-07-02 reconcile (the 06-28→07-02 sprint):
 - **Attribution thread:** Goals P2 (campaign goals + contribution,
   `docs/GOALS_P2_P3_SPEC.md`) + promo-code ROI on campaign reports — natural
   partners.
+- **Owl reads the client's world:** 4.8 Google Drive (P1 private Sheets is a
+  standalone M) and 4.9 deep Meta (P1 paid-performance ingestion) — both
+  raised 2026-07-02 as the felt gaps.
 - **Quick wins:** 2.3 client backgrounds, 3.3 dashboard prefetch, Slack
   inbound (`/api/inbound/slack`), status `/status` page.
 - **Hygiene:** close stale PRs #1/#2 + GitHub issues #6/#7 (both shipped);
