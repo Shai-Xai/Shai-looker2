@@ -188,8 +188,8 @@ button,a.btn{display:inline-block;background:#FF385C;color:#fff;border:none;bord
     const options = entities.map((e) => `<option value="${esc(e.id)}" ${e.enabled ? '' : 'disabled'}>${esc(e.name)}${e.enabled ? '' : ' — API access off (ask Howler)'}</option>`).join('');
     const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope']
       .map((k) => `<input type="hidden" name="${k}" value="${esc(req.query[k] || '')}">`).join('');
-    res.send(page('Connect to Pulse', `<h1>Connect “${esc(v.client.name)}” to Pulse?</h1>
-      <p>It will be able to <b>read</b> the chosen client’s Pulse data — dashboards, live metrics, audience sizes, campaign results and goals. It can’t send campaigns or change anything.</p>
+    res.send(page('Meet your Owl', `<h1>🦉 Connect “${esc(v.client.name)}” to your Owl?</h1>
+      <p>Your AI assistant becomes <b>the Owl</b> for the chosen client — it can <b>read</b> that client’s Pulse data (dashboards, live metrics, audience sizes, campaign results and goals) and answer questions about it. It can’t send campaigns or change anything.</p>
       ${anyEnabled ? '' : '<p><b>API access is switched off for all your clients</b> — ask your Howler contact to enable it, then try again.</p>'}
       <form method="POST" action="/oauth/approve">${hidden}
         <label>Which client?</label><select name="entityId">${options}</select>

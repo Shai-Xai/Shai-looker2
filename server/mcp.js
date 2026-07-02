@@ -139,9 +139,11 @@ function mount(app, { apiKeys, core, rateLimit }) {
 
   // Fresh McpServer per request (stateless): tools close over THIS request's
   // principal, so nothing user-scoped outlives the response.
-  // Top-level guidance the client shows the model at connect time — steers it to
-  // the correct AND fast path (fewer, cheaper calls) before any tool is picked.
+  // Top-level guidance the client shows the model at connect time — the Owl
+  // persona (same voice as the in-app Owl, see insights.js/owlChat.js) plus the
+  // steering that picks the correct AND fast path before any tool is chosen.
   const INSTRUCTIONS = [
+    'You are the Owl 🦉 — Howler Pulse\'s data analyst — answering an event organiser\'s questions about THEIR OWN live event data through these tools. Speak as the Owl, not as "the Pulse API": first person, warm and direct, numbers-first, no fluff. Ground every figure in tool results — never invent or estimate data; if a number isn\'t reachable, say so plainly. You are read-only: you can look anything up, but you never change, send or delete anything.',
     'Pulse gives read-only access to ONE Howler client\'s live event data (dashboards, metrics, segments, campaigns, goals).',
     'Efficient workflow:',
     '1. Call pulse_get_me ONCE at the start to get the client + its events (suite ids). Reuse those ids; do not call it again.',
@@ -153,7 +155,8 @@ function mount(app, { apiKeys, core, rateLimit }) {
   ].join('\n');
 
   function buildServer(req) {
-    const server = new McpServer({ name: 'pulse', version: '1.0.0' }, { instructions: INSTRUCTIONS });
+    // `name` stays the stable machine id; `title` is what connector UIs display.
+    const server = new McpServer({ name: 'pulse', title: 'The Owl — Howler Pulse', version: '1.0.0' }, { instructions: INSTRUCTIONS });
     const base = `${req.protocol}://${req.get('host')}`;
     // OpenAI's search/fetch want a `url` on every result/document (ChatGPT only
     // builds a citation when url is a non-empty string). We don't have per-item

@@ -74,11 +74,14 @@ curl -H "Authorization: Bearer pulse_sk_…" https://your-pulse-domain/api/v1/me
 
 ### B. For AI assistants — the MCP connection
 
-Pulse speaks **MCP** (Model Context Protocol), the standard AI assistants use
-to work with tools. To connect Claude:
+Connecting an AI assistant puts **the Owl** — Pulse's data analyst — in your
+assistant: ask questions in plain language, get answers grounded in your live
+data. Pulse speaks **MCP** (Model Context Protocol), the standard AI
+assistants use to work with tools. To connect Claude:
 
 1. Make sure you're **logged into Pulse** in your browser.
-2. In Claude, add a **custom connector** (Settings → Connectors) with the URL
+2. In Claude, add a **custom connector** (Settings → Connectors). Name it
+   **The Owl 🦉** (that's who you'll be talking to), URL
    `https://your-pulse-domain/mcp`. Leave any *OAuth Client ID* /
    *Client Secret* fields **blank** — Claude registers itself automatically.
 3. Click **Connect**. A Pulse approval page opens: pick **which client** to
@@ -89,10 +92,10 @@ That's it — no keys to copy. Behind the scenes Pulse creates a named API key
 for the connection; you'll see it (e.g. *"Claude (connected 2026-07-01)"*) in
 Settings → Integrations, and revoking it there disconnects Claude instantly.
 
-Claude can now see tools like *list dashboards*, *get metric*,
-*get campaign report* — and will use them to answer questions about your data.
-Good first prompt: *"Use the Pulse tools to give me a snapshot of how my next
-event is selling."*
+Claude now speaks as the Owl, with tools like *list dashboards*, *get metric*
+and *query data*. Good first prompt: *"Owl, give me a snapshot of how my next
+event is selling."* Others to try: *"revenue by ticket type, last 30 days"* ·
+*"how big is my VIP segment?"* · *"are my goals on pace?"*
 
 > **Developer note:** tools that take a plain Bearer header (scripts, some MCP
 > clients) can still just send `Authorization: Bearer pulse_sk_…` — the OAuth

@@ -604,6 +604,10 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **Connected AI assistants speak as the Owl** 🧪: connect Claude (or
+  ChatGPT) and it presents itself as **the Owl 🦉** — Pulse's data analyst — same persona
+  as in-app: warm, numbers-first, grounded in tool results, read-only. The connection
+  approval page and guide are Owl-branded; name the connector "The Owl" for the full effect.
 - **2026-07-02** — **API: query your data directly (no dashboard needed)** 🧪: connected
   tools and AI agents can now run **their own breakdowns** — any curated measure by any
   curated dimension, with filters and date ranges (`POST /api/v1/query` / the
