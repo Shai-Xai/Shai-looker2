@@ -105,11 +105,12 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // Live re-resolve (consent-aware reach) — same resolver the app's preview uses.
   async function segmentReach(user, id) {
     const entityId = entityOf(user);
-    getSegment(user, id); // 404 before the expensive resolve
+    const seg = getSegment(user, id); // 404 before the expensive resolve
     const r = await segmentsApi.resolveSegment(entityId, id, user);
     if (!r) throw new HttpError(404, 'Segment not found');
     const list = r.list || [];
-    return { id, count: list.length, reach: r.reach || { email: 0, sms: 0 }, noConsent: r.noConsent || 0, asOf: asOf() };
+    // Surface the event scope so a live re-resolution can't be mistaken for entity-wide.
+    return { id, count: list.length, reach: r.reach || { email: 0, sms: 0 }, noConsent: r.noConsent || 0, scope: scopeOf(seg.suiteId), asOf: asOf() };
   }
 
   // Campaign read shape: results counters without the audience list or the full
@@ -255,6 +256,10 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     const n = m[1].toLowerCase();
     return /claude/.test(n) ? 'claude' : /(chatgpt|openai|gpt)/.test(n) ? 'chatgpt' : 'api';
   };
+  // The resolved event scope of a write, surfaced in the response so a mismatch
+  // (e.g. a segment scoped to one event) is visible before a human approves a send.
+  // null = entity-wide (resolves across every event the client has).
+  const scopeOf = (suiteId) => { const s = String(suiteId || ''); if (!s) return null; const su = db.getSuite ? db.getSuite(s) : null; return { suiteId: s, event: su?.name || '' }; };
 
   async function createSegment(user, { name, filters, suiteId, folder } = {}) {
     if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
@@ -265,7 +270,9 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     const a = out.action;
     const sr = segmentsApi.createSegment({ entityId: entityOf(user), name: a.name, definition: a.draft, user, suiteId: suiteId || '', folder, via: viaOf(user) });
     if (!sr.ok) throw new HttpError(400, sr.error || 'The segment couldn’t be saved.');
-    return { segment: { id: sr.segment.id, name: sr.segment.name }, cohort: a.summary, count: a.count, reach: a.reach, asOf: asOf() };
+    // Surface the resolved event scope so the caller can confirm it before use — a
+    // segment scoped to one event never silently resolves across all of them.
+    return { segment: { id: sr.segment.id, name: sr.segment.name }, cohort: a.summary, count: a.count, reach: a.reach, scope: scopeOf(sr.segment.suiteId), asOf: asOf() };
   }
   async function draftCampaign(user, { goal, channel, segmentName, filters, name, ctaUrl, language, suiteId } = {}) {
     if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
@@ -279,12 +286,21 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     // in-app confirm), so the audience is visible + reusable in Engage.
     let audience = a.audience;
     if (audience && audience.mode === 'query') {
+      if (suiteId) audience = { ...audience, suiteId }; // scope the cohort to the event so it re-resolves scoped
       const sr = segmentsApi.createSegment({ entityId, name: `${a.name} audience`.slice(0, 120), definition: audience, user, suiteId: suiteId || '', via: viaOf(user) });
       if (sr.ok) audience = { mode: 'segment', segmentId: sr.segment.id };
     }
+    // The effective event scope of the audience — the campaign's own event if pinned,
+    // else the bound segment's own scope. Reflected onto the draft + surfaced in the
+    // response so a scope mismatch is visible before a human approves the send.
+    let scopeSuiteId = suiteId || '';
+    if (!scopeSuiteId && audience && audience.mode === 'segment' && segmentsApi.getSegmentDefinition) {
+      const d = segmentsApi.getSegmentDefinition(entityId, audience.segmentId);
+      if (d && d.suiteId) scopeSuiteId = d.suiteId;
+    }
     const config = {
       channel: a.channel, audience, subject: a.subject || '', body: a.body || '', ctaText: a.ctaText || '',
-      ctaUrl: a.ctaUrl || '', goal: a.goal || '', eventSuiteId: suiteId || '', campaignMode: 'once',
+      ctaUrl: a.ctaUrl || '', goal: a.goal || '', eventSuiteId: scopeSuiteId, campaignMode: 'once',
       language: a.language || '', contentMode: a.contentMode === 'blocks' ? 'blocks' : 'template',
       customHtml: '', blocks: a.blocks || [], theme: a.theme || {},
     };
@@ -292,7 +308,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     if (!r.ok) throw new HttpError(r.error === 'Not allowed' ? 403 : 400, r.error || 'The draft couldn’t be created.');
     return {
       campaign: { id: r.action.id, title: r.action.title, status: r.action.status, channel: a.channel, subject: a.subject || '' },
-      audience: a.summary, reach: a.reach, note: 'Draft only — a human reviews, approves and sends it in Pulse (Engage).', asOf: asOf(),
+      audience: a.summary, reach: a.reach, scope: scopeOf(scopeSuiteId), note: 'Draft only — a human reviews, approves and sends it in Pulse (Engage).', asOf: asOf(),
     };
   }
 

@@ -716,7 +716,10 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
     if (!Object.keys(filters).length) return refuse('no_cohort', 'Tell me the cohort to capture — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
     const name = String(args.name || '').trim().slice(0, 120) || desc.join(' · ') || 'Segment';
-    const draft = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+    // Bake the current event (suite) scope into the draft so the SAVED segment is
+    // scoped to it on every later resolution — the count previewed here matches what
+    // reach checks + campaigns resolve later, not just at creation.
+    const draft = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters, suiteId: suiteId || '' };
     // Preview the size + reach (server-side; the list itself never enters the chat).
     let count = null; let reach = null;
     try { const r = await resolveQueryAudience({ entityId, definition: draft, user, suiteId }); if (r && !r.error) { count = r.count; reach = r.reach; } } catch { /* preview is best-effort */ }
@@ -788,7 +791,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         desc.push(`${d.label} = ${val}`);
       }
       if (!Object.keys(filters).length) return refuse('no_cohort', 'Who should this go to? Name a saved segment, or give a cohort — e.g. ticket type VIP, city Cape Town, age 18 to 25.');
-      audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters };
+      audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters, suiteId: suiteId || '' };
       summary = desc.join(' · ');
       try { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } catch { /* best-effort preview */ }
     }

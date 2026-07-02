@@ -166,9 +166,10 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
       if (!set) return null;
       // One-level tree: top-level dashboards carry their sub-dashboards (tabs)
       // in `children`. An orphaned parent reference renders top-level.
-      const nodes = (set.dashboards || []).map(({ id, parentId }) => {
+      const nodes = (set.dashboards || []).map(({ id, parentId, displayName }) => {
         const d = store.get(id);
-        return d && !excluded.has(id) && visible(set.id, id) && { id: d.id, title: d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
+        // Per-Set display-name override wins in the nav (sidebar/top-nav); blank falls back to the native title.
+        return d && !excluded.has(id) && visible(set.id, id) && { id: d.id, title: (displayName || '').trim() || d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
       }).filter(Boolean);
       const valid = new Set(nodes.map((n) => n.id));
       const dashboards = nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
