@@ -154,6 +154,19 @@ test('preview page: serves the widget for a valid key, hints on off/unknown, rej
   assert.equal(r.status, 200);
 });
 
+test('website ingest: gated like config (admin / own entity), needs a real URL + configured AI', async () => {
+  const e = h.makeEntity('FanIngest Co', 'faningest-org');
+  const other = h.makeEntity('FanIngest2 Co', 'faningest2-org');
+  const client = h.makeClient('fan-ingest@test.local', [e.id], 'owner');
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/ingest`, { body: { url: 'https://x.example' } })).status, 401);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${other.id}/ingest`, { as: client, body: { url: 'https://x.example' } })).status, 403);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${e.id}/ingest`, { as: client, body: { url: 'not a url' } })).status, 400);
+  // Valid URL but no Anthropic key configured → a clear 400, never a crawl.
+  const r = await app.req('POST', `/api/my/fan-owl/${e.id}/ingest`, { as: client, body: { url: 'https://example.com' } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /AI is not configured/);
+});
+
 test('funnel: beacons are whitelisted and roll up in the insights view', async () => {
   const { e, admin, site } = await provision('funnel');
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });

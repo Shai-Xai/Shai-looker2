@@ -54,6 +54,21 @@ BOUNDARIES:
 
 FOLLOW-UPS: at the very END of your reply, on its own final line, output <<<FOLLOWUPS>>> followed by a JSON array of 2-3 SHORT (≤5 words) things the fan would likely tap next (e.g. ["What's included in VIP?","Add camping","Refund policy"]). Always last; never mention it.`;
 
+// "Read the website" (spec §3C, suggest → human confirms): the crawler feeds page
+// text to this prompt, which drafts knowledge entries + page mappings as
+// SUGGESTIONS the promoter reviews in the editor before saving. Nothing
+// auto-commits. Registered in insights.promptRegistry() for the AI audit.
+const FAN_INGEST_SYSTEM = `You read the text of an event's public website pages and produce SUGGESTED content for that event's website ticket assistant, for a human to review and edit before anything goes live.
+
+Respond with ONLY strict JSON (no markdown fences) of the form:
+{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…"}]}
+
+Rules:
+- Ground EVERYTHING in the provided page text. NEVER invent facts, dates, rules or policies that aren't in the text. Fewer solid entries beat many padded ones.
+- knowledge (max 20): distil what a ticket-buying fan would ask — policies (refunds, age limits, accessibility, what's allowed in), practical info (dates, venue, getting there, camping), what's included in tiers/experiences. Question in a fan's words; body closely following the site's own wording.
+- pages (max 12): for each distinct page/section identifiable from the URLs and text, give a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, and a one-line note telling the assistant what that page is about.
+- Do NOT suggest ticket prices or checkout links — the catalogue comes from the ticketing system, not the website.`;
+
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
 
 function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
@@ -227,6 +242,68 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const leadView = (p) => ({ id: p.id, email: p.email, name: p.name, preferences: J(p.preferences, []), consentMarketing: !!p.consent_marketing, consentAt: p.consent_at, at: p.created_at });
   app.get('/api/admin/entities/:entityId/fan-owl/leads', auth.requireAdmin, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
   app.get('/api/my/fan-owl/:entityId/leads', auth.requireAuth, requireMyEntity, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
+
+  // ── "Read the website" — crawl → AI-suggest → human review (spec §3C) ─────────
+  // Fetches the given page + a handful of same-site links (SSRF-safe via
+  // safeGetText), distils SUGGESTED knowledge entries + page mappings, and returns
+  // them to the editor. NOTHING is saved here — the promoter reviews, edits and
+  // hits Save like any manual entry. The Owl suggests; a human confirms.
+  const { safeGetText } = require('./safeFetch');
+  const stripHtml = (html) => String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ').trim();
+  const ASSET_RE = /\.(png|jpe?g|svg|gif|webp|ico|css|js|json|pdf|zip|mp3|mp4|woff2?)([?#]|$)/i;
+  function sameSiteLinks(html, baseUrl, cap) {
+    const seen = new Set(); const out = [];
+    for (const m of String(html).matchAll(/href=["']([^"'#]+)["']/gi)) {
+      let u; try { u = new URL(m[1], baseUrl); } catch { continue; }
+      if (!/^https?:$/.test(u.protocol) || u.hostname !== new URL(baseUrl).hostname) continue;
+      if (ASSET_RE.test(u.pathname) || u.pathname === new URL(baseUrl).pathname) continue;
+      u.hash = '';
+      const key = u.toString();
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(key);
+      if (out.length >= cap) break;
+    }
+    return out;
+  }
+  const PTYPES = new Set(['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'faq', 'other']);
+  const ingestLimit = rateLimit({ windowMs: 5 * 60_000, max: 4, by: 'user', scope: 'fan-ingest', message: 'Give the crawl a few minutes between runs.' });
+  const ingestHandler = asyncHandler(async (req, res) => {
+    const entityId = req.params.entityId;
+    const url = String((req.body || {}).url || '').trim();
+    if (!/^https?:\/\/.+\..+/i.test(url)) throw new HttpError(400, 'Give the full site URL (https://…).');
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new HttpError(400, 'AI is not configured for this client — set an Anthropic key in Admin → Integrations first.');
+    const first = await safeGetText(url, { timeoutMs: 15000, maxBytes: 3 * 1024 * 1024, allowHttp: true }).catch((e) => { throw new HttpError(400, `Couldn’t read that page: ${e.message}`); });
+    const crawled = [{ url, text: stripHtml(first).slice(0, 8000) }];
+    for (const link of sameSiteLinks(first, url, 7)) {
+      try { crawled.push({ url: link, text: stripHtml(await safeGetText(link, { timeoutMs: 12000, maxBytes: 3 * 1024 * 1024, allowHttp: true })).slice(0, 7000) }); } catch { /* skip unreadable pages */ }
+    }
+    const corpus = crawled.map((p) => `=== PAGE: ${p.url} ===\n${p.text}`).join('\n\n').slice(0, 45000);
+    const client = insights.requireClient(apiKey);
+    const msg = await client.messages.create({
+      model: insights.MODEL, max_tokens: 3500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system: FAN_INGEST_SYSTEM, messages: [{ role: 'user', content: corpus }],
+    });
+    const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    let parsed = {};
+    try { parsed = JSON.parse(rawText.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); }
+    catch { throw new HttpError(502, 'The Owl’s suggestions came back malformed — try again.'); }
+    res.json({
+      crawled: crawled.map((p) => p.url),
+      knowledge: (Array.isArray(parsed.knowledge) ? parsed.knowledge : []).slice(0, 20)
+        .filter((k) => String(k.body || '').trim())
+        .map((k) => ({ kind: KKINDS.has(k.kind) ? k.kind : 'faq', question: String(k.question || '').slice(0, 300), body: String(k.body).slice(0, 4000) })),
+      pages: (Array.isArray(parsed.pages) ? parsed.pages : []).slice(0, 12)
+        .filter((p) => String(p.urlPattern || '').trim())
+        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pageType: PTYPES.has(p.pageType) ? p.pageType : 'other', note: String(p.note || '').slice(0, 300) })),
+    });
+  });
+  app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, ingestLimit, ingestHandler);
+  app.post('/api/my/fan-owl/:entityId/ingest', auth.requireAuth, requireMyEntity, ingestLimit, ingestHandler);
 
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls
@@ -536,4 +613,4 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   return { saveConfig, configView }; // exposed for tests
 }
 
-module.exports = { mount, FAN_OWL_SYSTEM, CONSENT_WORDING_VERSION };
+module.exports = { mount, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, CONSENT_WORDING_VERSION };

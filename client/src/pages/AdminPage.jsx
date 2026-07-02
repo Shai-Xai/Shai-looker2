@@ -2573,7 +2573,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['eventops', 'Event Ops'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['eventops', 'Event Ops'], ['fanowl', '🦉 Fan Owl'], ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2587,6 +2587,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
         <div style={{ flex: 1, minWidth: 280 }}>
           {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={goSection} preview={previewAccount} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
+          {section === 'fanowl' && <div style={cardStyle}><FanOwlAdmin scope="admin-client" entityId={entity.id} /></div>}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
           {section === 'briefing' && (
@@ -2909,7 +2910,6 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         />
       </div>
       <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
-      <FanOwlAdmin scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
       <LanguageField entityId={entity.id} />
       <AudienceCapField entityId={entity.id} />
