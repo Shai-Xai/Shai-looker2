@@ -56,15 +56,10 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Security headers (dependency-free — mirrors the essentials of helmet). Cookie
-// auth means clickjacking and MIME-sniff matter; a CSP is defence-in-depth for
-// any XSS. Kept deliberately minimal so it can't break the SPA:
-//   • frame-ancestors 'none'  — no embedding (clickjacking)
-//   • nosniff                 — no MIME sniffing of downloads/mail assets
-//   • Referrer-Policy         — don't leak full URLs to third parties
-//   • HSTS (prod only)        — force https once seen
-// A full script-src CSP is intentionally NOT set here yet (the built bundle +
-// echarts would need nonce/hashing work); frame-ancestors is safe today.
+// Security headers (dependency-free, helmet essentials). Cookie auth makes
+// clickjacking + MIME-sniff matter; frame-ancestors 'none' blocks embedding,
+// nosniff stops sniffing downloads/mail assets, HSTS forces https in prod. A
+// full script-src CSP is deferred (needs nonce/hashing for the bundle+echarts).
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'DENY');
