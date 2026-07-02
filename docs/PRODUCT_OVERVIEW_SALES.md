@@ -658,6 +658,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Move a whole subfolder in one action** ✅ (Dashboard Console): admins
+  can now reparent a subfolder — with **all** its nested subfolders and dashboards — in a
+  single move, instead of relocating dashboards one by one. Use the **↗ Move** button on any
+  folder (a mobile-friendly "Move to…" picker) or **drag a folder onto another** on desktop.
+  Moving a folder into itself or one of its own subfolders is blocked with a clear message,
+  and the reparent is **atomic** (one transaction) so a failure can't leave a half-moved
+  tree. Folders are an admin-only organising layer — clients navigate via suites/sets — so
+  there's no separate client surface to update.
 - **2026-07-02** — **Rename dashboards in the sidebar per Set** ✅: admins can now give
   any dashboard a custom display name within a Set (in Admin → Sets, and in a client's
   custom sets) without editing the underlying dashboard. The label shows in the client's
