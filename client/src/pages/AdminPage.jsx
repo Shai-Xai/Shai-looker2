@@ -4280,7 +4280,55 @@ function AISettings() {
       </Section>
       <Section title="Home briefing"><BriefingSettings /></Section>
       <Section title="Reader feedback"><BriefingFeedback /></Section>
+      <Section title="AI usage & cost (live)"><AiUsagePanel /></Section>
       <Section title="Everything the AI is told (audit)"><AIOverview /></Section>
+    </div>
+  );
+}
+
+// Live AI spend: every Anthropic call is metered (tokens + estimated cost) per
+// client and per feature — this panel answers "what's driving the bill".
+function AiUsagePanel() {
+  const [days, setDays] = useState(14);
+  const [d, setD] = useState(null);
+  const [ents, setEnts] = useState([]);
+  const [err, setErr] = useState('');
+  useEffect(() => { api.adminListEntities().then((r) => setEnts(r.entities || r || [])).catch(() => {}); }, []);
+  useEffect(() => { setD(null); api.getAiUsage(days).then(setD).catch((e) => setErr(e.message)); }, [days]);
+  if (err) return <p style={{ color: 'var(--error)', fontSize: 13 }}>{err}</p>;
+  if (!d) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading usage…</p>;
+  const entName = (id) => (ents.find((e) => e.id === id) || {}).name || (id === '—' || !id ? 'Platform / unattributed' : id.slice(0, 8));
+  const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+  const usd = (c) => `$${c >= 100 ? c.toFixed(0) : c.toFixed(2)}`;
+  const KIND_LABEL = { briefing: 'Home briefing (incl. 15-min warmer)', digest: 'Digests', owl_chat: 'Owl chat (in-app)', whatsapp: 'WhatsApp Owl', fan_owl: 'Fan Owl (public site)', tile_insight: 'Tile / dashboard insights', campaign_draft: 'Campaign drafting', email_design: 'Email design (blocks + banners)', goals: 'Goals (summary + gap plans)', refine: 'Refine text', other: 'Other / unattributed' };
+  const table = (title, rows, label) => (
+    <div style={{ flex: '1 1 260px', minWidth: 240 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '0 0 6px' }}>{title}</div>
+      {rows.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Nothing recorded yet.</div> : rows.slice(0, 12).map((r) => (
+        <div key={r.key} style={{ display: 'flex', gap: 8, fontSize: 12.5, padding: '3px 0', borderBottom: '1px solid var(--hairline)' }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label(r.key)}</span>
+          <span style={{ color: 'var(--muted)', flexShrink: 0 }}>{fmt(r.calls)} calls · {fmt(r.inTok + r.cacheTok)}→{fmt(r.outTok)}</span>
+          <b style={{ flexShrink: 0, minWidth: 52, textAlign: 'right' }}>{usd(r.cost)}</b>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5 }}>
+          {[7, 14, 30, 90].map((n) => <option key={n} value={n}>Last {n} days</option>)}
+        </select>
+        <b style={{ fontSize: 15 }}>{usd(d.total.cost)} est.</b>
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{fmt(d.total.calls)} calls · {fmt(d.total.inTok)} in + {fmt(d.total.cacheTok)} cached · {fmt(d.total.outTok)} out</span>
+      </div>
+      <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+        {table('By client', d.byEntity, entName)}
+        {table('By feature (the drivers)', d.byKind, (k) => KIND_LABEL[k] || k)}
+        {table('By day', [...d.byDay].reverse(), (k) => k)}
+        {table('By model', d.byModel, (k) => k)}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>{d.note} Recording started when this shipped — history before that isn’t available here; check https://console.anthropic.com for past days.</div>
     </div>
   );
 }

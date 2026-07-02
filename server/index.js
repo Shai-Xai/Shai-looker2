@@ -146,7 +146,7 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) }), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -747,7 +747,7 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no'); // don't let a reverse proxy buffer the stream
     res.flushHeaders?.();
-    await insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t));
+    await aiUsage.run({ entityId: su.entityId, kind: 'goals' }, () => insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
     console.error('[POST /api/goals/:suiteId/brief]', err.message);
@@ -772,10 +772,10 @@ app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_0
     const { tiles, catalogue } = await buildFacts(req.user, entityId, false, true);
     let segments = [];
     try { segments = db.db.prepare('SELECT name, last_count FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 50').all(entityId).map((s) => ({ name: s.name, count: s.last_count })); } catch { /* segments table may be empty */ }
-    const plan = await insights.goalGapPlan({
+    const plan = await aiUsage.run({ entityId, kind: 'goals' }, () => insights.goalGapPlan({
       goal: withProgress, progress: withProgress.progress, tiles, segments, catalogue,
       clientName: db.getEntity(entityId)?.name || '', instructions: aiInstructionsFor(suiteId), today: todayLabel(), apiKey,
-    });
+    }));
     res.json({ plan });
   } catch (err) {
     console.error('[POST /api/goals/:id/gap-plan]', err.message);
@@ -1590,7 +1590,7 @@ app.post('/api/insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 30
       dashboardContext && dashboardContext.trim() ? `Context for this dashboard:\n${dashboardContext.trim()}` : '',
       tileContext && tileContext.trim() ? `Context for this tile:\n${tileContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text));
+    await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text)));
     res.end();
   } catch (err) {
     console.error('[POST /api/insight]', err.message);
@@ -1654,7 +1654,7 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
       aiInstructionsFor(suiteId),
       def.aiContext && def.aiContext.trim() ? `Context for this dashboard:\n${def.aiContext.trim()}` : '',
     ].filter(Boolean).join('\n\n');
-    await insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t));
+    await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
     console.error('[POST /api/dashboard-insight]', err.message);
@@ -1833,7 +1833,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const raw = await insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey });
+    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1895,7 +1895,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     const factsMs = Date.now() - tStart;
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
     const tLlm = Date.now();
-    const raw = groups.length ? await insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }) : { events: [] };
+    const raw = groups.length ? await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey })) : { events: [] };
     console.log(`[briefing-timing] events entity=${entityId} force=${!!force} events=${selected.length} total=${Date.now() - tStart}ms facts=${factsMs}ms llm=${Date.now() - tLlm}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const aiById = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
@@ -1964,7 +1964,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const raw = await insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
@@ -2203,7 +2203,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // The single-pass (flat) digest over all the facts — used for single-event
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
-    const raw = await insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() });
+    const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
     // A single-event digest scopes all its links/actions to that one event; the
     // multi-event fallback (flat over several) has no single event to assert.
     const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
@@ -2243,12 +2243,12 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         for (const ft of followedFacts) { (visualsBySuite[ft.suiteId] = visualsBySuite[ft.suiteId] || []).push(ft); }
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
-      const [ovRaw, evRaws] = await Promise.all([
+      const [ovRaw, evRaws] = await aiUsage.run({ entityId, kind: 'digest' }, () => Promise.all([
         insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
         Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
           .then((r) => ({ g, r }))
           .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
-      ]);
+      ]));
       const events = evRaws.map(({ g, r }) => {
         const e = r || {};
         const sect = {
@@ -2612,10 +2612,11 @@ const actionsApi = require('./actions').mount(app, {
     const apiKey = anthropicKeyForEntity(entityId);
     if (!insights.isConfigured(apiKey)) throw new Error('AI is not configured for this client');
     const ent = db.getEntity(entityId); const su = eventSuiteId ? db.getSuite(eventSuiteId) : null;
-    return insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') });
+    return aiUsage.run({ entityId, kind: 'campaign_draft' }, () => insights.draftCampaign({ goal, clientName: ent?.name, clientContext: ent?.aiContext || '', audienceCount, apiKey, instructions: [aiInstructionsFor(eventSuiteId || null, entityId, langOverride), su ? `This campaign is for the event "${su.name}"${su.briefing?.instructions ? ` — ${String(su.briefing.instructions).trim()}` : ''}. Write for THIS event specifically.` : ''].filter(Boolean).join('\n\n') }));
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); // AI token metering per client/feature (Admin → AI → Usage)
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).
@@ -2724,7 +2725,7 @@ app.post('/api/my/refine-text', auth.requireAuth, async (req, res) => {
   const apiKey = anthropicKeyForEntity(entityId);
   if (!insights.isConfigured(apiKey)) return res.status(400).json({ error: 'AI is not configured for this client.' });
   try {
-    const refined = await insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey });
+    const refined = await aiUsage.run({ entityId, kind: 'refine' }, () => insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey }));
     res.json({ text: refined });
   } catch (e) { console.error('[POST /api/my/refine-text]', e.message); res.status(500).json({ error: e.message }); }
 });

@@ -322,10 +322,10 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     }
     const corpus = crawled.map((p) => `=== PAGE: ${p.url} ===\n${p.text}`).join('\n\n').slice(0, 45000);
     const client = insights.requireClient(apiKey);
-    const msg = await client.messages.create({
+    const msg = await require('./aiUsage').run({ entityId, kind: 'fan_owl' }, () => client.messages.create({
       model: insights.MODEL, max_tokens: 3500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system: FAN_INGEST_SYSTEM, messages: [{ role: 'user', content: corpus }],
-    });
+    }));
     const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
     let parsed = {};
     try { parsed = JSON.parse(rawText.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); }
@@ -363,10 +363,10 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     if (!pages.length) throw new HttpError(400, 'Add some pages first — the pitch writer works from each page\'s info and items.');
     const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
     const client = insights.requireClient(apiKey);
-    const msg = await client.messages.create({
+    const msg = await require('./aiUsage').run({ entityId, kind: 'fan_owl' }, () => client.messages.create({
       model: insights.MODEL, max_tokens: 1200, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system: FAN_PITCH_SYSTEM, messages: [{ role: 'user', content: JSON.stringify({ event: site.name || suite?.name || '', pages }) }],
-    });
+    }));
     const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
     let parsed = {};
     try { parsed = JSON.parse(rawText.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); }
@@ -734,13 +734,13 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         if (final.stop_reason === 'max_tokens') console.warn('[fanOwl] turn hit max_tokens — answer may be truncated');
         return final;
       };
-      const { text, trail } = await runOwlLoop({
+      const { text, trail } = await require('./aiUsage').run({ entityId: site.entity_id, kind: 'fan_owl' }, () => runOwlLoop({
         llmTurn, toolMap, tools: toolSchemas,
         messages: [...history, { role: 'user', content: message }],
         ctx: {}, maxRounds: 4, shouldStop: () => clientGone,
         onText: (t) => res.write(t),
         onStatus: writeStatus,
-      });
+      }));
       let clean = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
       // Never end a turn on silence: if the loop came back empty (budget/round
       // exhaustion), say so instead of leaving a blank bubble.

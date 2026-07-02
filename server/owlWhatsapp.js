@@ -461,12 +461,12 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     let out = ''; let trail = [];
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
-      const r = await runOwlLoop({
+      const r = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
         maxRounds: persona.maxRounds,
-      });
+      }));
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
@@ -727,11 +727,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const instructions = `${instructionsFor(id.entityId, (id.user || {}).id || '')}\n\n${greeting ? SCHED_NOTE : SCHED_NOTE_ADD}`;
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
-      const { text } = await runOwlLoop({
+      const { text } = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
         toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
         ctx: { user: id.user, entityId: id.entityId },
-      });
+      }));
       return String(text || '').split(FU_MARK)[0].replace(/\s+$/, '').trim();
     } catch { return ''; }
   }

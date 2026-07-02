@@ -13,13 +13,13 @@ const MODEL = 'claude-opus-4-8';
 const BRIEF_MODEL = 'claude-sonnet-4-6';
 const MAX_ROWS = 60; // cap rows sent to keep the prompt small and cheap
 
-// One Anthropic client per API key (admin default from env/DB, or a client's own).
-const clientsByKey = new Map();
+// One Anthropic client per API key (admin default from env/DB, or a client's own) — each wrapped by aiUsage so every call's token usage is metered (clientFor is the single chokepoint all modules get clients through).
+const aiUsage = require('./aiUsage'); const clientsByKey = new Map();
 function clientFor(apiKey) {
   const key = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
   if (!key) return null;
   // timeout/maxRetries override the SDK's 10-min ×2 default (a hung call would otherwise pin the sequential scheduler tick for ~30 min).
-  if (!clientsByKey.has(key)) clientsByKey.set(key, new Anthropic({ apiKey: key, timeout: 120_000, maxRetries: 1 }));
+  if (!clientsByKey.has(key)) clientsByKey.set(key, aiUsage.wrapClient(new Anthropic({ apiKey: key, timeout: 120_000, maxRetries: 1 })));
   return clientsByKey.get(key);
 }
 

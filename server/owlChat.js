@@ -462,7 +462,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
     const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
     const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
-      const { text, trail, stopped } = await runOwlLoop({
+      const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
         toolMap,
         tools: toolSchemas,
@@ -473,7 +473,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getExploreFields
         onText: (t) => res.write(t),
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: writeStatus,
-      });
+      }));
       if (stopped) { logToolStop(thread.id, trail); res.end(); return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
       const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');

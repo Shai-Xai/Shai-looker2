@@ -88,7 +88,7 @@ function mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, 
     const suiteId = String((req.body || {}).eventSuiteId || '');
     const b = resolveBranding(entityId, suiteId);
     try {
-      const svg = await designSvg({ brief, brandColor: b.brandColor, secondaryColor: b.secondaryColor, width, height, apiKey, instructions: aiInstructionsFor(suiteId || null, entityId) });
+      const svg = await require('./aiUsage').run({ entityId, kind: 'email_design' }, () => designSvg({ brief, brandColor: b.brandColor, secondaryColor: b.secondaryColor, width, height, apiKey, instructions: aiInstructionsFor(suiteId || null, entityId) }));
       const dataUrl = svgToPngDataUrl(svg, { width });
       if (!dataUrl) return res.status(422).json({ error: 'Could not render a banner — try a simpler brief.' });
       res.json({ dataUrl });
