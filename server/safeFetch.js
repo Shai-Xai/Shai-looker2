@@ -83,11 +83,16 @@ function once(urlStr, { timeoutMs, maxBytes, allowHttp, allowHosts }) {
       timeout: timeoutMs,
       // Pin the connection to a freshly re-validated address (defeats DNS rebind
       // between assertPublicHost above and the actual connect).
+      // Node ≥20 sockets (autoSelectFamily) call lookup with { all: true } and
+      // expect an ARRAY of {address, family}; older callers expect (address,
+      // family). Honour both — answering the wrong shape makes net see
+      // `undefined` and die with "Invalid IP address: undefined".
       lookup(host, opts, cb) {
         dns.lookup(host, { all: true }).then((addrs) => {
-          const ok = addrs.find((a) => !ipIsPrivate(a.address));
-          if (!ok) return cb(new Error('URL resolves to a non-public address'));
-          cb(null, ok.address, ok.family);
+          const ok = addrs.filter((a) => !ipIsPrivate(a.address));
+          if (!ok.length) return cb(new Error('URL resolves to a non-public address'));
+          if (opts && opts.all) return cb(null, ok);
+          cb(null, ok[0].address, ok[0].family);
         }).catch(cb);
       },
     }, (res) => {
