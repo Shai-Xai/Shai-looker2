@@ -24,6 +24,7 @@ import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
 import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
 import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
+import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
@@ -2908,6 +2909,7 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
         />
       </div>
       <OwlGuidanceEditor scope="admin-client" entityId={entity.id} />
+      <FanOwlAdmin scope="admin-client" entityId={entity.id} />
       <CurrencyField entityId={entity.id} />
       <LanguageField entityId={entity.id} />
       <AudienceCapField entityId={entity.id} />

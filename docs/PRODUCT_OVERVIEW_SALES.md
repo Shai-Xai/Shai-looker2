@@ -154,6 +154,34 @@ about their ticket sales without leaving the back end they already use every day
 **Pitch:** "The analyst comes to where organizers already work — Howler's portal
 gets an AI data analyst pane, powered by Pulse."
 
+### The Fan Owl — a booking guide on the event's own website  🧪
+The Owl's first **consumer-facing** surface: a widget the promoter drops onto their
+public event website with **one script tag**, where it guides fans to the right
+ticket like a well-informed friend who's already going.
+- **Knows the page the fan is on** — on an artist page it leads with the ticket
+  that gets you to that artist; on the tickets page, the best options; plus a
+  no-AI "ribbon" teaser (offer + live availability tag) on every page.
+- **Answers like the organiser would** — FAQs, refund policy, what's included:
+  answered ONLY from the knowledge base the promoter writes (never invented), with
+  prices only ever from the configured catalogue. Urgency only from real
+  availability tags — no fake scarcity, ever.
+- **Sells with a buy button** — the Owl hands out the promoter's own Howler
+  checkout links (with tracking added), so every recommendation is one tap from
+  the official store. Purchases stay on Howler.
+- **Builds the promoter's fan base** — fans can opt in ("keep me posted") with an
+  explicit consent checkbox; captured names/emails/interests appear under the Fan
+  Owl config, ready for remarketing via Engage. Plus a live funnel (ribbon views →
+  chats → buy clicks) and a list of what fans asked that the FAQ couldn't answer.
+- **Self-service** — clients manage everything themselves under **Settings → Fan
+  Owl** (sites, catalogue, knowledge, page mappings); Howler can do it for them in
+  Admin → client → Fan Owl.
+- **Status 🧪:** beta. Deep-link checkout (in-widget checkout is on the roadmap);
+  catalogue and links are entered manually for now. Pilots: Retreat Yourself,
+  then Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
+
+**Pitch:** "Your website stays the story; the Owl turns it into the shop — every
+page gets a personal ticket guide that answers, recommends and sells."
+
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
   (exec / marketing / finance / ops), with headline KPIs, a short narrative and
@@ -618,6 +646,15 @@ Use these to set direction, **not** to promise dates.
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **The Fan Owl: a booking guide on the event's own website** 🧪: the
+  Owl's first **consumer-facing** surface — promoters drop one script tag on their public
+  event site and every page gets a personal ticket guide: a no-AI ribbon (right offer for
+  the page + live availability tag), a chat that answers ONLY from the promoter's own
+  knowledge base and catalogue (no invented prices/policies, no fake scarcity), buy buttons
+  on the promoter's own Howler checkout links (tracked), consent-first "keep me posted"
+  lead capture, and a promoter-facing funnel + FAQ-gap report. Self-service under
+  Settings → Fan Owl; admin twin in the client's detail tab. Deep-link checkout v1;
+  pilots: Retreat Yourself → Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
 - **2026-07-02** — **The Owl inside the Howler organizer portal** 🧪: the Owl can now be
   **embedded in Howler's own organizer portal** — the portal's backend does a secure
   server-to-server handshake with Pulse and drops a one-iframe Owl panel into its UI.
