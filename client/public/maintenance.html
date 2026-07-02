@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Pulse is updating…</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #0f1115; color: #f5f5f7;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px; box-sizing: border-box; text-align: center;
+    }
+    .card { max-width: 420px; }
+    .dot {
+      width: 54px; height: 54px; margin: 0 auto 20px; border-radius: 16px;
+      background: linear-gradient(135deg, #FF385C, #FF6B35);
+      display: flex; align-items: center; justify-content: center; font-size: 28px;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: .82; } }
+    h1 { font-size: 20px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.02em; }
+    p { font-size: 14.5px; line-height: 1.55; color: #b8b8c0; margin: 0 0 6px; }
+    .sub { font-size: 12.5px; color: #7a7a85; margin-top: 18px; }
+    .bar { width: 180px; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; margin: 22px auto 0; }
+    .bar > i { display: block; height: 100%; width: 40%; border-radius: 4px; background: linear-gradient(90deg, #FF385C, #FF6B35); animation: slide 1.3s ease-in-out infinite; }
+    @keyframes slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="dot">🦉</div>
+    <h1>Pulse is updating</h1>
+    <p>We’re shipping an improvement — this usually takes under a minute.</p>
+    <p>You’ll be taken back in automatically the moment it’s ready.</p>
+    <div class="bar"><i></i></div>
+    <div class="sub">Howler · Pulse</div>
+  </div>
+  <script>
+    // Poll the health endpoint; as soon as the server is back, reload into the app.
+    // Runs entirely from the cached page, so it works even while the origin is down.
+    var tries = 0;
+    function check() {
+      tries++;
+      fetch('/health', { cache: 'no-store' })
+        .then(function (r) { if (r && r.ok) { location.replace('/'); } else { schedule(); } })
+        .catch(schedule);
+    }
+    function schedule() { setTimeout(check, Math.min(3000 + tries * 500, 8000)); }
+    schedule();
+  </script>
+</body>
+</html>

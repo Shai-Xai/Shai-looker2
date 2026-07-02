@@ -341,7 +341,14 @@ function mount(app, { db, auth }) {
     if (holderStaffId) {
       const holder = resolveStaff(su.id, holderStaffId);
       if (!holder) return { error: 'Unknown staff member.' };
-      toState = 'deployed'; toStation = ''; toHolderId = holder.id; toHolderLabel = holder.label;
+      toState = 'deployed'; toHolderId = holder.id; toHolderLabel = holder.label;
+      // A hand-off can ALSO place the device at a station (staff working that post).
+      const raw = stationId == null ? '' : String(stationId);
+      if (raw && raw !== 'hive') {
+        const st = sql.prepare('SELECT id FROM eventops_stations WHERE id=? AND suite_id=?').get(raw, su.id);
+        if (!st) return { error: 'Unknown station.' };
+        toStation = st.id;
+      }
     } else if (state && STATES.includes(state)) {
       toState = state;
       toStation = state === 'deployed' ? str(stationId, 60) : '';
@@ -422,10 +429,16 @@ function mount(app, { db, auth }) {
     const stations = sql.prepare('SELECT * FROM eventops_stations WHERE suite_id=? ORDER BY position, name').all(su.id).map(stationRow);
     const openIssues = sql.prepare("SELECT COUNT(*) c FROM eventops_issues WHERE suite_id=? AND status='open'").get(su.id).c;
     const recent = sql.prepare('SELECT * FROM eventops_device_events WHERE suite_id=? ORDER BY at DESC LIMIT 25').all(su.id).map(eventRow);
+    // Devices held by a staff member but NOT placed at a station → a "With staff" grouping.
+    const heldByStaff = sql.prepare(`SELECT holder_staff_id AS sid, COUNT(*) AS c FROM eventops_devices
+        WHERE suite_id=? AND holder_staff_id<>'' AND (station_id IS NULL OR station_id='')
+        GROUP BY holder_staff_id`).all(su.id)
+      .map((h) => ({ staffId: h.sid, staffLabel: staffName(h.sid) || 'Staff member', count: h.c }))
+      .sort((a, b) => b.count - a.count);
     res.json({
       suite: { id: su.id, name: su.name },
       totals: { devices: devices.length, atHive: byState.in_stock + byState.returned, deployed: byState.deployed, openIssues },
-      byState, stations, recent,
+      byState, stations, recent, heldByStaff,
       canManage: canManage(req.user, su.id),
     });
   });
