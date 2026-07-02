@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS suite_sets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_entities_user ON user_entities(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_entities_entity ON user_entities(entity_id);
 CREATE INDEX IF NOT EXISTS idx_set_dashboards_set ON set_dashboards(set_id);
 CREATE INDEX IF NOT EXISTS idx_suites_entity      ON suites(entity_id);
 CREATE INDEX IF NOT EXISTS idx_suite_sets_suite   ON suite_sets(suite_id);
@@ -213,184 +214,12 @@ if (tableExists('settlements')) {
 // event_documents.data (extracted invoice JSON) added after the table shipped.
 if (tableExists('event_documents')) addColumn('event_documents', 'data', "TEXT NOT NULL DEFAULT '{}'");
 
-// ─── View tracking (powers the personalised home) ────────────────────────────
-// One row per dashboard open. Aggregated into a per-user profile: what they
-// check most, when they last visited — feeds shortcut ranking and the Owl's
-// home briefing.
-db.exec(`
-CREATE TABLE IF NOT EXISTS user_views (
-  user_id      TEXT NOT NULL,
-  suite_id     TEXT NOT NULL DEFAULT '',
-  dashboard_id TEXT NOT NULL,
-  at           TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_user_views_user ON user_views(user_id, at);
-`);
-function recordView(userId, suiteId, dashboardId) {
-  if (!userId || !dashboardId) return;
-  db.prepare('INSERT INTO user_views (user_id, suite_id, dashboard_id, at) VALUES (?,?,?,?)').run(userId, suiteId || '', dashboardId, now());
-}
-// Profile: top dashboards over the last 90 days + the user's previous session
-// start (most recent view older than 30 minutes — so "since your last visit"
-// doesn't mean "since 30 seconds ago").
-function viewProfile(userId) {
-  const since = new Date(Date.now() - 90 * 864e5).toISOString();
-  const top = db.prepare(`
-    SELECT dashboard_id AS dashboardId, suite_id AS suiteId, COUNT(*) AS count, MAX(at) AS lastAt
-    FROM user_views WHERE user_id=? AND at>=? GROUP BY dashboard_id ORDER BY count DESC, lastAt DESC LIMIT 10
-  `).all(userId, since);
-  const cutoff = new Date(Date.now() - 30 * 60e3).toISOString();
-  const last = db.prepare('SELECT MAX(at) AS at FROM user_views WHERE user_id=? AND at<?').get(userId, cutoff);
-  return { top, lastVisit: last?.at || null };
-}
-// The user's most recent dashboard opens, with titles (for the activity feed).
-function recentViewsForUser(userId, limit = 60) {
-  return db.prepare(`
-    SELECT uv.dashboard_id AS dashboardId, uv.suite_id AS suiteId, uv.at AS at, d.title AS title
-    FROM user_views uv LEFT JOIN dashboards d ON d.id = uv.dashboard_id
-    WHERE uv.user_id=? ORDER BY uv.at DESC LIMIT ?
-  `).all(userId, Math.min(200, limit));
-}
-// Per-client usage breakdown for one user: group their dashboard opens (last
-// `days`) by the client whose suite they were opened under. A dashboard open
-// carries the suite it happened in, and a suite belongs to a client — so the
-// same shared dashboard counts toward whichever client's context it was used in.
-// Views with no suite context can't be attributed to a client and are skipped.
-function usageByClientForUser(userId, days = 90) {
-  const since = new Date(Date.now() - days * 864e5).toISOString();
-  const rows = db.prepare(`
-    SELECT suite_id AS suiteId, dashboard_id AS dashboardId, COUNT(*) AS count, MAX(at) AS lastAt
-    FROM user_views WHERE user_id=? AND at>=? GROUP BY suite_id, dashboard_id
-  `).all(userId, since);
-  const byEntity = new Map();
-  for (const r of rows) {
-    const suite = r.suiteId ? getSuite(r.suiteId) : null;
-    const eid = suite ? suite.entityId : '';
-    if (!eid) continue; // unattributable without a client context
-    let b = byEntity.get(eid);
-    if (!b) { b = { entityId: eid, entityName: getEntity(eid)?.name || eid, views: 0, lastAt: '', dashboards: new Map() }; byEntity.set(eid, b); }
-    b.views += r.count;
-    if (r.lastAt > b.lastAt) b.lastAt = r.lastAt;
-    const d = b.dashboards.get(r.dashboardId) || { dashboardId: r.dashboardId, count: 0, lastAt: '' };
-    d.count += r.count; if (r.lastAt > d.lastAt) d.lastAt = r.lastAt;
-    b.dashboards.set(r.dashboardId, d);
-  }
-  return [...byEntity.values()]
-    .sort((a, c) => c.views - a.views)
-    .map((b) => ({
-      entityId: b.entityId, entityName: b.entityName, views: b.views, lastAt: b.lastAt,
-      topDashboards: [...b.dashboards.values()]
-        .sort((a, c) => c.count - a.count || (a.lastAt < c.lastAt ? 1 : -1)).slice(0, 5)
-        .map((d) => ({ dashboardId: d.dashboardId, title: getDashboard(d.dashboardId)?.title || d.dashboardId, count: d.count, lastAt: d.lastAt })),
-    }));
-}
-// Batch: each user's latest dashboard view (for the "last active" column).
-function lastViewForUsers() {
-  const out = {};
-  for (const r of db.prepare('SELECT user_id, MAX(at) AS at FROM user_views GROUP BY user_id').all()) out[r.user_id] = r.at;
-  return out;
-}
-// The user's recent onboarding/feature telemetry (guide + feature engagement),
-// folded into the activity feed. The table is owned by telemetry.js; tolerate
-// its absence (module not mounted) without throwing.
-function recentUsageForUser(userId, limit = 60) {
-  try {
-    return db.prepare('SELECT entity_id AS entityId, kind, name, event, ts AS at FROM usage_events WHERE user_id=? ORDER BY ts DESC LIMIT ?')
-      .all(userId, Math.min(200, limit));
-  } catch { return []; }
-}
-
-// Platform-wide activity summary for the admin Users console: how many people are
-// active, who's most active, which dashboards get opened most and which features
-// get used most — aggregated across every user from the view + audit logs.
-function adminActivityReport({ days = 30, limit = 8 } = {}) {
-  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
-  const win = ago(days);                          // selected window → breakdowns
-  const f1 = ago(1), f7 = ago(7), f30 = ago(30);  // FIXED windows for the snapshot card
-  // Active = a user in the view log OR action log in the window (deduped).
-  const activeIds = (s) => db.prepare('SELECT user_id FROM (SELECT user_id FROM user_views WHERE at>=? UNION SELECT user_id FROM user_actions WHERE at>=?)').all(s, s).map((r) => r.user_id);
-  const winIds = activeIds(win);
-  // Surface split: window's active users who opened the INSTALLED app vs only a browser.
-  const appUsers = new Set();
-  try { for (const r of db.prepare('SELECT user_id FROM app_installs WHERE last_at>=?').all(win)) appUsers.add(r.user_id); } catch { /* table new */ }
-  const app = winIds.filter((id) => appUsers.has(id)).length;
-  const topUsers = db.prepare(
-    `SELECT user_id AS userId, SUM(c) AS total, MAX(lastAt) AS lastAt FROM (
-       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_views   WHERE at>=? GROUP BY user_id
-       UNION ALL
-       SELECT user_id, COUNT(*) c, MAX(at) lastAt FROM user_actions WHERE at>=? GROUP BY user_id
-     ) GROUP BY user_id ORDER BY total DESC LIMIT ?`,
-  ).all(win, win, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
-  const topDashboards = db.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
-    .all(win, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
-  const topFeatures = db.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
-    .all(win, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
-  const totalViews = db.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(win).c;
-  const totalActions = db.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(win).c;
-  return {
-    days, active: { d1: activeIds(f1).length, d7: activeIds(f7).length, d30: activeIds(f30).length },
-    surfaces: { total: winIds.length, app, web: winIds.length - app },
-    totals: { views: totalViews, actions: totalActions }, topUsers, topDashboards, topFeatures,
-  };
-}
-// Clients (entities) with no client-side engagement in `days` — last login /
-// dashboard open / audited action across their non-admin logins. `never` = none ever.
-function inactivity(days = 30, limit = 60) {
-  const cutoff = new Date(Date.now() - days * 864e5).toISOString();
-  const lv = lastViewForUsers(), la = lastActionsForUsers();
-  const lastOf = (u) => [u.lastLogin, lv[u.id], la[u.id]?.at].filter(Boolean).sort().pop() || null;
-  const byE = new Map(); const users = [];
-  for (const u of listUsers().filter((x) => x.role !== 'admin')) { const t = lastOf(u);
-    if (!t || t < cutoff) users.push({ id: u.id, name: u.fullName || u.email, email: u.email, lastActiveAt: t, never: !t, client: (u.entityIds || []).map((eid) => getEntity(eid)?.name || '').filter(Boolean).join(', ') });
-    for (const eid of u.entityIds || []) { const b = byE.get(eid) || { lastActiveAt: null, userCount: 0 }; b.userCount += 1; if (t && (!b.lastActiveAt || t > b.lastActiveAt)) b.lastActiveAt = t; byE.set(eid, b); }
-  }
-  const bySort = (a, c) => (!!a.never === !!c.never ? String(a.lastActiveAt || '').localeCompare(String(c.lastActiveAt || '')) : (a.never ? -1 : 1));
-  const clients = listEntities().map((e) => { const b = byE.get(e.id) || { lastActiveAt: null, userCount: 0 }; return { entityId: e.id, entityName: e.name, lastActiveAt: b.lastActiveAt, userCount: b.userCount, never: !b.lastActiveAt }; }).filter((c) => c.never || c.lastActiveAt < cutoff).sort(bySort).slice(0, limit);
-  return { clients, users: users.sort(bySort).slice(0, limit) };
-}
-
-// ─── User action audit log (every meaningful action) ─────────────────────────
-// One row per state-changing request (and a few deliberate "views"), recorded by
-// the audit middleware (server/audit.js) and a couple of explicit call sites
-// (login/logout). Powers the Admin → Users activity timeline. Bounded per user.
-db.exec(`
-CREATE TABLE IF NOT EXISTS user_actions (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id     TEXT NOT NULL,
-  entity_id   TEXT NOT NULL DEFAULT '',
-  action      TEXT NOT NULL,            -- machine key, e.g. 'campaign.send'
-  label       TEXT NOT NULL DEFAULT '', -- human summary, e.g. 'Sent a campaign'
-  target_type TEXT NOT NULL DEFAULT '',
-  target_id   TEXT NOT NULL DEFAULT '',
-  detail      TEXT NOT NULL DEFAULT '{}',
-  method      TEXT NOT NULL DEFAULT '',
-  path        TEXT NOT NULL DEFAULT '',
-  at          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_user_actions_user ON user_actions(user_id, at);
-`);
-function recordAction({ userId, entityId = '', action, label = '', targetType = '', targetId = '', detail = {}, method = '', path = '' } = {}) {
-  if (!userId || !action) return;
-  try {
-    db.prepare('INSERT INTO user_actions (user_id,entity_id,action,label,target_type,target_id,detail,method,path,at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(userId, entityId || '', String(action).slice(0, 64), String(label || '').slice(0, 160),
-           String(targetType || '').slice(0, 32), String(targetId || '').slice(0, 80),
-           JSON.stringify(detail || {}).slice(0, 1000), String(method || '').slice(0, 8), String(path || '').slice(0, 200), now());
-    // Keep the per-user log bounded (latest 500) so it never grows unbounded.
-    db.prepare('DELETE FROM user_actions WHERE user_id=? AND id NOT IN (SELECT id FROM user_actions WHERE user_id=? ORDER BY id DESC LIMIT 500)').run(userId, userId);
-  } catch { /* audit must never break a request */ }
-}
-const rowToAction = (r) => ({ id: r.id, userId: r.user_id, entityId: r.entity_id, action: r.action, label: r.label, targetType: r.target_type, targetId: r.target_id, detail: J(r.detail, {}), method: r.method, path: r.path, at: r.at });
-function listActionsForUser(userId, limit = 100) {
-  return db.prepare('SELECT * FROM user_actions WHERE user_id=? ORDER BY id DESC LIMIT ?').all(userId, Math.min(500, limit)).map(rowToAction);
-}
-// Batch: each user's most recent action (for the users list). One grouped query.
-function lastActionsForUsers() {
-  const out = {};
-  const rows = db.prepare('SELECT user_id, action, label, entity_id, at FROM user_actions WHERE id IN (SELECT MAX(id) FROM user_actions GROUP BY user_id)').all();
-  for (const r of rows) out[r.user_id] = { action: r.action, label: r.label, entityId: r.entity_id, at: r.at };
-  return out;
-}
+// ─── User activity + audit log ───────────────────────────────────────────────
+// Extracted to server/activity.js (owns user_views + user_actions and every
+// read/report over them). Injected collaborators are hoisted db.js functions /
+// the shared now+J helpers; re-exported below under their original names.
+const activity = require('./activity')({ sql: db, now, J, getSuite, getEntity, getDashboard, getUser, listUsers, listEntities });
+const { recordView, viewProfile, recentViewsForUser, usageByClientForUser, lastViewForUsers, recentUsageForUser, adminActivityReport, inactivity, recordAction, listActionsForUser, lastActionsForUsers } = activity;
 
 // ─── Share links ──────────────────────────────────────────────────────────────
 // Short links to a dashboard + filter snapshot. NEVER an auth bypass: the
@@ -942,9 +771,12 @@ function roleForMembership(userId, entityId) {
 }
 const jsonArr = (s) => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } }; // user roles/tags → array (JSON like ["dev"])
 const normRoles = (v) => JSON.stringify([...new Set((Array.isArray(v) ? v : []).map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))]);
-function rowToUser(r) {
+function rowToUser(r, membershipsArg) {
   if (!r) return null;
-  const memberships = membershipsForUser(r.id);
+  // membershipsArg lets a batch caller (listUsers) supply pre-grouped rows and
+  // avoid the per-user membership query (the N+1 that made the admin Users list
+  // and every digest push-map do 1+N queries).
+  const memberships = membershipsArg || membershipsForUser(r.id);
   const firstName = r.first_name || '', lastName = r.last_name || '';
   return { id: r.id, email: r.email, role: r.role, passwordHash: r.password_hash, firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' '), mobile: r.mobile || '', inventiveWorkspaceId: r.inventive_workspace_id || '', howlerRole: r.howler_role || '', roles: jsonArr(r.roles), tokenVersion: r.token_version || 0, entityIds: memberships.map((m) => m.entityId), memberships, notifyEmail: r.notify_email !== 0, notifyPush: r.notify_push !== 0, lastLogin: r.last_login || null, createdAt: r.created_at };
 }
@@ -1059,7 +891,14 @@ function notifyTypeOn(userId, type, channel) {
   return NOTIFY_CHANNELS.some((ch) => m[ch]?.[type] !== false);
 }
 
-function listUsers() { return db.prepare('SELECT * FROM users ORDER BY email').all().map(rowToUser); }
+function listUsers() {
+  // One query for all memberships, grouped in memory — no per-user N+1.
+  const byUser = new Map();
+  for (const m of db.prepare('SELECT user_id, entity_id, role FROM user_entities').all()) {
+    (byUser.get(m.user_id) || byUser.set(m.user_id, []).get(m.user_id)).push({ entityId: m.entity_id, role: m.role || 'owner' });
+  }
+  return db.prepare('SELECT * FROM users ORDER BY email').all().map((r) => rowToUser(r, byUser.get(r.id) || []));
+}
 function getUser(id) { return rowToUser(db.prepare('SELECT * FROM users WHERE id=?').get(id)); }
 function getUserByEmail(email) {
   return rowToUser(db.prepare('SELECT * FROM users WHERE email=?').get((email || '').trim().toLowerCase()));
@@ -1141,10 +980,23 @@ function rowToDashboard(r) {
   if (!r) return null;
   return { ...J(r.def, {}), id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at };
 }
+// The list projection needs only a handful of fields, but computing tileCount
+// meant JSON.parsing every dashboard's (50-500KB) def on every /api/dashboards
+// call. Cache the tiny projected row keyed by (id, updated_at) — dashboards
+// change rarely, so the steady state does the light list query with zero def
+// parses. The cached value is value-only (never the shared def), so there's no
+// mutation-aliasing risk.
+const _dashListCache = new Map(); // id -> { updatedAt, proj }
 function listDashboards() {
-  return db.prepare('SELECT * FROM dashboards ORDER BY updated_at DESC').all().map((r) => {
-    const def = J(r.def, {});
-    return { id: r.id, title: r.title, description: def.description || '', folder: def.folder || '', tileCount: (def.tiles || []).length, source: def.source || null, ownerEntityId: def.ownerEntityId || '', createdAt: r.created_at, updatedAt: r.updated_at };
+  const rows = db.prepare('SELECT id, title, created_at, updated_at FROM dashboards ORDER BY updated_at DESC').all();
+  return rows.map((r) => {
+    const hit = _dashListCache.get(r.id);
+    if (hit && hit.updatedAt === r.updated_at) return { ...hit.proj, createdAt: r.created_at, updatedAt: r.updated_at };
+    const def = J(db.prepare('SELECT def FROM dashboards WHERE id=?').get(r.id)?.def, {});
+    const proj = { id: r.id, title: r.title, description: def.description || '', folder: def.folder || '', tileCount: (def.tiles || []).length, source: def.source || null, ownerEntityId: def.ownerEntityId || '' };
+    _dashListCache.set(r.id, { updatedAt: r.updated_at, proj });
+    if (_dashListCache.size > 2000) _dashListCache.delete(_dashListCache.keys().next().value);
+    return { ...proj, createdAt: r.created_at, updatedAt: r.updated_at };
   });
 }
 // Dashboards available to put in a context: shared (no owner) + those owned by
@@ -1177,6 +1029,7 @@ function updateDashboard(id, patch) {
   const merged = { ...cur, ...patch, id: cur.id, createdAt: cur.createdAt, updatedAt: now() };
   delete merged.folderKeepImported; // transient view-time hint — never persist it onto the dashboard
   db.prepare('UPDATE dashboards SET title=?, def=?, updated_at=? WHERE id=?').run(merged.title, JSON.stringify(stripMeta(merged)), merged.updatedAt, id);
+  _dashListCache.delete(id); // explicit evict — don't rely on ms-precision updated_at
   return merged;
 }
 
@@ -1196,7 +1049,7 @@ function folderKeepImportedFor(path) {
   const rows = db.prepare('SELECT folder FROM folder_settings WHERE keep_imported=1').all();
   return rows.some((r) => { const f = r.folder; return f === '' ? p === '' : (p === f || p.startsWith(`${f}/`)); });
 }
-function removeDashboard(id) { return db.prepare('DELETE FROM dashboards WHERE id=?').run(id).changes > 0; }
+function removeDashboard(id) { _dashListCache.delete(id); return db.prepare('DELETE FROM dashboards WHERE id=?').run(id).changes > 0; }
 
 // ─── Sets (reusable dashboard collections) ────────────────────────────────────
 function setDashboardIds(setId) {
