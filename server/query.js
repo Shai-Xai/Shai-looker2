@@ -45,10 +45,12 @@ module.exports = function createQueryEngine({ looker, auth }) {
     const p = looker.lookerRequest('POST', path, body)
       .then((data) => {
         qInflight.delete(key);
-        const rows = Array.isArray(data?.data) ? data.data.length : 0;
+        // Row list: json_detail wraps rows in .data; the compact /json format IS the array.
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : null);
+        const rows = list ? list.length : 0;
         if (rows <= QCACHE_MAX_ROWS) {
           let bytes = 4096;
-          try { bytes += rows ? JSON.stringify(data.data[0]).length * rows : 0; } catch { /* keep the floor */ }
+          try { bytes += rows ? JSON.stringify(list[0]).length * rows : 0; } catch { /* keep the floor */ }
           qEvict(key); // replacing: release the old entry's bytes first
           qCache.set(key, { at: Date.now(), data, bytes });
           qBytes += bytes;

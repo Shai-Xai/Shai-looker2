@@ -2599,10 +2599,11 @@ const actionsApi = require('./actions').mount(app, {
     const lockMap = expandLockMap(db.lockedFiltersForSuite(meta.suiteId));
     const qBody = await tileQueryBody(tile, def, user, meta.suiteId, lockMap, filterOverrides);
     if (!qBody) throw new Error('No data access for that tile');
-    const data = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: String(Math.min(Math.max(Number(limit) || 50000, 1000), 500000)) }, undefined, true);
-    const fields = [...(data.fields?.dimensions || []), ...(data.fields?.measures || []), ...(data.fields?.table_calculations || [])]
-      .map((f) => ({ name: f.name, label: f.label_short || f.label }));
-    return { rows: data.data || [], fields };
+    // Fields via a cached 1-row json_detail probe; bulk rows via the compact `json` format (same field-name keys, plain values — cellVal copes) because json_detail's per-cell metadata at 50k+ rows can exceed Node's max string length.
+    const probe = await runLookerQuery('/queries/run/json_detail', { ...qBody, limit: '1' });
+    const fields = [...(probe.fields?.dimensions || []), ...(probe.fields?.measures || []), ...(probe.fields?.table_calculations || [])].map((f) => ({ name: f.name, label: f.label_short || f.label }));
+    const rows = await runLookerQuery('/queries/run/json', { ...qBody, limit: String(Math.min(Math.max(Number(limit) || 50000, 1000), 500000)) }, undefined, true);
+    return { rows: Array.isArray(rows) ? rows : [], fields };
   },
   // The client's events (suites) — for optionally linking a campaign to one.
   listEvents: (entityId) => db.listSuitesForEntity(entityId).map((s) => ({ id: s.id, name: s.name, url: s.eventUrl || '' })),
