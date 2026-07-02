@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-02 · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-02 (event-scoped segments fix) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -237,9 +237,12 @@ with approvals and full tracking.
   uploaded 'already called' list"). Each source keeps its own filters.
 - **Always-live** — segments re-resolve at use/send time, so a linked Sheet stays
   current; counts and email/SMS reach show up front.
-- **Organise** ✅ — **link a segment to an event** and/or **file it in a folder**,
-  then filter the list by either. Keeps a long list tidy as it grows (e.g. all the
-  audiences for one festival together).
+- **Organise + scope to an event** ✅ — **link a segment to an event** and/or **file
+  it in a folder**, then filter the list by either. Keeps a long list tidy as it grows
+  (e.g. all the audiences for one festival together). Linking to an event also **scopes
+  the audience to that event** — the cohort resolves to that event only, every time
+  (reach checks *and* when a campaign sends from it), never silently widening across all
+  your events.
 
 **Pitch:** "Build the exact audience from your own data or a spreadsheet — combine
 lists, subtract a suppression list, and it stays live."
@@ -655,6 +658,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **Event-scoped segments stay scoped** ✅ (fix): a segment linked to an
+  event now resolves to **that event only** on every live re-resolution — reach checks and
+  when a campaign sends from it — not just at creation. Previously an event-scoped cohort
+  (e.g. VIPs for one festival) could silently widen to *all* your events at send time, risking
+  an over-send. The AI-draft/segment tools also now return the **resolved event scope** so a
+  mismatch is visible before anyone approves a send.
 - **2026-07-02** — **Agentic Owl auto-pilot is live** ✅: the one-tap close of the loop —
   the Owl drafts the campaign straight from an insight/suggested action. Drafts still
   ride the normal review + approval gates; nothing sends without a human. (Roadmap's
