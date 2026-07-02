@@ -45,6 +45,8 @@ goal progress; 60/min on MCP). Every call is audited (who/what/when/outcome).
 | `GET /api/v1/campaigns?status=` | Campaigns with results counters (sent, clicks, opens, CTR) |
 | `GET /api/v1/campaigns/:id` | One campaign's results (never the audience list) |
 | `GET /api/v1/goals?suiteId=&progress=1` | Goals for one event; `progress=1` resolves live progress |
+| `GET /api/v1/data-sources` | The curated data sources this client can query directly (measures, dimensions, filter-only fields) |
+| `POST /api/v1/query` | Direct aggregate query — `{source?, measure, measures?, dimensions?, filters?, dateRange?, suiteId?, limit?}` — no dashboard/tile needed |
 | `GET /api/v1/tiles/rows?dashboardId=&tileId=&suiteId=&limit=` | **`read_rows` scope only** — the table behind a tile: every column (incl. display-hidden ones) + rows (default 500, cap 10,000) |
 
 Errors are JSON `{ error }` with meaningful status codes (401 bad/missing key,
@@ -74,12 +76,20 @@ metadata}`), so Pulse works as a ChatGPT connector and for Deep Research. Those
 two tools are aggregate-only (never row-level) and available to any `read` key.
 
 Tools (all read-only): `pulse_get_me` · `pulse_list_dashboards` ·
-`pulse_get_dashboard` · `pulse_get_metric` · `pulse_list_segments` ·
-`pulse_get_segment_reach` · `pulse_list_campaigns` ·
-`pulse_get_campaign_report` · `pulse_get_goals` · `search` · `fetch`
-(the OpenAI-compatible pair) · `pulse_get_tile_rows`
+`pulse_get_dashboard` · `pulse_get_metric` · `pulse_list_data_sources` ·
+`pulse_query_data` · `pulse_list_segments` · `pulse_get_segment_reach` ·
+`pulse_list_campaigns` · `pulse_get_campaign_report` · `pulse_get_goals` ·
+`search` · `fetch` (the OpenAI-compatible pair) · `pulse_get_tile_rows`
 (the last one only appears for keys with the `read_rows` scope — an agent on a
 plain read key is never even offered it).
+
+**Direct queries (no dashboard needed):** `pulse_query_data` / `POST
+/api/v1/query` run bounded aggregate queries straight against the curated data
+catalogue — the SAME engine the in-app Owl uses (`server/owlTools.js`):
+admin-ticked fields only (Admin → Owl data catalogue, incl. per-client on/off
+for extra explores), PII fields are filter-only lookups (never groupable or
+listable), and the organiser scope is forced fail-closed on every query. This
+is deliberately NOT raw Looker API access — the catalogue is the boundary.
 
 Start with `pulse_get_me` (suite ids), then `pulse_list_dashboards` →
 `pulse_get_dashboard` → `pulse_get_metric` for live numbers.

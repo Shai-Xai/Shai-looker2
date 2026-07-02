@@ -604,6 +604,13 @@ Use these to set direction, **not** to promise dates.
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
   thinking line keeps refreshing every few seconds and the connection is kept alive, so a heavy
   query (e.g. a big cashless breakdown) shows progress instead of hanging on "Thinking…".
+- **2026-07-02** — **API: query your data directly (no dashboard needed)** 🧪: connected
+  tools and AI agents can now run **their own breakdowns** — any curated measure by any
+  curated dimension, with filters and date ranges (`POST /api/v1/query` / the
+  `pulse_query_data` MCP tool) — e.g. "revenue by ticket type, last 30 days". Same engine
+  the Owl uses: admin-curated fields only, personal fields are filter-only, every query
+  forced to the client's own scope. Dashboards are no longer the only door; the curated
+  catalogue and the client boundary still are.
 - **2026-07-01** — **Works with ChatGPT / OpenAI too** 🧪: the MCP server now exposes the
   standard `search` + `fetch` tools OpenAI requires, so Pulse connects as a **ChatGPT
   custom connector** (Developer mode) and works with **ChatGPT Deep Research**, as well as

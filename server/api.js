@@ -14,7 +14,7 @@
 
 const { HttpError, asyncHandler } = require('./http');
 
-function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi }) {
+function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue }) {
   const entityOf = (user) => (user.entityIds || [])[0];
   const asOf = () => new Date().toISOString();
 
@@ -177,6 +177,52 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     return { dashboardId, tileId, suiteId: entry.suiteId, fields: r.fields, rowCount: r.rows.length, rows: r.rows, asOf: asOf() };
   }
 
+  // ── direct data queries (no dashboard/tile needed) ──
+  // Rides the Owl's curated-catalogue engine (server/owlTools.js askData + the
+  // per-explore tools): admin-ticked fields only, PII never groupable, the
+  // organiser scope forced fail-closed. A dashboard stops being the only door —
+  // but the catalogue and the tenancy boundary still are.
+  const dataToolFor = (user, exploreKey) => {
+    const tools = getOwlTools();
+    if (!exploreKey || exploreKey === 'primary') return { runner: tools.askData, cat: { model: tools.catalogue.model, view: tools.catalogue.explore, label: tools.catalogue.label || 'All Tickets', key: 'primary', measures: tools.catalogue.measures, dimensions: tools.catalogue.dimensions, dateDimension: tools.catalogue.dateDimension } };
+    for (const t of Object.values(tools)) {
+      if (t && t.exploreKey === exploreKey) {
+        if (!owlCatalogue.exploreEnabledFor(db, exploreKey, entityOf(user))) return null; // per-client off → invisible
+        const cat = (tools.catalogue.extras || []).find((e) => `${e.model}::${e.explore}` === exploreKey);
+        return { runner: t, cat: cat ? { model: cat.model, view: cat.explore, label: cat.label, key: exploreKey, measures: cat.measures, dimensions: cat.dimensions, dateDimension: cat.dateDimension } : null };
+      }
+    }
+    return null;
+  };
+  // The data sources this client may query, with their curated fields — the
+  // discovery step an agent (or developer) uses to learn what it can ask for.
+  function listDataSources(user) {
+    const tools = getOwlTools();
+    const shape = (c, key) => ({
+      key, label: c.label || 'All Tickets', dateDimension: c.dateDimension || '',
+      measures: (c.measures || []).map((m) => ({ name: m.name, label: m.label })),
+      dimensions: (c.dimensions || []).filter((d) => !d.filterOnly).map((d) => ({ name: d.name, label: d.label })),
+      filterOnly: (c.dimensions || []).filter((d) => d.filterOnly).map((d) => ({ name: d.name, label: d.label })),
+    });
+    const out = [shape(tools.catalogue, 'primary')];
+    for (const e of tools.catalogue.extras || []) {
+      const key = `${e.model}::${e.explore}`;
+      if (owlCatalogue.exploreEnabledFor(db, key, entityOf(user))) out.push(shape(e, key));
+    }
+    return out;
+  }
+  // Run one bounded, scoped aggregate query: measure(s) × group-by dimensions ×
+  // filters × optional date range, against a curated source. suiteId (optional)
+  // narrows to one event, exactly like the Owl with an event open.
+  async function queryData(user, { source, suiteId, ...args } = {}) {
+    const t = dataToolFor(user, source);
+    if (!t) throw new HttpError(404, 'Unknown data source — see the data-sources list for what this client can query');
+    if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
+    const out = await t.runner.run(args, { user, suiteId: suiteId || '', entityId: entityOf(user) });
+    if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That query couldn’t be run.');
+    return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, asOf: asOf() };
+  }
+
   // ── OpenAI/ChatGPT-compatible search + fetch (over the same read core) ──
   // ChatGPT connectors require an MCP server to expose `search` and `fetch`.
   // A "document" here is any addressable read item — a dashboard, segment,
@@ -247,7 +293,7 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     throw new HttpError(404, 'Unknown document id');
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc };
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });
@@ -268,6 +314,11 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   app.get('/api/v1/campaigns/:id', ...guard, asyncHandler(async (req, res) => res.json(getCampaign(req.user, req.params.id))));
   app.get('/api/v1/goals', ...guard, heavy, asyncHandler(async (req, res) => {
     res.json({ goals: await listGoals(req.user, { suiteId: req.query.suiteId, progress: req.query.progress === '1' || req.query.progress === 'true' }) });
+  }));
+  // Direct data queries over the curated catalogue (no dashboard/tile needed).
+  app.get('/api/v1/data-sources', ...guard, (req, res) => res.json({ sources: listDataSources(req.user) }));
+  app.post('/api/v1/query', ...guard, heavy, asyncHandler(async (req, res) => {
+    res.json(await queryData(req.user, req.body || {}));
   }));
   // Row-level tile data — requires the `read_rows` scope (explicit opt-in per
   // key; rows can carry customer/ticketing personal data).

@@ -62,6 +62,8 @@ What's available:
 | `/api/v1/campaigns` | Your campaigns with sent / clicks / opens / CTR |
 | `/api/v1/campaigns/{id}` | One campaign's results |
 | `/api/v1/goals?suiteId=…&progress=1` | Your goals for an event, with live progress |
+| `/api/v1/data-sources` | What you can query directly — measures, group-bys, filters |
+| `POST /api/v1/query` | Ask for any curated number with your own breakdown/filters/dates — no dashboard needed |
 | `/api/v1/tiles/rows?dashboardId=…&tileId=…` | *Row-level keys only* — the table behind a tile |
 
 Everything comes back as JSON. A typical first call:

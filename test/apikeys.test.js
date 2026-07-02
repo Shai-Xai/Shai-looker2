@@ -31,6 +31,15 @@ const stubs = {
   },
   actionsApi: { listForEntity: (entityId) => (entityId === (entityA && entityA.id) ? [{ id: 'c1', title: 'Launch', type: 'campaign', status: 'done', audienceCount: 10, results: { sent: 10, clicks: 5 }, config: { channel: 'email', subject: 'Go' }, createdAt: '', updatedAt: '' }] : []) },
   goalsApi: { listGoals: () => [], attachProgress: async (g) => g },
+  // Owl catalogue engine stub — records the ctx the runner receives so the tests
+  // can assert the synthetic principal + entity binding reach it intact.
+  getOwlTools: () => ({
+    catalogue: { model: 'ticketing', explore: 'core', label: 'All Tickets', dateDimension: 'core.date', measures: [{ name: 'core.count', label: 'Tickets' }], dimensions: [{ name: 'core.type', label: 'Type' }, { name: 'core.email', label: 'Email', filterOnly: true }], extras: [] },
+    askData: { run: async (args, ctx) => (args.measure === 'core.count'
+      ? { ok: true, rows: [{ 'core.type': 'VIP', 'core.count': 7 }], count: 1, measure: args.measure, dimensions: args.dimensions || [], ctxEntity: ctx.entityId }
+      : { ok: false, reason: 'unknown_measure', message: `"${args.measure}" is not a measure I can read.` }) },
+  }),
+  owlCatalogue: { exploreEnabledFor: () => true },
 };
 
 before(async () => {
@@ -220,6 +229,31 @@ test('MCP: tools are listed and a tool call returns THIS key’s entity', async 
   assert.equal(call.status, 200);
   const payload = JSON.parse(call.body.result.content[0].text);
   assert.equal(payload.entity.id, entityA.id);
+});
+
+test('direct data queries: discovery + a scoped query, REST and MCP', async () => {
+  const { secret } = await issueKey(entityA.id);
+  // Discovery lists the curated fields (PII stays filter-only).
+  const src = await app.req('GET', '/api/v1/data-sources', { headers: bearer(secret) });
+  assert.equal(src.status, 200);
+  assert.equal(src.body.sources[0].key, 'primary');
+  assert.ok(src.body.sources[0].measures.some((m) => m.name === 'core.count'));
+  assert.ok(src.body.sources[0].filterOnly.some((d) => d.name === 'core.email'), 'PII field is listed as filter-only');
+  assert.ok(!src.body.sources[0].dimensions.some((d) => d.name === 'core.email'), 'PII field is not groupable');
+
+  // A valid query runs; the engine sees the key's entity as its binding context.
+  const q = await app.req('POST', '/api/v1/query', { headers: bearer(secret), body: { measure: 'core.count', dimensions: ['core.type'] } });
+  assert.equal(q.status, 200);
+  assert.equal(q.body.rows[0]['core.count'], 7);
+
+  // The engine's own refusal surfaces as a clean, safe 400.
+  const bad = await app.req('POST', '/api/v1/query', { headers: bearer(secret), body: { measure: 'not.a.measure' } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /not a measure/);
+
+  // Same via MCP.
+  const call = await rpc({ jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'pulse_query_data', arguments: { measure: 'core.count', dimensions: ['core.type'] } } }, secret);
+  assert.equal(JSON.parse(call.body.result.content[0].text).count, 1);
 });
 
 test('MCP: OpenAI-compatible search + fetch tools (structuredContent shape)', async () => {

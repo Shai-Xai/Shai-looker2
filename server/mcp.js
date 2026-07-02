@@ -87,6 +87,27 @@ function mount(app, { apiKeys, core, rateLimit }) {
       },
       run: (u, a) => core.tileRows(u, a),
     },
+    {
+      name: 'pulse_list_data_sources',
+      description: 'Instant. The curated data sources this client can query DIRECTLY (no dashboard needed) — each with its measures (numbers to compute), group-by dimensions and filter-only lookup fields. Call once, then use pulse_query_data.',
+      input: {},
+      run: (u) => ({ sources: core.listDataSources(u) }),
+    },
+    {
+      name: 'pulse_query_data',
+      description: 'LIVE query (~1-3s, cached after). THE MOST POWERFUL READ: compute any curated measure grouped by any curated dimensions with filters and a date range, straight from the client\'s data — use this when no dashboard tile matches the question (e.g. "revenue by ticket type last 30 days"). Field names must come from pulse_list_data_sources. Aggregate results only; personal fields are filter-only lookups, never listable.',
+      input: {
+        source: z.string().optional().describe('Data source key from pulse_list_data_sources (default: primary, the ticketing data)'),
+        measure: z.string().describe('The number to compute — a measure name from the source'),
+        measures: z.array(z.string()).optional().describe('Optional: 2+ measures side by side'),
+        dimensions: z.array(z.string()).optional().describe('Optional group-by fields (dimension names from the source)'),
+        filters: z.record(z.string(), z.string()).optional().describe('Optional {field: value} filters, e.g. {"core_tickets.ticket_type": "VIP"}'),
+        dateRange: z.string().optional().describe('Optional Looker date expression, e.g. "last 30 days", "this month", "2026-01-01 to 2026-02-01"'),
+        suiteId: z.string().optional().describe('Optional event (suite) id to narrow to one event'),
+        limit: z.number().optional().describe('Max rows (default 500)'),
+      },
+      run: (u, a) => core.queryData(u, a),
+    },
     // OpenAI/ChatGPT compatibility: connectors require `search` + `fetch`.
     // They return structuredContent (results / a document) per OpenAI's schema;
     // aggregate data only, so any read key has them. Generic names on purpose —
@@ -126,8 +147,9 @@ function mount(app, { apiKeys, core, rateLimit }) {
     '1. Call pulse_get_me ONCE at the start to get the client + its events (suite ids). Reuse those ids; do not call it again.',
     '2. For a single KPI number, go straight to pulse_get_metric (find the dashboardId/tileId via pulse_list_dashboards → pulse_get_dashboard). Do NOT fetch a whole dashboard just to read one number.',
     '3. List tools (pulse_list_dashboards, pulse_list_segments, pulse_list_campaigns) are instant and already carry headline numbers — prefer them and avoid redundant per-item calls.',
-    '4. Only these do a slower live query: pulse_get_metric, pulse_get_segment_reach, pulse_get_tile_rows, pulse_get_goals with withProgress, and fetch of a dashboard. Use them deliberately.',
-    '5. Make independent lookups in parallel. Answer from the data you have rather than re-fetching.',
+    '4. For analytical questions no tile answers (breakdowns, custom filters, date ranges — e.g. "revenue by ticket type last month"), use pulse_query_data with fields from pulse_list_data_sources. One query beats stitching several tile reads.',
+    '5. Only these do a slower live query: pulse_get_metric, pulse_query_data, pulse_get_segment_reach, pulse_get_tile_rows, pulse_get_goals with withProgress, and fetch of a dashboard. Use them deliberately.',
+    '6. Make independent lookups in parallel. Answer from the data you have rather than re-fetching.',
   ].join('\n');
 
   function buildServer(req) {

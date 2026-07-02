@@ -2714,7 +2714,7 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // remote MCP server for AI agents. Three disposable modules over the SAME
 // service core — external callers ride the app's own scope gates unchanged.
 const apiKeysApi = require('./apiKeys').mount(app, { db, auth, rateLimit });
-const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi });
+const apiV1 = require('./api').mount(app, { db, auth, rateLimit, apiKeys: apiKeysApi, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue });
 require('./mcp').mount(app, { apiKeys: apiKeysApi, core: apiV1.core, rateLimit });
 require('./oauth').mount(app, { db, auth, apiKeys: apiKeysApi, rateLimit }); // "Connect" flow for MCP clients (Claude): discovery + approve → mints a key
 
