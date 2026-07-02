@@ -19,6 +19,7 @@ const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const secretbox = require('./secretbox'); // AES-256-GCM seal/open for secrets at rest
 
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -474,10 +475,13 @@ function deleteFilterView(scope, ownerId, dashboardId) {
 
 function getSetting(key, fallback = '') {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
-  return r ? r.value : fallback;
+  if (!r) return fallback;
+  return secretbox.open(r.value); // no-op for non-sealed values (legacy/non-secret)
 }
 function setSetting(key, value) {
-  db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value == null ? '' : String(value));
+  // Seal credential-bearing settings at rest so the export/backup can't leak them.
+  const stored = secretbox.isSecretName(key) ? secretbox.seal(value) : (value == null ? '' : String(value));
+  db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, stored);
   return getSetting(key);
 }
 
@@ -679,16 +683,44 @@ function deleteInventiveWorkspace(id) {
 // Per-client integration credentials (Looker / Anthropic). Kept separate from
 // the general entity object so secrets never ride along to the browser by
 // accident — only the dedicated, masked endpoints expose them.
+// Per-client integration secrets are sealed at rest (field-by-field, so non-secret
+// fields like slackChannel/senderName stay readable in a leaked snapshot but the
+// credentials don't). open()/seal() are no-ops on already-correct data, so this is
+// backward-compatible with rows written before sealing shipped.
+function unsealIntegrations(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) out[k] = (typeof v === 'string' && secretbox.isSealed(v)) ? secretbox.open(v) : v;
+  return out;
+}
 function getEntityIntegrations(id) {
   const r = db.prepare('SELECT integrations FROM entities WHERE id=?').get(id);
-  return r ? J(r.integrations, {}) : {};
+  return r ? unsealIntegrations(J(r.integrations, {})) : {};
 }
 function setEntityIntegrations(id, patch) {
   const cur = getEntityIntegrations(id);
   const next = { ...cur, ...(patch || {}) }; // patch carries only the keys to change
-  db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(next), id);
+  const sealed = {};
+  for (const [k, v] of Object.entries(next)) sealed[k] = (secretbox.isSecretName(k) && typeof v === 'string') ? secretbox.seal(v) : v;
+  db.prepare('UPDATE entities SET integrations=? WHERE id=?').run(JSON.stringify(sealed), id);
   return getEntityIntegrations(id);
 }
+// One-time (idempotent) migration: seal secrets written before at-rest encryption
+// shipped. Only touches rows that actually hold unsealed credentials, so it's a
+// cheap no-op on every subsequent boot (and on fresh/test DBs with no secrets).
+(function sealExistingSecrets() {
+  try {
+    for (const r of db.prepare('SELECT key, value FROM settings').all()) {
+      if (secretbox.isSecretName(r.key) && r.value && !secretbox.isSealed(r.value)) {
+        db.prepare('UPDATE settings SET value=? WHERE key=?').run(secretbox.seal(r.value), r.key);
+      }
+    }
+    for (const e of db.prepare('SELECT id, integrations FROM entities').all()) {
+      const obj = J(e.integrations, {});
+      const needs = Object.entries(obj).some(([k, v]) => secretbox.isSecretName(k) && typeof v === 'string' && v && !secretbox.isSealed(v));
+      if (needs) setEntityIntegrations(e.id, {}); // merge-nothing → re-seals secret fields
+    }
+  } catch (err) { console.error('[db] secret-seal migration skipped:', err.message); }
+})();
 // Per-integration FREEZE locks for a client: { looker:false, meta:true, … }.
 // Integrations are LOCKED BY DEFAULT — a key is only unlocked when stored
 // explicitly as `false`, so a missing key reads as locked. A frozen integration
