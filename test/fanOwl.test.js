@@ -97,6 +97,14 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const r2 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x' }, headers: ORIGIN });
   assert.equal(r2.body.pageType, 'artist');
   assert.equal(r2.body.offer.label, 'Camping');
+  // Moving between pages REUSES the session and follows the new page: same
+  // session id, ribbon offer switches to the new page's mapping (and back).
+  const r3 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x', sessionId: r.body.sessionId }, headers: ORIGIN });
+  assert.equal(r3.body.sessionId, r.body.sessionId);
+  assert.equal(r3.body.offer.label, 'Camping');
+  const r4 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', sessionId: r.body.sessionId }, headers: ORIGIN });
+  assert.equal(r4.body.sessionId, r.body.sessionId);
+  assert.equal(r4.body.offer.label, 'Weekend Pass');
 });
 
 test('disabled site serves nothing, and non-public items never reach fans', async () => {

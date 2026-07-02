@@ -423,6 +423,11 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         sql.prepare('INSERT INTO fan_sessions (id,site_id,anon_id,page_url,created_at) VALUES (?,?,?,?,?)')
           .run(sid, site.id, String(b.anonId || '').slice(0, 60), pageUrl, now());
         session = getSession.get(sid);
+      } else if (pageUrl && session.page_url !== pageUrl) {
+        // The fan moved to another page — track it so the ribbon AND the chat
+        // (which reads session.page_url per message) follow their context.
+        sql.prepare('UPDATE fan_sessions SET page_url = ? WHERE id = ?').run(pageUrl, session.id);
+        session = getSession.get(session.id);
       }
       const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
       const { page, primary } = offerFor(site, pageUrl);

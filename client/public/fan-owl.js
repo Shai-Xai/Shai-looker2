@@ -99,23 +99,32 @@
     launcher.textContent = '🦉';
     launcher.addEventListener('click', openPanel);
 
-    // The teaser: the deterministic ribbon — the page's mapped offer (or the site's
-    // configured teaser line), shown once per browser session. Pure data, no AI.
+    updateTeaser();
+  }
+
+  // The teaser: the deterministic ribbon — the page's mapped offer (or the site's
+  // configured teaser line). Pure data, no AI. It follows the fan between pages:
+  // it re-shows whenever the page's offer CHANGES (a different offer key), but a
+  // page with the same offer never re-nags, and a dismissal holds until the
+  // offer changes. Called on first render and after every navigation.
+  var teaserTitle, teaserBody;
+  function updateTeaser() {
     var line = '';
     if (ctx.offer) line = ctx.offer.label + (ctx.offer.price ? ' · ' + ctx.offer.currency + ' ' + ctx.offer.price : '') + (ctx.offer.availability ? ' · ' + ctx.offer.availability : '');
     else if (ctx.site && ctx.site.teaser) line = ctx.site.teaser;
-    if (line && !sstore(true, SS_TEASED)) {
-      sstore(false, SS_TEASED, '1');
+    var key = (ctx.offer ? ctx.offer.id : 'site') + '|' + (ctx.pageType || '') + '|' + line;
+    if (!line || (frameWrap && frameWrap.style.display !== 'none')) return; // nothing to say, or chat already open
+    if (sstore(true, SS_TEASED) === key) return; // this exact offer was already teased/dismissed
+    sstore(false, SS_TEASED, key);
+    if (!teaser) {
       teaser = el('div', {
         position: 'fixed', right: '18px', bottom: '84px', zIndex: '2147483000',
         maxWidth: MOBILE() ? 'calc(100vw - 36px)' : '300px', background: '#fff', color: '#111',
         borderRadius: '14px', padding: '12px 36px 12px 14px', fontSize: '14px', lineHeight: '1.45',
         fontFamily: '-apple-system, system-ui, sans-serif', boxShadow: '0 10px 34px rgba(0,0,0,.22)', cursor: 'pointer',
       }, root);
-      var strong = el('div', { fontWeight: '700', marginBottom: '2px' }, teaser);
-      strong.textContent = (ctx.event && ctx.event.name) || ctx.site.name || 'Tickets';
-      var body = el('div', {}, teaser);
-      body.textContent = line;
+      teaserTitle = el('div', { fontWeight: '700', marginBottom: '2px' }, teaser);
+      teaserBody = el('div', {}, teaser);
       var x = el('button', {
         position: 'absolute', top: '6px', right: '6px', width: '24px', height: '24px', border: '0',
         background: 'transparent', color: '#999', fontSize: '16px', cursor: 'pointer',
@@ -124,7 +133,29 @@
       x.addEventListener('click', function (e) { e.stopPropagation(); teaser.style.display = 'none'; });
       teaser.addEventListener('click', openPanel);
     }
+    teaserTitle.textContent = (ctx.event && ctx.event.name) || (ctx.site && ctx.site.name) || 'Tickets';
+    teaserBody.textContent = line;
+    teaser.style.display = 'block';
   }
+
+  // Follow the fan between pages: full reloads re-run the loader naturally, but
+  // SPA navigations (history API) don't — hook them, re-fetch the page context
+  // (same session), and refresh the ribbon. The chat follows automatically: the
+  // server tracks the session's current page per context call.
+  function onNavigate() {
+    post('/api/fan/context', { siteKey: siteKey, url: window.location.href, anonId: anonId, sessionId: ctx && ctx.sessionId })
+      .then(function (r) { ctx = r; sstore(false, SS_SESSION, r.sessionId); if (root) updateTeaser(); })
+      .catch(function () { /* keep the old ribbon */ });
+  }
+  var lastHref = window.location.href;
+  function navCheck() { if (window.location.href !== lastHref) { lastHref = window.location.href; onNavigate(); } }
+  ['pushState', 'replaceState'].forEach(function (m) {
+    var orig = window.history[m];
+    if (!orig) return;
+    window.history[m] = function () { var r = orig.apply(this, arguments); setTimeout(navCheck, 0); return r; };
+  });
+  window.addEventListener('popstate', navCheck);
+  window.addEventListener('hashchange', navCheck);
 
   post('/api/fan/context', {
     siteKey: siteKey,
