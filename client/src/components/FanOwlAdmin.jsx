@@ -10,7 +10,8 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // (event-wide knowledge the Owl may quote), and REPORTS (funnel, FAQ gaps,
 // captured fans).
 
-const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'faq', 'other'];
+const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'accommodation', 'sponsors', 'faq', 'other'];
+const ITEM_KINDS = ['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise'];
 const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card, #fff)', color: 'var(--text)' };
 const small = { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 4px' };
@@ -72,6 +73,30 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
 
   // "Read the website": crawl → AI suggestions merged into the UNSAVED editor
   // state (deduped; never overwriting promoter edits) — review, then Save.
+  // "Write sales pitches": one AI call drafts a salesy ribbon line per page from
+  // its info + ticked items; fills only EMPTY pitch fields (edits always win).
+  const [pitching, setPitching] = useState(false);
+  async function writePitches(siteIndex) {
+    const site = cfg.sites[siteIndex];
+    if (!site?.id) { setIngestNote('Save the site first, then draft pitches.'); return; }
+    setPitching(true); setIngestNote('Writing pitches from each page\'s info + items…');
+    try {
+      const r = await fetch(`${base}/pitches`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteId: site.id }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Pitch drafting failed — try again.');
+      const byPat = new Map((d.pitches || []).map((p) => [p.urlPattern.toLowerCase().trim(), p.pitch]));
+      setCfg((c) => ({
+        ...c,
+        sites: c.sites.map((s, j) => (j !== siteIndex ? s : {
+          ...s,
+          pages: (s.pages || []).map((p) => (String(p.pitch || '').trim() ? p : { ...p, pitch: byPat.get(p.urlPattern.toLowerCase().trim()) || '' })),
+        })),
+      }));
+      setIngestNote(`Drafted ${d.pitches.length} pitch${d.pitches.length === 1 ? '' : 'es'} — review each page's pitch line, edit freely, then Save.`);
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setPitching(false); }
+  }
+
   async function ingest(siteIndex) {
     const url = ingestUrl.trim();
     if (!url) { setIngestNote('Enter the site URL first (https://…).'); return; }
@@ -203,6 +228,10 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                 </div>
                 {ingestNote && <p style={{ ...small, marginTop: 6 }}>{ingestNote}</p>}
               </details>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '2px 0 6px' }}>
+                <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={pitching} onClick={() => writePitches(i)}>{pitching ? 'Writing…' : '✨ Write sales pitches'}</button>
+                <span style={small}>Drafts the salesy ribbon line per page (fills empty pitch fields only).</span>
+              </div>
 
               {(s.pages || []).map((p, pi) => (
                 <details key={p.id || pi} style={{ borderTop: '1px dashed var(--hairline)' }} open={!p.urlPattern}>
@@ -229,6 +258,9 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <input style={{ ...input, marginTop: 6 }} value={(p.starters || []).join(', ')}
                     placeholder="Suggested chips for this page, comma-separated (e.g. What are the glamping options?, Is bedding included?)"
                     onChange={(e) => setPage(i, pi, { starters: e.target.value.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 4) })} />
+                  <input style={{ ...input, marginTop: 6 }} value={p.pitch || ''} maxLength={160}
+                    placeholder="Sales pitch — the salesy teaser line fans see on this page (✨ drafts it; edit freely, e.g. Glamping pods from R1,500 — wake up at the festival 🌙)"
+                    onChange={(e) => setPage(i, pi, { pitch: e.target.value })} />
                   <div style={{ ...small, marginTop: 6 }}>Lead with these catalogue items on this page:</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingBottom: 8 }}>
                     {cfg.catalogue.map((c) => {
@@ -266,7 +298,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '2fr 1fr 1fr 1fr 1fr', gap: 8 }}>
                 <input style={input} value={c.label} placeholder="Label (e.g. Weekend Pass)" onChange={(e) => setCat(i, { label: e.target.value })} />
                 <select style={input} value={c.kind} onChange={(e) => setCat(i, { kind: e.target.value })}>
-                  <option value="ticket">ticket</option><option value="addon">add-on</option><option value="bundle">bundle</option>
+                  {ITEM_KINDS.map((k) => <option key={k} value={k}>{k === 'addon' ? 'add-on' : k}</option>)}
                 </select>
                 <input style={input} value={c.price} placeholder="Price (e.g. 950)" onChange={(e) => setCat(i, { price: e.target.value })} />
                 <input style={input} value={c.currency} placeholder="ZAR" onChange={(e) => setCat(i, { currency: e.target.value })} />

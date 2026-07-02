@@ -61,13 +61,27 @@ FOLLOW-UPS: at the very END of your reply, on its own final line, output <<<FOLL
 const FAN_INGEST_SYSTEM = `You read the text of an event's public website pages and produce SUGGESTED content for that event's website ticket assistant, for a human to review and edit before anything goes live.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
-{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"faq"|"other","note":"…","content":"…","starters":["…"]}]}
+{"knowledge":[{"kind":"faq"|"policy"|"info","question":"…","body":"…"}],"pages":[{"urlPattern":"…","pageType":"home"|"lineup"|"artist"|"tickets"|"attraction"|"venue"|"accommodation"|"sponsors"|"faq"|"other","note":"…","content":"…","starters":["…"]}]}
 
 Rules:
 - Ground EVERYTHING in the provided page text. NEVER invent facts, dates, rules or policies that aren't in the text. Fewer solid entries beat many padded ones.
 - knowledge (max 20) = GENERAL, event-wide entries only: policies (refunds, age limits, accessibility, what's allowed in) and cross-cutting FAQs a fan could ask from any page. Question in a fan's words; body closely following the site's own wording. Do NOT duplicate page-specific detail here.
 - pages (max 12) = one entry per distinct page/section identifiable from the URLs and text: a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, a one-line note saying what the page is, "content" — the useful PAGE-SPECIFIC information from that page, distilled (up to ~250 words), closely following the site's wording — and "starters": up to 3 SHORT (≤6 words) questions a fan on that page would most likely tap, answerable from that page's content (e.g. on accommodation: "What are the glamping options?"). Page detail (e.g. everything about accommodation options) belongs in that page's content, not in knowledge.
 - Do NOT suggest ticket prices or checkout links — the catalogue comes from the ticketing system, not the website.`;
+
+// The pitch writer (spec §2.2b voice, applied to the ribbon): drafts ONE salesy
+// teaser line per page from that page's approved info + mapped items. Generated on
+// demand in the editor, reviewed by a human, then served deterministically — the
+// fan-facing ribbon stays a zero-AI, zero-latency surface.
+const FAN_PITCH_SYSTEM = `You write the tiny sales line ("pitch") an event-website assistant shows in its teaser bubble, one per page. You are given JSON: an event name and pages, each with its urlPattern, pageType, page info, and the items it leads with (label, price, currency, availability).
+
+Respond with ONLY strict JSON (no markdown fences): {"pitches":[{"urlPattern":"…","pitch":"…"}]} — one per input page.
+
+Rules:
+- ≤90 characters each. Warm, punchy, the voice of a friend who's already going — not an ad.
+- Grounded ONLY in the given info and items. NEVER invent prices, discounts, dates, or urgency; availability words like "selling fast" may be used ONLY if given on an item.
+- Lead with the concrete thing the page is about (the item name, the experience) — e.g. "Glamping pods from ZAR 1,500 — wake up at the festival 🌙".
+- At most one emoji, only where natural. No exclamation-mark pileups, no "don't miss out" clichés.`;
 
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
 
@@ -127,6 +141,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN content TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   // Migration: per-page suggested chips (the tappable starter questions in the chat).
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN starters TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+  // Migration: per-page AI-drafted (human-approved) sales pitch — the salesy teaser
+  // line the ribbon leads with on that page. Generated once, served deterministically.
+  try { sql.exec("ALTER TABLE fan_pages ADD COLUMN pitch TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   // Migration: catalogue items gained images (URLs; a scrollable strip on offer cards).
   try { sql.exec("ALTER TABLE fan_catalogue ADD COLUMN images TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
@@ -157,7 +174,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []) })),
+      pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
       id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price,
@@ -166,7 +183,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     })),
     knowledge: knowByEntity.all(entityId).map((k) => ({ id: k.id, kind: k.kind, question: k.question, body: k.body })),
   });
-  const KINDS = new Set(['ticket', 'addon', 'bundle']);
+  const KINDS = new Set(['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise']);
   const KKINDS = new Set(['faq', 'policy', 'info']);
   function saveConfig(entityId, b) {
     const tx = sql.transaction(() => {
@@ -190,8 +207,8 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
           for (const p of (s.pages || []).slice(0, 200)) {
             if (!String(p.urlPattern || '').trim()) continue;
-            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note,content,starters) VALUES (?,?,?,?,?,?,?,?)')
-              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300), String(p.content || '').slice(0, 6000), JSON.stringify((p.starters || []).map((x) => String(x).slice(0, 80)).filter(Boolean).slice(0, 4)));
+            sql.prepare('INSERT INTO fan_pages (id,site_id,url_pattern,page_type,item_ids,note,content,starters,pitch) VALUES (?,?,?,?,?,?,?,?,?)')
+              .run(p.id || uid(), id, String(p.urlPattern).trim().slice(0, 300), String(p.pageType || 'other').slice(0, 20), JSON.stringify((p.itemIds || []).map(String).slice(0, 30)), String(p.note || '').slice(0, 300), String(p.content || '').slice(0, 6000), JSON.stringify((p.starters || []).map((x) => String(x).slice(0, 80)).filter(Boolean).slice(0, 4)), String(p.pitch || '').slice(0, 160));
           }
         }
         for (const s of sitesByEntity.all(entityId)) {
@@ -290,7 +307,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     }
     return out;
   }
-  const PTYPES = new Set(['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'faq', 'other']);
+  const PTYPES = new Set(['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'accommodation', 'sponsors', 'faq', 'other']);
   const ingestLimit = rateLimit({ windowMs: 5 * 60_000, max: 4, by: 'user', scope: 'fan-ingest', message: 'Give the crawl a few minutes between runs.' });
   const ingestHandler = asyncHandler(async (req, res) => {
     const entityId = req.params.entityId;
@@ -325,6 +342,44 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   });
   app.post('/api/admin/entities/:entityId/fan-owl/ingest', auth.requireAdmin, requireManager, ingestLimit, ingestHandler);
   app.post('/api/my/fan-owl/:entityId/ingest', auth.requireAuth, requireMyEntity, requireManager, ingestLimit, ingestHandler);
+
+  // ── "Write sales pitches" — one Claude call drafts a salesy ribbon line per page
+  // (grounded in each page's info + mapped items). Returned as SUGGESTIONS the
+  // editor merges unsaved — review, edit, Save; then served with zero AI cost.
+  const pitchHandler = asyncHandler(async (req, res) => {
+    const entityId = req.params.entityId;
+    const site = siteById.get(String((req.body || {}).siteId || ''));
+    if (!site || site.entity_id !== entityId) throw new HttpError(404, 'Site not found.');
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new HttpError(400, 'AI is not configured for this client — set an Anthropic key in Admin → Integrations first.');
+    const cat = catByEntity.all(entityId);
+    const pages = pagesBySite.all(site.id).map((p) => ({
+      urlPattern: p.url_pattern,
+      pageType: p.page_type,
+      info: `${p.note || ''} ${p.content || ''}`.trim().slice(0, 1500),
+      items: J(p.item_ids, []).map((id) => cat.find((c) => c.id === id)).filter(Boolean)
+        .map((c) => ({ label: c.label, price: c.price, currency: c.currency, availability: c.availability })),
+    }));
+    if (!pages.length) throw new HttpError(400, 'Add some pages first — the pitch writer works from each page\'s info and items.');
+    const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
+    const client = insights.requireClient(apiKey);
+    const msg = await client.messages.create({
+      model: insights.MODEL, max_tokens: 1200, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system: FAN_PITCH_SYSTEM, messages: [{ role: 'user', content: JSON.stringify({ event: site.name || suite?.name || '', pages }) }],
+    });
+    const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    let parsed = {};
+    try { parsed = JSON.parse(rawText.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); }
+    catch { throw new HttpError(502, 'The Owl’s pitches came back malformed — try again.'); }
+    res.json({
+      pitches: (Array.isArray(parsed.pitches) ? parsed.pitches : [])
+        .filter((p) => String(p.pitch || '').trim() && String(p.urlPattern || '').trim())
+        .map((p) => ({ urlPattern: String(p.urlPattern).slice(0, 300), pitch: String(p.pitch).trim().slice(0, 160) })),
+    });
+  });
+  const pitchLimit = rateLimit({ windowMs: 5 * 60_000, max: 6, by: 'user', scope: 'fan-pitch' });
+  app.post('/api/admin/entities/:entityId/fan-owl/pitches', auth.requireAdmin, requireManager, pitchLimit, pitchHandler);
+  app.post('/api/my/fan-owl/:entityId/pitches', auth.requireAuth, requireMyEntity, requireManager, pitchLimit, pitchHandler);
 
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls
@@ -418,10 +473,14 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const mapped = mappedIds.map((id) => all.find((c) => c.id === id)).filter(Boolean);
     let items = mapped.length ? mapped : all;
     // A matched page with NO ticked items still leads with what fits the page
-    // type (attraction/venue → add-ons first), so pages differ sensibly even
+    // type (accommodation pages → accommodation items; venue → transport like
+    // parking/shuttles; attraction → add-ons), so pages differ sensibly even
     // before the promoter curates per-page items.
-    if (!mapped.length && page && (page.page_type === 'attraction' || page.page_type === 'venue')) {
-      items = [...items.filter((c) => c.kind === 'addon'), ...items.filter((c) => c.kind !== 'addon')];
+    const KIND_AFFINITY = { accommodation: ['accommodation', 'addon'], venue: ['transport', 'addon'], attraction: ['addon'] };
+    const pref = !mapped.length && page ? KIND_AFFINITY[page.page_type] : null;
+    if (pref) {
+      const rank = (k) => { const r = pref.indexOf(k); return r === -1 ? pref.length : r; };
+      items = [...items].sort((a, b) => rank(a.kind) - rank(b.kind));
     }
     return { page, items, primary: items[0] || null, all };
   }
@@ -461,6 +520,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', teaser: site.teaser || '' },
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
+        pitch: page?.pitch || '', // the approved salesy line for THIS page (ribbon leads with it)
         offer: primary ? publicItem(primary) : null,
       });
     }));
@@ -479,6 +539,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.json({
       site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
       event: suite ? { name: suite.name } : null,
+      pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
@@ -700,4 +761,4 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   return { saveConfig, configView }; // exposed for tests
 }
 
-module.exports = { mount, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, CONSENT_WORDING_VERSION };
+module.exports = { mount, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };
