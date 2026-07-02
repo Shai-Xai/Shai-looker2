@@ -955,6 +955,12 @@ function setMembershipRole(userId, entityId, role) {
 function removeMembership(userId, entityId) {
   return db.prepare('DELETE FROM user_entities WHERE user_id=? AND entity_id=?').run(userId, entityId).changes > 0;
 }
+// Invalidate every outstanding session JWT for a user without touching their
+// password (used by 2FA disable / admin reset). attachUser rejects any token
+// whose tv is behind.
+function bumpTokenVersion(id) {
+  db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?').run(id);
+}
 function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '', howlerRole = '', roles = [] }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
@@ -1641,7 +1647,7 @@ module.exports = {
   getEntityMailBranding, setEntityMailBranding,
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
-  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin,
+  listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin, bumpTokenVersion,
   NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn,
   createAuthToken, consumeAuthToken, clearAuthTokens,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,

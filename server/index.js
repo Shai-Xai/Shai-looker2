@@ -56,10 +56,8 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Security headers (dependency-free, helmet essentials). Cookie auth makes
-// clickjacking + MIME-sniff matter; frame-ancestors 'none' blocks embedding,
-// nosniff stops sniffing downloads/mail assets, HSTS forces https in prod. A
-// full script-src CSP is deferred (needs nonce/hashing for the bundle+echarts).
+// Security headers (dependency-free, helmet essentials): frame-ancestors 'none'
+// (clickjacking), nosniff, Referrer-Policy, HSTS in prod. Full script-src CSP deferred.
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'DENY');
@@ -93,8 +91,7 @@ require('./audit').mount(app, { db });
 // Internal ops alerts (Howler Slack) — background failures raise a human instead
 // of dying in the log stream. Disposable: remove these lines + server/ops.js.
 const ops = require('./ops'); ops.init({ db });
-// Nightly DB snapshots + off-box copy (R2/S3 when configured) — the disaster-
-// recovery floor. Disposable: remove this line + server/backup.js + backup_runs.
+// Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
 require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
 // Serve built React app (client/dist) if present, else raw client/
@@ -152,8 +149,7 @@ osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) }), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 // ─── Health ───────────────────────────────────────────────────────────────────
-// Health touches SQLite — a wedged DB/disk must fail the check (Render restarts
-// on failing health), not report ok while every real request errors.
+// Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
 app.get('/health', (_req, res) => {
   try { db.db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
   catch (e) { res.status(500).json({ status: 'db_error', error: e.message }); }
@@ -176,10 +172,13 @@ function meUser(user) {
 }
 // Brute-force guard (per-IP + per-account limiters + failed-attempt detector) → server/loginGuard.js.
 const loginGuard = require('./loginGuard')({ rateLimit, ops, db });
+// Two-factor auth (TOTP) → server/twofactor.js (login/reset/magic gate via stepUp()).
+const twofactor = require('./twofactor').mount(app, { db, auth, rateLimit, meUser, onLoginFail: (email) => loginGuard.onFailure(email) });
 app.post('/api/auth/login', loginGuard.perIp, loginGuard.perAccount, asyncHandler(async (req, res) => {
   const { email, password } = req.body || {};
   const user = await auth.verifyCredentials(email, password);
   if (!user) { loginGuard.onFailure(email); return res.status(401).json({ error: 'Invalid email or password' }); } // record+burst-detect; response stays generic (no enumeration)
+  if (twofactor.stepUp(res, user)) return; // 2FA on → withhold session until /api/auth/2fa
   auth.issueCookie(res, user);
   db.touchLastLogin(user.id); // most recent login → Admin → Users
   db.recordAction({ userId: user.id, action: 'auth.login', label: 'Logged in', method: 'POST', path: '/api/auth/login' });
@@ -192,15 +191,15 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+
 // Current user (200 with null when not logged in, so the client can decide).
 app.get('/api/auth/me', (req, res) => {
   res.json({ user: meUser(req.user) });
 });
 
 // ─── Passwordless / recovery sign-in (reset link + magic link) ─────────────────
-// Both flows email a one-time link. We always answer 200 {ok:true} to a request
-// so an attacker can't probe which emails have logins (no user enumeration).
-// Tokens are single-use, time-boxed, and stored only as a hash (see db.js).
+// Both flows email a one-time link, and always answer 200 {ok:true} so an attacker
+// can't probe which emails have logins. Tokens are single-use, time-boxed, hashed.
 function sendAuthLink(user, kind, ttlMs, { subject, title, body, ctaText, path }) {
   const token = db.createAuthToken(user.id, kind, ttlMs);
   const url = `${mailer.baseUrl()}${path}?token=${encodeURIComponent(token)}`;
@@ -208,8 +207,7 @@ function sendAuthLink(user, kind, ttlMs, { subject, title, body, ctaText, path }
     title, body: `${body}\n\nThis link expires in ${Math.round(ttlMs / 60000)} minutes and can be used once. If you didn't request it, you can ignore this email.`,
     ctaText, ctaPath: `${path}?token=${encodeURIComponent(token)}`,
   });
-  // notificationEmail builds the CTA from baseUrl()+ctaPath, so the button points
-  // at the tokenised link above. Best-effort send (auth still works if email lags).
+  // notificationEmail builds the CTA from baseUrl()+ctaPath. Best-effort send.
   mailer.send({ to: user.email, subject, html, text, kind: 'auth' }).catch((e) => console.error('[auth-link]', e.message));
   return url;
 }
@@ -239,8 +237,9 @@ app.post('/api/auth/reset', rateLimit({ windowMs: 15 * 60_000, max: 10, by: 'ip'
   db.clearAuthTokens(userId, 'reset'); // any other outstanding reset links are now dead
   auth.invalidateUser(userId);         // evict the 2s user cache so old cookies are rejected at once
   const user = db.getUser(userId);
-  auth.issueCookie(res, user);         // this browser gets a fresh cookie at the new epoch
   db.recordAction({ userId, action: 'auth.reset', label: 'Reset password', method: 'POST', path: '/api/auth/reset' });
+  if (twofactor.stepUp(res, user)) return; // a reset must not bypass 2FA
+  auth.issueCookie(res, user);         // this browser gets a fresh cookie at the new epoch
   res.json({ user: meUser(user) });
 });
 
@@ -264,6 +263,7 @@ app.post('/api/auth/magic/consume', rateLimit({ windowMs: 15 * 60_000, max: 10, 
   const userId = db.consumeAuthToken((req.body || {}).token, 'magic');
   if (!userId) return res.status(400).json({ error: 'This sign-in link is invalid or has expired. Request a new one.' });
   const user = db.getUser(userId);
+  if (twofactor.stepUp(res, user)) return; // a magic link must not bypass 2FA
   auth.issueCookie(res, user);
   db.touchLastLogin(user.id);
   db.recordAction({ userId, action: 'auth.magic', label: 'Signed in via magic link', method: 'POST', path: '/api/auth/magic/consume' });
