@@ -1,0 +1,199 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index ea136dd..ee0e6c1 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -207,7 +207,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
+         {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
+         {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
+         {entityName ? ` · scoped to ${entityName}` : ' · platform-wide'}
+-        {' '}· every {m.checkEveryMin}m · warn {m.warnMin}m · stale {m.staleMin}m
++        {' '}· every {m.checkEveryMin >= 1 ? `${m.checkEveryMin}m` : 'master'} · warn {m.warnMin}m · stale {m.staleMin}m
+       </div>
+       {m.lastError && <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 8 }}>⚠️ Last pull failed: {m.lastError}</div>}
+       {m.streams.length ? (
+@@ -243,7 +243,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
+ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+   const [f, setF] = useState(() => ({
+     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
+-    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 5, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
++    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+     ...(initial || {}),
+   }));
+   const [models, setModels] = useState(null);
+@@ -410,7 +410,10 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+         {[['warnMin', 'Warn after (min)'], ['staleMin', 'Stale after (min)'], ['checkEveryMin', 'Check every (min)'], ['cooldownMin', 'Alert cooldown (min)']].map(([k, l]) => (
+           <div key={k}>
+             <span style={label}>{l}</span>
+-            <input style={input} type="number" min="1" value={f[k]} onChange={(e) => set(k, e.target.value)} />
++            <input style={input} type="number" min={k === 'checkEveryMin' ? '0' : '1'}
++              value={k === 'checkEveryMin' ? (Number(f[k]) >= 1 ? f[k] : '') : f[k]}
++              placeholder={k === 'checkEveryMin' ? 'master' : undefined}
++              onChange={(e) => set(k, e.target.value)} />
+           </div>
+         ))}
+       </div>
+@@ -480,7 +483,7 @@ export default function DataHealthAdmin() {
+             <span key={i} style={{ fontSize: 12.5, fontWeight: 700, color: c, padding: '5px 12px', borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)' }}>{t}</span>
+           ))}
+           <span style={{ flex: 1 }} />
+-          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>auto-checks every {data.tickMin || 5} min · page refreshes every minute</span>
++          <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
+           {editing == null && <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>}
+         </div>
+       )}
+@@ -508,6 +511,37 @@ export default function DataHealthAdmin() {
+   );
+ }
+ 
++// Master auto-check cadence: how often the background sweep pulls each monitor
++// (a monitor can still set its own cadence in the editor; blank = follow this).
++// Saved via the same settings PUT the test-mode banner uses; applies within a
++// minute — the server heartbeat re-reads it every 60s, no restart needed.
++function MasterCadence({ tickMin, onChanged }) {
++  const [v, setV] = useState(String(tickMin));
++  const [busy, setBusy] = useState(false);
++  const [err, setErr] = useState('');
++  useEffect(() => { setV(String(tickMin)); }, [tickMin]);
++  const save = async () => {
++    setBusy(true); setErr('');
++    try {
++      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickMin: Number(v) }) });
++      const d = await res.json().catch(() => ({}));
++      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
++      onChanged();
++    } catch (e) { setErr(e.message); }
++    setBusy(false);
++  };
++  return (
++    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
++      auto-check every
++      <input type="number" min="1" max="120" value={v} onChange={(e) => setV(e.target.value)}
++        style={{ ...input, width: 58, padding: '4px 6px', fontSize: 12 }} />
++      min
++      {Number(v) !== Number(tickMin) && <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={save}>{busy ? '…' : 'Save'}</button>}
++      {err && <span style={{ color: STATUS_COLOR.stale }}>{err}</span>}
++    </span>
++  );
++}
++
+ // Test-mode banner: while ON, every alert is emailed ONLY to the test address —
+ // ops Slack and client-team notifications stay muted, so thresholds can be tuned
+ // without paging anyone. (Settings PUT is called inline rather than via lib/api.js
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index b1ace6b..74bfe5f 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -45,6 +45,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+   // the team or a client. Toggle + address live in Admin → Data health.
+   const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
+   const testEmail = () => String(db.getSetting('data_health_test_email', 'shai.evian@howler.co.za') || '').trim();
++  // Master auto-check cadence (minutes). Monitors with check_every_min = 0
++  // follow this; a monitor with its own value keeps it. Editable in the UI.
++  const masterMin = () => { const n = Math.round(Number(db.getSetting('data_health_tick_min', '5'))); return Number.isFinite(n) ? Math.max(1, Math.min(120, n)) : 5; };
+ 
+   sql.exec(`
+     CREATE TABLE IF NOT EXISTS data_monitors (
+@@ -170,7 +173,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+       filters,
+       warnMin: num(b.warnMin, 30, 1, 10080),
+       staleMin: num(b.staleMin, 60, 2, 10080),
+-      checkEveryMin: num(b.checkEveryMin, 5, 1, 1440),
++      checkEveryMin: num(b.checkEveryMin, 0, 0, 1440), // 0 = follow the master cadence
+       channels,
+       notifyRecovery: b.notifyRecovery === false ? 0 : 1,
+       cooldownMin: num(b.cooldownMin, 60, 0, 10080),
+@@ -451,7 +454,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+   }
+ 
+   // ── the tick ──
+-  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 5 * 60000;
++  // A 60s heartbeat; each monitor is actually checked when its cadence elapses —
++  // its own check_every_min if set, else the master setting. Changing the master
++  // in the UI therefore takes effect within a minute, no restart.
++  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 60000;
+   let ticking = false;
+   async function tick() {
+     if (!enabled() || ticking) return;
+@@ -459,9 +465,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     try {
+       const rows = sql.prepare("SELECT * FROM data_monitors WHERE status='active' AND model<>'' AND view<>'' AND time_field<>''").all().map(rowToMonitor);
+       const nowMs = Date.now();
++      const master = masterMin();
+       for (const m of rows) {
+-        // Per-monitor cadence: skip until its own interval has elapsed.
+-        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < m.checkEveryMin * 60000 - 5000) continue;
++        const cadence = m.checkEveryMin >= 1 ? m.checkEveryMin : master;
++        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < cadence * 60000 - 5000) continue;
+         try { await check(m); } catch (e) { console.error('[data-health] check failed', m.id, e.message); }
+       }
+       // Keep the logs bounded: pulls are noisy (14d), transitions are history (60d).
+@@ -485,7 +492,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+         lastCheck: sql.prepare('SELECT * FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 1').get(m.id) || null,
+         recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 5').all(m.id),
+       }));
+-    res.json({ enabled: true, tickMin: Math.round(TICK_MS / 60000), testMode: testMode(), testEmail: testEmail(), monitors });
++    res.json({ enabled: true, tickMin: masterMin(), testMode: testMode(), testEmail: testEmail(), monitors });
+   });
+ 
+   // Test-mode switch: while on, alerts email ONLY the test address (ops Slack +
+@@ -499,7 +506,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That test email doesn’t look valid.' });
+       db.setSetting('data_health_test_email', email);
+     }
+-    res.json({ testMode: testMode(), testEmail: testEmail() });
++    if (b.tickMin != null) {
++      const n = Math.round(Number(b.tickMin));
++      if (!Number.isFinite(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Auto-check must be between 1 and 120 minutes.' });
++      db.setSetting('data_health_tick_min', String(n));
++    }
++    res.json({ testMode: testMode(), testEmail: testEmail(), tickMin: masterMin() });
+   });
+ 
+   app.post('/api/admin/data-health/monitors', auth.requireAdmin, (req, res) => {
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 26eaa08..98782f1 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -287,6 +287,33 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async
+   assert.equal(body.limit, '100');
+ });
+ 
++test('master cadence: monitors with no own cadence follow data_health_tick_min', async () => {
++  const h = mountHealth();
++  db.setSetting('data_health_tick_min', '7');
++  try {
++    const follows = makeMonitor(h, { name: 'Follows master', checkEveryMin: 0 });
++    const own = makeMonitor(h, { name: 'Own cadence', checkEveryMin: 1 });
++    let checked = [];
++    h.setRowsFn(async (b) => { checked.push(b.filters ? 1 : 1); return [{ 'scans.scanned_at': minsAgo(1), 'scans.station_name': 'A', data_health_latest: minsAgo(1) }]; });
++    // Both were checked 3 minutes ago.
++    const threeAgo = new Date(Date.now() - 3 * 60000).toISOString();
++    h.sql.prepare('UPDATE data_monitors SET last_checked_at=?').run(threeAgo);
++    checked = [];
++    await h.mod.tick();
++    // 3m elapsed: own cadence (1m) is due; master follower (7m) is not.
++    assert.equal(checked.length, 1);
++    assert.equal(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo); // untouched
++    assert.notEqual(h.mod.monitorById(own.id).lastCheckedAt, threeAgo);  // re-checked
++    // 8 minutes elapsed → the follower is due too.
++    h.sql.prepare('UPDATE data_monitors SET last_checked_at=? WHERE id=?').run(new Date(Date.now() - 8 * 60000).toISOString(), follows.id);
++    checked = [];
++    await h.mod.tick();
++    assert.notEqual(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo);
++  } finally {
++    db.setSetting('data_health_tick_min', '5');
++  }
++});
++
+ test('fieldValues: distinct dimension values, deduped and scoped', async () => {
+   const h = mountHealth();
+   let body = null;
+@@ -316,7 +343,7 @@ test('clean() bounds thresholds and drops junk filters', () => {
+   assert.equal(c.name.length, 120);
+   assert.equal(c.warnMin, 1);
+   assert.equal(c.staleMin, 10080);
+-  assert.equal(c.checkEveryMin, 1);
++  assert.equal(c.checkEveryMin, 0); // 0 = follow the master cadence
+   assert.deepEqual(c.channels, ['push', 'email']);
+   assert.equal(Object.keys(c.filters).length, 2);
+   assert.ok(!('empty' in c.filters));
