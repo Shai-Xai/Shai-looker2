@@ -72,6 +72,48 @@ const TICKETING_DEFAULT_PLAYBOOK = `STARTER PLAYBOOK (v0 — to be refined in th
 - Watch day-on-day momentum shifts (a sudden slump or spike in the last 7 days) — call them out even when cumulative numbers look fine.
 - Final week: expect a surge; focus advice on operational readiness of inventory (what to release, when) rather than long-range campaigns.`;
 
+// ── The Chief of Operations (second specialist) ────────────────────────────────
+// Debriefs the RUNNING of an event day — gates/entry, bars/cashless, devices —
+// from whatever operational sources are connected for the client: the eventOps
+// tool (devices/stations/issues) and the admin-registered extra explores
+// (ask_<explore> — e.g. cashless spend/top-ups, access-control scans).
+const OPS_SKILL_SYSTEM = `You are the Chief of Operations — one of Howler Pulse's autonomous specialist skills — writing the operational DEBRIEF of an event day for its organiser. You run unattended; nobody is chatting with you. Your reader is the organiser and the ops team the morning after (or during a multi-day event, each morning). Write money in THIS client's reporting currency: if a "Currency:" note appears in your instructions, follow it exactly; only if there is no such note, default to South African Rand (R).
+
+HOW YOU KNOW THINGS (non-negotiable):
+- You do NOT know any numbers on your own. Learn figures ONLY from your tools and cite what you used:
+  • askData → the ticketing data (tickets sold, attendance-relevant sales, complimentary counts).
+  • ask_<source> tools (when present) → extra operational data sources, e.g. cashless (bar/vendor sales, top-ups, refunds) and access control (gate scans, entries by hour). Their measures/dimensions are listed in each tool's schema — explore what is actually available.
+  • eventOps (when present) → live device & station logistics: where devices are, open issues, checkpoints.
+  • getGoals → operational targets (e.g. top-up or spend goals) when configured.
+- NEVER invent, estimate, or guess a number. If a source isn't connected (a tool is missing or refuses), name the gap honestly ("no access-control data is connected, so I can't read gate flow") — do NOT fabricate that section.
+- All data is scoped server-side to this client and event. You cannot and must not try to widen it.
+
+WHAT YOU DO (and never do):
+- You DEBRIEF operations: entry/gates (arrival curve, peak entry pressure, scans vs tickets sold), bars & cashless (sales by hour/outlet, top-up vs spend behaviour, refund exposure), devices & stations (open issues, devices out of place), and anything the data shows about queues, bottlenecks or dead zones.
+- You take NO actions. Every recommendation is for the ops team to consider.
+- Investigate before you conclude: start wide (what happened yesterday/on the event day), then drill into the biggest anomalies by hour, outlet, gate or device until the story is concrete.
+
+OUTPUT FORMAT (exactly this shape, markdown, max ~450 words):
+HEADLINE: <one sentence — the single most important operational takeaway>
+
+**The day in numbers** — 3-6 short lines: attendance/entries, bar/cashless totals, top-ups, device issues — each figure cited from a tool result.
+**What worked** — bullets, each backed by a number.
+**What struggled** — bullets, each backed by a number; be direct about bottlenecks and when they happened.
+**Recommendations** — numbered, most important first, max 4. Each: the concrete change → the evidence → when it matters (tomorrow's event day / next event).
+
+DISCIPLINE:
+- Times matter in ops: anchor findings to hours ("entries peaked 19:00–20:00") whenever the data has a time dimension.
+- Be specific ("add a second scanner lane at Gate B before 19:00", not "improve entry flow").
+- If a whole domain has no connected data, one honest line about the gap beats a padded section.
+- A smooth day is a valid finding — say so and keep it short.`;
+
+const OPS_DEFAULT_PLAYBOOK = `STARTER PLAYBOOK (v0 — to be refined in the ops workshop; client additions may extend or override):
+- Entry: compare scans/entries against tickets sold (no-show rate), and read the arrival curve by hour — a peak-hour crush at one gate is the classic fix (more lanes/staff at peak, not all day).
+- Bars/cashless: find the peak sales hour and the top + bottom outlets; a big gap between outlets usually means placement or staffing, not demand.
+- Top-ups vs spend: unspent balances become refund admin — flag when top-ups outrun spend late in the day.
+- Devices: open issues and devices logged at the wrong station during trading hours are the first thing to check when an outlet underperforms.
+- Multi-day events: compare against the previous day and call out what changed.`;
+
 const SKILL_DEFS = {
   ticketing: {
     key: 'ticketing',
@@ -80,9 +122,22 @@ const SKILL_DEFS = {
     blurb: 'Watches ticket sales, pace and per-tier momentum against goals; advises on pricing, releases and allocation.',
     system: TICKETING_SKILL_SYSTEM,
     defaultPlaybook: TICKETING_DEFAULT_PLAYBOOK,
+    task: 'Check the goals first, then investigate anything off-track with askData before you conclude.',
     liveTools: ['getGoals', 'askData'],     // read-only; act-tools arrive with L2
     backtestTools: ['askData'],             // current-progress tools would leak the "future"
     usageKind: 'skill_ticketing',           // aiUsage attribution
+  },
+  ops: {
+    key: 'ops',
+    name: 'Chief of Operations',
+    emoji: '🎪',
+    blurb: 'Debriefs how the event day RAN — gates & entry flow, bars & cashless spend, devices & stations — and what to change for the next one.',
+    system: OPS_SKILL_SYSTEM,
+    defaultPlaybook: OPS_DEFAULT_PLAYBOOK,
+    task: 'Write the operational debrief of the most recent event day. Survey what each connected source shows first (entries/scans, cashless sales + top-ups by hour and outlet, device issues), then drill into the anomalies. If a source is not connected, say so honestly.',
+    liveTools: ['getGoals', 'askData', 'eventOps', 'ask_*'], // ask_* = every extra explore registered for this client (cashless, access…)
+    backtestTools: ['askData', 'ask_*'],    // date-clamped; eventOps/getGoals reflect PRESENT state so they are withheld
+    usageKind: 'skill_ops',
   },
 };
 
@@ -99,14 +154,27 @@ function clampBacktestDates(args = {}, freezeISO) {
   return out;
 }
 
+// Expand a def's tool-name list against the live registry. Exact names are kept
+// when present; a trailing-star entry ('ask_*') pulls in every registered tool
+// with that prefix — how the ops skill picks up whichever extra explores
+// (cashless, access control…) are connected for THIS client. (Exported for tests.)
+function expandToolNames(names, all) {
+  const keys = Object.keys(all || {});
+  const out = [];
+  for (const n of names || []) {
+    if (n.endsWith('*')) { const p = n.slice(0, -1); for (const k of keys) if (k.startsWith(p) && !out.includes(k)) out.push(k); }
+    else if (all[n] && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
 // Wrap a tool map for backtest mode: only the allowed tools survive, and each
-// run() gets its dates clamped. (Only askData takes a dateRange today; the wrap
-// applies it to any tool that grows one later.)
+// run() gets its dates clamped (askData and every ask_<explore> tool take a
+// dateRange; the wrap applies it to any tool that grows one later).
 function wrapToolsForBacktest(toolMap, allowed, freezeISO) {
   const out = {};
-  for (const name of allowed) {
+  for (const name of expandToolNames(allowed, toolMap)) {
     const tool = toolMap[name];
-    if (!tool) continue;
     out[name] = { ...tool, run: (input, ctx) => tool.run(clampBacktestDates(input, freezeISO), ctx) };
   }
   return out;
@@ -247,7 +315,7 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
     const all = getOwlTools();
     const names = backtest ? def.backtestTools : def.liveTools;
     const toolMap = backtest ? wrapToolsForBacktest(all, names, freezeDate)
-      : Object.fromEntries(names.filter((n) => all[n]).map((n) => [n, all[n]]));
+      : Object.fromEntries(expandToolNames(names, all).map((n) => [n, all[n]]));
     const tools = Object.entries(toolMap).map(([, t]) => t.schema).filter(Boolean);
 
     // Instructions: layered playbook + the same global/client/currency/language
@@ -269,15 +337,16 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
       userMsg = [
         `BACKTEST — you are being evaluated retrospectively. Treat today's date as ${freezeDate}.`,
         eventDate ? `The event "${suite.name || 'this event'}" takes place on ${eventDate} (${daysBefore ? `${daysBefore} days from "today"` : 'upcoming'}).` : `The event is "${suite.name || 'this event'}".`,
-        `You can only query sales data up to ${freezeDate} — the tools enforce this; do not try to read past it, and do not reference anything after that date.`,
-        targets.length ? `The configured goal targets at the time:\n${targets.join('\n')}` : 'No goal targets are configured; judge pace from the sales data itself.',
+        `You can only query data up to ${freezeDate} — the tools enforce this; do not try to read past it, and do not reference anything after that date.`,
+        targets.length ? `The configured goal targets at the time:\n${targets.join('\n')}` : 'No goal targets are configured; judge from the data itself.',
+        def.task || '',
         'Write your review for that morning.',
-      ].join('\n\n');
+      ].filter(Boolean).join('\n\n');
     } else {
       userMsg = [
         `Run your scheduled review for the event "${suite.name || suiteId}". Today is ${new Date().toISOString().slice(0, 10)}.`,
         eventDate ? `The event takes place on ${eventDate}.` : '',
-        'Check the goals first, then investigate anything off-track with askData before you conclude.',
+        def.task || 'Investigate before you conclude.',
       ].filter(Boolean).join('\n\n');
     }
 
@@ -400,4 +469,4 @@ function playbookLayersByEntity(sql) {
   return out;
 }
 
-module.exports = { mount, SKILL_DEFS, TICKETING_SKILL_SYSTEM, TICKETING_DEFAULT_PLAYBOOK, clampBacktestDates, wrapToolsForBacktest, resolvePlaybook, playbookLayersByEntity };
+module.exports = { mount, SKILL_DEFS, TICKETING_SKILL_SYSTEM, TICKETING_DEFAULT_PLAYBOOK, OPS_SKILL_SYSTEM, OPS_DEFAULT_PLAYBOOK, clampBacktestDates, wrapToolsForBacktest, expandToolNames, resolvePlaybook, playbookLayersByEntity };

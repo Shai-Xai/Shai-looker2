@@ -205,9 +205,12 @@ ticket like a well-informed friend who's already going.
 **Pitch:** "Your website stays the story; the Owl turns it into the shop — every
 page gets a personal ticket guide that answers, recommends and sells."
 
-### Skills — autonomous specialists (first: the Ticketing Manager)  🧪
+### Skills — autonomous specialists (Ticketing Manager · Chief of Operations)  🧪
 Self-running specialists that review a client's event on a schedule and write
-grounded advice — the Owl's "push" door. The first hire is the **Ticketing
+grounded advice — the Owl's "push" door. Two hires so far: the **Chief of
+Operations 🎪** debriefs how the event day *ran* — gates & entry flow, bars &
+cashless spend, devices & stations — from whatever operational sources are
+connected, and says what to change for the next one. The **Ticketing
 Manager 🎟️**: every morning it checks the event's goals, pace and forecast,
 digs into per-tier sales for the *why*, and writes a short review (headline →
 status → flags → concrete recommendations) into the run log.
