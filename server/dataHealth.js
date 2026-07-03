@@ -128,6 +128,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     add('roster_field', "roster_field TEXT NOT NULL DEFAULT ''");           // device/operator dimension for the roster view
     add('roster_baseline_min', 'roster_baseline_min INTEGER NOT NULL DEFAULT 1440'); // seen within this window = "linked"
     add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
+    add('roster_start', "roster_start TEXT NOT NULL DEFAULT ''");                    // fixed "linked since" start (UTC ISO) — overrides the rolling window
+    add('roster_daily', "roster_daily TEXT NOT NULL DEFAULT ''");                    // recurring daily anchor 'HH:MM' (SAST) — beats roster_start; multi-day events
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -138,7 +140,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
-      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min,
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '',
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -182,6 +184,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       rosterField: String(b.rosterField || '').slice(0, 200),
       rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
       rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
+      // Fixed "linked since" anchor (UTC ISO). When set it beats the rolling window
+      // — the event-day shape: "every device seen since doors opened".
+      rosterStart: (b.rosterStart && !Number.isNaN(Date.parse(b.rosterStart))) ? new Date(b.rosterStart).toISOString() : '',
+      // Recurring daily anchor (multi-day events): 'HH:MM' South-Africa time —
+      // the roster restarts from that time each day. Beats rosterStart when set.
+      rosterDaily: /^\d{1,2}:\d{2}$/.test(b.rosterDaily || '') ? b.rosterDaily : '',
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
@@ -197,20 +205,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const ts = now();
     if (id) {
       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
-        roster_field=?, roster_baseline_min=?, roster_online_min=?,
+        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin,
+          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
     sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
-      roster_field, roster_baseline_min, roster_online_min, filters,
+      roster_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
       .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, JSON.stringify(c.filters),
+        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -222,8 +230,25 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (v == null || v === '') return null;
     let s = String(v).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += ' 00:00:00';
+    if (/^\d{4}-\d{2}-\d{2} \d{1,2}$/.test(s)) s += ':00'; // hour-granularity dims ("YYYY-MM-DD HH")
     const d = new Date(s.replace(' ', 'T') + (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? '' : 'Z'));
     return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // The roster's "linked since" anchor, in precedence order: the recurring daily
+  // time (today at HH:MM SAST — yesterday's if that moment is still ahead), then
+  // the fixed start, else null (rolling window). SAST is fixed UTC+2 (no DST).
+  function rosterAnchor(m, nowMs = Date.now()) {
+    if (/^\d{1,2}:\d{2}$/.test(m.rosterDaily || '')) {
+      const [hh, mm] = m.rosterDaily.split(':').map(Number);
+      const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' })
+        .formatToParts(new Date(nowMs)).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+      let d = new Date(`${p.year}-${p.month}-${p.day}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00+02:00`);
+      if (d.getTime() > nowMs) d = new Date(d.getTime() - 86400000); // today's anchor still ahead → since yesterday's
+      return d;
+    }
+    if (m.rosterStart && !Number.isNaN(Date.parse(m.rosterStart))) return new Date(m.rosterStart);
+    return null;
   }
 
   // Scoped reads: pinned-to-client monitors run as a synthetic CLIENT locked to that
@@ -328,9 +353,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   async function deviceRoster(m) {
     if (!m.rosterField) return { configured: false };
     const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
-    // Constrain to the baseline window in Looker itself, so a long-lived explore
-    // doesn't drag ancient devices into the roster.
-    body.filters[m.timeField] = `last ${m.rosterBaselineMin} minutes`;
+    // Constrain the roster in Looker itself: the daily/fixed "since doors opened"
+    // anchor when set (queries run in UTC), else the rolling baseline window.
+    const startAt = rosterAnchor(m);
+    body.filters[m.timeField] = startAt
+      ? `after ${startAt.toISOString().slice(0, 16).replace('T', ' ')}`
+      : `last ${m.rosterBaselineMin} minutes`;
     const rows = await runScoped(m, body);
     const seen = new Map(); // device -> latest Date
     for (const r of rows) {
@@ -347,10 +375,60 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
     return {
       configured: true,
-      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin,
+      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
       total: devices.length, online: devices.length - offline.length,
       offline: offline.slice(0, 100),
       truncated: rows.length >= 5000, // baseline window busier than the scan window — counts may undercount idle devices
+    };
+  }
+
+  // Block sizes the timeline can bucket by, in minutes.
+  const TIMELINE_INTERVALS = [5, 10, 20, 30, 60];
+
+  // The day timeline: per device, which time blocks of the window it produced
+  // data — rows × buckets the UI renders as a green/grey activity grid, so you
+  // can SEE when each device dropped and for how long. At 60-min blocks it uses
+  // the timestamp's hour-granularity sibling dimension (created_at_time →
+  // created_at_hour) so Looker aggregates to one row per (device, hour) — a
+  // whole busy day fits. Finer blocks read the raw time dimension and bucket
+  // here (5000-row cap → `truncated` warns when a very busy window overflows).
+  async function deviceTimeline(m, hours = 24, interval = 60) {
+    if (!m.rosterField) return { configured: false };
+    // Looker dimension groups name every timeframe `${group}_${timeframe}` —
+    // swap the picked timeframe for `_hour` (or append it when the picked field
+    // is the bare group name). If the guess is wrong Looker 400s and the panel
+    // shows the error rather than silently lying.
+    const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
+    const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
+    const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
+    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
+    const ivMs = iv * 60000;
+    const bucketField = iv === 60 ? hourField : m.timeField;
+    const body = { ...baseBody(m), fields: [m.rosterField, bucketField], sorts: [`${bucketField} desc`], limit: '5000' };
+    body.filters[m.timeField] = `last ${h} hours`;
+    const rows = await runScoped(m, body);
+    const nowMs = Date.now();
+    const n = Math.round((h * 60) / iv);
+    const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
+    const firstBucket = lastBucket - (n - 1) * ivMs;
+    const byDevice = new Map(); // device -> array of 0/1 per bucket
+    for (const r of rows) {
+      const d = String(r[m.rosterField] ?? '').trim();
+      const ts = parseTs(r[bucketField]);
+      if (!d || !ts) continue;
+      const idx = Math.floor((ts.getTime() - firstBucket) / ivMs);
+      if (idx < 0 || idx >= n) continue;
+      if (!byDevice.has(d)) byDevice.set(d, Array(n).fill(0));
+      byDevice.get(d)[idx] = 1;
+    }
+    const devices = [...byDevice.entries()].map(([device, active]) => ({ device, active }))
+      .sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
+    return {
+      configured: true, hours: h, intervalMin: iv, hourField, bucketField,
+      buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
+      devices,
+      truncated: rows.length >= 5000,
     };
   }
 
@@ -639,6 +717,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     res.json(await deviceRoster(m));
   }));
 
+  // The per-device day timeline (live Looker read, opened on demand).
+  app.get('/api/admin/data-health/monitors/:id/timeline', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const m = monitorById(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Monitor not found' });
+    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60));
+  }));
+
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
     if (!enabled()) return off(res);
     if (!monitorById(req.params.id)) return res.status(404).json({ error: 'Monitor not found' });
@@ -691,7 +777,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }));
 
   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster };
+  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster, deviceTimeline, rosterAnchor };
 }
 
 module.exports = { mount, AREAS, CHANNELS };

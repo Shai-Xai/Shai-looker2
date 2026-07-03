@@ -143,6 +143,51 @@ test('seedCashlessFields does NOT set the done-flag when Looker is unreachable (
   assert.equal(r2.added, 1);
 });
 
+// ── seedCashlessEventName: enables the explore's own event-name dimension ────
+// Inventive's reliable check-in recipe keys on cashless_combine_data.name — the
+// explore's OWN event field — which the check-in family seed can't reach.
+
+test('seedCashlessEventName adds <view>.name once, then respects admin unticks', async () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
+    { name: 'cashless_check_ins.count', label: 'Check-Ins Count', kind: 'measure', type: 'count' },
+    { name: 'cashless_check_ins.station_name', label: 'Station Name', kind: 'dimension', type: 'string' },
+  ] }));
+  let lookerCalls = 0;
+  const getExploreFields = async () => { lookerCalls++; return { measures: [], dimensions: [{ name: 'cashless_x.name', label: 'Event Name', type: 'string' }] }; };
+  const r = await cat.seedCashlessEventName(db, getExploreFields);
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 1);
+  const saved = JSON.parse(db.getSetting('owl_catalogue_expfields', '{}'))[KEY];
+  assert.ok(saved.some((x) => x.name === 'cashless_x.name'), 'event-name dimension enabled');
+  // The effective catalogue now carries the full check-in recipe as a usage note.
+  const eff = cat.effective(db);
+  assert.ok(eff.extras[0].dimensions.some((d) => d.name === 'cashless_x.name'));
+  const note = (eff.extras[0].notes || []).join(' ');
+  assert.ok(/cashless_check_ins\.count/.test(note), 'note names the check-in count measure');
+  assert.ok(/cashless_check_ins\.station_name/.test(note), 'note names the station dimension');
+  assert.ok(/cashless_x\.name/.test(note), 'note names the explore\'s own event field');
+  assert.ok(/NEVER answer check-in questions from sales/i.test(note), 'note warns off sales rows');
+  // Admin unticks it → the seeder never re-adds (flag set).
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: saved.filter((x) => x.name !== 'cashless_x.name') }));
+  const again = await cat.seedCashlessEventName(db, getExploreFields);
+  assert.equal(again.skipped, 'already seeded');
+  assert.equal(lookerCalls, 1, 'Looker not consulted again');
+});
+
+test('seedCashlessEventName: Looker down → no flag (retries); missing field → flag set, nothing added', async () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  const down = await cat.seedCashlessEventName(db, async () => { throw new Error('looker down'); });
+  assert.equal(down.ok, false);
+  assert.equal(db.getSetting('owl_catalogue_cashless_eventname_seeded', ''), '', 'flag not set — retried next boot');
+  const noField = await cat.seedCashlessEventName(db, async () => ({ measures: [], dimensions: [] }));
+  assert.equal(noField.ok, true);
+  assert.equal(noField.added, 0);
+  assert.notEqual(db.getSetting('owl_catalogue_cashless_eventname_seeded', ''), '', 'flag set — explore has no such field');
+});
+
 test('seedCashlessFields without a registered cashless explore is a safe no-op', async () => {
   const db = fakeDb();
   const r = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [] }));

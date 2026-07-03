@@ -1123,10 +1123,14 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     const subsetHint = categoryDims.length
       ? ` SUBSET QUESTIONS ("bars only", "food vendors", "merch"): do NOT answer across everything — FILTER a category field (${categoryDims.slice(0, 4).join(', ')}). Group by it once without a filter to learn its exact case-sensitive values, then filter and answer the subset.`
       : '';
+    // Per-explore usage notes (e.g. the reliable check-in recipe from the catalogue)
+    // ride the tool's own description — the guidance only exists for clients who
+    // actually have this tool, so a switched-off explore never leaks a mention.
+    const usage = (cat.notes || []).length ? ` USAGE: ${cat.notes.join(' ')}` : '';
     return {
       schema: {
         name: toolName,
-        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}${subsetHint}`,
+        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}${subsetHint}${usage}`,
         input_schema: { type: 'object', properties: props, required: ['measure'] },
       },
       run,
