@@ -481,7 +481,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
                 <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
-                <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} />
+                <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} suiteId={selSuite} entityId={selEntity} />
                 {isAdmin && selEntity && <SaveSegmentButton source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.queryBody && s.queryBody.model)} entityId={selEntity} />}
                 <ReportToClaude
                   question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
@@ -671,12 +671,23 @@ function OwlMd({ text }) {
           // exploding each row into a tall stacked card. Momentum + overscroll-contain
           // keep the scroll inside the table rather than dragging the page/chat.
           const stickyL = { position: 'sticky', left: 0, zIndex: 1, borderRight: '1px solid var(--hairline)' };
+          // Download THIS table (as written in the answer) — markdown stripped to plain text.
+          const plain = (s) => String(s ?? '').replace(/\*\*|__|\*|_|`/g, '').trim();
+          const tableCsv = () => downloadText(
+            `${plain(b.header[0] || 'table').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'owl-table'}.csv`,
+            [b.header.map((h) => csvEscape(plain(h))).join(','), ...b.rows.map((r) => r.map((c) => csvEscape(plain(c))).join(','))].join('\n'),
+          );
           return (
-            <div key={k} style={{ margin: '6px 0', overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain', border: '1px solid var(--hairline)', borderRadius: 10 }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: isMobile ? '0.85em' : '0.92em', width: '100%', minWidth: isMobile ? 'max-content' : undefined }}>
-                <thead><tr>{b.header.map((h, j) => <th key={j} style={j === 0 ? { ...th, ...stickyL, zIndex: 2, background: 'var(--elevated, #f1f1f5)' } : th}>{mdInline(h)}</th>)}</tr></thead>
-                <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={ci === 0 ? { ...td(false), ...stickyL, background: 'var(--card)', fontWeight: 600 } : td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
-              </table>
+            <div key={k} style={{ margin: '6px 0' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain', border: '1px solid var(--hairline)', borderRadius: 10 }}>
+                <table style={{ borderCollapse: 'collapse', fontSize: isMobile ? '0.85em' : '0.92em', width: '100%', minWidth: isMobile ? 'max-content' : undefined }}>
+                  <thead><tr>{b.header.map((h, j) => <th key={j} style={j === 0 ? { ...th, ...stickyL, zIndex: 2, background: 'var(--elevated, #f1f1f5)' } : th}>{mdInline(h)}</th>)}</tr></thead>
+                  <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={ci === 0 ? { ...td(false), ...stickyL, background: 'var(--card)', fontWeight: 600 } : td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+              <div style={{ textAlign: 'right', marginTop: 2 }}>
+                <button type="button" onClick={tableCsv} title="Download this table as CSV" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 10.5, fontWeight: 600, padding: '1px 4px' }}>⬇ Table CSV</button>
+              </div>
             </div>
           );
         }
@@ -844,12 +855,27 @@ function CopyBtn({ text }) {
 // CSV + chart-image downloads for an answer, sitting inline with the other message
 // actions. The image grabs the answer's rendered chart canvas (found via the message
 // wrapper's data attribute), so no ref-threading into the chart is needed.
-function DataActions({ source }) {
+// CSV = the RAW query data: when the citation preview is capped (50 rows) the button
+// re-runs the query live server-side (same scope gates) and downloads ALL rows.
+function DataActions({ source, suiteId, entityId }) {
+  const [busy, setBusy] = useState(false);
   if (!source || !(source.rows && source.rows.length)) return null;
   const hasChart = !!source.chartType;
+  const capped = (source.count || 0) > source.rows.length && !!source.queryBody;
+  const downloadCsv = async () => {
+    if (busy) return;
+    let rows = source.rows;
+    if (capped) {
+      setBusy(true);
+      try { const r = await api.owlExportRows({ queryBody: source.queryBody, suiteId: suiteId || undefined, entityId: entityId || undefined }); if (r && Array.isArray(r.rows) && r.rows.length) rows = r.rows; }
+      catch { /* fall back to the preview rows rather than failing the download */ }
+      setBusy(false);
+    }
+    downloadText(csvName(source), toCSV(source.columns, rows));
+  };
   return (
     <>
-      <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download the data as CSV (opens in Excel/Sheets)" style={msgActionStyle}>⬇ CSV</button>
+      <button onClick={downloadCsv} disabled={busy} title={capped ? `Download ALL ${Number(source.count).toLocaleString()} rows as CSV (re-runs the query live)` : 'Download the data as CSV (opens in Excel/Sheets)'} style={msgActionStyle}>{busy ? '⬇ Fetching…' : `⬇ CSV${capped ? ` (${Number(source.count).toLocaleString()})` : ''}`}</button>
       {hasChart && <button onClick={(e) => { const c = e.currentTarget.closest('[data-owl-msg]') && e.currentTarget.closest('[data-owl-msg]').querySelector('canvas'); if (c) downloadCanvasJpg(c, csvName(source).replace(/\.csv$/, '.jpg')); }} title="Download the chart as an image (JPEG)" style={msgActionStyle}>⬇ Image</button>}
     </>
   );

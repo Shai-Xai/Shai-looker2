@@ -221,7 +221,9 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
     const out = await t.runner.run(args, { user, suiteId: suiteId || '', entityId: entityOf(user) });
     if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That query couldn’t be run.');
-    return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, asOf: asOf() };
+    // Pass the runner's advisory note through (zero-rows case-sensitivity hint,
+    // fan-out warning) — without it the MCP/API caller presents bad data as fact.
+    return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, ...(out.note ? { note: out.note } : {}), asOf: asOf() };
   }
 
   // ── Event Ops (per event: devices, stations, staff, issues, checkpoints) ──

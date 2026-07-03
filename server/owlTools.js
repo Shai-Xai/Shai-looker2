@@ -40,6 +40,29 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   const emptyFilterNote = (userFilters) => ((userFilters && Object.keys(userFilters).length)
     ? 'No rows matched. Filter values are exact and CASE-SENSITIVE ("Bar" ≠ "bar") — group by the filtered field WITHOUT the filter to see its real values, then retry with the exact value.'
     : undefined);
+  // A grouped result where EVERY row repeats the IDENTICAL measure value is almost
+  // always a Looker fan-out: the group-by dimension doesn't actually relate to the
+  // measured view in this explore, so the ungrouped total is repeated once per
+  // dimension value (e.g. check-ins by sales station → 185 rows of "4"). Those
+  // numbers look like a real breakdown but are meaningless — say so in the result
+  // so the Owl re-queries instead of confidently presenting garbage.
+  const FANOUT_MIN_ROWS = 8;
+  function fanOutNote(rows, measureList, dimensions) {
+    if (!Array.isArray(rows) || rows.length < FANOUT_MIN_ROWS) return undefined;
+    if (!Array.isArray(dimensions) || !dimensions.length) return undefined;
+    if (!Array.isArray(measureList) || !measureList.length) return undefined;
+    const uniform = measureList.every((m) => {
+      const v0 = rows[0] ? rows[0][m] : undefined;
+      return v0 !== undefined && rows.every((r) => r && r[m] === v0);
+    });
+    if (!uniform) return undefined;
+    const family = String(measureList[0]).split('.')[0];
+    return `SUSPECT RESULT — every row repeats the identical measure value, which means the group-by dimension(s) don't relate to this measure in this explore (Looker repeated the ungrouped total per row). Do NOT present this as a breakdown. Re-query grouping "${measureList[0]}" by a dimension from its own data family (a ${family}.* field or a dimension whose label shares its family), or drop the group-by for the true total.`;
+  }
+  // The first applicable note wins (they're mutually exclusive: empty vs many rows).
+  const resultNote = (rows, measureList, dimensions, userFilters) => ((!Array.isArray(rows) || !rows.length)
+    ? emptyFilterNote(userFilters)
+    : fanOutNote(rows, measureList, dimensions));
   // Resolver for the createSegment act-tool's preview (count + per-channel reach).
   // Server-side only; never returns the people list to the chat. Same scope gate.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
@@ -237,6 +260,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     } catch (e) {
       return refuse('query_failed', `I couldn't run that query over your data${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}. Try rephrasing or a different breakdown.`);
     }
+    const note = resultNote(rows, measureList, dimensions, args.filters);
     return {
       ok: true,
       rows: Array.isArray(rows) ? rows : [],
@@ -244,7 +268,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       measure,
       dimensions,
       queryBody: body, // stored in the audit ledger (tool_results)
-      ...((!Array.isArray(rows) || !rows.length) && emptyFilterNote(args.filters) ? { note: emptyFilterNote(args.filters) } : {}),
+      ...(note ? { note } : {}),
     };
   }
 
@@ -458,8 +482,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
     stampReportingTz(body, { user, suiteId, entityId });
     const rows = await query.runLookerQuery('/queries/run/json', body);
-    const emptyNote = (!Array.isArray(rows) || !rows.length) ? emptyFilterNote(args.filters) : undefined;
-    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body, ...(emptyNote ? { note: emptyNote } : {}) };
+    const note = resultNote(rows, measureList, dimensions, args.filters);
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body, ...(note ? { note } : {}) };
   }
   const queryDashboardSchema = {
     name: 'queryDashboard',
@@ -1064,8 +1088,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
       catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
-      const emptyNote = (!Array.isArray(rows) || !rows.length) ? emptyFilterNote(args.filters) : undefined;
-      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(emptyNote ? { note: emptyNote } : {}) };
+      const note = resultNote(rows, measureList, dimensions, args.filters);
+      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
     const props = {
       measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}.` },
@@ -1075,10 +1099,17 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     };
     if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
     if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression on ${cat.label}'s date (e.g. "last 7 days").` };
+    // A combined explore stitches several views (families) together; not every
+    // view joins to every other. Warn the model up front so it pairs a measure
+    // with its own family's dimensions instead of producing a fan-out.
+    const families = new Set([...(cat.measures || []), ...(cat.dimensions || [])].map((f) => String(f.name).split('.')[0]));
+    const combinedHint = families.size > 2
+      ? ' This explore COMBINES several views — group a measure by dimensions of its OWN family (matching field-name prefix, or shared core_events/date fields). A cross-family group-by returns the same total repeated on every row, not a real breakdown.'
+      : '';
     return {
       schema: {
         name: toolName,
-        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.`,
+        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}`,
         input_schema: { type: 'object', properties: props, required: ['measure'] },
       },
       run,
@@ -1089,8 +1120,38 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // include or drop it PER CLIENT (Admin can switch an explore off for one client).
   for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = { ...t, exploreKey: `${ex.model}::${ex.explore}` }; } catch { /* skip a malformed explore */ } }
 
+  // ── Raw-data export (the chat's ⬇ CSV "full data" path) ─────────────────────
+  // Re-runs a citation's queryBody LIVE with the full row budget (the chat stream
+  // caps citation rows at 50). The body is UNTRUSTED — it round-trips through the
+  // browser — so: whitelisted keys only, PII fields rejected, and the SAME scope
+  // gate + entity binding as askData re-applied fresh (ceiling, fail closed). It can
+  // never return data the user couldn't already query — just more rows of it.
+  async function exportRows(raw, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const qb = raw && typeof raw === 'object' ? raw : {};
+    if (!qb.model || !qb.view || !Array.isArray(qb.fields) || !qb.fields.length) return refuse('bad_query', 'No query to export.');
+    const fields = qb.fields.map(String).slice(0, 24);
+    if (fields.some((f) => isPII(f))) return refuse('pii', 'Contact fields can\'t be exported.');
+    const filters = {};
+    for (const [k, v] of Object.entries(qb.filters || {})) if (v != null && (typeof v === 'string' || typeof v === 'number')) filters[String(k).slice(0, 200)] = String(v).slice(0, 2000);
+    const body = { model: String(qb.model), view: String(qb.view), fields, filters, sorts: Array.isArray(qb.sorts) ? qb.sorts.slice(0, 4).map(String) : [], limit: 5000 };
+    const allowed = await query.applyScope(body, user, suiteId);
+    if (allowed === false) return refuse('no_scope', 'No data scope for this export.');
+    if (entityId && auth && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    } else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    let rows;
+    try { rows = await query.runLookerQuery('/queries/run/json', body); }
+    catch (e) { return refuse('query_failed', `Export failed${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0 };
+  }
+
   return {
     catalogue,
+    exportRows, // NOT a chat tool (no schema) — the export route calls it directly
     ...extraTools,
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },

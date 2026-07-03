@@ -806,6 +806,12 @@ see "The continuous comms loop" above.)*
   with no extra login, always scoped to **their own organization's data**. Pilot: works for
   organizations linked to a Pulse client (Admin → AI → Organizer portal Owl); widens to all
   self-service organizers when the Howler→Pulse data integration ships.
+- **2026-07-01** — **Owl chat: download one answer's data, table or chart** 🧪: each data
+  answer already had ⬇ CSV / ⬇ Image — now the **CSV is the RAW query data** (when the preview
+  is capped at 50 rows, the download re-runs the query live and fetches **all** rows, same
+  privacy/scope gates), every **table in an answer** gets its own tiny ⬇ Table CSV, and
+  cashless/extra-explore answers now carry their **chart, CSV and "Beneath the hood"** query
+  view just like ticketing ones (they'd silently lost all three).
 - **2026-07-01** — **Owl chat: ⏹ Stop button + no more silent stalls** 🧪: while the Owl is
   working you can now **tap Stop** to cancel the answer (the server abandons the work too, so
   nothing keeps burning in the background). And long data pulls no longer look frozen — the

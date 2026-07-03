@@ -271,6 +271,65 @@ test('a registered extra explore gets its own scoped, validated read tool', asyn
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
 });
 
+test('exportRows (raw CSV): PII fields refused, scope forced, full row budget', async () => {
+  const ent = h.makeEntity('Ultra EX', 'Ultra Exports');
+  const user = h.makeClient('owl-ex@client.test', [ent.id]);
+  const t = tools();
+  // A round-tripped queryBody is untrusted: a PII field must refuse BEFORE Looker.
+  lookerCalls = 0;
+  const pii = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_purchasers.email', M0] }, ctx(user));
+  assert.equal(pii.ok, false);
+  assert.equal(lookerCalls, 0, 'refused before any query ran');
+  // A valid export re-applies the organiser scope and lifts the row budget to 5000.
+  const res = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_ticket_types.name', M0], filters: { [h.ORG_FIELD]: 'Someone Else' } }, ctx(user));
+  assert.equal(res.ok, true);
+  // The smuggled foreign organiser filter is clamped back inside the user's own scope.
+  assert.equal((await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: [M0] }, ctx(user))).ok, true);
+});
+
+// ── fan-out guard: a grouped result repeating one identical value is flagged ──
+
+test('a grouped result where every row repeats the same value carries a fan-out warning note', async () => {
+  // Reproduces the KFF 26 check-ins bug: grouping cashless_check_ins.count by
+  // cashless_stations.name (an unrelated view) returned 185 rows all showing "4"
+  // — the ungrouped total repeated per station. The Owl must be told it's not real.
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 4 }));
+  const ent = h.makeEntity('Fanout Co', 'Fanout-org');
+  const user = h.makeClient('owl-fo1@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.match(res.note || '', /SUSPECT RESULT/, 'the fan-out is flagged');
+  assert.match(res.note || '', /cashless_x_checkins/, 'points at the measure\'s own family');
+});
+
+test('a genuinely varied breakdown carries NO fan-out note', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 100 - i }));
+  const ent = h.makeEntity('Varied Co', 'Varied-org');
+  const user = h.makeClient('owl-fo2@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.note, undefined);
+});
+
+test('small uniform results and ungrouped totals are NOT flagged as fan-out', async () => {
+  // 3 stations all on the same count is plausible real data; a single-row total
+  // has no group-by to distrust. Neither should scare the Owl off.
+  const ent = h.makeEntity('Small Co', 'Small-org');
+  const user = h.makeClient('owl-fo3@client.test', [ent.id]);
+  looker.lookerRequest = async () => Array.from({ length: 3 }, (_, i) => ({ 'core_ticket_types.name': `T${i}`, [M0]: 4 }));
+  const small = await tools().askData.run({ measure: M0, dimensions: ['core_ticket_types.name'] }, ctx(user));
+  assert.equal(small.ok, true);
+  assert.equal(small.note, undefined, 'few rows → not flagged');
+  looker.lookerRequest = async () => [{ [M0]: 4 }];
+  const total = await tools().askData.run({ measure: M0 }, ctx(user));
+  assert.equal(total.ok, true);
+  assert.equal(total.note, undefined, 'ungrouped total → not flagged');
+});
+
 // ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──
 
 test('createAlert drafts a metric alert bound to the curated explore', async () => {
