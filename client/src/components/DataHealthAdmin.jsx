@@ -186,10 +186,13 @@ function RosterPanel({ monitorId }) {
 // The day timeline: rows = devices, columns = time blocks (5–60 min each),
 // green = sent data in that block, grey = silent — the "see the impact through
 // the whole day" view. A red device name means nothing in the last ~30 minutes.
+// The 🔢 Counts mode turns the same grid into a report: scans per device per
+// block, with per-device and per-block totals.
 function TimelinePanel({ monitorId }) {
   const [data, setData] = useState(null);
   const [hours, setHours] = useState(24);
   const [interval, setIntervalMin] = useState(60);
+  const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const load = async (h, iv) => {
@@ -212,12 +215,20 @@ function TimelinePanel({ monitorId }) {
   const bw = iv >= 30 ? 12 : 8; // finer blocks get narrower cells so more fit before scrolling
   const perLabel = Math.max(1, Math.round((data.hours <= 12 ? 60 : 180) / iv)); // a time label every 1h (short windows) or 3h
   const lookback = Math.max(1, Math.ceil(30 / iv)); // "live" = active within the last ~30 min
+  const maxCount = Math.max(1, ...data.devices.flatMap((d) => d.counts || []));
+  const heat = (c) => `rgba(22, 163, 74, ${0.12 + 0.38 * Math.min(1, c / maxCount)})`; // busier block = deeper green
+  const nameCell = { maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, padding: '2px 8px 2px 0', textAlign: 'left' };
+  const numCell = { fontSize: 10.5, padding: '2px 4px', textAlign: 'right', minWidth: 26, fontVariantNumeric: 'tabular-nums' };
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>each block = {iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `scans per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
         <span style={{ flex: 1 }} />
+        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts']].map(([k, l]) => (
+          <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
+        ))}
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
         {[12, 24, 48].map((h) => (
           <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
         ))}
@@ -229,7 +240,43 @@ function TimelinePanel({ monitorId }) {
       </div>
       {data.hours < hours && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
       {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
-      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : (
+      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ ...nameCell, color: 'var(--muted)', fontWeight: 400, fontSize: 10.5 }}>Device</th>
+                {data.buckets.map((b, i) => (
+                  <th key={b} style={{ ...numCell, color: 'var(--muted)', fontWeight: 400, fontSize: 8.5 }}>{i % perLabel === 0 ? hourLabel(b) : ''}</th>
+                ))}
+                <th style={{ ...numCell, color: 'var(--muted)', fontWeight: 700, fontSize: 10.5 }}>Σ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.devices.map(({ device, counts, active, total }) => {
+                const liveNow = active.slice(-lookback).some((a) => a === 1);
+                return (
+                  <tr key={device}>
+                    <td title={device} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</td>
+                    {counts.map((c, i) => (
+                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} scan${c === 1 ? '' : 's'}`}
+                        style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
+                    ))}
+                    <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td style={{ ...nameCell, fontWeight: 700, borderTop: '1px solid var(--hairline)' }}>All devices</td>
+                {data.bucketTotals.map((c, i) => (
+                  <td key={i} style={{ ...numCell, fontWeight: 700, borderTop: '1px solid var(--hairline)' }}>{c || ''}</td>
+                ))}
+                <td style={{ ...numCell, fontWeight: 800, borderTop: '1px solid var(--hairline)' }}>{data.grandTotal}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
         <div style={{ overflowX: 'auto' }}>
           {/* Time scale: periodic labels aligned to the blocks. */}
           <div style={{ display: 'flex', gap: 2, marginLeft: 148, marginBottom: 2 }}>
