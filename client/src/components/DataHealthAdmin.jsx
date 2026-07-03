@@ -72,6 +72,8 @@ const EVENT_META = {
 // between the admin surface (/api/admin/data-health) and the client one
 // (/api/my/data-health — read-only, entity-enforced server-side).
 const ADMIN_BASE = '/api/admin/data-health';
+// UTC 'HH:MM' -> South Africa time label (fixed UTC+2, no DST).
+const saTime = (hhmm) => { const [h, m2] = String(hhmm).split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(m2).padStart(2, '0')}`; };
 async function jget(url, opts) {
   const res = await fetch(url, opts);
   const d = await res.json().catch(() => ({}));
@@ -460,9 +462,20 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)' }}>{m.rosterSnapshot.offline} offline</strong>
             {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
             {m.rosterSnapshot.scansPerHour != null && <>
-              {' · '}<strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
-              {' '}(~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg)
+              {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
+              {m.rosterSnapshot.lastHourScans != null && <> · last hour <strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.lastHourScans).toLocaleString('en-ZA')}</strong></>}
+              {' '}· ~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg
             </>}
+          </div>
+        )}
+        {/* Coverage sparkline: devices sending per block through the day —
+            the offline windows read as dips, right on the tile. */}
+        {!expanded && m.rosterField && (m.rosterSnapshot?.coverage?.length || 0) > 1 && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 22, marginTop: 6, overflow: 'hidden' }}>
+            {(() => { const cov = m.rosterSnapshot.coverage; const max = Math.max(1, ...cov.map((c) => c.n)); return cov.map((c, i) => (
+              <span key={i} title={`${saTime(c.t)} SA — ${c.n} device${c.n === 1 ? '' : 's'} sending`}
+                style={{ width: 4, flexShrink: 0, borderRadius: '1px 1px 0 0', height: Math.max(2, Math.round((c.n / max) * 22)), background: c.n ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+            )); })()}
           </div>
         )}
       </div>
@@ -608,6 +621,35 @@ function ReportPanel({ url, body, title }) {
         );
       })}
       <div style={{ fontSize: 13, lineHeight: 1.6, overflowX: 'auto', borderTop: charts.length ? '1px solid var(--hairline)' : 'none', paddingTop: charts.length ? 10 : 0 }}>{state.markdown.split('\n').map(mdLine)}</div>
+    </div>
+  );
+}
+
+// Permanent metrics row: fleet + volume headline computed from the stored
+// snapshots (no live queries) — shown on the Admin page and the client tab.
+function HealthMetrics({ monitors }) {
+  const snaps = monitors.map((m) => m.rosterSnapshot).filter(Boolean);
+  if (!snaps.length) return null;
+  const sum = (k) => (snaps.some((x) => x[k] != null) ? snaps.reduce((a, x) => a + (x[k] || 0), 0) : null);
+  const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
+  const approx = snaps.some((x) => x.scansApprox) ? '≥' : '';
+  const tiles = [
+    ['Stations', num(monitors.length)],
+    ['Devices linked', num(sum('total'))],
+    ['Online', num(sum('online')), STATUS_COLOR.fresh],
+    ['Offline', num(sum('offline')), sum('offline') ? STATUS_COLOR.stale : undefined],
+    ['Total scans', sum('totalScans') == null ? '—' : `${approx}${num(sum('totalScans'))}`],
+    ['Last hour', num(sum('lastHourScans'))],
+    ['Avg scans/h', sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+      {tiles.map(([l, v, c]) => (
+        <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1020,6 +1062,8 @@ export default function DataHealthAdmin() {
         </div>
       )}
 
+      {data && monitors.length > 0 && <HealthMetrics monitors={monitors} />}
+
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {editing != null && (
         <MonitorEditor initial={editing === 'new' ? null : editing} entities={entities} suites={suites}
@@ -1076,6 +1120,7 @@ export function DataHealthOps({ entityId, suiteId }) {
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
         </div>
       ) : <>
+        <HealthMetrics monitors={monitors} />
         <div style={{ marginBottom: 12 }}>
           <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
         </div>
