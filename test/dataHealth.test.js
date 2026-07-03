@@ -259,6 +259,32 @@ test('test mode routes every alert ONLY to the test address (ops + client muted)
   }
 });
 
+test('latestRecords: the raw feed tail, newest first, scoped and mapped', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h);
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(1) },
+      { 'scans.station_name': 'Bar 3', 'scans.scanned_at': minsAgo(7) },
+    ];
+  });
+  const recs = await h.mod.latestRecords(m, 20);
+  assert.deepEqual(body.fields, ['scans.station_name', 'scans.scanned_at']);
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+  assert.equal(body.limit, '20');
+  assert.equal(body.dynamic_fields, undefined); // plain rows, no aggregation
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].station, 'Gate A');
+  assert.ok(recs[0].agoMin >= 0.5 && recs[0].agoMin <= 2);
+  assert.ok(recs[1].agoMin >= 6 && recs[1].agoMin <= 8);
+  // Limit is clamped to a sane window (1..100).
+  h.setRowsFn(async (b) => { body = b; return []; });
+  await h.mod.latestRecords(m, 9999);
+  assert.equal(body.limit, '100');
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({

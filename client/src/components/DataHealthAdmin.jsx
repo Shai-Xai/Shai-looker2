@@ -59,7 +59,62 @@ const EVENT_META = {
   recovery_alert: ['📣', '#16a34a'], error: ['⚠️', '#d97706'],
 };
 
-// Expandable history: the transition/alert feed + the raw pull log.
+// The raw tail of the feed: the last N (station, timestamp) records, pulled LIVE
+// from Looker on open/refresh (cache-bypassed server-side) — so you can see what
+// the pipe actually delivered, not just the lag number. (Inline fetch, same
+// reasoning as TestModeBanner: keep this module out of the shared lib/api.js.)
+function LatestRecords({ monitorId }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/latest?limit=20`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch only when the monitor changes
+  useEffect(() => { load(); }, [monitorId]);
+  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={load}>Retry</button></div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Pulling the latest records from Looker…</div>;
+  const hasStation = !!data.stationField;
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Newest first, straight off the explore (identical station+time records collapse into one row).</span>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={load}>{busy ? 'Refreshing…' : '🔄 Refresh'}</button>
+      </div>
+      {!data.records.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No records found — check the monitor’s filters and scope.</div> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>#</th>
+              {hasStation && <th style={{ padding: '4px 8px', fontWeight: 600 }}>Station</th>}
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Record time</th>
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Age</th>
+            </tr></thead>
+            <tbody>{data.records.map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
+                <td style={{ padding: '4px 8px 4px 0', color: 'var(--muted)' }}>{i + 1}</td>
+                {hasStation && <td style={{ padding: '4px 8px', fontWeight: 600 }}>{r.station || '—'}</td>}
+                <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{r.at ? fmtAt(r.at) : r.raw}</td>
+                <td style={{ padding: '4px 8px', color: r.agoMin != null && r.agoMin < 30 ? STATUS_COLOR.fresh : 'var(--muted)' }}>{r.agoMin != null ? `${fmtLag(r.agoMin)} ago` : '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Expandable history: the transition/alert feed + the raw pull log + a live peek
+// at the last 20 records off the feed.
 function HistoryPanel({ monitorId }) {
   const [hist, setHist] = useState(null);
   const [tab, setTab] = useState('events');
@@ -67,8 +122,8 @@ function HistoryPanel({ monitorId }) {
   if (!hist) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: '8px 0' }}>Loading history…</div>;
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`]].map(([k, l]) => (
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
         ))}
       </div>
@@ -107,58 +162,8 @@ function HistoryPanel({ monitorId }) {
             </table>
           </div>
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
+        {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
       </div>
-    </div>
-  );
-}
-
-// Test-mode banner: while ON, every alert is emailed ONLY to the test address —
-// ops Slack and client-team notifications stay muted, so thresholds can be tuned
-// without paging anyone. (Settings PUT is called inline rather than via lib/api.js
-// so this self-contained feature doesn't touch that shared file.)
-function TestModeBanner({ testMode, testEmail, onChanged }) {
-  const [email, setEmail] = useState(testEmail || '');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  useEffect(() => { setEmail(testEmail || ''); }, [testEmail]);
-
-  const save = async (body) => {
-    setBusy(true); setErr('');
-    try {
-      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
-      onChanged();
-    } catch (e) { setErr(e.message); }
-    setBusy(false);
-  };
-
-  if (!testMode) {
-    return (
-      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 16px' }}>
-        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>🔔 Alerts are <strong>live</strong> — stale alerts post to ops Slack and (for client-pinned monitors) the client’s team.</span>
-        <span style={{ flex: 1 }} />
-        <button style={ghostBtn} disabled={busy} onClick={() => save({ testMode: true })}>🧪 Back to test mode</button>
-        {err && <span style={{ fontSize: 12, color: STATUS_COLOR.stale }}>{err}</span>}
-      </div>
-    );
-  }
-  return (
-    <div style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR.warn}`, background: STATUS_BG.warn }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <strong style={{ fontSize: 13.5 }}>🧪 Test mode</strong>
-        <span style={{ fontSize: 12.5 }}>All alerts are emailed <strong>only</strong> to the address below — ops Slack and client notifications are muted.</span>
-      </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
-        <input style={{ ...input, width: 260, flex: '0 1 auto' }} type="email" value={email} placeholder="you@howler.co.za" onChange={(e) => setEmail(e.target.value)} />
-        <button style={ghostBtn} disabled={busy || !email.trim() || email === testEmail} onClick={() => save({ testEmail: email })}>Save address</button>
-        <span style={{ flex: 1 }} />
-        <button style={{ ...btn, background: STATUS_COLOR.fresh }} disabled={busy}
-          onClick={() => { if (window.confirm('Go live? Stale alerts will start posting to ops Slack and, for client-pinned monitors, to the client’s team.')) save({ testMode: false }); }}>
-          Go live
-        </button>
-      </div>
-      {err && <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 6 }}>{err}</div>}
     </div>
   );
 }
@@ -453,6 +458,57 @@ export default function DataHealthAdmin() {
         ) : monitors.map((m) => (
           <MonitorCard key={m.id} m={m} entities={entities} onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+    </div>
+  );
+}
+
+// Test-mode banner: while ON, every alert is emailed ONLY to the test address —
+// ops Slack and client-team notifications stay muted, so thresholds can be tuned
+// without paging anyone. (Settings PUT is called inline rather than via lib/api.js
+// so this self-contained feature doesn't touch that shared file.)
+function TestModeBanner({ testMode, testEmail, onChanged }) {
+  const [email, setEmail] = useState(testEmail || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setEmail(testEmail || ''); }, [testEmail]);
+
+  const save = async (body) => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (!testMode) {
+    return (
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 16px' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>🔔 Alerts are <strong>live</strong> — stale alerts post to ops Slack and (for client-pinned monitors) the client’s team.</span>
+        <span style={{ flex: 1 }} />
+        <button style={ghostBtn} disabled={busy} onClick={() => save({ testMode: true })}>🧪 Back to test mode</button>
+        {err && <span style={{ fontSize: 12, color: STATUS_COLOR.stale }}>{err}</span>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR.warn}`, background: STATUS_BG.warn }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13.5 }}>🧪 Test mode</strong>
+        <span style={{ fontSize: 12.5 }}>All alerts are emailed <strong>only</strong> to the address below — ops Slack and client notifications are muted.</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+        <input style={{ ...input, width: 260, flex: '0 1 auto' }} type="email" value={email} placeholder="you@howler.co.za" onChange={(e) => setEmail(e.target.value)} />
+        <button style={ghostBtn} disabled={busy || !email.trim() || email === testEmail} onClick={() => save({ testEmail: email })}>Save address</button>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...btn, background: STATUS_COLOR.fresh }} disabled={busy}
+          onClick={() => { if (window.confirm('Go live? Stale alerts will start posting to ops Slack and, for client-pinned monitors, to the client’s team.')) save({ testMode: false }); }}>
+          Go live
+        </button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 6 }}>{err}</div>}
     </div>
   );
 }
