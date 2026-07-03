@@ -437,6 +437,9 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
   const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
   h.setRowsFn(async (b) => {
+    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
+    // and the raw time dim takes over.
+    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field "scans.scanned_at_minute10"');
     body = b;
     return [
       { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0), 'scans.count': 2 },  // current 10-min block
@@ -458,6 +461,27 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   const capped = await h.mod.deviceTimeline(m, 48, 5);
   assert.equal(capped.hours, 24); // 5-min blocks top out at 24h
   assert.equal(capped.buckets.length, 288);
+});
+
+test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows the read', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { name: 'Bars monitor', rosterField: 'scans.device_id' });
+  // Looker minute10 dims render "YYYY-MM-DD HH:MM" floored to the block.
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 }]; });
+  const t = await h.mod.deviceTimeline(m, 12, 10, 'Bar One');
+  assert.ok(body.fields.includes('scans.scanned_at_minute10')); // aggregated in Looker — one row per device+block, not per scan
+  assert.equal(body.filters['scans.station_name'], '"Bar One"'); // quoted = exact station match
+  assert.equal(t.station, 'Bar One');
+  assert.equal(t.devicesTotal, 1);
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.counts[71], 4);
+  // The working bucket dim is remembered — the next read goes straight to it.
+  body = null;
+  await h.mod.deviceTimeline(m, 12, 10);
+  assert.ok(body.fields.includes('scans.scanned_at_minute10'));
+  assert.equal(body.filters['scans.station_name'], undefined); // no station → whole monitor
 });
 
 test('fleet alert: ≥ rosterAlertPct % of devices offline fires once, recovers once', async () => {
@@ -494,9 +518,12 @@ test('healthSummary scopes by entity and suite', () => {
   const a = makeMonitor(h, { name: 'Client A gate', entityId: 'ent-a', suiteId: 'suite-1' });
   makeMonitor(h, { name: 'Client A wide', entityId: 'ent-a' });
   makeMonitor(h, { name: 'Client B gate', entityId: 'ent-b' });
+  makeMonitor(h, { name: 'B bar', entityId: 'ent-b', area: 'Bar' });
   makeMonitor(h, { name: 'Platform', entityId: '' });
   // The suite shares one DB across tests — assert on THIS test's monitors only.
   const all = h.mod.healthSummary({});
+  assert.equal(all.find((x) => x.name === 'B bar').unit, 'transactions'); // bars/vendors transact
+  assert.equal(all.find((x) => x.name === 'Client B gate').unit, 'scans');
   assert.ok(['Client A gate', 'Client A wide', 'Client B gate', 'Platform'].every((n) => all.some((m) => m.name === n)));
   assert.ok(Array.isArray(all[0].streams));
   // entityIds = a caller's allowed set (drops platform-wide + other clients).

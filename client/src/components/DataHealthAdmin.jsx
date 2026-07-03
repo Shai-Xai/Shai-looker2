@@ -15,6 +15,9 @@ const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)',
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
 const input = { padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box', width: '100%', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' };
+
+// Bars & vendors sell — their per-record activity is "transactions"; gates scan.
+const unitFor = (m) => (m && (m.area === 'Bar' || m.area === 'Vendors') ? 'transactions' : 'scans');
 const label = { fontSize: 11, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4, display: 'block' };
 const btn = { padding: '9px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' };
 const ghostBtn = { padding: '7px 13px', background: 'var(--card)', border: '1.5px solid var(--hairline)', borderRadius: 7, fontWeight: 600, fontSize: 12.5, cursor: 'pointer', color: 'var(--text)' };
@@ -205,25 +208,26 @@ function RosterPanel({ monitorId, base = ADMIN_BASE }) {
 // the whole day" view. A red device name means nothing in the last ~30 minutes.
 // The 🔢 Counts mode turns the same grid into a report: scans per device per
 // block, with per-device and per-block totals.
-function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'scans' }) {
   const [data, setData] = useState(null);
+  const [station, setStation] = useState(''); // '' = all stations; else one station's devices only
   const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
   const [interval, setIntervalMin] = useState(10); // 10-min blocks by default — hour blocks hide short dropouts
   const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const load = async (h, iv) => {
+  const load = async (h, iv, st = station) => {
     setBusy(true); setErr('');
     try {
-      const res = await fetch(`${base}/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}`);
+      const res = await fetch(`${base}/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}${st ? `&station=${encodeURIComponent(st)}` : ''}`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
       setData(d);
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block change
-  useEffect(() => { load(hours, interval); }, [monitorId, hours, interval]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block/station change
+  useEffect(() => { load(hours, interval, station); }, [monitorId, hours, interval, station]);
   if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours, interval)}>Retry</button></div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the day timeline from Looker…</div>;
   if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.reason || 'No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.'}</div>;
@@ -240,7 +244,14 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `scans per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
+        {stations.length > 1 && (
+          <select value={station} disabled={busy} onChange={(e) => setStation(e.target.value)}
+            style={{ ...input, width: 'auto', maxWidth: 230, padding: '4px 8px', fontSize: 12 }}>
+            <option value="">🏪 All stations</option>
+            {stations.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        )}
         <span style={{ flex: 1 }} />
         {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts']].map(([k, l]) => (
           <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
@@ -258,7 +269,8 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
       {data.anchored && data.startAt && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>From the start time — {new Date(data.startAt).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} to now.</div>}
       {hours === 'start' && data.anchored === false && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>No start time set on this monitor — showing the last 24h. Set "Daily from" or a once-off start in ✏️ Edit → Device roster.</div>}
       {(data.trimmedStart || (typeof hours === 'number' && data.hours < hours)) && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
-      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
+      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range, bigger blocks, or pick one station.</div>}
+      {(data.devicesTotal || 0) > data.devices.length && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>Showing {data.devices.length} of {data.devicesTotal} devices — pick a station above to see the rest.</div>}
       {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse' }}>
@@ -278,7 +290,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
                   <tr key={device}>
                     <td title={device} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</td>
                     {counts.map((c, i) => (
-                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} scan${c === 1 ? '' : 's'}`}
+                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
                         style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
                     ))}
                     <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
@@ -323,7 +335,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
 
 // Expandable history: the transition/alert feed + the raw pull log + a live peek
 // at the last 20 records off the feed (+ the device roster when configured).
-function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE }) {
+function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE, stations = [], unit = 'scans' }) {
   const [hist, setHist] = useState(null);
   // Roster monitors open straight onto the live timeline — that's the view the
   // card is expanded for; the history lists are one click away.
@@ -378,7 +390,7 @@ function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE }) {
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
         {tab === 'latest' && <LatestRecords monitorId={monitorId} base={base} />}
         {tab === 'roster' && <RosterPanel monitorId={monitorId} base={base} />}
-        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} base={base} />}
+        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} base={base} stations={stations} unit={unit} />}
       </div>
     </div>
   );
@@ -474,7 +486,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
               {' · '}<strong title={flowTitle(m.rosterSnapshot.flow)} style={{ color: flowColor(m.rosterSnapshot.flowScore) }}>flow {m.rosterSnapshot.flowScore}</strong>
             </>}
             {m.rosterSnapshot.scansPerHour != null && <>
-              {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
+              {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} {unitFor(m)}</strong>
               {m.rosterSnapshot.lastHourScans != null && <> · last hour <strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.lastHourScans).toLocaleString('en-ZA')}</strong></>}
               {' '}· ~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg
             </>}
@@ -541,7 +553,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
           </button>
           <button style={ghostBtn} disabled={!!busy}
-            title="Closed = the station is intentionally shut (gate closed for the night) — no checks, no alerts, and it drops out of the dashboard numbers until reopened"
+            title="Closed = the station is intentionally shut (gate closed for the night) — no checks, no alerts; its devices leave the fleet numbers, but its scans/transactions still count in the day totals"
             onClick={() => run('close', () => api.setDataMonitorStatus(m.id, m.status === 'closed' ? 'active' : 'closed'))}>
             {m.status === 'closed' ? '🚪 Reopen' : '🚪 Mark closed'}
           </button>
@@ -551,7 +563,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
         <DiagnosePanel monitorId={m.id} base={base} />
         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
       </div>
-      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} />}
+      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} stations={m.streams.map((s) => s.station).filter(Boolean)} unit={unitFor(m)} />}
       </>}
     </div>
   );
@@ -593,6 +605,8 @@ function ReportPanel({ url, body, title }) {
   const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
   const sum = (k) => ((state.charts || []).some((c) => c[k] != null) ? (state.charts || []).reduce((a, c) => a + (c[k] || 0), 0) : null);
   const utcLabel = (hhmm) => { const [h, mm] = hhmm.split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+  const rUnits = new Set((state.charts || []).map((c) => c.unit || 'scans'));
+  const rShort = rUnits.size > 1 ? 'scans+txns' : rUnits.has('transactions') ? 'txns' : 'scans';
   return (
     <div style={{ ...card, borderLeft: '4px solid var(--brand)', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -609,7 +623,7 @@ function ReportPanel({ url, body, title }) {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           {[['Stations', num((state.charts || []).length)], ['Devices linked', num(sum('linked'))],
             ['Online', num(sum('online')), STATUS_COLOR.fresh], ['Offline', num(sum('offline')), sum('offline') ? STATUS_COLOR.stale : undefined],
-            ['Total scans', num(sum('totalScans'))], ['Avg scans/h', num(sum('scansPerHour'))]].map(([l, v, c]) => (
+            [`Total ${rShort}`, num(sum('totalScans'))], [`Avg ${rShort}/h`, num(sum('scansPerHour'))]].map(([l, v, c]) => (
             <div key={l} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
               <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
@@ -631,7 +645,7 @@ function ReportPanel({ url, body, title }) {
               <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>
                 {num(c.linked)} linked · <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{num(c.online)} online</span> ·{' '}
                 <span style={{ color: c.offline ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: 700 }}>{num(c.offline)} offline</span> ·{' '}
-                {num(c.totalScans)} scans · ~{num(c.scansPerHour)}/h
+                {num(c.totalScans)} {c.unit || 'scans'} · ~{num(c.scansPerHour)}/h
               </span>
             </div>
             <div style={{ overflowX: 'auto', paddingTop: 4 }}>
@@ -661,13 +675,18 @@ function ReportPanel({ url, body, title }) {
 // snapshots (no live queries) — shown on the Admin page and the client tab.
 function HealthMetrics({ monitors: allMonitors }) {
   // Closed stations are intentionally shut — their silence must not drag the
-  // fleet numbers, so they drop out of every aggregate until reopened.
+  // fleet numbers (devices/online/offline/flow). Their trading DID happen,
+  // though, so the volume totals still count their frozen snapshots.
   const monitors = allMonitors.filter((m) => m.status !== 'closed');
   const snaps = monitors.map((m) => m.rosterSnapshot).filter(Boolean);
-  if (!snaps.length) return null;
-  const sum = (k) => (snaps.some((x) => x[k] != null) ? snaps.reduce((a, x) => a + (x[k] || 0), 0) : null);
+  const volSnaps = allMonitors.map((m) => m.rosterSnapshot).filter(Boolean); // incl. closed
+  if (!volSnaps.length) return null;
+  const sumOf = (arr, k) => (arr.some((x) => x[k] != null) ? arr.reduce((a, x) => a + (x[k] || 0), 0) : null);
+  const sum = (k) => sumOf(snaps, k);
   const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
-  const approx = snaps.some((x) => x.scansApprox) ? '≥' : '';
+  const approx = volSnaps.some((x) => x.scansApprox) ? '≥' : '';
+  const units = new Set(allMonitors.filter((m) => m.rosterSnapshot).map((m) => unitFor(m)));
+  const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
   const scored = snaps.filter((x) => x.flowScore != null && x.total);
   const flowAgg = scored.length ? Math.round(scored.reduce((a, x) => a + x.flowScore * x.total, 0) / Math.max(1, scored.reduce((a, x) => a + x.total, 0))) : null;
   const tiles = [
@@ -676,9 +695,9 @@ function HealthMetrics({ monitors: allMonitors }) {
     ['Devices linked', num(sum('total'))],
     ['Online', num(sum('online')), STATUS_COLOR.fresh],
     ['Offline', sum('offline') == null ? '—' : `${num(sum('offline'))}${sum('total') ? ` (${Math.round((sum('offline') / Math.max(1, sum('total'))) * 100)}%)` : ''}`, sum('offline') ? STATUS_COLOR.stale : undefined],
-    ['Total scans', sum('totalScans') == null ? '—' : `${approx}${num(sum('totalScans'))}`],
+    [`Total ${short}`, sumOf(volSnaps, 'totalScans') == null ? '—' : `${approx}${num(sumOf(volSnaps, 'totalScans'))}`],
     ['Last hour', num(sum('lastHourScans'))],
-    ['Avg scans/h', sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
+    [`Avg ${short}/h`, sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
   ];
   // Which stations the offline devices belong to — the drill-down for the
   // Offline tile, visible without hovering anything.
