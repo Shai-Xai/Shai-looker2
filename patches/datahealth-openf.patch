@@ -1,0 +1,90 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index ee0e6c1..831a0af 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -281,7 +281,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+ 
+   const save = async () => {
+     setErr('');
+-    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k, v]) => k && String(v).trim())), detailFields: detailRows.filter(Boolean) };
++    // Filter rows with a dimension but no value yet are kept as "open" filters
++    // (saved with the monitor, applied only once a value is chosen).
++    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k]) => k)), detailFields: detailRows.filter(Boolean) };
+     if (!body.name.trim()) return setErr('Give the monitor a name.');
+     if (!body.model || !body.view || !body.timeField) return setErr('Pick the explore and its timestamp field.');
+     setSaving(true);
+@@ -373,7 +375,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+               </select>
+               {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
+               <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
+-                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value' : 'value'}
++                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value (blank = not applied yet)' : 'value (blank = not applied yet)'}
+                 onFocus={() => loadDimValues(k)}
+                 onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+               <datalist id={`dh-vals-${i}`}>
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 74bfe5f..a059d97 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -151,7 +151,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     const filters = {};
+     if (b.filters && typeof b.filters === 'object' && !Array.isArray(b.filters)) {
+       for (const [k, v] of Object.entries(b.filters).slice(0, 10)) {
+-        if (k && v != null && String(v).trim()) filters[String(k).slice(0, 200)] = String(v).slice(0, 500);
++        // A blank value is kept: an "open" filter the admin is still deciding on
++        // (the dimension survives a save). Blanks are stripped from queries.
++        if (k) filters[String(k).slice(0, 200)] = v == null ? '' : String(v).trim().slice(0, 500);
+       }
+     }
+     const channels = Array.isArray(b.channels) ? [...new Set(b.channels.filter((c) => CHANNELS.includes(c)))] : ['push'];
+@@ -226,7 +228,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     if (!Array.isArray(rows)) throw new Error('unexpected Looker response shape');
+     return rows;
+   }
+-  const baseBody = (m) => ({ model: m.model, view: m.view, filters: { ...(m.filters || {}) }, query_timezone: 'UTC' });
++  // Blank-valued ("open") filters are config-only — sending "" to Looker would
++  // filter for blank values, so they never reach the query.
++  const baseBody = (m) => ({
++    model: m.model, view: m.view,
++    filters: Object.fromEntries(Object.entries(m.filters || {}).filter(([, v]) => String(v).trim())),
++    query_timezone: 'UTC',
++  });
+ 
+   // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
+   // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 98782f1..5beb3d5 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -261,7 +261,10 @@ test('test mode routes every alert ONLY to the test address (ops + client muted)
+ 
+ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async () => {
+   const h = mountHealth();
+-  const m = makeMonitor(h, { detailFields: ['scans.record_type', 'scans.scanned_at'] }); // time field deduped out
++  const m = makeMonitor(h, {
++    detailFields: ['scans.record_type', 'scans.scanned_at'], // time field deduped out
++    filters: { 'scans.event_name': 'Festival X', 'scans.pending': '' }, // one real, one "open"
++  });
+   let body = null;
+   h.setRowsFn(async (b) => {
+     body = b;
+@@ -272,6 +275,10 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async
+   });
+   const recs = await h.mod.latestRecords(m, 20);
+   assert.deepEqual(body.fields, ['scans.station_name', 'scans.scanned_at', 'scans.record_type']);
++  // The "open" (blank-valued) filter is saved on the monitor but never sent to
++  // Looker — an empty string would filter for blank values.
++  assert.deepEqual(m.filters, { 'scans.event_name': 'Festival X', 'scans.pending': '' });
++  assert.deepEqual(body.filters, { 'scans.event_name': 'Festival X' });
+   assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+   assert.equal(body.limit, '20');
+   assert.equal(body.dynamic_fields, undefined); // plain rows, no aggregation
+@@ -345,6 +352,6 @@ test('clean() bounds thresholds and drops junk filters', () => {
+   assert.equal(c.staleMin, 10080);
+   assert.equal(c.checkEveryMin, 0); // 0 = follow the master cadence
+   assert.deepEqual(c.channels, ['push', 'email']);
+-  assert.equal(Object.keys(c.filters).length, 2);
+-  assert.ok(!('empty' in c.filters));
++  assert.equal(Object.keys(c.filters).length, 3);
++  assert.equal(c.filters.empty, ''); // "open" filter: dimension kept, blank value
+ });
