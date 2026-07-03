@@ -63,71 +63,89 @@ test('the primary explore never appears as a registrable extra', () => {
   assert.equal(cat.explores(db).length, 1);
 });
 
-// ── seedCheckinFields: the one-shot check-in/access-control enrichment ────────
+// ── seedCashlessFields: the one-shot check-in + sales enrichment (v2) ─────────
 
-test('seedCheckinFields enables the check-in family from Looker (non-PII, additive, once)', async () => {
+test('seedCashlessFields enables the check-in AND sales families from Looker (non-PII, additive, once)', async () => {
   const db = fakeDb();
   cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
-  // Already-ticked selection: a check-in count + an access-control date.
+  // Already-ticked selection: a check-in count + a sales station.
   db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
     { name: 'cashless_check_ins.count', label: 'Check-Ins Count', kind: 'measure', type: 'count' },
-    { name: 'cashless_access_control.date_date', label: 'AC Date', kind: 'dimension', type: 'date' },
+    { name: 'cashless_sales.station_name', label: 'Sales Station', kind: 'dimension', type: 'string' },
   ] }));
   let lookerCalls = 0;
   const getExploreFields = async () => { lookerCalls++; return {
     measures: [
       { name: 'cashless_check_ins.count', label: 'Check-Ins Count', type: 'count' },          // already ticked → skipped
-      { name: 'cashless_sales.sum_credit_amount', label: 'Sale Amount', type: 'sum' },        // wrong family → skipped
+      { name: 'cashless_sales.transaction_count', label: 'Transaction Count', type: 'count' },
     ],
     dimensions: [
       { name: 'cashless_check_ins.station_name', label: 'Station Name', type: 'string' },
       { name: 'cashless_check_ins.operator_name', label: 'Operator Name', type: 'string' },
       { name: 'cashless_check_ins.device_id', label: 'Device ID', type: 'string' },
       { name: 'cashless_check_ins.ticket_type', label: 'Ticket Type', type: 'string' },
-      { name: 'cashless_check_ins.date_time', label: 'Check-in Time', type: 'date_time' },
       { name: 'cashless_access_control.station_name', label: 'AC Station', type: 'string' },
+      { name: 'cashless_sales_operators.operator_id', label: 'Operator ID', type: 'string' },  // sales family — NEW in v2
+      { name: 'cashless_sales.payment_type', label: 'Payment Type', type: 'string' },
+      { name: 'cashless_stations.category', label: 'Station Category', type: 'string' },
+      { name: 'cashless_products.name', label: 'Product Name', type: 'string' },
       { name: 'cashless_check_ins.customer_email', label: 'Email', type: 'string' },          // PII → never
-      { name: 'cashless_sales.station_name', label: 'Sales Station', type: 'string' },        // wrong family → skipped
+      { name: 'cashless_sales.customer_first_name', label: 'First Name', type: 'string' },    // PII → never
       { name: 'core_events.name', label: 'Event', type: 'string' },                           // wrong family → skipped
+      { name: 'cashless_gtags.active', label: 'Gtag Active', type: 'yesno' },                 // wrong family → skipped
     ],
   }; };
-  const r = await cat.seedCheckinFields(db, getExploreFields);
+  const r = await cat.seedCashlessFields(db, getExploreFields);
   assert.equal(r.ok, true);
-  assert.equal(r.added, 6, 'the 6 new check-in family fields (not the ticked, PII or foreign ones)');
+  assert.equal(r.added, 10, 'check-in + sales family fields (not the ticked, PII or foreign ones)');
   const saved = JSON.parse(db.getSetting('owl_catalogue_expfields', '{}'))[KEY];
   const names = saved.map((x) => x.name);
   assert.ok(names.includes('cashless_check_ins.station_name'));
-  assert.ok(names.includes('cashless_check_ins.operator_name'));
-  assert.ok(names.includes('cashless_access_control.station_name'));
+  assert.ok(names.includes('cashless_sales_operators.operator_id'), 'sales operator id now available');
+  assert.ok(names.includes('cashless_sales.payment_type'), 'closed-loop payment type now available');
+  assert.ok(names.includes('cashless_stations.category'));
+  assert.ok(names.includes('cashless_sales.transaction_count'));
   assert.ok(!names.includes('cashless_check_ins.customer_email'), 'PII never enters the catalogue');
-  assert.ok(!names.includes('cashless_sales.station_name'), 'other families untouched');
+  assert.ok(!names.includes('cashless_sales.customer_first_name'), 'PII never enters the catalogue');
+  assert.ok(!names.includes('cashless_gtags.active'), 'non-target families untouched');
   assert.ok(names.includes('cashless_check_ins.count'), 'existing ticks preserved');
   // The enriched selection yields a queryable explore with the new dims.
   const eff = cat.effective(db);
-  assert.ok(eff.extras[0].dimensions.some((d) => d.name === 'cashless_check_ins.station_name'));
+  assert.ok(eff.extras[0].dimensions.some((d) => d.name === 'cashless_sales_operators.operator_id'));
   // Second run: flag set → no Looker call, nothing re-added (admin unticks respected).
   db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: saved.filter((x) => x.name !== 'cashless_check_ins.device_id') }));
-  const again = await cat.seedCheckinFields(db, getExploreFields);
+  const again = await cat.seedCashlessFields(db, getExploreFields);
   assert.equal(again.skipped, 'already seeded');
   assert.equal(lookerCalls, 1, 'Looker not consulted again');
   assert.ok(!JSON.parse(db.getSetting('owl_catalogue_expfields', '{}'))[KEY].some((x) => x.name === 'cashless_check_ins.device_id'), 'an admin untick stays unticked');
 });
 
-test('seedCheckinFields does NOT set the done-flag when Looker is unreachable (retries next boot)', async () => {
+test('seedCashlessFields runs even where the v1 check-in seed already did (v2 flag is separate)', async () => {
   const db = fakeDb();
   cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
-  const r = await cat.seedCheckinFields(db, async () => { throw new Error('looker down'); });
+  db.setSetting('owl_catalogue_checkin_seeded', '2026-07-03T09:00:00Z'); // prod ran v1 this morning
+  const r = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [
+    { name: 'cashless_sales_operators.operator_id', label: 'Operator ID', type: 'string' },
+  ] }));
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 1, 'the sales delta still lands');
+});
+
+test('seedCashlessFields does NOT set the done-flag when Looker is unreachable (retries next boot)', async () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  const r = await cat.seedCashlessFields(db, async () => { throw new Error('looker down'); });
   assert.equal(r.ok, false);
-  assert.equal(db.getSetting('owl_catalogue_checkin_seeded', ''), '', 'flag not set');
+  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v2', ''), '', 'flag not set');
   // Next boot, Looker is back → it seeds.
-  const r2 = await cat.seedCheckinFields(db, async () => ({ measures: [], dimensions: [{ name: 'cashless_check_ins.station_name', label: 'Station', type: 'string' }] }));
+  const r2 = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [{ name: 'cashless_check_ins.station_name', label: 'Station', type: 'string' }] }));
   assert.equal(r2.ok, true);
   assert.equal(r2.added, 1);
 });
 
-test('seedCheckinFields without a registered cashless explore is a safe no-op', async () => {
+test('seedCashlessFields without a registered cashless explore is a safe no-op', async () => {
   const db = fakeDb();
-  const r = await cat.seedCheckinFields(db, async () => ({ measures: [], dimensions: [] }));
+  const r = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [] }));
   assert.equal(r.ok, false);
-  assert.equal(db.getSetting('owl_catalogue_checkin_seeded', ''), '', 'flag not set — seeds when the explore is registered later');
+  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v2', ''), '', 'flag not set — seeds when the explore is registered later');
 });
