@@ -1,0 +1,359 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 1fbe688..f581769 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -183,6 +183,68 @@ function RosterPanel({ monitorId }) {
+   );
+ }
+ 
++// The day timeline: rows = devices, columns = hours, green = sent data that hour,
++// grey = silent — the "see the impact through the whole day" view. A red device
++// name means it hasn't been active in the current hour.
++function TimelinePanel({ monitorId }) {
++  const [data, setData] = useState(null);
++  const [hours, setHours] = useState(24);
++  const [busy, setBusy] = useState(false);
++  const [err, setErr] = useState('');
++  const load = async (h) => {
++    setBusy(true); setErr('');
++    try {
++      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/timeline?hours=${h}`);
++      const d = await res.json().catch(() => ({}));
++      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
++      setData(d);
++    } catch (e) { setErr(e.message); }
++    setBusy(false);
++  };
++  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window change
++  useEffect(() => { load(hours); }, [monitorId, hours]);
++  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours)}>Retry</button></div>;
++  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the day timeline from Looker…</div>;
++  if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.reason || 'No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.'}</div>;
++  const hourLabel = (iso) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }).slice(0, 5);
++  return (
++    <div>
++      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
++        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
++        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>each block = one hour · green = sent data · grey = silent</span>
++        <span style={{ flex: 1 }} />
++        {[12, 24, 48].map((h) => (
++          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
++        ))}
++        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours)}>{busy ? '…' : '🔄'}</button>
++      </div>
++      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some device-hours may be missing; try a shorter range.</div>}
++      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : (
++        <div style={{ overflowX: 'auto' }}>
++          {/* Hour scale: a label every 3rd bucket, aligned to the 12px blocks. */}
++          <div style={{ display: 'flex', gap: 2, marginLeft: 148, marginBottom: 2 }}>
++            {data.buckets.map((b, i) => (
++              <span key={b} style={{ width: 12, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % 3 === 0 ? hourLabel(b) : ''}</span>
++            ))}
++          </div>
++          {data.devices.map(({ device, active }) => {
++            const liveNow = active[active.length - 1] === 1;
++            return (
++              <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
++                <span title={device} style={{ width: 140, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
++                {active.map((a, i) => (
++                  <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
++                    style={{ width: 12, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
++                ))}
++              </div>
++            );
++          })}
++        </div>
++      )}
++    </div>
++  );
++}
++
+ // Expandable history: the transition/alert feed + the raw pull log + a live peek
+ // at the last 20 records off the feed (+ the device roster when configured).
+ function HistoryPanel({ monitorId, rosterField }) {
+@@ -194,7 +256,7 @@ function HistoryPanel({ monitorId, rosterField }) {
+     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
+       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+         {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)'],
+-          ...(rosterField ? [['roster', '📟 Devices (live)']] : [])].map(([k, l]) => (
++          ...(rosterField ? [['roster', '📟 Devices (live)'], ['timeline', '📊 Timeline (live)']] : [])].map(([k, l]) => (
+           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
+         ))}
+       </div>
+@@ -235,6 +297,7 @@ function HistoryPanel({ monitorId, rosterField }) {
+         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
+         {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
+         {tab === 'roster' && <RosterPanel monitorId={monitorId} />}
++        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} />}
+       </div>
+     </div>
+   );
+@@ -340,7 +403,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+   const [f, setF] = useState(() => ({
+     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
+     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+-    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30,
++    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '',
+     ...(initial || {}),
+   }));
+   const [models, setModels] = useState(null);
+@@ -464,15 +527,20 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+           </div>
+           {f.rosterField && (
+             <div>
+-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
++              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
++                <div>
++                  <span style={label}>Daily from (SA time)</span>
++                  <input style={input} type="time" value={f.rosterDaily || ''} onChange={(e) => set('rosterDaily', e.target.value)} />
++                </div>
+                 <div>
+-                  <span style={label}>Linked from (start time)</span>
+-                  <input style={input} type="datetime-local" value={isoToLocalInput(f.rosterStart)}
++                  <span style={{ ...label, opacity: f.rosterDaily ? 0.45 : 1 }}>or once-off start</span>
++                  <input style={{ ...input, opacity: f.rosterDaily ? 0.45 : 1 }} type="datetime-local" disabled={!!f.rosterDaily}
++                    value={isoToLocalInput(f.rosterStart)}
+                     onChange={(e) => set('rosterStart', e.target.value ? new Date(e.target.value).toISOString() : '')} />
+                 </div>
+                 <div>
+-                  <span style={{ ...label, opacity: f.rosterStart ? 0.45 : 1 }}>or linked window (min)</span>
+-                  <input style={{ ...input, opacity: f.rosterStart ? 0.45 : 1 }} type="number" min="10" disabled={!!f.rosterStart}
++                  <span style={{ ...label, opacity: (f.rosterDaily || f.rosterStart) ? 0.45 : 1 }}>or window (min)</span>
++                  <input style={{ ...input, opacity: (f.rosterDaily || f.rosterStart) ? 0.45 : 1 }} type="number" min="10" disabled={!!(f.rosterDaily || f.rosterStart)}
+                     value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
+                 </div>
+               </div>
+@@ -481,7 +549,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+                 <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
+               </div>
+               <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>
+-                {f.rosterStart ? 'Roster = every device seen since the start time (your local time). Clear it to use the rolling window instead.' : 'Set a start time (e.g. doors open) to anchor the roster to the event instead of a rolling window.'}
++                {f.rosterDaily ? `Roster restarts every day at ${f.rosterDaily} (South Africa time) — the multi-day event shape.`
++                  : f.rosterStart ? 'Roster = every device seen since the once-off start time (your local time). Clear it to use the rolling window.'
++                    : 'Pick a daily time (multi-day events), a once-off start (single event day), or leave both blank for a rolling window.'}
+               </span>
+             </div>
+           )}
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 4ef64ca..88c1626 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -129,6 +129,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     add('roster_baseline_min', 'roster_baseline_min INTEGER NOT NULL DEFAULT 1440'); // seen within this window = "linked"
+     add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
+     add('roster_start', "roster_start TEXT NOT NULL DEFAULT ''");                    // fixed "linked since" start (UTC ISO) — overrides the rolling window
++    add('roster_daily', "roster_daily TEXT NOT NULL DEFAULT ''");                    // recurring daily anchor 'HH:MM' (SAST) — beats roster_start; multi-day events
+   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
+ 
+   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
+@@ -139,7 +140,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
+       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
+       detailFields: parseJson(r.detail_fields, []),
+-      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '',
++      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '',
+       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
+       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
+       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
+@@ -186,6 +187,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+       // Fixed "linked since" anchor (UTC ISO). When set it beats the rolling window
+       // — the event-day shape: "every device seen since doors opened".
+       rosterStart: (b.rosterStart && !Number.isNaN(Date.parse(b.rosterStart))) ? new Date(b.rosterStart).toISOString() : '',
++      // Recurring daily anchor (multi-day events): 'HH:MM' South-Africa time —
++      // the roster restarts from that time each day. Beats rosterStart when set.
++      rosterDaily: /^\d{1,2}:\d{2}$/.test(b.rosterDaily || '') ? b.rosterDaily : '',
+       filters,
+       warnMin: num(b.warnMin, 30, 1, 10080),
+       staleMin: num(b.staleMin, 60, 2, 10080),
+@@ -201,20 +205,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     const ts = now();
+     if (id) {
+       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
+-        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?,
++        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?,
+         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
+         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+-          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart,
++          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily,
+           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
+       return monitorById(id);
+     }
+     const nid = uuid();
+     sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
+-      roster_field, roster_baseline_min, roster_online_min, roster_start, filters,
++      roster_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, filters,
+       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
+-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
++      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+       .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+-        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, JSON.stringify(c.filters),
++        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, JSON.stringify(c.filters),
+         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
+     return monitorById(nid);
+   }
+@@ -226,10 +230,27 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     if (v == null || v === '') return null;
+     let s = String(v).trim();
+     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += ' 00:00:00';
++    if (/^\d{4}-\d{2}-\d{2} \d{1,2}$/.test(s)) s += ':00'; // hour-granularity dims ("YYYY-MM-DD HH")
+     const d = new Date(s.replace(' ', 'T') + (/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? '' : 'Z'));
+     return Number.isNaN(d.getTime()) ? null : d;
+   }
+ 
++  // The roster's "linked since" anchor, in precedence order: the recurring daily
++  // time (today at HH:MM SAST — yesterday's if that moment is still ahead), then
++  // the fixed start, else null (rolling window). SAST is fixed UTC+2 (no DST).
++  function rosterAnchor(m, nowMs = Date.now()) {
++    if (/^\d{1,2}:\d{2}$/.test(m.rosterDaily || '')) {
++      const [hh, mm] = m.rosterDaily.split(':').map(Number);
++      const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' })
++        .formatToParts(new Date(nowMs)).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
++      let d = new Date(`${p.year}-${p.month}-${p.day}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00+02:00`);
++      if (d.getTime() > nowMs) d = new Date(d.getTime() - 86400000); // today's anchor still ahead → since yesterday's
++      return d;
++    }
++    if (m.rosterStart && !Number.isNaN(Date.parse(m.rosterStart))) return new Date(m.rosterStart);
++    return null;
++  }
++
+   // Scoped reads: pinned-to-client monitors run as a synthetic CLIENT locked to that
+   // entity (applyScope forces the organiser boundary, exactly like alerts/goals);
+   // platform monitors run as a synthetic admin (unscoped by design — internal ops).
+@@ -332,9 +353,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+   async function deviceRoster(m) {
+     if (!m.rosterField) return { configured: false };
+     const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+-    // Constrain the roster in Looker itself: a fixed "since doors opened" anchor
+-    // when set (queries run in UTC), else the rolling baseline window.
+-    const startAt = m.rosterStart && !Number.isNaN(Date.parse(m.rosterStart)) ? new Date(m.rosterStart) : null;
++    // Constrain the roster in Looker itself: the daily/fixed "since doors opened"
++    // anchor when set (queries run in UTC), else the rolling baseline window.
++    const startAt = rosterAnchor(m);
+     body.filters[m.timeField] = startAt
+       ? `after ${startAt.toISOString().slice(0, 16).replace('T', ' ')}`
+       : `last ${m.rosterBaselineMin} minutes`;
+@@ -361,6 +382,46 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     };
+   }
+ 
++  // The day timeline: per device, which HOURS of the window it produced data —
++  // rows × 24 hour-buckets the UI renders as a green/grey activity grid, so you
++  // can SEE when each device dropped and for how long. Uses the timestamp's
++  // hour-granularity sibling dimension (created_at_time → created_at_hour) so
++  // Looker aggregates to one row per (device, hour) — a whole busy day fits.
++  async function deviceTimeline(m, hours = 24) {
++    if (!m.rosterField) return { configured: false };
++    // Looker dimension groups name every timeframe `${group}_${timeframe}` —
++    // swap the picked timeframe for `_hour` (or append it when the picked field
++    // is the bare group name). If the guess is wrong Looker 400s and the panel
++    // shows the error rather than silently lying.
++    const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
++    const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
++    const h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
++    const body = { ...baseBody(m), fields: [m.rosterField, hourField], sorts: [`${hourField} desc`], limit: '5000' };
++    body.filters[m.timeField] = `last ${h} hours`;
++    const rows = await runScoped(m, body);
++    const nowMs = Date.now();
++    const lastBucket = Math.floor(nowMs / 3600000) * 3600000; // current hour start (UTC)
++    const firstBucket = lastBucket - (h - 1) * 3600000;
++    const byDevice = new Map(); // device -> Uint-ish array of 0/1 per bucket
++    for (const r of rows) {
++      const d = String(r[m.rosterField] ?? '').trim();
++      const ts = parseTs(r[hourField]);
++      if (!d || !ts) continue;
++      const idx = Math.floor((ts.getTime() - firstBucket) / 3600000);
++      if (idx < 0 || idx >= h) continue;
++      if (!byDevice.has(d)) byDevice.set(d, Array(h).fill(0));
++      byDevice.get(d)[idx] = 1;
++    }
++    const devices = [...byDevice.entries()].map(([device, active]) => ({ device, active }))
++      .sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
++    return {
++      configured: true, hours: h, hourField,
++      buckets: Array.from({ length: h }, (_, i) => new Date(firstBucket + i * 3600000).toISOString()),
++      devices,
++      truncated: rows.length >= 5000,
++    };
++  }
++
+   // Distinct values of a dimension (scoped) — feeds the editor's linked filter
+   // dropdowns so users pick a real station/event/type instead of typing blind.
+   async function fieldValues({ model, view, field, entityId, suiteId }) {
+@@ -646,6 +707,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     res.json(await deviceRoster(m));
+   }));
+ 
++  // The per-device day timeline (live Looker read, opened on demand).
++  app.get('/api/admin/data-health/monitors/:id/timeline', auth.requireAdmin, asyncHandler(async (req, res) => {
++    if (!enabled()) return off(res);
++    const m = monitorById(req.params.id);
++    if (!m) return res.status(404).json({ error: 'Monitor not found' });
++    res.json(await deviceTimeline(m, req.query.hours));
++  }));
++
+   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
+     if (!enabled()) return off(res);
+     if (!monitorById(req.params.id)) return res.status(404).json({ error: 'Monitor not found' });
+@@ -698,7 +767,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+   }));
+ 
+   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
+-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster };
++  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster, deviceTimeline, rosterAnchor };
+ }
+ 
+ module.exports = { mount, AREAS, CHANNELS };
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 9cb5ed1..d962f2b 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -382,6 +382,49 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
+   assert.equal(junk.rosterStart, '');
+ });
+ 
++test('rosterAnchor: daily SAST time beats fixed start; wraps to yesterday', () => {
++  const h = mountHealth();
++  const now = Date.parse('2026-07-03T10:00:00Z'); // 12:00 SAST
++  const a = h.mod.rosterAnchor({ rosterDaily: '09:00', rosterStart: '2026-01-01T00:00:00.000Z' }, now);
++  assert.equal(a.toISOString(), '2026-07-03T07:00:00.000Z'); // today 09:00 SAST (daily wins)
++  const b = h.mod.rosterAnchor({ rosterDaily: '14:00' }, now); // today's 14:00 SAST still ahead
++  assert.equal(b.toISOString(), '2026-07-02T12:00:00.000Z'); // → since yesterday 14:00 SAST
++  assert.equal(h.mod.rosterAnchor({ rosterStart: '2026-01-01T00:00:00.000Z' }, now).toISOString(), '2026-01-01T00:00:00.000Z');
++  assert.equal(h.mod.rosterAnchor({}, now), null);
++});
++
++test('deviceTimeline: per-device hour buckets over the window', async () => {
++  const h = mountHealth();
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  let body = null;
++  // Real Looker hour dims render "YYYY-MM-DD HH" (query_timezone UTC).
++  const hourStr = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
++  h.setRowsFn(async (b) => {
++    body = b;
++    return [
++      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(0) },   // this hour
++      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(180) }, // 3 hours back
++      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(600) }, // 10 hours back
++    ];
++  });
++  const t = await h.mod.deviceTimeline(m, 24);
++  assert.equal(t.configured, true);
++  assert.equal(t.hours, 24);
++  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at_hour']); // hour sibling of the time field
++  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
++  const d1 = t.devices.find((d) => d.device === 'D-1');
++  assert.equal(d1.active[23], 1);
++  assert.equal(d1.active[20], 1);
++  assert.equal(d1.active.filter(Boolean).length, 2);
++  const d2 = t.devices.find((d) => d.device === 'D-2');
++  assert.equal(d2.active[13], 1);
++  // Hour-sibling derivation follows Looker's `${group}_${timeframe}` naming.
++  const daily = makeMonitor(h, { name: 'Day level', rosterField: 'scans.device_id', timeField: 'scans.created_at_date' });
++  assert.equal((await h.mod.deviceTimeline(daily, 12)).hourField, 'scans.created_at_hour');
++  const timey = makeMonitor(h, { name: 'Timey', rosterField: 'scans.device_id', timeField: 'scans.created_at_time' });
++  assert.equal((await h.mod.deviceTimeline(timey, 12)).hourField, 'scans.created_at_hour');
++});
++
+ test('clean() bounds thresholds and drops junk filters', () => {
+   const h = mountHealth();
+   const c = h.mod.clean({
