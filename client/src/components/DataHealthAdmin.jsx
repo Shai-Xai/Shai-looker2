@@ -33,6 +33,14 @@ const fmtAt = (iso) => {
   return d.toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 const ago = (iso) => (iso ? fmtLag((Date.now() - new Date(iso).getTime()) / 60000) + ' ago' : 'never');
+// UTC ISO ⇄ the browser-local value a <input type="datetime-local"> wants.
+const isoToLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
 
 function Dot({ status, size = 9 }) {
   return <span style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: STATUS_COLOR[status] || 'var(--muted)', flexShrink: 0 }} />;
@@ -144,7 +152,7 @@ function RosterPanel({ monitorId }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.total} linked</span>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(seen in the last {fmtLag(data.baselineMin)})</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>({data.startAt ? `seen since ${fmtAt(data.startAt)}` : `seen in the last ${fmtLag(data.baselineMin)}`})</span>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: STATUS_COLOR.fresh }}>{data.online} online</span>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: data.offline.length ? STATUS_COLOR.stale : 'var(--muted)' }}>{data.offline.length} offline</span>
         <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(no sync in {fmtLag(data.onlineMin)})</span>
@@ -455,15 +463,26 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
             <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the device ID or operator dimension. Anything seen in the linked window counts as connected; silence past the online window flags it offline by name.</span>
           </div>
           {f.rosterField && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <span style={label}>Linked window (min)</span>
-                <input style={input} type="number" min="10" value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <span style={label}>Linked from (start time)</span>
+                  <input style={input} type="datetime-local" value={isoToLocalInput(f.rosterStart)}
+                    onChange={(e) => set('rosterStart', e.target.value ? new Date(e.target.value).toISOString() : '')} />
+                </div>
+                <div>
+                  <span style={{ ...label, opacity: f.rosterStart ? 0.45 : 1 }}>or linked window (min)</span>
+                  <input style={{ ...input, opacity: f.rosterStart ? 0.45 : 1 }} type="number" min="10" disabled={!!f.rosterStart}
+                    value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
+                </div>
               </div>
-              <div>
+              <div style={{ marginTop: 8 }}>
                 <span style={label}>Online window (min)</span>
                 <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
               </div>
+              <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>
+                {f.rosterStart ? 'Roster = every device seen since the start time (your local time). Clear it to use the rolling window instead.' : 'Set a start time (e.g. doors open) to anchor the roster to the event instead of a rolling window.'}
+              </span>
             </div>
           )}
         </div>

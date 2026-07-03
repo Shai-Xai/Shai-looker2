@@ -128,6 +128,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     add('roster_field', "roster_field TEXT NOT NULL DEFAULT ''");           // device/operator dimension for the roster view
     add('roster_baseline_min', 'roster_baseline_min INTEGER NOT NULL DEFAULT 1440'); // seen within this window = "linked"
     add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
+    add('roster_start', "roster_start TEXT NOT NULL DEFAULT ''");                    // fixed "linked since" start (UTC ISO) — overrides the rolling window
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -138,7 +139,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
-      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min,
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '',
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -182,6 +183,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       rosterField: String(b.rosterField || '').slice(0, 200),
       rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
       rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
+      // Fixed "linked since" anchor (UTC ISO). When set it beats the rolling window
+      // — the event-day shape: "every device seen since doors opened".
+      rosterStart: (b.rosterStart && !Number.isNaN(Date.parse(b.rosterStart))) ? new Date(b.rosterStart).toISOString() : '',
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
@@ -197,20 +201,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const ts = now();
     if (id) {
       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
-        roster_field=?, roster_baseline_min=?, roster_online_min=?,
+        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin,
+          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
     sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
-      roster_field, roster_baseline_min, roster_online_min, filters,
+      roster_field, roster_baseline_min, roster_online_min, roster_start, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
       .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, JSON.stringify(c.filters),
+        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -328,9 +332,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   async function deviceRoster(m) {
     if (!m.rosterField) return { configured: false };
     const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
-    // Constrain to the baseline window in Looker itself, so a long-lived explore
-    // doesn't drag ancient devices into the roster.
-    body.filters[m.timeField] = `last ${m.rosterBaselineMin} minutes`;
+    // Constrain the roster in Looker itself: a fixed "since doors opened" anchor
+    // when set (queries run in UTC), else the rolling baseline window.
+    const startAt = m.rosterStart && !Number.isNaN(Date.parse(m.rosterStart)) ? new Date(m.rosterStart) : null;
+    body.filters[m.timeField] = startAt
+      ? `after ${startAt.toISOString().slice(0, 16).replace('T', ' ')}`
+      : `last ${m.rosterBaselineMin} minutes`;
     const rows = await runScoped(m, body);
     const seen = new Map(); // device -> latest Date
     for (const r of rows) {
@@ -347,7 +354,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
     return {
       configured: true,
-      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin,
+      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
       total: devices.length, online: devices.length - offline.length,
       offline: offline.slice(0, 100),
       truncated: rows.length >= 5000, // baseline window busier than the scan window — counts may undercount idle devices

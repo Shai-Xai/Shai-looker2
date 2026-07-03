@@ -368,6 +368,18 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   // No roster field configured → explicitly unconfigured, no query.
   const plain = makeMonitor(h, { name: 'No roster' });
   assert.deepEqual(await h.mod.deviceRoster(plain), { configured: false });
+
+  // A fixed start time anchors the roster ("since doors opened") and beats the
+  // rolling window; the Looker filter is an UTC `after` expression.
+  const startIso = new Date(Date.now() - 2 * 3600000).toISOString();
+  const anchored = makeMonitor(h, { name: 'Anchored', rosterField: 'scans.device_id', rosterStart: startIso, rosterBaselineMin: 60 });
+  assert.equal(anchored.rosterStart, startIso);
+  const r2 = await h.mod.deviceRoster(anchored);
+  assert.equal(body.filters['scans.scanned_at'], `after ${startIso.slice(0, 16).replace('T', ' ')}`);
+  assert.equal(r2.startAt, startIso);
+  // Junk start time is dropped at clean() — falls back to the rolling window.
+  const junk = makeMonitor(h, { name: 'Junk start', rosterField: 'scans.device_id', rosterStart: 'not-a-date' });
+  assert.equal(junk.rosterStart, '');
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {
