@@ -5,6 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import { useProfile } from '../lib/profile.jsx';
 import HomeButton from '../components/HomeButton.jsx';
 import AlertEditor from '../components/AlertEditor.jsx';
+import LivePulsePanel from '../components/LivePulsePanel.jsx';
 
 // The Alerts surface (insight → action). Grouped by event, like Goals: each event
 // lists its metric watchers, with a one-tap "New alert". An alert is a saved rule
@@ -20,7 +21,7 @@ export default function AlertsPage() {
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
-  const [tab, setTab] = useState('alerts');         // 'alerts' | 'templates'
+  const [tab, setTab] = useState(params.get('tab') === 'live' ? 'live' : 'alerts'); // 'alerts' | 'live' | 'templates' (?tab=live deep-links from the Owl)
   const [templates, setTemplates] = useState(null);  // reusable templates (this client + global)
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setSuitesLoading(false)); }, []);
@@ -84,8 +85,12 @@ export default function AlertsPage() {
       {/* Tabs: live alerts vs the reusable templates available to this client. */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid var(--hairline)' }}>
         <TabBtn active={tab === 'alerts'} onClick={() => setTab('alerts')}>Alerts</TabBtn>
+        <TabBtn active={tab === 'live'} onClick={() => setTab('live')}>⚡ Live updates</TabBtn>
         <TabBtn active={tab === 'templates'} onClick={() => setTab('templates')}>Templates{templates && templates.length ? ` (${templates.length})` : ''}</TabBtn>
       </div>
+
+      {/* Live updates — recurring event-day multi-metric snapshots (Live Pulse). */}
+      {tab === 'live' && <LivePulsePanel suites={visibleSuites} />}
 
       {tab === 'templates' && (
         <TemplatesView templates={templates} canUse={rows.some((r) => r.canManage) || visibleSuites.length > 0} onUse={useTemplate} onDelete={deleteTpl} />
