@@ -1,0 +1,10 @@
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index a0c7c4d..63dc5b6 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -674 +674,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), ...probed, 'distinct', 'distinct2', 'none'];
++    // Catalogue measures FIRST: the explore-name guess can be a measure like
++    // "Cashless Events Count" that returns 1 per group — non-zero, so the
++    // zero-check can't catch it, and it must never outrank transaction_count.
++    const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
