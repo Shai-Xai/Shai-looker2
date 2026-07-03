@@ -596,10 +596,10 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
           return (
             <div style={{ flex: '0 1 320px', minWidth: 240, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Devices online through the day</div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 52 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: cov.length > 24 ? 1 : 3, height: 52 }}>
                 {cov.map((c, i) => (
                   <span key={i} title={`${saTime(c.t)} SA — ${c.n} of ${max} devices sending`}
-                    style={{ flex: 1, maxWidth: 30, borderRadius: '3px 3px 0 0', height: c.n ? Math.max(3, Math.round((c.n / max) * 52)) : 3, background: c.n ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                    style={{ flex: 1, maxWidth: cov.length > 24 ? 8 : 30, borderRadius: cov.length > 24 ? '1px 1px 0 0' : '3px 3px 0 0', height: c.n ? Math.max(3, Math.round((c.n / max) * 52)) : 3, background: c.n ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
                 ))}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', marginTop: 3 }}>
