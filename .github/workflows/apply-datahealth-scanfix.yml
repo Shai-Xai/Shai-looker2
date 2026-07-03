@@ -1,0 +1,44 @@
+name: Apply data-health scan-count fix
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): decodes the
+# reviewed patch (gzip -> base64, sha256-verified after decode), applies it to
+# the feature branch, copies the files onto main, then deletes itself from this
+# (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decode + verify patch, apply to branch, sync main, self-clean
+        run: |
+          set -euo pipefail
+          base64 -d patches/scanfix.gz.b64 | gunzip > /tmp/d.patch
+          echo "fe8f1bcc4aeb8c9a5a4d96132b4d05d4abc183153a9fb4e79e61a6954d976f9e  /tmp/d.patch" | sha256sum -c -
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --index -3 /tmp/d.patch
+          git commit -m 'Data health: fix scan counting on combined explores; tile sparkline + permanent metrics' \
+            -m 'Count fix: the timeline''s native count measure is derived from the TIME FIELD''s view (cashless_check_ins.count), not the explore name - on combined explores the old guess failed and silently fell back to one row per device-hour (26 devices x 3h read as 76 scans). The row-presence fallback is never memoized, and when used at hour blocks the snapshot re-reads at 10-min blocks; approximate totals show a >= prefix. Tiles show total scans / last hour / avg per hour plus a coverage sparkline (devices sending per block). Permanent metrics row (stations, devices linked/online/offline, total scans, last hour, avg scans/h) on the Admin page and the Event Ops tab, computed from stored snapshots.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- server/dataHealth.js client/src/components/DataHealthAdmin.jsx
+          git commit -m 'Data health: fix scan counting on combined explores; tile sparkline + permanent metrics' \
+            -m 'Files copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/scanfix.gz.b64 .github/workflows/apply-datahealth-scanfix.yml
+          git commit -m "chore: remove one-shot scanfix helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
