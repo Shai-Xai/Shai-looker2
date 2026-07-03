@@ -429,6 +429,30 @@ test('withInfo: roster + timeline devices carry their latest station and operato
   assert.equal(plain.offline[0].station, undefined);
 });
 
+test('deviceTimeline: station fallback filters the whole feed by the labels map', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One', data_health_last: minsAgo(1) },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two', data_health_last: minsAgo(1) },
+      ];
+    }
+    if (b.filters['scans.station_name']) return []; // the broken join path: the filtered count read finds nothing
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 5 },
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(), 'scans.count': 7 },
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 60, 'Bar One', true);
+  assert.deepEqual(t.devices.map((d) => d.device), ['D-1']); // only the asked-for station's devices
+  assert.equal(t.grandTotal, 5); // totals recomputed for the kept devices only
+  assert.equal(t.station, 'Bar One');
+  assert.equal(t.devices[0].station, 'Bar One');
+});
+
 test('deviceTimeline: a count measure that reads 0 for every row is a soft failure', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
