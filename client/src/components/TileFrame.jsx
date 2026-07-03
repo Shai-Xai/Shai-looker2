@@ -19,6 +19,7 @@ import CreateSegmentModal from './CreateSegmentModal.jsx';
 import ShareMenu from './ShareMenu.jsx';
 import TileLockModal from './TileLockModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
@@ -36,6 +37,11 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
+  // Per-user chart zoom ("last N points") — loaded from the user's prefs and
+  // saved back on change; a personal lens, never a dashboard edit.
+  const [zoom, setZoom] = useState(0);
+  useEffect(() => { let alive = true; if (dashboardId) loadTileZoom(dashboardId).then((m) => { if (alive) setZoom(m[tile.id] || 0); }); return () => { alive = false; }; }, [dashboardId, tile.id]);
+  const changeZoom = (n) => { setZoom(n); if (dashboardId) setTileZoom(dashboardId, tile.id, n); };
   // On phones the per-tile owl/pin/segment buttons clutter every card, so they
   // stay hidden until you tap the tile (desktop shows them on hover as before).
   const [tapped, setTapped] = useState(false);
@@ -168,6 +174,23 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {/* Chart zoom: show only the last N points of a long axis (e.g. a
+            days-before-event countdown where all the action is the final two
+            weeks). Personal + persisted; stays visible while active. */}
+        {!editable && (visType || '').match(/column|bar|line|area|scatter/) && (data?.data?.length || 0) > 24 && (!isMobile || tapped || zoom > 0) && (
+          <select
+            value={zoom}
+            onChange={(e) => changeZoom(Number(e.target.value))}
+            onMouseDown={(e) => e.stopPropagation()}
+            className={zoom > 0 || isMobile ? undefined : 'insight-btn'}
+            title="Zoom — show only the most recent part of the axis (saved for you)"
+            aria-label="Chart zoom"
+            style={{ position: 'absolute', right: 8, bottom: 6, zIndex: 6, fontSize: 10.5, padding: '2px 5px', borderRadius: 7, border: '1px solid var(--hairline)', background: 'var(--card)', color: zoom > 0 ? 'var(--brand)' : 'var(--muted)', fontWeight: zoom > 0 ? 700 : 500, cursor: 'pointer' }}
+          >
+            <option value={0}>🔍 All</option>
+            {[90, 60, 30, 14, 7].map((n) => <option key={n} value={n}>🔍 Last {n}</option>)}
+          </select>
+        )}
         {/* Editable metric tile (no header): the move handle + edit controls float
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
@@ -207,7 +230,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             style={{ height: '100%', animationDelay: `${enterDelay(tile)}ms` }}
           >
             <ErrorBoundary resetKey={data}>
-              <TileContent tile={tile} data={data} />
+              <TileContent tile={tile} data={data} zoom={zoom} />
             </ErrorBoundary>
           </div>
         ) : null}
@@ -319,7 +342,7 @@ function Skeleton({ metric, chart }) {
   );
 }
 
-function TileContent({ tile, data }) {
+function TileContent({ tile, data, zoom = 0 }) {
   const visType = tile.vis?.type;
 
   if (visType === 'single_value' || visType === 'single_value_period_over_period') {
@@ -336,7 +359,7 @@ function TileContent({ tile, data }) {
     visType === 'looker_area' || visType === 'looker_scatter' || visType === 'looker_pie' ||
     visType === 'looker_donut_multiples'
   ) {
-    return <ChartTile data={data} visConfig={tile.vis} />;
+    return <ChartTile data={data} visConfig={tile.vis} zoom={zoom} />;
   }
   // Fallback: always show the data.
   return <TableTile data={data} visConfig={tile.vis} />;
