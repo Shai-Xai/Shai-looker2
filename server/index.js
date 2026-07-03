@@ -130,7 +130,7 @@ const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND �
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).
 const socialMetrics = require('./socialMetrics');
-socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); // Meta PAID performance inbound — per-campaign spend/clicks/purchases/ROAS (deep Meta P1; same token as audience-sync)
+socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields)
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.

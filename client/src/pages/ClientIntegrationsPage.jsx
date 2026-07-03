@@ -9,6 +9,7 @@ import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
+import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
@@ -134,6 +135,7 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+              <MetaConnectCard entityId={activeItem.entityId} scope="my" />
               <DriveSourcesCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}

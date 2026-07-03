@@ -700,6 +700,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-02** — **One-click connects** 🟡: "Connect with Google" (pick the
+  exact files in a native Google picker — the app can only ever see what you
+  pick) and "Continue with Facebook" (login + choose the ad account, no tokens
+  to paste) replace manual keys for Drive and Meta. Needs a one-time platform
+  app registration by Howler per platform.
 - **2026-07-02** — **Meta paid-ads performance in Pulse** 🟡: per-campaign spend,
   clicks, purchases and ROAS pulled daily from the connected ad account — a Paid
   ads section on the Social page, and the Owl answers "how are my ads doing?".
