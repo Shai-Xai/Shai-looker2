@@ -238,9 +238,14 @@ async function getExploreFields(model, explore) {
     `/lookml_models/${encodeURIComponent(model)}/explores/${encodeURIComponent(explore)}?fields=fields(dimensions(name,label,label_short,type,description,hidden,group_label),measures(name,label,label_short,type,description,hidden,group_label))`
   );
   const f = data.fields || {};
+  // Hidden fields are INCLUDED, flagged. "Hidden" in LookML is a UI nicety, not
+  // an API restriction — dashboard tiles and CSV exports use hidden fields all
+  // the time (the cashless check-in station/operator/device fields are a live
+  // example). Filtering them out here silently made those fields untickable in
+  // the Owl catalogue and invisible to the boot seeds. Consumers that want the
+  // old behaviour filter on `hidden` themselves.
   const pick = (arr) =>
     (arr || [])
-      .filter((x) => !x.hidden)
       .map((x) => ({
         name: x.name,
         label: x.label || x.name,
@@ -248,6 +253,7 @@ async function getExploreFields(model, explore) {
         type: x.type,
         description: x.description || '',
         group_label: x.group_label || '',
+        hidden: !!x.hidden,
       }));
   return { dimensions: pick(f.dimensions), measures: pick(f.measures) };
 }
