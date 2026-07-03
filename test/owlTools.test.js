@@ -192,6 +192,65 @@ test('a valid filter on a curated dimension is passed through under scope', asyn
   assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', M0]);
 });
 
+// ── Reporting timezone: relative date filters ("today") must resolve on the
+//    client's LOCAL calendar day, not Looker's server default — the cashless
+//    dateRange="today" = zero-rows bug. Fresh Owl query bodies now stamp
+//    query_timezone (platform default, or the entity's override).
+const reportingTz = require('../server/timezone');
+
+test('askData stamps the platform reporting timezone so "today" resolves locally', async () => {
+  const ent = h.makeEntity('TZ Co', 'TZ-org');
+  const user = h.makeClient('owl-tz1@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters[catalogue.dateDimension], 'today');
+  assert.equal(res.queryBody.query_timezone, reportingTz.PLATFORM_TIMEZONE); // no override → platform default
+});
+
+test('a per-entity reporting timezone override wins over the platform default', async () => {
+  const ent = h.makeEntity('Euro Co', 'Euro-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Europe/Rome' });
+  const user = h.makeClient('owl-tz2@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.query_timezone, 'Europe/Rome');
+});
+
+test('an invalid reporting timezone is ignored (falls back to the platform default)', async () => {
+  const ent = h.makeEntity('Bad TZ Co', 'BadTZ-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Not/AZone' });
+  assert.equal(h.db.getEntity(ent.id).reportingTimezone, ''); // rejected at write time
+  const user = h.makeClient('owl-tz3@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.queryBody.query_timezone, reportingTz.PLATFORM_TIMEZONE);
+});
+
+test('an extra explore (e.g. cashless) also stamps the reporting timezone', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x.date', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const ent = h.makeEntity('Cashless TZ Co', 'CashlessTZ-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Europe/Paris' });
+  const user = h.makeClient('owl-tz4@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x.date'], 'today');
+  assert.equal(res.queryBody.query_timezone, 'Europe/Paris');
+});
+
+test('dateRange filters the MEASURED view\'s own date, not the catalogue default (issue #28 residual)', async () => {
+  // Combined explore: catalogue dateDimension is the check-in date, but the
+  // measured view (sales) has its own date_date — "today" must land THERE, or
+  // it doesn't constrain sales rows at all (the €34.50-instead-of-€12 bug).
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_checkins.date_date', measures: [{ name: 'cashless_x_sales.revenue', label: 'Sales Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.date_date', label: 'Sales Date', type: 'date' }, { name: 'cashless_x_checkins.date_date', label: 'Check-in Date', type: 'date' }], notes: [] }] };
+  const ent = h.makeEntity('Cashless DD Co', 'CashlessDD-org');
+  const user = h.makeClient('owl-dd@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x_sales.date_date'], 'today', 'filters the measured view\'s own date');
+  assert.equal(res.queryBody.filters['cashless_x_checkins.date_date'], undefined, 'catalogue default not used when the measure has its own date');
+});
+
 test('a registered extra explore gets its own scoped, validated read tool', async () => {
   const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
   const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });

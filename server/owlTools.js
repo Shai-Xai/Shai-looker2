@@ -18,12 +18,21 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // schema + validation track that module automatically (add an operator/channel/priority
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
+const reportingTz = require('./timezone');
 
 module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
   const ORG = 'core_organisers.name'; // the canonical organiser lock field
+  // Stamp the client's reporting timezone onto a FRESH Owl query body so Looker
+  // resolves relative date filters ("today"/"this week") on the client's local
+  // calendar day — the cashless `dateRange="today"` = zero-rows fix. Only set it
+  // when the body doesn't already carry one; harmless on date-free queries.
+  function stampReportingTz(body, ctx) {
+    if (body && !body.query_timezone) body.query_timezone = reportingTz.reportingTimezoneFor(db, ctx || {});
+    return body;
+  }
   // Resolver for the createSegment act-tool's preview (count + per-channel reach).
   // Server-side only; never returns the people list to the chat. Same scope gate.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
@@ -214,6 +223,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     // 5) Run + return the grounding trail. /queries/run/json → array of row objects.
     //    A Looker error (e.g. a field that isn't in this explore) becomes a structured
     //    refusal so the Owl can say "I couldn't run that" instead of crashing the turn.
+    stampReportingTz(body, { user, suiteId, entityId });
     let rows;
     try {
       rows = await query.runLookerQuery('/queries/run/json', body);
@@ -438,6 +448,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       if (locks && locks[ORG] && validField.has(ORG)) body.filters = { ...body.filters, ...locks };
       else return refuse('no_scope', 'Open this dashboard under a specific client or event so I can scope its data safely.');
     }
+    stampReportingTz(body, { user, suiteId, entityId });
     const rows = await query.runLookerQuery('/queries/run/json', body);
     return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body };
   }
@@ -1016,7 +1027,17 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         if (val == null || String(val).trim() === '') continue;
         filters[field] = String(val);
       }
-      if (args.dateRange && String(args.dateRange).trim() && cat.dateDimension) filters[cat.dateDimension] = String(args.dateRange).trim();
+      // Date-filter the MEASURED view's OWN date field when it has one. In a
+      // combined explore the catalogue-level dateDimension (e.g. the cashless
+      // access-control/check-in date) does not constrain other views' rows —
+      // issue #28's residual: "today" on bar sales matched every date. Prefer
+      // `<measureView>.date_date`, then `<measureView>.created_at_date`, then
+      // the catalogue default.
+      if (args.dateRange && String(args.dateRange).trim()) {
+        const mv = String(measure).split('.')[0];
+        const dateDim = [`${mv}.date_date`, `${mv}.created_at_date`].find((n) => dByName.has(n)) || cat.dateDimension;
+        if (dateDim) filters[dateDim] = String(args.dateRange).trim();
+      }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
       applySuiteEventLocks(body.filters, suiteId, dByName);
       const allowed = await query.applyScope(body, user, suiteId);
@@ -1030,6 +1051,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
         else return refuse('no_scope', `I can't tell which client's data to use for ${cat.label}.`);
       }
+      stampReportingTz(body, { user, suiteId, entityId });
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
       catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
