@@ -37,7 +37,7 @@ function areaGradient(c) {
   ]);
 }
 
-export default function ChartTile({ data, visConfig = {} }) {
+export default function ChartTile({ data, visConfig = {}, zoom = 0 }) {
   const { openDrill } = useDrill();
   // Measure the available height so we can truncate rotated axis names to fit
   // the plot area (short tiles can't show a long vertical title).
@@ -52,7 +52,11 @@ export default function ChartTile({ data, visConfig = {} }) {
     return () => ro.disconnect();
   }, []);
   const fields = data.fields || {};
-  const rows = data.data || [];
+  // Per-user tile zoom: show only the LAST N points (the interesting end of a
+  // long date / days-before axis). Pie-likes keep every category.
+  const allRows = data.data || [];
+  const pieLike = (visConfig.type === 'looker_pie' || visConfig.type === 'looker_donut_multiples');
+  const rows = (zoom > 0 && !pieLike && allRows.length > zoom) ? allRows.slice(-zoom) : allRows;
   const dimensions = fields.dimensions || [];
   // Honour Looker's hidden fields (e.g. a raw measure hidden in favour of a
   // running-total / % change calc) — otherwise extra squashed series appear.
@@ -79,7 +83,7 @@ export default function ChartTile({ data, visConfig = {} }) {
   const { option, seriesMeta } = useMemo(
     () => buildOption({ rows, dimensions, measures, pivots, visType, stacked, visConfig, boxH }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, visType, stacked, boxH, theme, brandV]
+    [data, zoom, visType, stacked, boxH, theme, brandV]
   );
 
   if (!rows.length || !measures.length) return <Empty />;

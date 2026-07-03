@@ -518,6 +518,8 @@ export const api = {
   getAiUsage: (days = 14) => fetch(`/api/admin/ai-usage?days=${days}`).then(json),
 
   // Custom sending domain (dual-surface: admin per client, client self-service)
+  getTileZoom: (dashboardId) => fetch(`/api/my/tile-zoom/${dashboardId}`).then(json),
+  saveTileZoom: (dashboardId, zoom) => fetch(`/api/my/tile-zoom/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zoom }) }).then(json),
   clearQueryCache: () => fetch('/api/admin/clear-query-cache', { method: 'POST' }).then(json),
   getSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`).then(json),
   saveSendingDomain: (entityId, body, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
