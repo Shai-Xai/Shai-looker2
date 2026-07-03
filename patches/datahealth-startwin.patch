@@ -1,0 +1,129 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index d308946..f9d8439 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -190,7 +190,7 @@ function RosterPanel({ monitorId }) {
+ // block, with per-device and per-block totals.
+ function TimelinePanel({ monitorId }) {
+   const [data, setData] = useState(null);
+-  const [hours, setHours] = useState(24);
++  const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
+   const [interval, setIntervalMin] = useState(60);
+   const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
+   const [busy, setBusy] = useState(false);
+@@ -229,8 +229,8 @@ function TimelinePanel({ monitorId }) {
+           <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
+         ))}
+         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
+-        {[12, 24, 48].map((h) => (
+-          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
++        {[['start', '▶ Start'], [12, '12h'], [24, '24h'], [48, '48h']].map(([h, l]) => (
++          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{l}</button>
+         ))}
+         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
+         {[5, 10, 20, 30, 60].map((m) => (
+@@ -238,7 +238,9 @@ function TimelinePanel({ monitorId }) {
+         ))}
+         <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours, interval)}>{busy ? '…' : '🔄'}</button>
+       </div>
+-      {data.hours < hours && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
++      {data.anchored && data.startAt && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>From the start time — {new Date(data.startAt).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} to now.</div>}
++      {hours === 'start' && data.anchored === false && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>No start time set on this monitor — showing the last 24h. Set "Daily from" or a once-off start in ✏️ Edit → Device roster.</div>}
++      {(data.trimmedStart || (typeof hours === 'number' && data.hours < hours)) && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
+       {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
+       {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+         <div style={{ overflowX: 'auto' }}>
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 26f5058..786530a 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -407,12 +407,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
+     const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
+     const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
+-    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+-    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
+     const ivMs = iv * 60000;
++    // hours === 'start' anchors the window to the roster's start time (daily
++    // HH:MM / once-off start) — the event-day view: no dead grey hours before
++    // doors. Falls back to a rolling 24h when the monitor has no anchor.
++    const anchor = String(hours) === 'start' ? rosterAnchor(m) : null;
++    let h = anchor
++      ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
++      : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
++    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
+     const bucketField = iv === 60 ? hourField : m.timeField;
+     const base = { ...baseBody(m), sorts: [`${bucketField} desc`], limit: '5000' };
+-    base.filters[m.timeField] = `last ${h} hours`;
++    base.filters[m.timeField] = anchor
++      ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
++      : `last ${h} hours`;
+     const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : ['native', 'distinct', 'none'];
+     let rows = null; let mode = 'none'; let lastErr = null;
+     for (const cand of modes) {
+@@ -428,8 +436,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     countModeByMonitor.set(m.id, mode);
+     const cKey = mode === 'native' ? `${m.view}.count` : CNT_FIELD;
+     const nowMs = Date.now();
+-    const n = Math.round((h * 60) / iv);
+     const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
++    // Anchored: first block is the one containing the start time; rolling: n
++    // blocks back from now. Either way the grid stays capped at 288 blocks
++    // (anchored windows longer than that keep the most recent blocks).
++    let n = anchor
++      ? Math.floor((lastBucket - Math.floor(anchor.getTime() / ivMs) * ivMs) / ivMs) + 1
++      : Math.round((h * 60) / iv);
++    const trimmedStart = n > 288;
++    if (trimmedStart) n = 288;
+     const firstBucket = lastBucket - (n - 1) * ivMs;
+     const byDevice = new Map(); // device -> scan count per bucket
+     for (const r of rows) {
+@@ -448,7 +463,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
+     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
+     return {
+-      configured: true, hours: h, intervalMin: iv, hourField, bucketField, countBasis: mode,
++      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode,
++      anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
+       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
+       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
+       truncated: rows.length >= 5000,
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index e257c28..0cdaca8 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -460,6 +460,34 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
+   assert.equal(capped.buckets.length, 288);
+ });
+ 
++test('deviceTimeline: hours="start" anchors the window to the roster start time', async () => {
++  const h = mountHealth();
++  // Once-off start 5 hours ago (stable regardless of wall clock, unlike a daily HH:MM).
++  const start = new Date(Date.now() - 5 * 3600000);
++  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterStart: start.toISOString() });
++  let body = null;
++  h.setRowsFn(async (b) => { body = b; return []; });
++  const t = await h.mod.deviceTimeline(m, 'start', 10);
++  assert.equal(t.anchored, true);
++  assert.equal(body.filters['scans.scanned_at'], `after ${start.toISOString().slice(0, 16).replace('T', ' ')}`);
++  // First block is the one containing the start time; last is the current block.
++  const first = Date.parse(t.buckets[0]);
++  assert.ok(first <= start.getTime() && start.getTime() < first + 10 * 60000);
++  const last = Date.parse(t.buckets[t.buckets.length - 1]);
++  assert.ok(last <= Date.now() && Date.now() < last + 10 * 60000);
++  // No anchor on the monitor → falls back to a rolling 24h.
++  const plain = makeMonitor(h, { name: 'No anchor', rosterField: 'scans.device_id' });
++  const f = await h.mod.deviceTimeline(plain, 'start', 60);
++  assert.equal(f.anchored, false);
++  assert.equal(f.hours, 24);
++  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
++  // Long anchored windows keep the most recent 288 blocks and say so.
++  const old = makeMonitor(h, { name: 'Old start', rosterField: 'scans.device_id', rosterStart: new Date(Date.now() - 60 * 3600000).toISOString() });
++  const trimmed = await h.mod.deviceTimeline(old, 'start', 5);
++  assert.equal(trimmed.buckets.length, 288);
++  assert.equal(trimmed.trimmedStart, true);
++});
++
+ test('deviceTimeline: falls back to a dynamic count when the view has no native count measure', async () => {
+   const h = mountHealth();
+   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
