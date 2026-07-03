@@ -43,6 +43,7 @@ function waConfigured() { return !!waApiKey(); }
 // returns { ok, error }. Never throws. WhatsApp free-form replies are allowed inside the
 // 24h customer-service window (i.e. when replying to a customer's inbound message).
 async function sendOne(channel, { to, text }) {
+  if (process.env.OUTBOUND_DISABLED === '1') return { ok: false, skipped: true, reason: 'outbound disabled (staging)' };
   const isWa = channel === 'whatsapp';
   const key = isWa ? waApiKey() : apiKey();
   if (!key) return { ok: false, reason: 'not_configured' };
@@ -83,6 +84,7 @@ function waErr(data, msg, status) {
 // POST a single pre-built WhatsApp message object to the One API. Shared by the
 // image + button sends (sendOne handles the plain-text channel path).
 async function waSend(message, key) {
+  if (process.env.OUTBOUND_DISABLED === '1') return { ok: false, skipped: true, reason: 'outbound disabled (staging)' };
   try {
     const res = await fetch(waEndpoint(), {
       method: 'POST',

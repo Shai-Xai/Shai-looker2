@@ -67,6 +67,7 @@ function log(entityId, st, detail, kind) {
 // falls back to the incoming webhook. Best-effort — returns a result, never throws.
 async function send({ entityId, text, blocks, username, iconUrl, kind = 'other' }) {
   const c = connection(entityId);
+  if (process.env.OUTBOUND_DISABLED === '1') { log(entityId, 'skipped', 'outbound disabled (staging)', kind); return { skipped: true, reason: 'outbound_disabled' }; }
   if (!isConfigured(entityId)) { log(entityId, 'skipped', 'not configured', kind); return { skipped: true, reason: 'not_configured' }; }
   const useBot = !!(c.botToken && c.channel);
   try {
