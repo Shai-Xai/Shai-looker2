@@ -758,16 +758,25 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     res.json({ testMode: testMode(), testEmail: testEmail(), tickMin: masterMin() });
   });
 
-  app.post('/api/admin/data-health/monitors', auth.requireAdmin, (req, res) => {
+  // Saving takes a fresh reading right away (when active): an edited setting —
+  // e.g. a changed online window — must show on the tile immediately, not
+  // whenever the next scheduled check happens to run.
+  async function checkAfterSave(monitor) {
+    if (monitor.status !== 'active' || !monitor.model || !monitor.view || !monitor.timeField) return monitor;
+    try { await check(monitor); } catch (e) { console.warn('[data-health] post-save check failed', monitor.id, e.message); }
+    return monitorById(monitor.id);
+  }
+
+  app.post('/api/admin/data-health/monitors', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
     const c = clean(req.body || {});
     if (!c.name) return res.status(400).json({ error: 'Give the monitor a name.' });
     if (!c.model || !c.view || !c.timeField) return res.status(400).json({ error: 'Pick the explore and its timestamp field.' });
     if (c.staleMin <= c.warnMin) c.warnMin = Math.max(1, Math.floor(c.staleMin / 2));
-    res.status(201).json({ monitor: upsert(null, c, req.user.email) });
-  });
+    res.status(201).json({ monitor: await checkAfterSave(upsert(null, c, req.user.email)) });
+  }));
 
-  app.put('/api/admin/data-health/monitors/:id', auth.requireAdmin, (req, res) => {
+  app.put('/api/admin/data-health/monitors/:id', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
@@ -786,8 +795,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (c.rosterField !== m.rosterField || c.model !== m.model || c.view !== m.view) {
       sql.prepare("UPDATE data_monitors SET roster_snapshot='' WHERE id=?").run(m.id);
     }
-    res.json({ monitor: upsert(m.id, c, req.user.email) });
-  });
+    res.json({ monitor: await checkAfterSave(upsert(m.id, c, req.user.email)) });
+  }));
 
   app.delete('/api/admin/data-health/monitors/:id', auth.requireAdmin, (req, res) => {
     if (!enabled()) return off(res);
