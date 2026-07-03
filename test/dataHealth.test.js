@@ -10,7 +10,7 @@ const { db } = require('./helpers');
 function fakeApp() { return { get() {}, post() {}, put() {}, delete() {} }; }
 
 // Mount with a controllable Looker feed + captured deliveries.
-function mountHealth() {
+function mountHealth(over = {}) {
   const sql = db.db;
   let rows = [];                // what the next Looker pull returns
   let rowsFn = async () => rows; // body-aware override (fallback-path tests)
@@ -25,7 +25,7 @@ function mountHealth() {
   const mod = require('../server/dataHealth').mount(fakeApp(), {
     db,
     auth: { requireAdmin: (_req, _res, next) => next && next() },
-    looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
+    looker: over.looker || { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
     runLookerQuery: async (_path, body) => rowsFn(body),
     applyScope: async (_body, user) => { scopedUser = user; return scopeOk; },
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
@@ -346,6 +346,8 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterBaselineMin: 1440, rosterOnlineMin: 30 });
   let body = null;
   h.setRowsFn(async (b) => {
+    // This LookML rejects the dynamic MAX read — the raw fallback serves.
+    if (b.fields.includes('data_health_last')) throw new Error('Unknown field "data_health_last"');
     body = b;
     return [
       { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(2) },
@@ -380,6 +382,158 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   // Junk start time is dropped at clean() — falls back to the rolling window.
   const junk = makeMonitor(h, { name: 'Junk start', rosterField: 'scans.device_id', rosterStart: 'not-a-date' });
   assert.equal(junk.rosterStart, '');
+});
+
+test('deviceRoster: aggregates last-seen per device in Looker when the MAX measure works', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const bodies = [];
+  h.setRowsFn(async (b) => {
+    bodies.push(b);
+    if (!b.fields.includes('data_health_last')) throw new Error('raw fallback should not run');
+    return [
+      { 'scans.device_id': 'D-1', data_health_last: minsAgo(3) },
+      { 'scans.device_id': 'D-2', data_health_last: minsAgo(90) }, // silent past 30m
+    ];
+  });
+  const r = await h.mod.deviceRoster(m);
+  assert.equal(r.total, 2);
+  assert.equal(r.online, 1);
+  assert.equal(r.truncated, false); // one row per device — the cap is out of reach
+  assert.deepEqual(JSON.parse(bodies[0].dynamic_fields), [{ measure: 'data_health_last', based_on: 'scans.scanned_at_raw', type: 'max' }]);
+  // Remembered — the next pull is still a single aggregated query.
+  await h.mod.deviceRoster(m);
+  assert.equal(bodies.length, 2);
+});
+
+test('withInfo: roster + timeline devices carry their latest station and operator', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30, detailFields: ['scans.device_id', 'ops.handler'] });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // The labels lookup is the only query that joins the station dimension in.
+    if (b.fields.includes('scans.station_name')) {
+      return [{ 'scans.device_id': 'D-9', 'scans.station_name': 'Gate B', 'ops.handler': 'Thabo', data_health_last: minsAgo(45) }];
+    }
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-9', data_health_last: minsAgo(45) }];
+    return [{ 'scans.device_id': 'D-9', 'scans.scanned_at_hour': hourStr(), 'scans.count': 3 }];
+  });
+  const r = await h.mod.deviceRoster(m, true);
+  assert.equal(r.offline[0].station, 'Gate B');
+  assert.equal(r.offline[0].operator, 'Thabo');
+  const t = await h.mod.deviceTimeline(m, 12, 60, '', true);
+  assert.equal(t.devices[0].station, 'Gate B');
+  assert.equal(t.devices[0].operator, 'Thabo');
+  // Without the flag (scheduled checks) no labels query runs and none appear.
+  const plain = await h.mod.deviceRoster(m);
+  assert.equal(plain.offline[0].station, undefined);
+});
+
+test('deviceTimeline: station fallback filters the whole feed by the labels map', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One', data_health_last: minsAgo(1) },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two', data_health_last: minsAgo(1) },
+      ];
+    }
+    if (b.filters['scans.station_name']) return []; // the broken join path: the filtered count read finds nothing
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 5 },
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(), 'scans.count': 7 },
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 60, 'Bar One', true);
+  assert.deepEqual(t.devices.map((d) => d.device), ['D-1']); // only the asked-for station's devices
+  assert.equal(t.grandTotal, 5); // totals recomputed for the kept devices only
+  assert.equal(t.station, 'Bar One');
+  assert.equal(t.devices[0].station, 'Bar One');
+});
+
+test('labels: devices the timed read lost still get a station via the combo read', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // Timed labels read: D-2 fell off the newest-first cap.
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One', data_health_last: minsAgo(2) }];
+    // The no-timestamp combo read sees every device.
+    if (b.fields.includes('scans.station_name')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One' },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two' },
+      ];
+    }
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 2 },
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(), 'scans.count': 3 },
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 60, '', true);
+  assert.equal(t.devices.find((d) => d.device === 'D-1').station, 'Bar One');
+  assert.equal(t.devices.find((d) => d.device === 'D-2').station, 'Bar Two'); // filled by the combo read
+});
+
+test('deviceTimeline: probes the explore catalogue for a real count measure', async () => {
+  // Cumulative_topups_count sorts first alphabetically — the ranking must pick
+  // transaction_count (the per-sale counter) and never query the topup one.
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.Cumulative_topups_count' }, { name: 'scans.transaction_count' }, { name: 'other.count' }] }) } });
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  const bodies = [];
+  h.setRowsFn(async (b) => {
+    bodies.push(b);
+    // The guessed native measure exists but counts another view — zero-only.
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    if (b.fields.includes('scans.transaction_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.transaction_count': 41 }];
+    throw new Error('unexpected read');
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'native');
+  assert.equal(t.countField, 'scans.transaction_count'); // exposed for the feed-total read
+  assert.equal(t.devices[0].counts[11], 41); // the real per-sale volume
+  assert.equal(t.grandTotal, 41);
+  assert.ok(bodies.every((b) => !b.fields.includes('scans.Cumulative_topups_count'))); // the decoy never ran
+  // Remembered — the next read goes straight to the probed measure.
+  bodies.length = 0;
+  await h.mod.deviceTimeline(m, 12);
+  assert.equal(bodies.length, 1);
+  assert.ok(bodies[0].fields.includes('scans.transaction_count'));
+});
+
+test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.count')) throw new Error('Unknown field "scans.count"');
+    if (b.dynamic_fields && b.dynamic_fields.includes('_raw')) throw new Error('Unknown field "scans.scanned_at_raw"');
+    return [{ 'scans.device_id': 'D-3', 'scans.scanned_at_hour': hourStr(), data_health_scans: 6 }];
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'distinct');
+  assert.equal(t.devices[0].counts[11], 6);
+});
+
+test('deviceTimeline: a count measure that reads 0 for every row is a soft failure', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // Combined-explore trap: scans.count exists but counts another view — 0s.
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    if (b.fields.includes('data_health_scans')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), data_health_scans: 9 }];
+    return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr() }];
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'distinct'); // zero-only native rejected, real counts kept
+  const d1 = t.devices[0];
+  assert.equal(d1.counts[11], 9);
+  assert.equal(d1.active[11], 1);
+  assert.equal(t.grandTotal, 9);
 });
 
 test('rosterAnchor: daily SAST time beats fixed start; wraps to yesterday', () => {
@@ -437,6 +591,9 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
   const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
   h.setRowsFn(async (b) => {
+    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
+    // and the raw time dim takes over.
+    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field "scans.scanned_at_minute10"');
     body = b;
     return [
       { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0), 'scans.count': 2 },  // current 10-min block
@@ -458,6 +615,30 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   const capped = await h.mod.deviceTimeline(m, 48, 5);
   assert.equal(capped.hours, 24); // 5-min blocks top out at 24h
   assert.equal(capped.buckets.length, 288);
+});
+
+test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows the read', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { name: 'Bars monitor', rosterField: 'scans.device_id' });
+  // Looker minute10 dims render "YYYY-MM-DD HH:MM" floored to the block.
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 }]; });
+  const t = await h.mod.deviceTimeline(m, 12, 10, 'Bar One');
+  assert.ok(body.fields.includes('scans.scanned_at_minute10')); // aggregated in Looker — one row per device+block, not per scan
+  assert.equal(body.filters['scans.station_name'], 'Bar One'); // plain value — same form as every other filter
+  assert.equal(t.station, 'Bar One');
+  assert.equal(t.devicesTotal, 1);
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.counts[71], 4);
+  // The working bucket dim is remembered — the next read goes straight to it.
+  body = null;
+  await h.mod.deviceTimeline(m, 12, 10);
+  assert.ok(body.fields.includes('scans.scanned_at_minute10'));
+  assert.equal(body.filters['scans.station_name'], undefined); // no station → whole monitor
+  // Values carrying filter-syntax characters get quoted so they stay literal.
+  await h.mod.deviceTimeline(m, 12, 10, 'Bar, The');
+  assert.equal(body.filters['scans.station_name'], '"Bar, The"');
 });
 
 test('fleet alert: ≥ rosterAlertPct % of devices offline fires once, recovers once', async () => {
@@ -494,9 +675,12 @@ test('healthSummary scopes by entity and suite', () => {
   const a = makeMonitor(h, { name: 'Client A gate', entityId: 'ent-a', suiteId: 'suite-1' });
   makeMonitor(h, { name: 'Client A wide', entityId: 'ent-a' });
   makeMonitor(h, { name: 'Client B gate', entityId: 'ent-b' });
+  makeMonitor(h, { name: 'B bar', entityId: 'ent-b', area: 'Bar' });
   makeMonitor(h, { name: 'Platform', entityId: '' });
   // The suite shares one DB across tests — assert on THIS test's monitors only.
   const all = h.mod.healthSummary({});
+  assert.equal(all.find((x) => x.name === 'B bar').unit, 'transactions'); // bars/vendors transact
+  assert.equal(all.find((x) => x.name === 'Client B gate').unit, 'scans');
   assert.ok(['Client A gate', 'Client A wide', 'Client B gate', 'Platform'].every((n) => all.some((m) => m.name === n)));
   assert.ok(Array.isArray(all[0].streams));
   // entityIds = a caller's allowed set (drops platform-wide + other clients).
@@ -579,12 +763,38 @@ test('deviceTimeline: falls back to a dynamic count when the view has no native 
   const t = await h.mod.deviceTimeline(m, 12);
   assert.equal(t.countBasis, 'distinct');
   const dyn = JSON.parse(bodies[1].dynamic_fields);
-  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at', type: 'count_distinct' }]);
+  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at_raw', type: 'count_distinct' }]);
   assert.equal(t.devices[0].counts[11], 11);
   // The working mode is remembered — the next read goes straight to the dynamic measure.
   await h.mod.deviceTimeline(m, 12);
   assert.equal(bodies.length, 3);
   assert.ok(bodies[2].fields.includes('data_health_scans'));
+});
+
+test('check() stores the whole-feed day total with station narrowing dropped', async () => {
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.transaction_count' }] }) } });
+  const m = makeMonitor(h, {
+    rosterField: 'scans.device_id',
+    filters: { 'ev.name': 'KFF 26', 'scans.station_category': 'bar' },
+  });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  let feedBody = null;
+  h.setRowsFn(async (b) => {
+    // The feed-total read: ONLY the count measure, no device dimension.
+    if (b.fields.length === 1 && b.fields[0] === 'scans.transaction_count') { feedBody = b; return [{ 'scans.transaction_count': 555 }]; }
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-1', data_health_last: minsAgo(2) }];
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 0 }];
+    if (b.fields.includes('scans.transaction_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.transaction_count': 5 }];
+    if (b.fields.includes('scans.device_id')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at': minsAgo(2) }];
+    return [feedRow('Gate B', 2)];
+  });
+  await h.mod.check(m);
+  const snap = h.mod.monitorById(m.id).rosterSnapshot;
+  assert.equal(snap.feedTotal, 555);
+  assert.ok(feedBody);
+  assert.equal(feedBody.filters['scans.station_category'], undefined); // narrowing dropped
+  assert.equal(feedBody.filters['scans.station_name'], undefined);
+  assert.equal(feedBody.filters['ev.name'], 'KFF 26'); // event scope kept
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {

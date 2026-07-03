@@ -18,6 +18,8 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 // schema + validation track that module automatically (add an operator/channel/priority
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
+// Same one-source-of-truth deal for live updates (server/livepulse.js).
+const { CHANNELS: LP_CHANNELS, MAX_BLOCKS: LP_MAX_BLOCKS } = require('./livepulse');
 const reportingTz = require('./timezone');
 
 module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, catalogue = defaultCatalogue }) {
@@ -90,13 +92,19 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // events. We only apply locks valid in THIS explore (core_events.* or a curated
   // dimension) so we never inject a field Looker would reject, and never touch the
   // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
-  function applySuiteEventLocks(filters, suiteId, dims = dimByName) {
+  // `modelPinnedEvent`: the model explicitly filtered this explore's OWN event-name
+  // field (a cross-edition comparison, e.g. cashless "vs last year"). In that case the
+  // blanket core_events.* auto-lock is skipped — otherwise the CURRENT ticketing event
+  // lock would contradict the comparison filter and return empty rows. Locks on the
+  // explore's own dims still apply only when the model hasn't set them (default, not wall).
+  function applySuiteEventLocks(filters, suiteId, dims = dimByName, modelPinnedEvent = false) {
     if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
     let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
     for (const [key, val] of Object.entries(locks)) {
       if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
       const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
       if (!field || field === ORG) continue; // organiser handled by applyScope
+      if (modelPinnedEvent && /^core_events\./.test(field) && !dims.has(field)) continue;
       if ((/^core_events\./.test(field) || dims.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
@@ -801,6 +809,86 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── createLiveUpdate (ACT) ────────────────────────────────────────────────────
+  // DRAFTS a recurring event-day "live update" (the Alerts page's Live updates tab):
+  // a multi-metric snapshot — with since-last deltas and per-hour rates — sent every
+  // N minutes while the event runs. Same draft→confirm pattern as createAlert:
+  // nothing is created here; the user taps "Set it up"
+  // (POST /api/owl/act/create-live-update), which runs the real permission + create
+  // path in server/livepulse.js. Measures are bounded to the curated catalogue.
+  function runCreateLiveUpdate(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const wanted = Array.isArray(args.measures) ? args.measures.slice(0, LP_MAX_BLOCKS) : [];
+    if (!wanted.length) return refuse('no_measures', 'Pick at least one curated measure to include in the update.');
+    const blocks = [];
+    for (const nm of wanted) {
+      const m = measureByName.get(nm);
+      if (!m) return refuse('unknown_measure', `"${nm}" isn't a measure I can include. Pick curated measures.`);
+      blocks.push({ type: 'value', source: 'metric', model: catalogue.model, view: catalogue.explore, measure: m.name, measureLabel: m.label, label: m.label, unit: m.unit || '', showDelta: true, showRate: true });
+    }
+    if (args.includeDevices) blocks.push({ type: 'eventops', label: 'Devices' });
+    const cadenceMin = Math.max(10, Math.min(240, Math.round(Number(args.cadenceMin)) || 30));
+    const channels = (Array.isArray(args.channels) ? args.channels : []).filter((c) => LP_CHANNELS.includes(c));
+    const name = String(args.name || '').trim().slice(0, 120) || 'Event live update';
+    const draft = { name, cadenceMin, channels: channels.length ? channels : ['push'], blocks };
+    // Resolve which EVENT it covers — same forgiving path as createAlert: draft
+    // anyway and let the confirm card pick when several events exist.
+    let resolvedSuite = suiteId || '';
+    let events;
+    if (!resolvedSuite) {
+      const entityId = ctx.entityId
+        || ((user.entityIds || []).length === 1 ? user.entityIds[0] : null);
+      if (!entityId) return refuse('no_client', 'Open a client (or an event) first, then I can set up the live update.');
+      const list = (db && db.listSuitesForEntity ? db.listSuitesForEntity(entityId) : []).map((s) => ({ id: s.id, name: s.name }));
+      if (list.length === 1) resolvedSuite = list[0].id;
+      else if (!list.length) return refuse('no_events', 'This client has no events yet to attach a live update to.');
+      else events = list;
+    }
+    // Like-for-like comparison: "% of the previous event BY THIS POINT" (same
+    // day-of-event + clock time, clipped on the catalogue's date dimension). Only
+    // auto-wired when the past event is unambiguous — exactly one other event; with
+    // several, the user picks the comparison event in the editor instead.
+    let compareNote = '';
+    if (args.compareToLastEvent && resolvedSuite && catalogue.dateDimension) {
+      const eid = (db && db.getSuite ? (db.getSuite(resolvedSuite) || {}).entityId : null);
+      const others = eid && db.listSuitesForEntity ? db.listSuitesForEntity(eid).filter((s) => s.id !== resolvedSuite) : [];
+      if (others.length === 1) {
+        draft.compareSuiteId = others[0].id;
+        draft.compareLabel = others[0].name;
+        for (const bl of draft.blocks) if (bl.type === 'value') { bl.compare = true; bl.compareMode = 'same_point'; bl.compareClipField = catalogue.dateDimension; }
+      } else {
+        compareNote = 'Comparison not auto-set: this client has several past events — pick which one to compare against in the editor (Alerts → Live updates).';
+      }
+    }
+    return {
+      ok: true,
+      confirm: true, // surfaces an action card; nothing is created yet
+      note: compareNote || undefined,
+      action: {
+        kind: 'createLiveUpdate', suiteId: resolvedSuite, needsEvent: !resolvedSuite, events, draft,
+        summary: `Every ${cadenceMin} min while the event is live: ${blocks.map((b) => b.label || 'Devices').join(', ')}${draft.compareSuiteId ? ` · vs ${draft.compareLabel} by this point` : ''}`,
+      },
+    };
+  }
+  const createLiveUpdateSchema = {
+    name: 'createLiveUpdate',
+    description:
+      'DRAFT a recurring event-day LIVE UPDATE for the user to confirm — you do NOT create it; they tap "Set it up" to switch it on (they go live / pause it on the Alerts page\'s Live updates tab). While the event runs, Pulse sends the team ONE compact snapshot every N minutes covering SEVERAL metrics at once, with "+since last update" deltas and per-hour rates (e.g. "20:00 — 4,213 through the gates, +612, ~1,220/hr; bar revenue …"). Use when the user asks for recurring updates DURING an event ("update me every 30 minutes on event night", "hourly gate + bar numbers"), NOT for a one-off threshold — that is createAlert. Delivery: in-app/push by default; email, SMS and WhatsApp can be added (WhatsApp only reaches numbers that messaged the Owl in the last 24h — the WhatsApp service-window rule; phone numbers are typed in on the Alerts page, not here). You do NOT need an event selected: the confirm card lets the user pick one. After calling it, summarise what each update will contain, the cadence, and that they press Go live on event day (or set a time window in the editor).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        measures: { type: 'array', items: { type: 'string', enum: catalogue.measures.map((mm) => mm.name) }, description: `Which curated numbers each update covers, in order (max ${LP_MAX_BLOCKS}).` },
+        cadenceMin: { type: 'number', description: 'Minutes between updates (10–240; default 30). Only set if the user asks.' },
+        channels: { type: 'array', items: { type: 'string', enum: LP_CHANNELS }, description: 'Optional delivery channels (default push; inbox is always on). Only set if the user asks how to be updated.' },
+        includeDevices: { type: 'boolean', description: 'Add an Event Ops device-health line (deployed devices + open issues). Only when the user runs Event Ops / asks about devices.' },
+        compareToLastEvent: { type: 'boolean', description: 'Add a LIKE-FOR-LIKE comparison: each number also shows "% of the previous event by this point" — the past event clipped to the same day-of-event and clock time, so multi-day and single-day events compare fairly. Set when the user asks how they are comparing to last time/last year. Auto-wires only when the client has exactly one other event; otherwise they pick the comparison event in the editor.' },
+        name: { type: 'string', description: 'Optional short name; defaults to "Event live update".' },
+      },
+      required: ['measures'],
+    },
+  };
+
   // `menu` = the slash-command palette entry for a tool (client /api/owl/capabilities).
   // Defining it HERE keeps the palette sourced from the registry, so adding a tool with
   // a menu automatically adds its slash command — one source of truth, no drift.
@@ -1033,16 +1121,31 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     try {
       if (q === 'devices') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured — I can only see its stream lag.`);
-        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m) };
+        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m, true) };
       }
       if (q === 'timeline') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
-        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10);
-        // activeBlocks: compact 0/1 string per device, oldest→newest; counts = scans per block.
+        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''), true);
+        // activeBlocks: compact 0/1 string per device, oldest→newest; coverage:
+        // devices sending per block — the offline-trend series the Owl should
+        // analyse (same shape the 🩺 Diagnose uses).
         return {
-          ok: true, monitor: m.name, intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
-          totalScans: t.grandTotal, note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC.',
-          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+          ok: true, monitor: m.name, unit: hit.unit || 'scans', station: t.station || '', intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
+          totalScans: t.grandTotal,
+          note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
+          coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
+        };
+      }
+      if (q === 'observed') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no offline log.`);
+        const ob = api.observedLog(m, api.obsSinceFor(m, args.hours || 'start'));
+        return {
+          ok: true, monitor: m.name,
+          note: 'The OBSERVED log is what Pulse itself saw at each check — a device that traded offline and synced late can NEVER repaint it. Treat it as the authoritative connectivity record; times are UTC — convert to the client\'s local time.',
+          onlineSeries: ob.ticks.map((t) => ({ atUTC: t.at.slice(11, 16), online: t.online, total: t.total })),
+          offlineWindows: ob.windows.slice(0, 80),
         };
       }
       if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
@@ -1053,14 +1156,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   }
   const dataHealthSchema = {
     name: 'dataHealth',
-    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "when did device X stop", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + scan counts per time block through the day (spot gaps, flappers, late joiners). latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series: analyse it for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up — that window analysis is what the user usually wants. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'latest'], description: 'What to fetch (default overview).' },
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
         monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
         hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
         intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
+        station: { type: 'string', description: 'For timeline: narrow to ONE station name exactly as it appears in the monitor\'s streams — use when a monitor spans many bars/vendors.' },
         limit: { type: 'number', description: 'For latest: how many records (default 20, max 50).' },
       },
     },
@@ -1147,7 +1251,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         }
       }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
-      applySuiteEventLocks(body.filters, suiteId, dByName);
+      applySuiteEventLocks(body.filters, suiteId, dByName, filters[`${cat.explore}.name`] != null);
       const allowed = await query.applyScope(body, user, suiteId);
       if (allowed === false) return refuse('no_scope', `I can't scope ${cat.label} to a client here — this data source may not be linkable to your client, or open a client/event first.`);
       if (entityId && auth && auth.accessibleOrgFilters) {
@@ -1259,6 +1363,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     readDriveDoc: { schema: readDriveDocSchema, run: runReadDriveDoc },
     getPaidPerformance: { schema: getPaidPerformanceSchema, run: runGetPaidPerformance, menu: { cmd: 'ads', label: 'Paid ads (Meta)', icon: '💸', example: 'How are my Meta ads performing — spend and ROAS?' } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
+    createLiveUpdate: { schema: createLiveUpdateSchema, run: runCreateLiveUpdate },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
     draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
   };

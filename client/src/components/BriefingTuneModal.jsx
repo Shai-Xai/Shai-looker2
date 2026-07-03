@@ -117,6 +117,21 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                 </div>
                 <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} phases={cfg?.phases || []} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>Each pick can be scoped to a <b>lifecycle phase</b> — e.g. lead with a launch board during Launch, the gates board on Event Day. "All phases" feeds the briefing all the time.</div>
+                {/* Phase-scoped picks only activate when the event's phase is known
+                    (from its dates or a manual phase). Warn here instead of letting
+                    the pick silently never match. */}
+                {(() => {
+                  const dashSuite = Object.fromEntries((cat?.dashboards || []).map((d) => [d.dashboardId, d.suiteId]));
+                  const noPhase = new Set(cfg.suites.filter((s) => !s.phase?.key).map((s) => s.id));
+                  const stuck = tiles.some((t) => t.phase && (noPhase.has(dashSuite[t.dashboardId]) || !dashSuite[t.dashboardId]));
+                  if (!stuck) return null;
+                  const names = cfg.suites.filter((s) => noPhase.has(s.id)).map((s) => s.name).join(', ');
+                  return (
+                    <div style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.5, color: '#b45309', background: 'rgba(180,83,9,0.08)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 8, padding: '7px 10px' }}>
+                      ⚠ Some picks are scoped to a phase, but {names || 'this event'} has no phase yet — set the <b>key dates</b> (or a manual phase) below so the briefing knows when Event Day (etc.) is. Until then those picks feed all the time.
+                    </div>
+                  );
+                })()}
                 {cats.length > 0 && (
                   <>
                     <Label>What every event's briefing covers</Label>

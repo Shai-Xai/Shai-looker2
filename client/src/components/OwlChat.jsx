@@ -955,6 +955,7 @@ function ViewLink({ url, label = 'View it →' }) {
 function ActionCard({ action, suiteId }) {
   if (!action) return null;
   if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
+  if (action.kind === 'createLiveUpdate') return <LivePulseActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
@@ -1068,6 +1069,62 @@ function AlertActionCard({ action }) {
           <button onClick={create} disabled={state === 'busy' || !suiteId}
             style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
+          </button>
+          {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Live update confirm card — sets up a recurring event-day multi-metric snapshot
+// (the Alerts page's "Live updates" tab). Same draft→confirm shape as the alert
+// card; commit re-checks alerts.manage server-side. The user still presses Go live
+// on event day (or sets a window in the editor) — nothing sends until then.
+function LivePulseActionCard({ action }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
+  const [err, setErr] = useState('');
+  const [suiteId, setSuiteId] = useState(action.suiteId || '');
+  const [url, setUrl] = useState('');
+  const d = action.draft || {};
+  const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', whatsapp: 'WhatsApp' };
+  const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
+  const events = action.events || [];
+  const create = async () => {
+    if (!suiteId) return;
+    setState('busy'); setErr('');
+    try { const r = await api.owlCreateLiveUpdate({ suiteId, draft: d }); setUrl((r && r.url) || ''); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not set up the live update.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>⚡</span>
+        <strong style={{ fontSize: 12.5 }}>Live update</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>
+        Every <strong>{d.cadenceMin || 30} min</strong> while the event is live: <strong>{(d.blocks || []).map((b) => b.label || (b.type === 'eventops' ? 'Devices' : 'Metric')).join(' · ')}</strong>.
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>via {['in-app', ...chans].join(', ')} · press Go live on event day (Alerts → Live updates)</div>
+      {action.needsEvent && state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 3 }}>Which event is this for?</div>
+          <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        </div>
+      )}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Live update set up — press Go live on event day.<ViewLink url={url} label="View live updates →" /></div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy' || !suiteId}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Setting up…' : '⚡ Set it up'}
           </button>
           {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}

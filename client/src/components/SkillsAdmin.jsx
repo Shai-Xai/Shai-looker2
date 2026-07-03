@@ -135,9 +135,9 @@ function SkillCard({ def, suites, isMobile, busy, onUpsert, onRun, onBacktest })
       <div style={{ fontSize: 15, fontWeight: 800 }}>{def.emoji} {def.name}</div>
       <p style={{ ...small, marginTop: 4 }}>{def.blurb}</p>
       <details>
-        <summary style={summaryStyle}>📖 Default playbook (platform-wide)</summary>
+        <summary style={summaryStyle}>📖 Default playbook (platform-wide{def.defaultOverridden ? ' — customised' : ''})</summary>
         <p style={{ ...small, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{def.defaultPlaybook}</p>
-        <p style={small}>This ships with the skill and is refined via the AM workshop. Per-event additions below layer on top for this client only.</p>
+        <p style={small}>{def.defaultOverridden ? 'This platform playbook was edited by an admin (Admin → AI → Skill playbooks) and replaces the built-in default for every client.' : 'The built-in default. Edit the platform-wide playbook under Admin → AI → Skill playbooks.'} Per-event additions below layer on top for this client only.</p>
       </details>
 
       {def.instances.map((inst) => (
@@ -238,5 +238,66 @@ function RunRow({ run, suiteName, onGrade }) {
         </div>
       </div>
     </details>
+  );
+}
+
+// ─── Platform tier: the default playbooks every client inherits ────────────────
+// Rendered under Admin → AI ("Skill playbooks"). Editing here is how the AM
+// workshop output lands — no code change. Blank = inherit the built-in seed;
+// per-client additions (edited on each client's Skills tab) layer on top.
+export function SkillDefaultsEditor() {
+  const [rows, setRows] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [err, setErr] = useState('');
+  const [savedKey, setSavedKey] = useState('');
+
+  useEffect(() => {
+    j('/api/admin/skills/defaults')
+      .then((d) => { setRows(d.skills || []); setDrafts(Object.fromEntries((d.skills || []).map((s) => [s.key, s.override || '']))); })
+      .catch((e) => setErr(e.message));
+  }, []);
+
+  const save = async (key, playbook) => {
+    setErr(''); setSavedKey('');
+    try {
+      const r = await j(`/api/admin/skills/defaults/${key}`, { method: 'PUT', body: { playbook } });
+      setRows((rs) => rs.map((s) => (s.key === key ? { ...s, override: r.override, effective: r.effective } : s)));
+      setDrafts((d) => ({ ...d, [key]: r.override }));
+      setSavedKey(key); setTimeout(() => setSavedKey(''), 2000);
+    } catch (e) { setErr(e.message); }
+  };
+
+  if (!rows) return <p style={small}>{err ? `⚠ ${err}` : 'Loading skill playbooks…'}</p>;
+  return (
+    <div>
+      <p style={small}>
+        Each skill's <b>platform playbook</b> — the operating knowledge every client inherits (this is where the
+        AM/ops workshop output lives). Leave a skill blank to keep its built-in default. Per-client additions are
+        edited on each client's 🤖 Skills tab and layer on top.
+      </p>
+      {err && <p style={{ ...small, color: '#b91c1c' }}>⚠ {err}</p>}
+      {rows.map((s) => {
+        const draft = drafts[s.key] ?? '';
+        const dirty = draft !== (s.override || '');
+        return (
+          <div key={s.key} style={card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5, flex: 1, minWidth: 140 }}>{s.emoji} {s.name}</div>
+              <span style={s.override ? chip('#eef2ff', '#4338ca') : chip('var(--hairline)', 'var(--muted)')}>{s.override ? 'customised' : 'built-in default'}</span>
+            </div>
+            <p style={small}>{s.blurb}</p>
+            <textarea rows={6} style={{ ...input, resize: 'vertical', marginTop: 6 }} value={draft}
+              onChange={(e) => setDrafts((d) => ({ ...d, [s.key]: e.target.value }))}
+              placeholder={`Blank = built-in default:\n\n${s.builtin}`} />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <button style={primaryBtn} disabled={!dirty} onClick={() => save(s.key, draft)}>Save platform playbook</button>
+              {s.override && <button style={btn} onClick={() => save(s.key, '')}>Reset to built-in</button>}
+              {savedKey === s.key && <span style={{ ...small, color: '#047857', margin: 0 }}>✓ Saved — applies to every client's next run</span>}
+              <span style={{ ...small, margin: '0 0 0 auto' }}>{draft.length} characters</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }

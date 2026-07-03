@@ -163,6 +163,7 @@ export const api = {
   },
   // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
   owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlCreateLiveUpdate: (body) => fetch('/api/owl/act/create-live-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlRemember: (body) => fetch('/api/owl/act/remember', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Client memory (durable per-client facts the Owl carries across chats).
   owlMemory: (entityId) => fetch(`/api/admin/entities/${entityId}/owl-memory`).then(json),
@@ -811,6 +812,16 @@ export const api = {
   alertTemplates: (entityId) => fetch(`/api/alerts/templates/${entityId}`).then(json),
   saveAlertTemplate: (body) => fetch('/api/alerts/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   deleteAlertTemplate: (id) => fetch(`/api/alerts/templates/${id}`, { method: 'DELETE' }).then(json),
+  // Live updates (Live Pulse) — recurring event-day multi-metric snapshots; the
+  // "Live updates" tab of the Alerts page. Same suite-keyed guarded set as alerts.
+  suiteLivePulses: (suiteId) => fetch(`/api/livepulse/suites/${suiteId}`).then(json),
+  createLivePulse: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateLivePulse: (id, b) => fetch(`/api/livepulse/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteLivePulse: (id) => fetch(`/api/livepulse/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  setLivePulseStatus: (id, status) => fetch(`/api/livepulse/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
+  setLivePulseLive: (id, live) => fetch(`/api/livepulse/${id}/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ live }) }).then(json),
+  testLivePulse: (id) => fetch(`/api/livepulse/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  livePulseRuns: (id) => fetch(`/api/livepulse/${id}/runs`).then(json),
 
   // Status notices — human-authored platform incidents. Admin authors + updates +
   // resolves; clients read the banner/feed via myNotices (scoped server-side).

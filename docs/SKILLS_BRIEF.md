@@ -161,8 +161,16 @@ configure + audit them.
   fact pack — with the Ticketing Manager prompt + a layered, trainable playbook
   (registered in `promptRegistry()`), per-run token cost via `aiUsage`, the
   **backtest** mode (date-clamped tools; the skill cannot read past the freeze)
-  and AM **grading** (👍/👎 + note) from the training loop. Remaining for P1:
-  admin UI (configure/run/backtest/grade), briefing delivery, client surface.
+  and AM **grading** (👍/👎 + note) from the training loop. The **admin UI**
+  shipped too (Admin → client → 🤖 Skills: configure/run/backtest/grade), and a
+  **second specialist** — the **Chief of Operations** (event-day debrief:
+  gates/entry, bars/cashless, devices via `eventOps` + the `ask_*` extra
+  explores, `liveTools` wildcards) — proved the "new skill = config + prompt"
+  claim. The playbook now has a **platform tier** (Admin → AI → Skill playbooks,
+  setting `skill_playbook:<key>`): admin-edited, replaces the built-in seed,
+  inherited by every client, client additions layer on top — so the AM-workshop
+  output lands without a code change. Remaining for P1: briefing delivery + the
+  client surface.
 - **P2 — L2 (suggest-and-confirm).** Skill drafts a campaign via Engage; human
   approves. Mostly wiring the skill output into the existing approval flow.
 - **P3 — `skill_runs` audit surface + cost.** Admin can see what each skill saw,
