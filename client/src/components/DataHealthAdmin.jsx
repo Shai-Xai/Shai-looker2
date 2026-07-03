@@ -234,7 +234,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block/station change
   useEffect(() => { load(hours, interval, station); }, [monitorId, hours, interval, station]);
   useEffect(() => {
-    if (mode !== 'observed') return;
+    if (mode !== 'observed' && mode !== 'combined') return;
     setObs(null);
     fetch(`${base}/monitors/${monitorId}/observed?hours=${hours}`)
       .then((r) => r.json()).then(setObs).catch((e) => setObs({ error: e.message }));
@@ -265,6 +265,31 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
     }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0]))
     : null;
   const grpOnline = (devs) => devs.filter(isOn).length;
+  // 🚦 Combined: fuse the transaction blocks with the OBSERVED log — per block:
+  // online+data (green), OFFLINE at a check yet data synced later (amber),
+  // offline+no data (red), online but quiet (grey).
+  const combinedOff = (() => {
+    if (mode !== 'combined' || !obs || !obs.configured || !data.buckets.length) return null;
+    const first = Date.parse(data.buckets[0]);
+    const ivMs = iv * 60000;
+    const n = data.buckets.length;
+    const tickBucket = (obs.ticks || []).map((t) => Math.floor((Date.parse(t.at) - first) / ivMs));
+    const map = new Map();
+    (obs.devices || []).forEach((d) => {
+      const set = new Set();
+      d.offAt.forEach((ti) => { const b = tickBucket[ti]; if (b >= 0 && b < n) set.add(b); });
+      map.set(d.device, set);
+    });
+    return map;
+  })();
+  const cellFor = (device, a, i) => {
+    if (!combinedOff) return { bg: a ? STATUS_COLOR.fresh : 'var(--hairline)', label: a ? 'active' : 'silent' };
+    const off = !!(combinedOff.get(device) && combinedOff.get(device).has(i));
+    if (a && off) return { bg: STATUS_COLOR.warn, label: 'seen OFFLINE at a check — data synced later (connectivity blip, sales intact)' };
+    if (a) return { bg: STATUS_COLOR.fresh, label: 'online · data' };
+    if (off) return { bg: STATUS_COLOR.stale, label: 'offline · NO data — down and not trading' };
+    return { bg: 'var(--hairline)', label: 'quiet — no data (online at checks)' };
+  };
   const stationHeader = (grpName, devs) => (
     <>
       <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase' }}>{grpName}</span>{' '}
@@ -289,7 +314,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
             <span style={{ fontSize: 11, color: 'var(--muted)' }}> (no sync in {onlineMin}m)</span>
           </span>
         )}
-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'observed' ? 'each cell = one Pulse check · red = seen OFFLINE at that check — late syncs never repaint this' : mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'combined' ? 'green = online + data · amber = OFFLINE at check but data synced later · red = offline + no data · grey = quiet' : mode === 'observed' ? 'each cell = one Pulse check · red = seen OFFLINE at that check — late syncs never repaint this' : mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
         {stations.length > 1 && (
           <select value={station} disabled={busy} onChange={(e) => setStation(e.target.value)}
             style={{ ...input, width: 'auto', maxWidth: 230, padding: '4px 8px', fontSize: 12 }}>
@@ -298,7 +323,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
           </select>
         )}
         <span style={{ flex: 1 }} />
-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log']].map(([k, l]) => (
+        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log'], ['combined', '🚦 Combined']].map(([k, l]) => (
           <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
         ))}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
@@ -316,6 +341,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
       {(data.trimmedStart || (typeof hours === 'number' && data.hours < hours)) && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
       {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range, bigger blocks, or pick one station.</div>}
       {(data.devicesTotal || 0) > data.devices.length && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>Showing {data.devices.length} of {data.devicesTotal} devices — pick a station above to see the rest.</div>}
+      {mode === 'combined' && obs && !obs.configured && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>No observed checks in this window yet — amber/red only appear where Pulse's own offline log has coverage (it records from every check going forward).</div>}
       {mode === 'observed' ? (
         !obs ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Reading Pulse's own check history…</div>
           : obs.error ? <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {obs.error}</div>
@@ -425,10 +451,13 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
                       <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
                       {suffix ? <span style={{ fontSize: 10, color: 'var(--muted)' }}> {suffix}</span> : null}
                     </span>
-                    {active.map((a, i) => (
-                      <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
-                        style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
-                    ))}
+                    {active.map((a, i) => {
+                      const c = cellFor(device, a, i);
+                      return (
+                        <span key={i} title={`${hourLabel(data.buckets[i])} — ${c.label}`}
+                          style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: c.bg }} />
+                      );
+                    })}
                   </div>
                 );
               })}
