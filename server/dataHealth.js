@@ -131,6 +131,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
     add('roster_start', "roster_start TEXT NOT NULL DEFAULT ''");                    // fixed "linked since" start (UTC ISO) — overrides the rolling window
     add('roster_daily', "roster_daily TEXT NOT NULL DEFAULT ''");                    // recurring daily anchor 'HH:MM' (SAST) — beats roster_start; multi-day events
+    add('roster_snapshot', "roster_snapshot TEXT NOT NULL DEFAULT ''");              // last roster counts JSON, refreshed by check() — collapsed cards read this, no live query
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -142,6 +143,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
       rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '',
+      rosterSnapshot: parseJson(r.roster_snapshot, null),
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -623,6 +625,19 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     }
 
     sql.prepare("UPDATE data_monitors SET last_checked_at=?, last_error='', state=? WHERE id=?").run(ts, state, m.id);
+
+    // Refresh the roster snapshot alongside the pull so collapsed cards can show
+    // linked/online/offline counts without a live Looker query per render. A
+    // roster failure never fails the check — the stream reading already landed.
+    if (m.rosterField) {
+      try {
+        const r = await deviceRoster(m);
+        sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
+          at: ts, total: r.total, online: r.online, offline: r.total - r.online,
+          startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
+        }), m.id);
+      } catch (e) { console.warn('[data-health] roster snapshot failed', m.id, e.message); }
+    }
     return { ok: true, stations: streams.length, fresh, warn, stale, maxLagMin: maxLag, latestEventAt: latestOverall, newlyStale, recovered: recoveredNow };
   }
 
@@ -709,6 +724,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=?').run(m.id);
       maxMeasureUnsupported.delete(m.id);
       countModeByMonitor.delete(m.id); // re-learn the scan-count measure on the new explore
+    }
+    // The stored roster counts belong to the old roster setup — drop them; the
+    // next check rebuilds the snapshot.
+    if (c.rosterField !== m.rosterField || c.model !== m.model || c.view !== m.view) {
+      sql.prepare("UPDATE data_monitors SET roster_snapshot='' WHERE id=?").run(m.id);
     }
     res.json({ monitor: upsert(m.id, c, req.user.email) });
   });
