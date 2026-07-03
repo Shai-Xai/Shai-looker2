@@ -1,0 +1,141 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index b189ae5..ea136dd 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -224,6 +224,8 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
+         <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
+         <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
+         <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
++        <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
++          onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
+         <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
+           {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
+         </button>
+@@ -248,11 +250,25 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+   const [fields, setFields] = useState(null);
+   const [filterRows, setFilterRows] = useState(() => Object.entries((initial && initial.filters) || {}));
+   const [detailRows, setDetailRows] = useState(() => (initial && initial.detailFields) || []);
++  const [dimValues, setDimValues] = useState({}); // field -> 'loading' | [values] (linked filter dropdowns)
+   const [err, setErr] = useState('');
+   const [saving, setSaving] = useState(false);
+   const isMobile = useIsMobile();
+   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+ 
++  // Linked values: once a filter dimension is picked, fetch its real (scoped)
++  // distinct values so the value box offers them as suggestions — live Looker
++  // read, so only on demand and cached per field for this editor session.
++  const loadDimValues = (field) => {
++    if (!field || dimValues[field] != null || !f.model || !f.view) return;
++    setDimValues((p) => ({ ...p, [field]: 'loading' }));
++    fetch('/api/admin/data-health/field-values', {
++      method: 'POST', headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ model: f.model, view: f.view, field, entityId: f.entityId, suiteId: f.suiteId }),
++    }).then((r) => r.json()).then((d) => setDimValues((p) => ({ ...p, [field]: Array.isArray(d.values) ? d.values : [] })))
++      .catch(() => setDimValues((p) => ({ ...p, [field]: [] })));
++  };
++
+   useEffect(() => { api.dataHealthExplores().then((r) => setModels(r.models || [])).catch((e) => setErr(e.message)); }, []);
+   useEffect(() => {
+     setFields(null);
+@@ -350,11 +366,19 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
+           <span style={label}>Filters (optional — e.g. one event only)</span>
+           {filterRows.map(([k, v], i) => (
+             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+-              <select style={{ ...input, flex: 1 }} value={k} onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}>
++              <select style={{ ...input, flex: 1 }} value={k}
++                onChange={(e) => { const nf = e.target.value; setFilterRows((rows) => rows.map((r, j) => (j === i ? [nf, r[1]] : r))); loadDimValues(nf); }}>
+                 <option value="">— dimension —</option>
+                 {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+               </select>
+-              <input style={{ ...input, flex: 1 }} value={v} placeholder="value" onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
++              {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
++              <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
++                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value' : 'value'}
++                onFocus={() => loadDimValues(k)}
++                onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
++              <datalist id={`dh-vals-${i}`}>
++                {(Array.isArray(dimValues[k]) ? dimValues[k] : []).map((val) => <option key={val} value={val} />)}
++              </datalist>
+               <button style={ghostBtn} onClick={() => setFilterRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
+             </div>
+           ))}
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index c19f976..b1ace6b 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -295,6 +295,19 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     });
+   }
+ 
++  // Distinct values of a dimension (scoped) — feeds the editor's linked filter
++  // dropdowns so users pick a real station/event/type instead of typing blind.
++  async function fieldValues({ model, view, field, entityId, suiteId }) {
++    const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
++    const rows = await runScoped(mLike, { model: mLike.model, view: mLike.view, fields: [String(field)], filters: {}, sorts: [String(field)], limit: '500', query_timezone: 'UTC' });
++    const out = [];
++    for (const r of rows) {
++      const v = r[String(field)];
++      if (v != null && v !== '' && !out.includes(String(v))) { out.push(String(v)); if (out.length >= 200) break; }
++    }
++    return out;
++  }
++
+   function reduceRows(m, rows, timeKey) {
+     const seen = new Map(); // station -> latest Date
+     for (const r of rows) {
+@@ -574,6 +587,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     res.json({ models: _models });
+   }));
+ 
++  // Distinct values of one dimension, scoped like the monitor would be — powers
++  // the editor's linked value dropdowns (e.g. pick a real station name).
++  app.post('/api/admin/data-health/field-values', auth.requireAdmin, asyncHandler(async (req, res) => {
++    if (!enabled()) return off(res);
++    const { model, view, field, entityId, suiteId } = req.body || {};
++    if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
++    res.json({ values: await fieldValues({ model, view, field, entityId, suiteId }) });
++  }));
++
+   const _fieldCache = new Map();
+   app.get('/api/admin/data-health/fields', auth.requireAdmin, asyncHandler(async (req, res) => {
+     if (!enabled()) return off(res);
+@@ -593,7 +615,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+   }));
+ 
+   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
+-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords };
++  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues };
+ }
+ 
+ module.exports = { mount, AREAS, CHANNELS };
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 6b3ff6e..26eaa08 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -287,6 +287,26 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async
+   assert.equal(body.limit, '100');
+ });
+ 
++test('fieldValues: distinct dimension values, deduped and scoped', async () => {
++  const h = mountHealth();
++  let body = null;
++  h.setRowsFn(async (b) => {
++    body = b;
++    return [
++      { 'scans.station_name': 'Bar 1' }, { 'scans.station_name': 'Bar 1' },
++      { 'scans.station_name': 'Gate A' }, { 'scans.station_name': '' }, { 'scans.station_name': null },
++    ];
++  });
++  const vals = await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name', entityId: 'entZ', suiteId: 'sZ' });
++  assert.deepEqual(vals, ['Bar 1', 'Gate A']); // deduped, blanks dropped
++  assert.deepEqual(body.fields, ['scans.station_name']);
++  assert.equal(h.getScopedUser().role, 'client'); // entity given → scoped read
++  assert.deepEqual(h.getScopedUser().entityIds, ['entZ']);
++
++  await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name' });
++  assert.equal(h.getScopedUser().role, 'admin'); // no entity → platform read
++});
++
+ test('clean() bounds thresholds and drops junk filters', () => {
+   const h = mountHealth();
+   const c = h.mod.clean({
