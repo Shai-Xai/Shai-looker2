@@ -1,0 +1,43 @@
+name: Apply data-health last-seen reads
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): applies the
+# reviewed patch to the feature branch, copies the files onto main, then deletes
+# itself from this (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify patch, apply to branch, sync main, self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-lastread.patch /tmp/d.patch
+          echo "e206100cba7b218ff6823d322429b6adda92a0a2cdfa7b088a801d129e6c7830  /tmp/d.patch" | sha256sum -c -
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/d.patch
+          git commit -m 'Data health: resilient last-seen reads (raw-timeframe MAX, then rows at 20k)' \
+            -m 'The dynamic MAX measure based on the picked timeframe errors on this explore, so the aggregated roster read silently fell back to 5000 raw rows (the under-count warning) and the labels lookup returned nothing -- which also disabled the station-timeline fallback and the new station/operator columns. The shared last-seen read now tries MAX on the _raw timeframe (what Looker custom max measures want), then the picked timeframe, then plain rows at a 20000 cap, remembering what worked per monitor. Labels and the per-station view work even where every measure variant fails.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- server/dataHealth.js test/dataHealth.test.js
+          git commit -m 'Data health: resilient last-seen reads (raw-timeframe MAX, then rows at 20k)' \
+            -m 'Files copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-lastread.patch .github/workflows/apply-datahealth-lastread.yml
+          git commit -m "chore: remove one-shot lastread helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
