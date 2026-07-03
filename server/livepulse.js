@@ -32,7 +32,7 @@ const CHANNELS = ['push', 'email', 'sms', 'whatsapp']; // inbox is always-on (th
 const BLOCK_TYPES = ['value', 'top_list', 'eventops'];
 const MAX_BLOCKS = 8;
 
-function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, os, mailer, messaging, eventops }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -126,7 +126,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     out.source = b.source === 'metric' ? 'metric' : 'tile';
     out.showDelta = b.showDelta !== false;          // "+612 since 19:30" (on by default)
     out.showRate = !!b.showRate;                    // "~1,220/hr" derived from consecutive snapshots
-    out.compare = !!b.compare;                      // "78% of <last event>"
+    out.compare = !!b.compare;                      // "% of <last event>"
+    // How the comparison is cut: 'final' = the past event's end number; 'same_point' =
+    // LIKE-FOR-LIKE — the past event clipped to the same day-of-event + clock time
+    // (needs a date dimension to clip on; metric source only). Falls back to final.
+    out.compareMode = b.compareMode === 'same_point' ? 'same_point' : 'final';
+    out.compareClipField = String(b.compareClipField || '').slice(0, 200);
     if (out.source === 'metric') {
       out.model = String(b.model || '').slice(0, 120);
       out.view = String(b.view || '').slice(0, 120);
@@ -214,11 +219,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   function evalUser(p) {
     return { id: `livepulse:${p.entityId}`, email: p.createdBy || 'livepulse@howler', role: 'client', entityIds: [p.entityId] };
   }
-  async function readValueBlock(p, b, suiteId) {
+  async function readValueBlock(p, b, suiteId, extraFilters) {
     try {
       if (b.source === 'metric') {
         if (typeof resolveCustomMetric !== 'function') return null;
-        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: b.metricFilters || {}, user: evalUser(p), suiteId });
+        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: { ...(b.metricFilters || {}), ...(extraFilters || {}) }, user: evalUser(p), suiteId });
         return v == null ? null : Number(v);
       }
       if (typeof resolveTileValue !== 'function') return null;
@@ -251,6 +256,39 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     } catch { return null; }
   }
 
+  // ── like-for-like ("same point in time") comparison ──
+  // Mid-event, "% of last year's FINAL" answers the wrong question — organisers want
+  // "how am I tracking vs last year BY THIS POINT": day N of the event at the same
+  // clock time, which works for single- and multi-day events alike. Both events are
+  // anchored on their Looker start dates (core_events.start_date via
+  // resolveEventDate); we compute how far into THIS event we are (whole local days +
+  // wall-clock HH:MM in the pulse's timezone) and clip the past event's read with a
+  // `before <their day N> <same HH:MM>` filter on the block's date dimension.
+  // Every step fails SOFT to the final-total comparison — a number still lands.
+  const evStartCache = new Map(); // suiteId -> { at, date } (one tiny Looker query; 6h TTL)
+  async function eventStartDate(p, suiteId) {
+    const hit = evStartCache.get(suiteId);
+    if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.date;
+    let date = null;
+    try { if (typeof resolveEventDate === 'function') date = await resolveEventDate({ suiteId, user: evalUser(p) }); } catch { date = null; }
+    evStartCache.set(suiteId, { at: Date.now(), date });
+    return date;
+  }
+  function localYMD(tz, date = new Date()) {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); } catch { return null; }
+  }
+  function addDays(ymd, n) { const d = new Date(Date.parse(`${ymd}T12:00:00Z`)); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  async function samePointClip(p, b) {
+    if (b.source !== 'metric' || (b.compareMode || 'final') !== 'same_point' || !b.compareClipField) return null;
+    const curStart = await eventStartDate(p, p.suiteId);
+    const cmpStart = await eventStartDate(p, p.compareSuiteId);
+    const today = localYMD(p.timezone);
+    const hhmm = localHHMM(p.timezone);
+    if (!curStart || !cmpStart || !today || !hhmm) return null;
+    const dayN = Math.max(0, Math.round((Date.parse(today) - Date.parse(curStart)) / 86400e3));
+    return { [b.compareClipField]: `before ${addDays(cmpStart, dayN)} ${hhmm}` };
+  }
+
   // One full snapshot: every block's current reading (+ the comparison event's
   // reading for blocks that asked for it). Stored on the run so the NEXT run can
   // compute "+since last" deltas and per-hour rates from it.
@@ -260,7 +298,11 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       if (b.type === 'eventops') { snap[b.id] = { ops: readEventOpsBlock(p) }; continue; }
       if (b.type === 'top_list') { snap[b.id] = { rows: await readTopListBlock(p, b) }; continue; }
       const cur = { value: await readValueBlock(p, b, p.suiteId) };
-      if (b.compare && p.compareSuiteId) cur.compare = await readValueBlock(p, b, p.compareSuiteId);
+      if (b.compare && p.compareSuiteId) {
+        const clip = await samePointClip(p, b);
+        cur.compare = await readValueBlock(p, b, p.compareSuiteId, clip || undefined);
+        cur.compareMode = clip ? 'same_point' : 'final';
+      }
       snap[b.id] = cur;
     }
     return snap;
@@ -306,7 +348,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
         bits.push(`(${extra.join(' · ')})`);
       }
       if (b.compare && s.compare != null && Number(s.compare) > 0) {
-        bits.push(`· ${Math.round((s.value / Number(s.compare)) * 100)}% of ${compareName}`);
+        // "by this point" = like-for-like (same day-of-event + clock time); otherwise
+        // the % is against the past event's final number — say which, honestly.
+        bits.push(`· ${Math.round((s.value / Number(s.compare)) * 100)}% of ${compareName}${s.compareMode === 'same_point' ? ' by this point' : ''}`);
       }
       lines.push(`${icon} ${label}: ${bits.join(' ')}`);
     }

@@ -235,7 +235,7 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
         </Field>
 
         {anyCompare && (
-          <Field label="Compare against" hint="Blocks with “vs last event” show what % of that event’s final number you’ve reached.">
+          <Field label="Compare against" hint="Blocks with “vs last event” show how you’re tracking against this event — like-for-like (same day of event, same clock time) or against its final number, per block.">
             <select style={inp} value={compareSuiteId} onChange={(e) => setCompareSuiteId(e.target.value)}>
               <option value="">Pick a past event…</option>
               {otherSuites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -340,8 +340,36 @@ function BlockCard({ block: b, idx, count, dashboards, explores, onPatch, onRemo
           </select>
           <Check small checked={b.showDelta !== false} onChange={() => onPatch({ showDelta: !(b.showDelta !== false) })} label="+ change" />
           <Check small checked={!!b.showRate} onChange={() => onPatch({ showRate: !b.showRate })} label="pace /hr" />
-          <Check small checked={!!b.compare} onChange={() => onPatch({ compare: !b.compare })} label="vs last event" />
+          <Check small checked={!!b.compare} onChange={() => onPatch(b.compare ? { compare: false } : { compare: true, compareMode: b.compareMode || 'same_point' })} label="vs last event" />
         </div>
+        {b.compare && b.source === 'metric' && (() => {
+          const dateDims = (curExplore?.dimensions || []).filter((d) => /date|time|day|hour/i.test(`${d.name} ${d.label || ''}`) || /date|time/i.test(d.type || ''));
+          const samePoint = (b.compareMode || 'final') === 'same_point';
+          return (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <button type="button" onClick={() => onPatch({ compareMode: 'same_point' })} style={segBtn(samePoint)}>Same point in time</button>
+                <button type="button" onClick={() => onPatch({ compareMode: 'final' })} style={segBtn(!samePoint)}>Their final number</button>
+              </div>
+              {samePoint && (dateDims.length ? (
+                <select style={inp} value={b.compareClipField || ''} onChange={(e) => onPatch({ compareClipField: e.target.value })}>
+                  <option value="">Date field to cut by…</option>
+                  {dateDims.map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+                </select>
+              ) : (
+                <div style={hintTxt}>Pick a data source above first — the same-point cut needs a date field.</div>
+              ))}
+              <div style={hintTxt}>
+                Same point in time = the past event cut to the <b>same day of the event at the same clock time</b> —
+                a fair, like-for-like read whether the event is one day or five. If the cut can’t be made it
+                falls back to their final number (and says so).
+              </div>
+            </div>
+          );
+        })()}
+        {b.compare && b.source !== 'metric' && (
+          <div style={hintTxt}>Tile blocks compare against the past event’s <b>final</b> number. For a like-for-like “same point in time” comparison, switch this block to “Build a metric”.</div>
+        )}
       </>)}
 
       {b.type === 'top_list' && (<>
@@ -424,6 +452,7 @@ const blockBox = { border: '1px solid var(--hairline)', borderRadius: 12, paddin
 const tinyBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, width: 26, height: 24, fontSize: 11, cursor: 'pointer', lineHeight: 1 };
 const addChip = { border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', borderRadius: 9, fontSize: 12, fontWeight: 700, padding: '7px 11px', cursor: 'pointer' };
 const winLabel = { fontSize: 12, fontWeight: 600, color: 'var(--muted)' };
+const hintTxt = { fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.4 };
 const previewBox = { marginBottom: 10, padding: '10px 12px', background: 'rgba(var(--brand-rgb,10,132,255),0.07)', border: '1px solid var(--hairline)', borderRadius: 10 };
 const btnGhost = { flex: '0 0 auto', padding: '10px 14px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' };
 const btnDelGhost = { flex: '0 0 auto', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--error, #dc2626)', fontSize: 15, cursor: 'pointer' };

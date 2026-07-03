@@ -640,7 +640,7 @@ const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, reso
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
 const eventopsApi = require('./eventops').mount(app, { db, auth }); // pilot: device/station logistics, per-client opt-in → server/eventops.js
-const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, os, mailer, messaging, eventops: eventopsApi }); // Live Pulse: recurring event-day multi-metric updates (the Alerts page's "Live updates" tab) → server/livepulse.js
+const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi }); // Live Pulse: recurring event-day multi-metric updates (the Alerts page's "Live updates" tab) → server/livepulse.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });

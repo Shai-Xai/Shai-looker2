@@ -604,7 +604,10 @@ client's* numbers.
   the gates with the **+change since the last update** and the **pace per hour**, bar
   revenue, a **top-3 bars/vendors** list read off any breakdown tile, and (for Event
   Ops clients) **device health** (deployed devices + open issues). A block can also
-  show **"% of last year"** against a chosen past event. Press **Go live** when doors
+  show **"% of last year — by this point"**: a true **like-for-like** comparison that
+  cuts the past event to the **same day of the event at the same clock time** (fair
+  whether the event is one day or five; a "final number" mode is there too). Press
+  **Go live** when doors
   open (or set a start/end window and it runs itself); it lands in the **inbox** (the
   whole night in one thread) plus **app push, email, SMS** and **WhatsApp** — WhatsApp
   reaches anyone who's messaged the Owl in the last 24h (WhatsApp's own service-window
@@ -773,7 +776,9 @@ see "The continuous comms loop" above.)*
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
   **pace/hr**, bar revenue, **top-3 bars/vendors**, Event Ops device health, optional
-  **"% of last year"** vs a chosen past event). Manual **Go live** switch or a
+  **like-for-like "% of last year by this point"** — the past event cut to the same
+  day-of-event + clock time, fair for single- and multi-day events alike). Manual
+  **Go live** switch or a
   scheduled window; delivered to the inbox (one thread for the whole night) + app
   push, email, SMS and **WhatsApp** (24h service-window rule respected). The **Owl
   can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`

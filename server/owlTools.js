@@ -845,12 +845,29 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       else if (!list.length) return refuse('no_events', 'This client has no events yet to attach a live update to.');
       else events = list;
     }
+    // Like-for-like comparison: "% of the previous event BY THIS POINT" (same
+    // day-of-event + clock time, clipped on the catalogue's date dimension). Only
+    // auto-wired when the past event is unambiguous — exactly one other event; with
+    // several, the user picks the comparison event in the editor instead.
+    let compareNote = '';
+    if (args.compareToLastEvent && resolvedSuite && catalogue.dateDimension) {
+      const eid = (db && db.getSuite ? (db.getSuite(resolvedSuite) || {}).entityId : null);
+      const others = eid && db.listSuitesForEntity ? db.listSuitesForEntity(eid).filter((s) => s.id !== resolvedSuite) : [];
+      if (others.length === 1) {
+        draft.compareSuiteId = others[0].id;
+        draft.compareLabel = others[0].name;
+        for (const bl of draft.blocks) if (bl.type === 'value') { bl.compare = true; bl.compareMode = 'same_point'; bl.compareClipField = catalogue.dateDimension; }
+      } else {
+        compareNote = 'Comparison not auto-set: this client has several past events — pick which one to compare against in the editor (Alerts → Live updates).';
+      }
+    }
     return {
       ok: true,
       confirm: true, // surfaces an action card; nothing is created yet
+      note: compareNote || undefined,
       action: {
         kind: 'createLiveUpdate', suiteId: resolvedSuite, needsEvent: !resolvedSuite, events, draft,
-        summary: `Every ${cadenceMin} min while the event is live: ${blocks.map((b) => b.label || 'Devices').join(', ')}`,
+        summary: `Every ${cadenceMin} min while the event is live: ${blocks.map((b) => b.label || 'Devices').join(', ')}${draft.compareSuiteId ? ` · vs ${draft.compareLabel} by this point` : ''}`,
       },
     };
   }
@@ -865,6 +882,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         cadenceMin: { type: 'number', description: 'Minutes between updates (10–240; default 30). Only set if the user asks.' },
         channels: { type: 'array', items: { type: 'string', enum: LP_CHANNELS }, description: 'Optional delivery channels (default push; inbox is always on). Only set if the user asks how to be updated.' },
         includeDevices: { type: 'boolean', description: 'Add an Event Ops device-health line (deployed devices + open issues). Only when the user runs Event Ops / asks about devices.' },
+        compareToLastEvent: { type: 'boolean', description: 'Add a LIKE-FOR-LIKE comparison: each number also shows "% of the previous event by this point" — the past event clipped to the same day-of-event and clock time, so multi-day and single-day events compare fairly. Set when the user asks how they are comparing to last time/last year. Auto-wires only when the client has exactly one other event; otherwise they pick the comparison event in the editor.' },
         name: { type: 'string', description: 'Optional short name; defaults to "Event live update".' },
       },
       required: ['measures'],

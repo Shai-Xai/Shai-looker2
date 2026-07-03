@@ -18,14 +18,16 @@ function mountLivePulse(over = {}) {
   const sql = db.db;
   let tileValue = 0;
   let metricBySuite = {};          // suiteId -> value (drives the last-event comparison)
+  const metricCalls = [];          // every metric read: { suiteId, filters } (asserts the same-point clip)
   const announced = [];
   const sms = [];
   const wa = [];
   const mod = require('../server/livepulse').mount(fakeApp(), {
     db, auth,
     resolveTileValue: async () => tileValue,
-    resolveCustomMetric: async ({ suiteId }) => (suiteId in metricBySuite ? metricBySuite[suiteId] : tileValue),
+    resolveCustomMetric: async ({ suiteId, filters }) => { metricCalls.push({ suiteId, filters: filters || {} }); return suiteId in metricBySuite ? metricBySuite[suiteId] : tileValue; },
     resolveTileRows: over.resolveTileRows || (async () => null),
+    resolveEventDate: over.resolveEventDate,
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
     mailer: { baseUrl: () => 'https://pulse.test' },
     messaging: {
@@ -38,7 +40,7 @@ function mountLivePulse(over = {}) {
     eventops: over.eventops,
   });
   return {
-    mod, sql, announced, sms, wa,
+    mod, sql, announced, sms, wa, metricCalls,
     setValue: (v) => { tileValue = v; },
     setMetricBySuite: (m) => { metricBySuite = m; },
   };
@@ -90,6 +92,38 @@ test('a compare block reads the SAME metric under the previous event and shows %
   h.setMetricBySuite({ suite1: 3900, lastyear: 5000 });
   const r = await h.mod.sendUpdate(p);
   assert.match(r.message, /78% of last year/);
+});
+
+test('same-point compare clips the past event to the same day-of-event + clock time', async () => {
+  const tz = 'Africa/Johannesburg';
+  const ymd = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const curStart = ymd(new Date(Date.now() - 86400e3)); // this event started yesterday → we're on day 1
+  const h = mountLivePulse({ resolveEventDate: async ({ suiteId }) => (suiteId === 'suite1' ? curStart : '2025-07-01') });
+  const p = makePulse(h.mod, {
+    compareSuiteId: 'lastyear', compareLabel: 'last year',
+    blocks: [{ id: 'b1', type: 'value', source: 'metric', model: 'm', view: 'v', measure: 'v.count', label: 'Gates', unit: '', showDelta: false, showRate: false, compare: true, compareMode: 'same_point', compareClipField: 'v.created_date' }],
+  });
+  h.setMetricBySuite({ suite1: 5200, lastyear: 5000 });
+  const r = await h.mod.sendUpdate(p);
+  const cmp = h.metricCalls.find((c) => c.suiteId === 'lastyear');
+  assert.ok(cmp, 'the compare read hit the past event');
+  // Day 1 of this event → last year's day 1 (start 2025-07-01 + 1 = 2025-07-02), cut at the same clock time.
+  assert.match(cmp.filters['v.created_date'], /^before 2025-07-02 \d{2}:\d{2}$/);
+  assert.match(r.message, /104% of last year by this point/);
+});
+
+test('same-point falls back to the final-number comparison when event dates are unknown', async () => {
+  const h = mountLivePulse({ resolveEventDate: async () => null });
+  const p = makePulse(h.mod, {
+    compareSuiteId: 'lastyear', compareLabel: 'last year',
+    blocks: [{ id: 'b1', type: 'value', source: 'metric', model: 'm', view: 'v', measure: 'v.count', label: 'Gates', unit: '', showDelta: false, showRate: false, compare: true, compareMode: 'same_point', compareClipField: 'v.created_date' }],
+  });
+  h.setMetricBySuite({ suite1: 3900, lastyear: 5000 });
+  const r = await h.mod.sendUpdate(p);
+  const cmp = h.metricCalls.find((c) => c.suiteId === 'lastyear');
+  assert.equal(cmp.filters['v.created_date'], undefined, 'no clip → the whole past event');
+  assert.match(r.message, /78% of last year/);
+  assert.ok(!/by this point/.test(r.message), 'labelled as a final-number comparison, honestly');
 });
 
 test('top-list block reads the table behind a tile, sorts and takes the top N', async () => {
