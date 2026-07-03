@@ -13,22 +13,29 @@ function fakeApp() { return { get() {}, post() {}, put() {}, delete() {} }; }
 function mountHealth() {
   const sql = db.db;
   let rows = [];                // what the next Looker pull returns
+  let rowsFn = async () => rows; // body-aware override (fallback-path tests)
   let scopedUser = null;        // the user applyScope saw
   let scopeOk = true;
   const announced = [];         // OS-spine (client inbox) deliveries
   const opsAlerts = [];         // internal ops Slack deliveries
+  const testEmails = [];        // test-mode direct emails
+  // Test mode defaults ON in the module (trial phase); pin it OFF here so the
+  // live-delivery tests exercise the real fan-out. The test-mode test flips it.
+  db.setSetting('data_health_test_mode', '0');
   const mod = require('../server/dataHealth').mount(fakeApp(), {
     db,
     auth: { requireAdmin: (_req, _res, next) => next && next() },
     looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
-    runLookerQuery: async () => rows,
+    runLookerQuery: async (_path, body) => rowsFn(body),
     applyScope: async (_body, user) => { scopedUser = user; return scopeOk; },
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
     ops: { alert: (kind, msg) => opsAlerts.push({ kind, msg }) },
+    mailer: { send: async (msg) => { testEmails.push(msg); return { ok: true }; } },
   });
   return {
-    mod, sql, announced, opsAlerts,
-    setRows: (r) => { rows = r; },
+    mod, sql, announced, opsAlerts, testEmails,
+    setRows: (r) => { rows = r; rowsFn = async () => rows; },
+    setRowsFn: (fn) => { rowsFn = fn; },
     setScopeOk: (v) => { scopeOk = v; },
     getScopedUser: () => scopedUser,
   };
@@ -139,14 +146,51 @@ test('cooldown: a second station going stale inside the window is logged, not re
   assert.equal(h.opsAlerts.length, 1);
 });
 
-test('whole-feed monitor (no station split) works with a single stream', async () => {
+test('whole-feed monitor (no station split) reads the newest row directly', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { stationField: '' });
-  h.setRows([{ data_health_latest: minsAgo(3) }]);
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return [{ 'scans.scanned_at': minsAgo(3) }]; });
   const r = await h.mod.check(m);
   assert.equal(r.stations, 1);
   assert.equal(streamRows(h, m.id)[0].station, '');
   assert.equal(streamRows(h, m.id)[0].status, 'fresh');
+  // No custom measure involved: plain newest-row query (the max() measure is
+  // rejected on some Looker versions, so the whole-feed path never uses it).
+  assert.equal(body.dynamic_fields, undefined);
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+  assert.equal(body.limit, '1');
+});
+
+test('Looker rejecting the max() measure → sorted-scan fallback, memoised', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h);
+  let dynAttempts = 0;
+  const scanBodies = [];
+  h.setRowsFn(async (body) => {
+    if (body.dynamic_fields) {
+      dynAttempts += 1;
+      throw new Error('Looker API POST /queries/run/json failed (400): {"message":"Expressions for fields of type \\"max\\" must evaluate to \\"number\\", but the provided expression evaluates to \\"date\\"."}');
+    }
+    scanBodies.push(body);
+    return [
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(2) },
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(9) },  // older row — first (newest) wins
+      { 'scans.station_name': 'Gate B', 'scans.scanned_at': minsAgo(45) }, // past the 30m threshold
+    ];
+  });
+  const r = await h.mod.check(m);
+  assert.equal(r.ok, true);
+  assert.equal(r.stations, 2);
+  assert.deepEqual(scanBodies[0].sorts, ['scans.scanned_at desc']);
+  const gateA = streamRows(h, m.id).find((s) => s.station === 'Gate A');
+  assert.equal(gateA.status, 'fresh'); // 2m, not the older 9m row
+  assert.equal(h.opsAlerts.length, 1); // Gate B stale → alert fired off fallback data
+  assert.match(h.opsAlerts[0].msg, /Gate B/);
+
+  // Second check skips the doomed max() attempt entirely (memoised).
+  await h.mod.check(h.mod.monitorById(m.id));
+  assert.equal(dynAttempts, 1);
 });
 
 test('scoped reads: entity monitors run as a locked client, platform monitors as admin', async () => {
@@ -158,6 +202,7 @@ test('scoped reads: entity monitors run as a locked client, platform monitors as
   assert.deepEqual(h.getScopedUser().entityIds, ['ent42']);
 
   const p = makeMonitor(h, { name: 'Platform', entityId: '', suiteId: '' });
+  h.setRows([{ 'scans.scanned_at': minsAgo(1) }]);
   await h.mod.check(p);
   assert.equal(h.getScopedUser().role, 'admin');
 
@@ -186,6 +231,145 @@ test('a failed pull is logged as a health signal, and fail-closed scope never re
   assert.equal(eventKinds(h, m.id).filter((k) => k === 'error').length, 1);
 });
 
+test('test mode routes every alert ONLY to the test address (ops + client muted)', async () => {
+  const h = mountHealth();
+  db.setSetting('data_health_test_mode', '1');
+  db.setSetting('data_health_test_email', 'shai@test.local');
+  try {
+    const m = makeMonitor(h, { name: 'TM', entityId: 'entX', suiteId: 'sX' });
+    h.setRows([feedRow('Gate A', 90)]); // straight to stale
+    await h.mod.check(m);
+    assert.equal(h.opsAlerts.length, 0);      // ops Slack muted
+    assert.equal(h.announced.length, 0);      // client team muted (despite entityId)
+    assert.equal(h.testEmails.length, 1);     // only the test address hears it
+    assert.equal(h.testEmails[0].to, 'shai@test.local');
+    assert.match(h.testEmails[0].subject, /^\[TEST\] /);
+    // The event history records where the alert actually went.
+    const ev = h.sql.prepare("SELECT message FROM data_monitor_events WHERE monitor_id=? AND kind='alert'").get(m.id);
+    assert.match(ev.message, /test-email:shai@test\.local/);
+
+    // Recovery notice honours test mode too.
+    h.setRows([feedRow('Gate A', 1)]);
+    await h.mod.check(h.mod.monitorById(m.id));
+    assert.equal(h.testEmails.length, 2);
+    assert.equal(h.opsAlerts.length, 0);
+    assert.equal(h.announced.length, 0);
+  } finally {
+    db.setSetting('data_health_test_mode', '0');
+  }
+});
+
+test('latestRecords: the raw feed tail, newest first, scoped and mapped', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, {
+    detailFields: ['scans.record_type', 'scans.scanned_at'], // time field deduped out
+    filters: { 'scans.event_name': 'Festival X', 'scans.pending': '' }, // one real, one "open"
+  });
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(1), 'scans.record_type': 'check-in' },
+      { 'scans.station_name': 'Bar 3', 'scans.scanned_at': minsAgo(7), 'scans.record_type': 'sale' },
+    ];
+  });
+  const recs = await h.mod.latestRecords(m, 20);
+  assert.deepEqual(body.fields, ['scans.station_name', 'scans.scanned_at', 'scans.record_type']);
+  // The "open" (blank-valued) filter is saved on the monitor but never sent to
+  // Looker — an empty string would filter for blank values.
+  assert.deepEqual(m.filters, { 'scans.event_name': 'Festival X', 'scans.pending': '' });
+  assert.deepEqual(body.filters, { 'scans.event_name': 'Festival X' });
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+  assert.equal(body.limit, '20');
+  assert.equal(body.dynamic_fields, undefined); // plain rows, no aggregation
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].station, 'Gate A');
+  assert.equal(recs[0].extra['scans.record_type'], 'check-in'); // detail column rides along
+  assert.equal(recs[1].extra['scans.record_type'], 'sale');
+  assert.ok(recs[0].agoMin >= 0.5 && recs[0].agoMin <= 2);
+  assert.ok(recs[1].agoMin >= 6 && recs[1].agoMin <= 8);
+  // Limit is clamped to a sane window (1..100).
+  h.setRowsFn(async (b) => { body = b; return []; });
+  await h.mod.latestRecords(m, 9999);
+  assert.equal(body.limit, '100');
+});
+
+test('master cadence: monitors with no own cadence follow data_health_tick_min', async () => {
+  const h = mountHealth();
+  db.setSetting('data_health_tick_min', '7');
+  try {
+    const follows = makeMonitor(h, { name: 'Follows master', checkEveryMin: 0 });
+    const own = makeMonitor(h, { name: 'Own cadence', checkEveryMin: 1 });
+    let checked = [];
+    h.setRowsFn(async (b) => { checked.push(b.filters ? 1 : 1); return [{ 'scans.scanned_at': minsAgo(1), 'scans.station_name': 'A', data_health_latest: minsAgo(1) }]; });
+    // Both were checked 3 minutes ago.
+    const threeAgo = new Date(Date.now() - 3 * 60000).toISOString();
+    h.sql.prepare('UPDATE data_monitors SET last_checked_at=?').run(threeAgo);
+    checked = [];
+    await h.mod.tick();
+    // 3m elapsed: own cadence (1m) is due; master follower (7m) is not.
+    assert.equal(checked.length, 1);
+    assert.equal(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo); // untouched
+    assert.notEqual(h.mod.monitorById(own.id).lastCheckedAt, threeAgo);  // re-checked
+    // 8 minutes elapsed → the follower is due too.
+    h.sql.prepare('UPDATE data_monitors SET last_checked_at=? WHERE id=?').run(new Date(Date.now() - 8 * 60000).toISOString(), follows.id);
+    checked = [];
+    await h.mod.tick();
+    assert.notEqual(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo);
+  } finally {
+    db.setSetting('data_health_tick_min', '5');
+  }
+});
+
+test('fieldValues: distinct dimension values, deduped and scoped', async () => {
+  const h = mountHealth();
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.station_name': 'Bar 1' }, { 'scans.station_name': 'Bar 1' },
+      { 'scans.station_name': 'Gate A' }, { 'scans.station_name': '' }, { 'scans.station_name': null },
+    ];
+  });
+  const vals = await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name', entityId: 'entZ', suiteId: 'sZ' });
+  assert.deepEqual(vals, ['Bar 1', 'Gate A']); // deduped, blanks dropped
+  assert.deepEqual(body.fields, ['scans.station_name']);
+  assert.equal(h.getScopedUser().role, 'client'); // entity given → scoped read
+  assert.deepEqual(h.getScopedUser().entityIds, ['entZ']);
+
+  await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name' });
+  assert.equal(h.getScopedUser().role, 'admin'); // no entity → platform read
+});
+
+test('deviceRoster: linked vs online vs offline, learned from the baseline window', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterBaselineMin: 1440, rosterOnlineMin: 30 });
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(2) },
+      { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(500) }, // older row, same device
+      { 'scans.device_id': 'D-102', 'scans.scanned_at': minsAgo(45) },  // silent past 30m → offline
+      { 'scans.device_id': 'D-103', 'scans.scanned_at': minsAgo(700) }, // long silent → offline
+      { 'scans.device_id': '', 'scans.scanned_at': minsAgo(1) },        // blank device ignored
+    ];
+  });
+  const r = await h.mod.deviceRoster(m);
+  assert.equal(r.configured, true);
+  assert.equal(r.total, 3);
+  assert.equal(r.online, 1);
+  assert.deepEqual(r.offline.map((d) => d.device), ['D-103', 'D-102']); // longest silent first
+  // The baseline window is enforced in Looker itself, newest rows first.
+  assert.equal(body.filters['scans.scanned_at'], 'last 1440 minutes');
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at']);
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+
+  // No roster field configured → explicitly unconfigured, no query.
+  const plain = makeMonitor(h, { name: 'No roster' });
+  assert.deepEqual(await h.mod.deviceRoster(plain), { configured: false });
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
@@ -195,8 +379,8 @@ test('clean() bounds thresholds and drops junk filters', () => {
   assert.equal(c.name.length, 120);
   assert.equal(c.warnMin, 1);
   assert.equal(c.staleMin, 10080);
-  assert.equal(c.checkEveryMin, 1);
+  assert.equal(c.checkEveryMin, 0); // 0 = follow the master cadence
   assert.deepEqual(c.channels, ['push', 'email']);
-  assert.equal(Object.keys(c.filters).length, 2);
-  assert.ok(!('empty' in c.filters));
+  assert.equal(Object.keys(c.filters).length, 3);
+  assert.equal(c.filters.empty, ''); // "open" filter: dimension kept, blank value
 });

@@ -153,11 +153,14 @@ async function listFields(db, getExploreFields, model = seed.model, view = seed.
       label: (seedFld && seedFld.label) || fld.label || fld.label_short || name,
       type: coarseType(fld.type),
       group: fld.group_label || (seedFld && seedFld.group) || '',
-      inSeed, enabled, pii: !!pii,
+      inSeed, enabled, pii: !!pii, hidden: !!fld.hidden,
     };
   };
-  const measures = (f.measures || []).filter((m) => !m.hidden).map((m) => row(m, 'measure', seedM));
-  const dimensions = (f.dimensions || []).filter((d) => !d.hidden).map((d) => row(d, 'dimension', seedD));
+  // Hidden Looker fields ARE listed (flagged) — hiding is a LookML UI nicety, and
+  // the cashless check-in station/operator/device fields live behind it. An admin
+  // can tick them; the API queries them fine.
+  const measures = (f.measures || []).map((m) => row(m, 'measure', seedM));
+  const dimensions = (f.dimensions || []).map((d) => row(d, 'dimension', seedD));
   return { model, view, primary, label: primary ? seed.label : (readExplores(db).find((e) => e.model === model && e.view === view) || {}).label || view, measures, dimensions };
 }
 
@@ -188,18 +191,28 @@ async function setEnabled(db, enabledNames, getExploreFields, model = seed.model
   return { ok: true, version: version(db) };
 }
 
-// ── One-shot enrichment: check-in / access-control fields on the cashless explore ──
-// Clients ask "who scanned where, on which device, for which ticket type" — those
-// answers live on the cashless explore's check-in family views, which were never
-// ticked in the admin catalogue (only counts + access-control dates were), so the
-// Owl couldn't answer scanning questions. This does exactly what an admin would in
-// Admin → AI → Owl catalogue: read the explore's REAL fields from Looker and enable
-// the non-PII check-in-family ones. Runs once (flag), only ADDS (never unticks),
-// and never re-runs — so later admin edits are always respected.
-const CHECKIN_SEED_FLAG = 'owl_catalogue_checkin_seeded';
-const CHECKIN_FAMILY_RE = /check_?in|access_control/i; // matched against the field's view prefix
-async function seedCheckinFields(db, getExploreFields) {
-  if (db.getSetting(CHECKIN_SEED_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+// ── One-shot enrichment: check-in + sales fields on the cashless explore ──────
+// Clients ask "who scanned where, on which device, for which ticket type" and
+// "what did each operator/station sell, paid how" — those answers live on the
+// cashless explore's check-in/access-control and sales-family views, only partly
+// ticked in the admin catalogue, so the Owl couldn't answer (or fanned out). This
+// does exactly what an admin would in Admin → AI → Owl catalogue: read the
+// explore's REAL fields from Looker and enable the non-PII fields of those
+// families. Runs once per flag VERSION (bump the flag to sweep newly-needed
+// families), only ADDS (never unticks) — later admin edits are always respected.
+// v1 (owl_catalogue_checkin_seeded) covered check-ins only; v2 added the sales
+// families (operators, stations, products, operations, payment fields); v3
+// re-sweeps now that getExploreFields also returns HIDDEN fields (which is where
+// the check-in station/operator/device/date fields actually live).
+const CASHLESS_SEED_FLAG = 'owl_catalogue_cashless_seeded_v3';
+const CASHLESS_FAMILY_RE = /check_?in|access_control|sales|operator|operation|station|product/i; // matched against the field's view prefix
+// The platform PII patterns skip customer-name fields (the hand-curated primary
+// marks those filter-only instead). An UNATTENDED seed must be stricter: never
+// auto-enable a customer's name or per-person id. (Operator/station/product
+// "name" fields are fine — only person-name shapes are blocked.)
+const SEED_PII_RE = /(first|last|full)_?name|phone|mobile|customer_uid/i;
+async function seedCashlessFields(db, getExploreFields) {
+  if (db.getSetting(CASHLESS_SEED_FLAG, '')) return { ok: true, skipped: 'already seeded' };
   const target = readExplores(db).find((e) => /cashless/i.test(e.view));
   if (!target) return { ok: false, skipped: 'no cashless explore registered' };
   let f;
@@ -212,8 +225,8 @@ async function seedCheckinFields(db, getExploreFields) {
   const added = [];
   const take = (arr, kind) => {
     for (const x of arr || []) {
-      if (!CHECKIN_FAMILY_RE.test(String(x.name).split('.')[0])) continue; // its VIEW must be check-in family
-      if (isPII(x.name) || have.has(x.name)) continue;
+      if (!CASHLESS_FAMILY_RE.test(String(x.name).split('.')[0])) continue; // its VIEW must be a target family
+      if (isPII(x.name) || SEED_PII_RE.test(x.name) || have.has(x.name)) continue;
       added.push({ name: x.name, label: x.label_short || x.label || x.name, kind, type: x.type });
       have.add(x.name);
     }
@@ -221,8 +234,50 @@ async function seedCheckinFields(db, getExploreFields) {
   take(f.measures, 'measure');
   take(f.dimensions, 'dimension');
   if (added.length) { map[key] = [...current, ...added]; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map)); }
-  db.setSetting(CHECKIN_SEED_FLAG, new Date().toISOString());
+  db.setSetting(CASHLESS_SEED_FLAG, new Date().toISOString());
   return { ok: true, explore: key, added: added.length };
+}
+
+// v3: some clients' check-in ROW data (station / operator / device per scan)
+// lives in a DEDICATED explore — e.g. the access-control explore behind their
+// "Gates Checkin" dashboards — that was never registered for the Owl, so the
+// combined-cashless seed above finds nothing to tick. Discover it from the
+// dashboards themselves: a stored tile query whose fields include a
+// check-in-family view is proof that explore carries the data. Register it and
+// tick its non-PII fields, exactly as an admin would. Same one-shot semantics.
+const CHECKIN_EXPLORE_FLAG = 'owl_catalogue_checkin_explore_seeded_v2'; // v2: re-sweep with hidden fields visible
+const CHECKIN_VIEW_RE = /check_?in|access_control/i;
+const exploreLabel = (view) => String(view).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
+async function seedCheckinExplore(db, getExploreFields) {
+  if (db.getSetting(CHECKIN_EXPLORE_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+  if (typeof db.listDashboards !== 'function') return { ok: false, skipped: 'no dashboard access' };
+  const known = new Set([PRIMARY, ...readExplores(db)].map((e) => keyOf(e.model, e.view)));
+  const found = new Map();
+  for (const d of db.listDashboards() || []) {
+    for (const t of [...(d.tiles || []), ...((d.carousels || []).flatMap((c) => c.tiles || []))]) {
+      const q = t && t.query;
+      if (!q || !q.model || !q.view || !Array.isArray(q.fields)) continue;
+      const key = keyOf(q.model, q.view);
+      if (known.has(key) || found.has(key)) continue;
+      if (q.fields.some((f) => CHECKIN_VIEW_RE.test(String(f).split('.')[0]))) found.set(key, { model: q.model, view: q.view });
+    }
+  }
+  const registered = [];
+  for (const e of [...found.values()].slice(0, 3)) { // sanity cap
+    let f;
+    try { f = (await getExploreFields(e.model, e.view)) || {}; }
+    catch (err) { return { ok: false, skipped: `looker unreachable: ${err.message}`, registered }; } // no flag → retried next boot
+    const fields = [];
+    const take = (arr, kind) => { for (const x of arr || []) { if (!isPII(x.name) && !SEED_PII_RE.test(x.name)) fields.push({ name: x.name, label: x.label_short || x.label || x.name, kind, type: x.type }); } };
+    take(f.measures, 'measure');
+    take(f.dimensions, 'dimension');
+    if (!fields.some((x) => x.kind === 'measure')) { registered.push({ explore: keyOf(e.model, e.view), skipped: 'no measures' }); continue; }
+    registerExplore(db, { model: e.model, view: e.view, label: exploreLabel(e.view) });
+    const map = readExpFields(db); map[keyOf(e.model, e.view)] = fields; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
+    registered.push({ explore: keyOf(e.model, e.view), fields: fields.length });
+  }
+  db.setSetting(CHECKIN_EXPLORE_FLAG, new Date().toISOString());
+  return { ok: true, registered };
 }
 
 // Register / unregister an EXTRA explore (the primary can't be removed).
@@ -289,10 +344,13 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
     catch (e) { res.status(500).json({ error: 'Could not save the catalogue selection.' }); }
   });
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
-  // Fire-and-forget: enrich the cashless catalogue with check-in fields once.
-  seedCheckinFields(db, getExploreFields)
-    .then((r) => { if (!r.skipped || r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in field seed:', JSON.stringify(r)); })
-    .catch((e) => console.error('[owlCatalogue] check-in field seed failed:', e.message));
+  // Fire-and-forget, SEQUENTIAL (both write the same field-selection setting):
+  // enrich the cashless catalogue, then register any dashboard-proven check-in explore.
+  seedCashlessFields(db, getExploreFields)
+    .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless field seed:', JSON.stringify(r)); })
+    .then(() => seedCheckinExplore(db, getExploreFields))
+    .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in explore seed:', JSON.stringify(r)); })
+    .catch((e) => console.error('[owlCatalogue] catalogue seed failed:', e.message));
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCheckinFields };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore };

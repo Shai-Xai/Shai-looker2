@@ -7,10 +7,10 @@
 //
 // WHAT it measures: Pulse reads everything through Looker, which reflects BigQuery,
 // which reflects Howler's stations on the ground (check-in scanners, bars, vendors).
-// A monitor asks Looker for max(timestamp) on an explore — optionally split by a
-// station dimension — on a cadence, ALWAYS bypassing the query cache (measuring
-// freshness through a cache would lie). The lag between that max timestamp and now
-// is the end-to-end health of the whole pipe: station → Howler → BigQuery → Looker.
+// A monitor asks Looker for the latest record timestamp on an explore — optionally
+// split by a station dimension — on a cadence, ALWAYS bypassing the query cache
+// (measuring freshness through a cache would lie). The lag between that timestamp and
+// now is the end-to-end health of the whole pipe: station → Howler → BigQuery → Looker.
 //
 // The hard parts (the real deliverable):
 //   • per-station memory — a station that DISAPPEARS from the query result (rows
@@ -32,11 +32,22 @@ const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's 
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const CHANNELS = ['push', 'email', 'slack']; // entity fan-out via the OS spine; ops Slack is always-on
 
-function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
+// `mailer` is injectable for tests but defaults to the real module so the
+// index.js mount line stays unchanged (it's only used by test mode below).
+function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mailer = require('./mailer') }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
   const enabled = () => db.getSetting('data_health_enabled', '1') !== '0';
+  // ── test mode (ON by default while the feature is being trialled) ──
+  // While on, EVERY alert goes only to the test address — the internal ops Slack
+  // and the client-team fan-out are muted, so a mis-tuned threshold can't page
+  // the team or a client. Toggle + address live in Admin → Data health.
+  const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
+  const testEmail = () => String(db.getSetting('data_health_test_email', 'shai.evian@howler.co.za') || '').trim();
+  // Master auto-check cadence (minutes). Monitors with check_every_min = 0
+  // follow this; a monitor with its own value keeps it. Editable in the UI.
+  const masterMin = () => { const n = Math.round(Number(db.getSetting('data_health_tick_min', '5'))); return Number.isFinite(n) ? Math.max(1, Math.min(120, n)) : 5; };
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS data_monitors (
@@ -109,6 +120,16 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     CREATE INDEX IF NOT EXISTS idx_dme ON data_monitor_events(monitor_id, at);
   `);
 
+  // Additive migrations for DBs created before detail columns / the device roster.
+  try {
+    const cols = sql.prepare('PRAGMA table_info(data_monitors)').all().map((c) => c.name);
+    const add = (name, ddl) => { if (!cols.includes(name)) sql.exec(`ALTER TABLE data_monitors ADD COLUMN ${ddl}`); };
+    add('detail_fields', "detail_fields TEXT NOT NULL DEFAULT '[]'");
+    add('roster_field', "roster_field TEXT NOT NULL DEFAULT ''");           // device/operator dimension for the roster view
+    add('roster_baseline_min', 'roster_baseline_min INTEGER NOT NULL DEFAULT 1440'); // seen within this window = "linked"
+    add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
+  } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
+
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
 
   function rowToMonitor(r) {
@@ -116,6 +137,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     return {
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
+      detailFields: parseJson(r.detail_fields, []),
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min,
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -133,7 +156,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     const filters = {};
     if (b.filters && typeof b.filters === 'object' && !Array.isArray(b.filters)) {
       for (const [k, v] of Object.entries(b.filters).slice(0, 10)) {
-        if (k && v != null && String(v).trim()) filters[String(k).slice(0, 200)] = String(v).slice(0, 500);
+        // A blank value is kept: an "open" filter the admin is still deciding on
+        // (the dimension survives a save). Blanks are stripped from queries.
+        if (k) filters[String(k).slice(0, 200)] = v == null ? '' : String(v).trim().slice(0, 500);
       }
     }
     const channels = Array.isArray(b.channels) ? [...new Set(b.channels.filter((c) => CHANNELS.includes(c)))] : ['push'];
@@ -147,10 +172,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
       view: String(b.view || '').slice(0, 120),
       timeField: String(b.timeField || '').slice(0, 200),
       stationField: String(b.stationField || '').slice(0, 200),
+      // Extra dimensions shown as columns in the 🧾 Latest-20 peek (e.g. station
+      // name, action/record type). Display-only — no effect on health evaluation.
+      detailFields: Array.isArray(b.detailFields)
+        ? [...new Set(b.detailFields.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().slice(0, 200)))].slice(0, 4)
+        : [],
+      // Device roster: dimension identifying a device/operator, plus the "linked"
+      // baseline window and the "online" recency window (minutes).
+      rosterField: String(b.rosterField || '').slice(0, 200),
+      rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
+      rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
-      checkEveryMin: num(b.checkEveryMin, 5, 1, 1440),
+      checkEveryMin: num(b.checkEveryMin, 0, 0, 1440), // 0 = follow the master cadence
       channels,
       notifyRecovery: b.notifyRecovery === false ? 0 : 1,
       cooldownMin: num(b.cooldownMin, 60, 0, 10080),
@@ -161,17 +196,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
   function upsert(id, c, who) {
     const ts = now();
     if (id) {
-      sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?,
+      sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
+        roster_field=?, roster_baseline_min=?, roster_online_min=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
-        .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField,
+        .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, filters,
+    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
+      roster_field, roster_baseline_min, roster_online_min, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
-      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.filters),
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -195,25 +234,143 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     return { id: 'datahealth', email: 'datahealth@howler', role: 'admin' };
   }
 
-  async function readLatest(m) {
-    const fields = m.stationField ? [m.stationField, MAX_FIELD] : [MAX_FIELD];
-    const body = {
-      model: m.model, view: m.view, fields,
-      // A dynamic custom measure — max(time_field) — so Looker aggregates server-side
-      // and one small query covers every station, however busy the raw table is.
-      dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
-      filters: { ...(m.filters || {}) },
-      limit: m.stationField ? '500' : '1',
-      query_timezone: 'UTC',
-    };
+  // Run one scoped, cache-bypassed Looker query. force=true matters: a cached row
+  // would make the pipe look exactly as stale as our own cache, defeating the point.
+  async function runScoped(m, body) {
     if (!(await applyScope(body, evalUser(m), m.suiteId || null))) throw new Error('scope failed (fail closed)');
-    // force=true: bypass the shared query cache — a cached row would make the pipe
-    // look exactly as stale as our own cache, defeating the measurement.
     const rows = await runLookerQuery('/queries/run/json', body, 0, true);
     if (!Array.isArray(rows)) throw new Error('unexpected Looker response shape');
+    return rows;
+  }
+  // Blank-valued ("open") filters are config-only — sending "" to Looker would
+  // filter for blank values, so they never reach the query.
+  const baseBody = (m) => ({
+    model: m.model, view: m.view,
+    filters: Object.fromEntries(Object.entries(m.filters || {}).filter(([, v]) => String(v).trim())),
+    query_timezone: 'UTC',
+  });
+
+  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
+  // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
+  // monitor hits that, remember it and go straight to the sorted-scan path.
+  const maxMeasureUnsupported = new Set();
+
+  async function readLatest(m) {
+    // Whole feed: the single newest row IS the answer — no aggregation needed.
+    if (!m.stationField) {
+      const rows = await runScoped(m, { ...baseBody(m), fields: [m.timeField], sorts: [`${m.timeField} desc`], limit: '1' });
+      const ts = rows.length ? parseTs(rows[0][m.timeField]) : null;
+      return ts ? new Map([['', ts]]) : new Map();
+    }
+
+    // Station split, preferred path: a dynamic max(time) measure — one tiny row per
+    // station regardless of how busy the raw table is.
+    if (!maxMeasureUnsupported.has(m.id)) {
+      try {
+        const rows = await runScoped(m, {
+          ...baseBody(m),
+          fields: [m.stationField, MAX_FIELD],
+          dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
+          limit: '500',
+        });
+        return reduceRows(m, rows, MAX_FIELD);
+      } catch (e) {
+        // Custom-measure rejection is permanent for this field — memoise and fall
+        // through to the scan. Any other failure also gets one scan attempt (it
+        // may still work); if the scan fails too, THAT error surfaces.
+        if (/must evaluate to/i.test(String(e.message || ''))) maxMeasureUnsupported.add(m.id);
+        console.warn('[data-health] max-measure read failed, trying sorted scan', m.id, e.message);
+      }
+    }
+
+    // Fallback: newest rows first, reduced to max-per-station in JS. Sorted desc,
+    // so the FIRST time a station appears is its latest record. Stations idle for
+    // longer than the window won't appear — the per-station memory keeps evaluating
+    // them from their remembered last_event_at, which is exactly the stale signal.
+    const rows = await runScoped(m, {
+      ...baseBody(m),
+      fields: [m.stationField, m.timeField],
+      sorts: [`${m.timeField} desc`],
+      limit: '5000',
+    });
+    return reduceRows(m, rows, m.timeField);
+  }
+
+  // The raw tail of the feed: the N most recent (station, timestamp) records,
+  // newest first — a live, cache-bypassed peek so an admin can SEE what the pipe
+  // last delivered rather than trusting the lag number. Note Looker groups
+  // identical rows, so same-station-same-second records collapse into one.
+  async function latestRecords(m, limit = 20) {
+    const n = Math.max(1, Math.min(100, Math.round(Number(limit) || 20)));
+    // Detail columns ride along in the same query (station/action/whatever the
+    // monitor configured) — display-only extras, deduped against the core fields.
+    const extras = (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField);
+    const fields = [...(m.stationField ? [m.stationField] : []), m.timeField, ...extras];
+    const rows = await runScoped(m, { ...baseBody(m), fields, sorts: [`${m.timeField} desc`], limit: String(n) });
+    const nowMs = Date.now();
+    return rows.map((r) => {
+      const ts = parseTs(r[m.timeField]);
+      return {
+        at: ts ? ts.toISOString() : '',
+        raw: String(r[m.timeField] ?? ''),
+        station: m.stationField ? String(r[m.stationField] ?? '').trim() : '',
+        extra: Object.fromEntries(extras.map((f) => [f, r[f] == null ? '' : String(r[f])])),
+        agoMin: ts ? Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 : null,
+      };
+    });
+  }
+
+  // The device roster: "expected vs actual". Every device/operator seen within
+  // the BASELINE window counts as linked; any of those not seen within the
+  // ONLINE window is offline — named, with how long it's been silent. This
+  // learns the expected set from the data itself (no manual device register):
+  // one scoped query over the baseline window, reduced to last-seen per device.
+  async function deviceRoster(m) {
+    if (!m.rosterField) return { configured: false };
+    const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+    // Constrain to the baseline window in Looker itself, so a long-lived explore
+    // doesn't drag ancient devices into the roster.
+    body.filters[m.timeField] = `last ${m.rosterBaselineMin} minutes`;
+    const rows = await runScoped(m, body);
+    const seen = new Map(); // device -> latest Date
+    for (const r of rows) {
+      const d = String(r[m.rosterField] ?? '').trim();
+      const ts = parseTs(r[m.timeField]);
+      if (!d || !ts) continue;
+      const prev = seen.get(d);
+      if (!prev || ts > prev) seen.set(d, ts);
+    }
+    const nowMs = Date.now();
+    const devices = [...seen.entries()]
+      .map(([device, ts]) => ({ device, lagMin: Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 }))
+      .sort((a, b) => b.lagMin - a.lagMin);
+    const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
+    return {
+      configured: true,
+      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin,
+      total: devices.length, online: devices.length - offline.length,
+      offline: offline.slice(0, 100),
+      truncated: rows.length >= 5000, // baseline window busier than the scan window — counts may undercount idle devices
+    };
+  }
+
+  // Distinct values of a dimension (scoped) — feeds the editor's linked filter
+  // dropdowns so users pick a real station/event/type instead of typing blind.
+  async function fieldValues({ model, view, field, entityId, suiteId }) {
+    const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
+    const rows = await runScoped(mLike, { model: mLike.model, view: mLike.view, fields: [String(field)], filters: {}, sorts: [String(field)], limit: '500', query_timezone: 'UTC' });
+    const out = [];
+    for (const r of rows) {
+      const v = r[String(field)];
+      if (v != null && v !== '' && !out.includes(String(v))) { out.push(String(v)); if (out.length >= 200) break; }
+    }
+    return out;
+  }
+
+  function reduceRows(m, rows, timeKey) {
     const seen = new Map(); // station -> latest Date
     for (const r of rows) {
-      const ts = parseTs(r[MAX_FIELD]);
+      const ts = parseTs(r[timeKey]);
       if (!ts) continue;
       const station = m.stationField ? String(r[m.stationField] ?? '').trim() || '—' : '';
       const prev = seen.get(station);
@@ -237,9 +394,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
 
   // Fan out: internal ops Slack ALWAYS (this is first and foremost a Howler health
   // tool); plus the client's inbox/push/email/Slack via the OS spine when the
-  // monitor is pinned to an entity and has channels ticked.
+  // monitor is pinned to an entity and has channels ticked. In TEST MODE both are
+  // muted and the alert is emailed only to the test address. Returns where the
+  // alert actually went, so the event history stays truthful.
   function deliver(m, title, body) {
-    try { ops?.alert?.(`datahealth-${m.id}`, `${title}\n${body}`); } catch { /* best-effort */ }
+    if (testMode()) {
+      const to = testEmail();
+      if (to && mailer?.send) {
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        mailer.send({
+          to,
+          subject: `[TEST] ${title}`,
+          text: `${body}\n\nData health is in TEST MODE — only you receive these alerts (ops Slack + client notifications are muted). Go live in Admin → Data health.`,
+          html: `<p><strong>${esc(title)}</strong></p><p>${esc(body)}</p><p style="color:#888;font-size:12px">Data health is in <strong>test mode</strong> — only you receive these alerts (ops Slack + client notifications are muted). Go live in Admin → Data health.</p>`,
+          kind: 'notification',
+        }).catch((e) => console.error('[data-health] test email failed', m.id, e.message));
+      }
+      return to ? [`test-email:${to}`] : [];
+    }
+    const sent = [];
+    try { ops?.alert?.(`datahealth-${m.id}`, `${title}\n${body}`); sent.push('ops-slack'); } catch { /* best-effort */ }
     if (m.entityId && os?.announce) {
       try {
         os.announce({
@@ -248,8 +422,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
           channels: (m.channels || []).filter((c) => CHANNELS.includes(c)),
           subjectType: 'data-monitor', subjectId: m.id,
         });
+        sent.push('client-team');
       } catch (e) { console.error('[data-health] announce failed', m.id, e.message); }
     }
+    return sent;
   }
 
   // ── one check: pull → update stream memory → evaluate → alert on transitions ──
@@ -312,8 +488,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
           ? `${names.length} of ${streams.length} station${streams.length === 1 ? '' : 's'} stopped sending data: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ` +${names.length - 8} more` : ''}. Longest silence ${fmtLag(worst)} (threshold ${m.staleMin}m).`
           : `No new data for ${fmtLag(worst)} (threshold ${m.staleMin}m).`;
         const title = `⛔ Data stream stale — ${m.name || m.area || m.view}`;
-        deliver(m, title, bodyMsg);
-        recordEvent(m.id, '', 'alert', worst, bodyMsg);
+        const via = deliver(m, title, bodyMsg);
+        recordEvent(m.id, '', 'alert', worst, `${bodyMsg}${via.length ? ` → ${via.join(', ')}` : ' → no channel delivered'}`);
         sql.prepare('UPDATE data_monitors SET last_alerted_at=? WHERE id=?').run(ts, m.id);
       }
     } else if (stale === 0 && m.state === 'alerting') {
@@ -322,8 +498,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
         const bodyMsg = streams.length > 1
           ? `All ${streams.length} stations are sending data again.`
           : 'Data is flowing again.';
-        deliver(m, `✅ Data stream recovered — ${m.name || m.area || m.view}`, bodyMsg);
-        recordEvent(m.id, '', 'recovery_alert', maxLag, bodyMsg);
+        const via = deliver(m, `✅ Data stream recovered — ${m.name || m.area || m.view}`, bodyMsg);
+        recordEvent(m.id, '', 'recovery_alert', maxLag, `${bodyMsg}${via.length ? ` → ${via.join(', ')}` : ''}`);
       }
     } else if (stale > 0) {
       state = 'alerting'; // still stale (e.g. went stale while paused) — no re-fire, just truthful state
@@ -334,7 +510,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
   }
 
   // ── the tick ──
-  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 5 * 60000;
+  // A 60s heartbeat; each monitor is actually checked when its cadence elapses —
+  // its own check_every_min if set, else the master setting. Changing the master
+  // in the UI therefore takes effect within a minute, no restart.
+  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 60000;
   let ticking = false;
   async function tick() {
     if (!enabled() || ticking) return;
@@ -342,9 +521,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     try {
       const rows = sql.prepare("SELECT * FROM data_monitors WHERE status='active' AND model<>'' AND view<>'' AND time_field<>''").all().map(rowToMonitor);
       const nowMs = Date.now();
+      const master = masterMin();
       for (const m of rows) {
-        // Per-monitor cadence: skip until its own interval has elapsed.
-        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < m.checkEveryMin * 60000 - 5000) continue;
+        const cadence = m.checkEveryMin >= 1 ? m.checkEveryMin : master;
+        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < cadence * 60000 - 5000) continue;
         try { await check(m); } catch (e) { console.error('[data-health] check failed', m.id, e.message); }
       }
       // Keep the logs bounded: pulls are noisy (14d), transitions are history (60d).
@@ -368,7 +548,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
         lastCheck: sql.prepare('SELECT * FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 1').get(m.id) || null,
         recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 5').all(m.id),
       }));
-    res.json({ enabled: true, tickMin: Math.round(TICK_MS / 60000), monitors });
+    res.json({ enabled: true, tickMin: masterMin(), testMode: testMode(), testEmail: testEmail(), monitors });
+  });
+
+  // Test-mode switch: while on, alerts email ONLY the test address (ops Slack +
+  // client fan-out muted) — so thresholds can be tuned without paging anyone.
+  app.put('/api/admin/data-health/settings', auth.requireAdmin, (req, res) => {
+    if (!enabled()) return off(res);
+    const b = req.body || {};
+    if (typeof b.testMode === 'boolean') db.setSetting('data_health_test_mode', b.testMode ? '1' : '0');
+    if (typeof b.testEmail === 'string') {
+      const email = b.testEmail.trim().slice(0, 200);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That test email doesn’t look valid.' });
+      db.setSetting('data_health_test_email', email);
+    }
+    if (b.tickMin != null) {
+      const n = Math.round(Number(b.tickMin));
+      if (!Number.isFinite(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Auto-check must be between 1 and 120 minutes.' });
+      db.setSetting('data_health_tick_min', String(n));
+    }
+    res.json({ testMode: testMode(), testEmail: testEmail(), tickMin: masterMin() });
   });
 
   app.post('/api/admin/data-health/monitors', auth.requireAdmin, (req, res) => {
@@ -391,6 +590,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     // The explore/split changed → the remembered stations belong to the old feed.
     if (c.model !== m.model || c.view !== m.view || c.timeField !== m.timeField || c.stationField !== m.stationField) {
       sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=?').run(m.id);
+      maxMeasureUnsupported.delete(m.id);
     }
     res.json({ monitor: upsert(m.id, c, req.user.email) });
   });
@@ -422,6 +622,23 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     res.json({ ...r, monitor: monitorById(m.id), streams: streamsFor(m.id) });
   }));
 
+  // The last N raw records off the feed (live Looker read — a deliberate click,
+  // not something the page polls).
+  app.get('/api/admin/data-health/monitors/:id/latest', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const m = monitorById(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Monitor not found' });
+    res.json({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) });
+  }));
+
+  // The device roster (live Looker read — opened on demand from the log panel).
+  app.get('/api/admin/data-health/monitors/:id/roster', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const m = monitorById(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Monitor not found' });
+    res.json(await deviceRoster(m));
+  }));
+
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
     if (!enabled()) return off(res);
     if (!monitorById(req.params.id)) return res.status(404).json({ error: 'Monitor not found' });
@@ -446,6 +663,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
     res.json({ models: _models });
   }));
 
+  // Distinct values of one dimension, scoped like the monitor would be — powers
+  // the editor's linked value dropdowns (e.g. pick a real station name).
+  app.post('/api/admin/data-health/field-values', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const { model, view, field, entityId, suiteId } = req.body || {};
+    if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
+    res.json({ values: await fieldValues({ model, view, field, entityId, suiteId }) });
+  }));
+
   const _fieldCache = new Map();
   app.get('/api/admin/data-health/fields', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
@@ -465,7 +691,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
   }));
 
   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
-  return { check, tick, monitorById, upsert, clean, streamsFor };
+  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster };
 }
 
 module.exports = { mount, AREAS, CHANNELS };

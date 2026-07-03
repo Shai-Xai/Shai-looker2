@@ -59,16 +59,134 @@ const EVENT_META = {
   recovery_alert: ['📣', '#16a34a'], error: ['⚠️', '#d97706'],
 };
 
-// Expandable history: the transition/alert feed + the raw pull log.
-function HistoryPanel({ monitorId }) {
+// The raw tail of the feed: the last N (station, timestamp) records, pulled LIVE
+// from Looker on open/refresh (cache-bypassed server-side) — so you can see what
+// the pipe actually delivered, not just the lag number. (Inline fetch, same
+// reasoning as TestModeBanner: keep this module out of the shared lib/api.js.)
+function LatestRecords({ monitorId }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/latest?limit=20`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch only when the monitor changes
+  useEffect(() => { load(); }, [monitorId]);
+  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={load}>Retry</button></div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Pulling the latest records from Looker…</div>;
+  const hasStation = !!data.stationField;
+  const extras = data.detailFields || [];
+  // "cashless_check_ins.record_type" → "Record Type" — good enough for a header.
+  const colName = (f) => String(f).split('.').pop().replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Newest first, straight off the explore (identical station+time records collapse into one row).</span>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={load}>{busy ? 'Refreshing…' : '🔄 Refresh'}</button>
+      </div>
+      {!data.records.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No records found — check the monitor’s filters and scope.</div> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>#</th>
+              {hasStation && <th style={{ padding: '4px 8px', fontWeight: 600 }}>Station</th>}
+              {extras.map((f) => <th key={f} style={{ padding: '4px 8px', fontWeight: 600 }}>{colName(f)}</th>)}
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Record time</th>
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Age</th>
+            </tr></thead>
+            <tbody>{data.records.map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
+                <td style={{ padding: '4px 8px 4px 0', color: 'var(--muted)' }}>{i + 1}</td>
+                {hasStation && <td style={{ padding: '4px 8px', fontWeight: 600 }}>{r.station || '—'}</td>}
+                {extras.map((f) => <td key={f} style={{ padding: '4px 8px' }}>{(r.extra && r.extra[f]) || '—'}</td>)}
+                <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{r.at ? fmtAt(r.at) : r.raw}</td>
+                <td style={{ padding: '4px 8px', color: r.agoMin != null && r.agoMin < 30 ? STATUS_COLOR.fresh : 'var(--muted)' }}>{r.agoMin != null ? `${fmtLag(r.agoMin)} ago` : '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The device roster: expected vs actual. Everything seen in the baseline window
+// is "linked"; anything silent longer than the online window is offline, named,
+// with how long it's been quiet — the go-check-these list.
+function RosterPanel({ monitorId }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/roster`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch only when the monitor changes
+  useEffect(() => { load(); }, [monitorId]);
+  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={load}>Retry</button></div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the device roster from Looker…</div>;
+  if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.</div>;
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.total} linked</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(seen in the last {fmtLag(data.baselineMin)})</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: STATUS_COLOR.fresh }}>{data.online} online</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: data.offline.length ? STATUS_COLOR.stale : 'var(--muted)' }}>{data.offline.length} offline</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(no sync in {fmtLag(data.onlineMin)})</span>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={load}>{busy ? 'Refreshing…' : '🔄 Refresh'}</button>
+      </div>
+      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — idle devices may be under-counted; consider a shorter linked window.</div>}
+      {!data.offline.length ? (
+        <div style={{ fontSize: 12.5, color: STATUS_COLOR.fresh }}>✅ Every linked device has synced within the online window.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 }}>Check these — longest silent first:</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>Device / operator</th>
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Last sync</th>
+            </tr></thead>
+            <tbody>{data.offline.map((d) => (
+              <tr key={d.device} style={{ borderTop: '1px solid var(--hairline)' }}>
+                <td style={{ padding: '5px 8px 5px 0', fontWeight: 700, color: STATUS_COLOR.stale }}>{d.device}</td>
+                <td style={{ padding: '5px 8px' }}>{fmtLag(d.lagMin)} ago</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Expandable history: the transition/alert feed + the raw pull log + a live peek
+// at the last 20 records off the feed (+ the device roster when configured).
+function HistoryPanel({ monitorId, rosterField }) {
   const [hist, setHist] = useState(null);
   const [tab, setTab] = useState('events');
   useEffect(() => { api.dataMonitorHistory(monitorId).then(setHist).catch(() => setHist({ checks: [], events: [] })); }, [monitorId]);
   if (!hist) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: '8px 0' }}>Loading history…</div>;
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`]].map(([k, l]) => (
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)'],
+          ...(rosterField ? [['roster', '📟 Devices (live)']] : [])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
         ))}
       </div>
@@ -107,6 +225,8 @@ function HistoryPanel({ monitorId }) {
             </table>
           </div>
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
+        {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
+        {tab === 'roster' && <RosterPanel monitorId={monitorId} />}
       </div>
     </div>
   );
@@ -146,7 +266,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
         {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
         {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
         {entityName ? ` · scoped to ${entityName}` : ' · platform-wide'}
-        {' '}· every {m.checkEveryMin}m · warn {m.warnMin}m · stale {m.staleMin}m
+        {' '}· every {m.checkEveryMin >= 1 ? `${m.checkEveryMin}m` : 'master'} · warn {m.warnMin}m · stale {m.staleMin}m
       </div>
       {m.lastError && <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 8 }}>⚠️ Last pull failed: {m.lastError}</div>}
       {m.streams.length ? (
@@ -163,6 +283,8 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
         <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
         <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
         <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
+        <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
+          onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
         <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
           {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
         </button>
@@ -170,9 +292,38 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
           onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
       </div>
-      {showHist && <HistoryPanel monitorId={m.id} />}
+      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} />}
     </div>
   );
+}
+
+// Field pickers get one <optgroup> per Looker view, labelled with the fields'
+// shared label prefix ("Check-Ins", "Closed Loop Sales", …) which is stripped
+// from each option — so the dropdown reads Date Time / Created At Hour instead
+// of a flat wall of forty near-identical names. timeFirst floats full-timestamp
+// variants to the top of each group (they're the recommended pick).
+function groupFields(list, { timeFirst = false } = {}) {
+  const byView = new Map();
+  for (const d of list || []) {
+    const v = String(d.name).split('.')[0];
+    if (!byView.has(v)) byView.set(v, []);
+    byView.get(v).push(d);
+  }
+  const out = [];
+  for (const [v, arr] of byView) {
+    let prefix = arr.length > 1 ? String(arr[0].label || '') : '';
+    for (const d of arr) {
+      const l = String(d.label || '');
+      let i = 0; while (i < prefix.length && i < l.length && prefix[i] === l[i]) i++;
+      prefix = prefix.slice(0, i);
+    }
+    prefix = prefix.replace(/[^ ]*$/, '').trim(); // never cut mid-word
+    const title = prefix.length >= 3 ? prefix : v.replace(/^(cashless|core)_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const items = arr.map((d) => ({ ...d, short: (prefix.length >= 3 && String(d.label).startsWith(prefix) && String(d.label).slice(prefix.length).trim()) || d.label }));
+    items.sort((a, b) => (timeFirst ? (/time/i.test(String(b.type || '')) ? 1 : 0) - (/time/i.test(String(a.type || '')) ? 1 : 0) : 0) || String(a.short).localeCompare(String(b.short)));
+    out.push([title, items]);
+  }
+  return out.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
 }
 
 // Create / edit form. Explore + field pickers come from Looker metadata; filters
@@ -180,16 +331,32 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
 function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
-    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 5, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
   const [fields, setFields] = useState(null);
   const [filterRows, setFilterRows] = useState(() => Object.entries((initial && initial.filters) || {}));
+  const [detailRows, setDetailRows] = useState(() => (initial && initial.detailFields) || []);
+  const [dimValues, setDimValues] = useState({}); // field -> 'loading' | [values] (linked filter dropdowns)
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
   const isMobile = useIsMobile();
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // Linked values: once a filter dimension is picked, fetch its real (scoped)
+  // distinct values so the value box offers them as suggestions — live Looker
+  // read, so only on demand and cached per field for this editor session.
+  const loadDimValues = (field) => {
+    if (!field || dimValues[field] != null || !f.model || !f.view) return;
+    setDimValues((p) => ({ ...p, [field]: 'loading' }));
+    fetch('/api/admin/data-health/field-values', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: f.model, view: f.view, field, entityId: f.entityId, suiteId: f.suiteId }),
+    }).then((r) => r.json()).then((d) => setDimValues((p) => ({ ...p, [field]: Array.isArray(d.values) ? d.values : [] })))
+      .catch(() => setDimValues((p) => ({ ...p, [field]: [] })));
+  };
 
   useEffect(() => { api.dataHealthExplores().then((r) => setModels(r.models || [])).catch((e) => setErr(e.message)); }, []);
   useEffect(() => {
@@ -203,7 +370,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
 
   const save = async () => {
     setErr('');
-    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k, v]) => k && String(v).trim())) };
+    // Filter rows with a dimension but no value yet are kept as "open" filters
+    // (saved with the monitor, applied only once a value is chosen).
+    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k]) => k)), detailFields: detailRows.filter(Boolean) };
     if (!body.name.trim()) return setErr('Give the monitor a name.');
     if (!body.model || !body.view || !body.timeField) return setErr('Pick the explore and its timestamp field.');
     setSaving(true);
@@ -246,10 +415,17 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
           <div>
             <span style={label}>Timestamp field (what “new data” means)</span>
             {!fields ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading fields…</div> : (
-              <select style={input} value={f.timeField} onChange={(e) => set('timeField', e.target.value)}>
-                <option value="">— pick the record time —</option>
-                {(fields.timeFields || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
-              </select>
+              <>
+                <select style={input} value={f.timeField} onChange={(e) => set('timeField', e.target.value)}>
+                  <option value="">— pick the record time —</option>
+                  {groupFields(fields.timeFields, { timeFirst: true }).map(([g, items]) => (
+                    <optgroup key={g} label={g}>
+                      {items.map((d) => <option key={d.name} value={d.name}>{d.short}{/time/i.test(d.type || '') ? '' : ' (day-level)'}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the finest granularity available (a <em>Time</em> variant, not <em>Date</em>) — a day-level field can read as up to 24h behind.</span>
+              </>
             )}
           </div>
           <div>
@@ -257,10 +433,55 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
             {!fields ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }} /> : (
               <select style={input} value={f.stationField} onChange={(e) => set('stationField', e.target.value)}>
                 <option value="">Whole feed (no split)</option>
-                {(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || '')).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+                {groupFields((fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || ''))).map(([g, items]) => (
+                  <optgroup key={g} label={g}>
+                    {items.map((d) => <option key={d.name} value={d.name}>{d.short}</option>)}
+                  </optgroup>
+                ))}
               </select>
             )}
           </div>
+        </div>
+      )}
+
+      {f.model && f.view && fields && (
+        <div style={{ ...grid2, marginTop: 12 }}>
+          <div>
+            <span style={label}>Device roster (optional — count linked vs offline)</span>
+            <select style={input} value={f.rosterField} onChange={(e) => set('rosterField', e.target.value)}>
+              <option value="">No roster</option>
+              {(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || '')).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+            </select>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the device ID or operator dimension. Anything seen in the linked window counts as connected; silence past the online window flags it offline by name.</span>
+          </div>
+          {f.rosterField && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <span style={label}>Linked window (min)</span>
+                <input style={input} type="number" min="10" value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
+              </div>
+              <div>
+                <span style={label}>Online window (min)</span>
+                <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {f.model && f.view && fields && (
+        <div style={{ marginTop: 12 }}>
+          <span style={label}>Extra columns in 🧾 Latest 20 (optional — e.g. station, action type)</span>
+          {detailRows.map((k, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <select style={{ ...input, flex: 1 }} value={k} onChange={(e) => setDetailRows((rows) => rows.map((r, j) => (j === i ? e.target.value : r)))}>
+                <option value="">— dimension —</option>
+                {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+              </select>
+              <button style={ghostBtn} onClick={() => setDetailRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+          {detailRows.length < 4 && <button style={{ ...ghostBtn, marginBottom: 12 }} onClick={() => setDetailRows((rows) => [...rows, ''])}>+ Add column</button>}
         </div>
       )}
 
@@ -269,11 +490,23 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
           <span style={label}>Filters (optional — e.g. one event only)</span>
           {filterRows.map(([k, v], i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-              <select style={{ ...input, flex: 1 }} value={k} onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}>
+              <select style={{ ...input, flex: 1 }} value={k}
+                onChange={(e) => { const nf = e.target.value; setFilterRows((rows) => rows.map((r, j) => (j === i ? [nf, r[1]] : r))); loadDimValues(nf); }}>
                 <option value="">— dimension —</option>
-                {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+                {groupFields(fields.dimensions).map(([g, items]) => (
+                  <optgroup key={g} label={g}>
+                    {items.map((d) => <option key={d.name} value={d.name}>{d.short}</option>)}
+                  </optgroup>
+                ))}
               </select>
-              <input style={{ ...input, flex: 1 }} value={v} placeholder="value" onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+              {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
+              <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
+                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value (blank = not applied yet)' : 'value (blank = not applied yet)'}
+                onFocus={() => loadDimValues(k)}
+                onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+              <datalist id={`dh-vals-${i}`}>
+                {(Array.isArray(dimValues[k]) ? dimValues[k] : []).map((val) => <option key={val} value={val} />)}
+              </datalist>
               <button style={ghostBtn} onClick={() => setFilterRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
@@ -305,7 +538,10 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
         {[['warnMin', 'Warn after (min)'], ['staleMin', 'Stale after (min)'], ['checkEveryMin', 'Check every (min)'], ['cooldownMin', 'Alert cooldown (min)']].map(([k, l]) => (
           <div key={k}>
             <span style={label}>{l}</span>
-            <input style={input} type="number" min="1" value={f[k]} onChange={(e) => set(k, e.target.value)} />
+            <input style={input} type="number" min={k === 'checkEveryMin' ? '0' : '1'}
+              value={k === 'checkEveryMin' ? (Number(f[k]) >= 1 ? f[k] : '') : f[k]}
+              placeholder={k === 'checkEveryMin' ? 'master' : undefined}
+              onChange={(e) => set(k, e.target.value)} />
           </div>
         ))}
       </div>
@@ -364,6 +600,8 @@ export default function DataHealthAdmin() {
         the lag you see is the pipe’s real lag.
       </p>
 
+      {data && <TestModeBanner testMode={!!data.testMode} testEmail={data.testEmail || ''} onChanged={load} />}
+
       {data && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
           {[[`${monitors.length} monitor${monitors.length === 1 ? '' : 's'}`, 'var(--text)'],
@@ -373,7 +611,7 @@ export default function DataHealthAdmin() {
             <span key={i} style={{ fontSize: 12.5, fontWeight: 700, color: c, padding: '5px 12px', borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)' }}>{t}</span>
           ))}
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>auto-checks every {data.tickMin || 5} min · page refreshes every minute</span>
+          <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
           {editing == null && <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>}
         </div>
       )}
@@ -397,6 +635,88 @@ export default function DataHealthAdmin() {
         ) : monitors.map((m) => (
           <MonitorCard key={m.id} m={m} entities={entities} onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+    </div>
+  );
+}
+
+// Master auto-check cadence: how often the background sweep pulls each monitor
+// (a monitor can still set its own cadence in the editor; blank = follow this).
+// Saved via the same settings PUT the test-mode banner uses; applies within a
+// minute — the server heartbeat re-reads it every 60s, no restart needed.
+function MasterCadence({ tickMin, onChanged }) {
+  const [v, setV] = useState(String(tickMin));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setV(String(tickMin)); }, [tickMin]);
+  const save = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickMin: Number(v) }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+      auto-check every
+      <input type="number" min="1" max="120" value={v} onChange={(e) => setV(e.target.value)}
+        style={{ ...input, width: 58, padding: '4px 6px', fontSize: 12 }} />
+      min
+      {Number(v) !== Number(tickMin) && <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={save}>{busy ? '…' : 'Save'}</button>}
+      {err && <span style={{ color: STATUS_COLOR.stale }}>{err}</span>}
+    </span>
+  );
+}
+
+// Test-mode banner: while ON, every alert is emailed ONLY to the test address —
+// ops Slack and client-team notifications stay muted, so thresholds can be tuned
+// without paging anyone. (Settings PUT is called inline rather than via lib/api.js
+// so this self-contained feature doesn't touch that shared file.)
+function TestModeBanner({ testMode, testEmail, onChanged }) {
+  const [email, setEmail] = useState(testEmail || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setEmail(testEmail || ''); }, [testEmail]);
+
+  const save = async (body) => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (!testMode) {
+    return (
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 16px' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>🔔 Alerts are <strong>live</strong> — stale alerts post to ops Slack and (for client-pinned monitors) the client’s team.</span>
+        <span style={{ flex: 1 }} />
+        <button style={ghostBtn} disabled={busy} onClick={() => save({ testMode: true })}>🧪 Back to test mode</button>
+        {err && <span style={{ fontSize: 12, color: STATUS_COLOR.stale }}>{err}</span>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR.warn}`, background: STATUS_BG.warn }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13.5 }}>🧪 Test mode</strong>
+        <span style={{ fontSize: 12.5 }}>All alerts are emailed <strong>only</strong> to the address below — ops Slack and client notifications are muted.</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+        <input style={{ ...input, width: 260, flex: '0 1 auto' }} type="email" value={email} placeholder="you@howler.co.za" onChange={(e) => setEmail(e.target.value)} />
+        <button style={ghostBtn} disabled={busy || !email.trim() || email === testEmail} onClick={() => save({ testEmail: email })}>Save address</button>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...btn, background: STATUS_COLOR.fresh }} disabled={busy}
+          onClick={() => { if (window.confirm('Go live? Stale alerts will start posting to ops Slack and, for client-pinned monitors, to the client’s team.')) save({ testMode: false }); }}>
+          Go live
+        </button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 6 }}>{err}</div>}
     </div>
   );
 }
