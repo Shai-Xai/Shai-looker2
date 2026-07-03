@@ -119,7 +119,7 @@ function ReportCard({ t, open, onToggle, onChange }) {
         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 7, whiteSpace: 'nowrap', ...statusStyle(t.status) }}>{t.statusLabel}</span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-        {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
+        {t.screen || 'unknown screen'}{t.tileName ? ` · ▦ ${t.tileName}` : ''} · {new Date(t.createdAt).toLocaleDateString()}
         {(t.attachments || []).length > 0 ? ` · 📎 ${t.attachments.length}` : ''}
         {(t.comments || []).length > 0 ? ` · 💬 ${t.comments.length}` : ''}
       </div>
