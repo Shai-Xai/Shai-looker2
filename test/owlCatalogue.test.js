@@ -199,8 +199,8 @@ test('check-in usage note warns about missing timestamps only when a check-in ti
   ] }));
   let note = (cat.effective(db).extras[0].notes || []).join(' ');
   assert.ok(!/TIME-FILTERED CHECK-INS/.test(note), 'no time caveat without a time field');
-  // With the check-in family's own time field: the caveat appears, names the field,
-  // and forces the unfiltered cross-check + disclosure (the 687-vs-8,132 bug).
+  // With only a sparse time field: the caveat appears, names it, and forces the
+  // unfiltered cross-check + disclosure (the 687-vs-8,132 bug).
   db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
     { name: 'cashless_check_ins.count', label: 'Check-Ins Count', kind: 'measure', type: 'count' },
     { name: 'cashless_check_ins.station_name', label: 'Station Name', kind: 'dimension', type: 'string' },
@@ -210,7 +210,18 @@ test('check-in usage note warns about missing timestamps only when a check-in ti
   assert.ok(/TIME-FILTERED CHECK-INS/.test(note));
   assert.ok(/cashless_check_ins\.date_time/.test(note), 'caveat names the check-in time field');
   assert.ok(/without the time filter/i.test(note), 'caveat forces the unfiltered cross-check');
-  assert.ok(/NEVER present a time-filtered check-in count alone/i.test(note));
+  assert.ok(/never present a time-filtered check-in count alone/i.test(note));
+  // With BOTH a created-at and the sparse date_time: created-at wins (it's on every
+  // row), and the note explicitly warns off the sparse field by name.
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
+    { name: 'cashless_check_ins.count', label: 'Check-Ins Count', kind: 'measure', type: 'count' },
+    { name: 'cashless_check_ins.date_time', label: 'Check-in Time', kind: 'dimension', type: 'date_time' },
+    { name: 'cashless_check_ins.created_date', label: 'Checkin Created Date', kind: 'dimension', type: 'date' },
+  ] }));
+  note = (cat.effective(db).extras[0].notes || []).join(' ');
+  assert.ok(/filter\/group cashless_check_ins\.created_date/.test(note), 'created-at preferred for time filters');
+  assert.ok(/created-at timestamp, present on every row/.test(note));
+  assert.ok(/Do NOT time-filter on cashless_check_ins\.date_time/.test(note), 'sparse field warned off by name');
 });
 
 test('seedCashlessFields without a registered cashless explore is a safe no-op', async () => {

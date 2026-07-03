@@ -132,12 +132,17 @@ function effective(db) {
       const station = ds.find((d) => /check_?ins?\./i.test(d.name) && /station/i.test(d.name));
       const evName = ds.find((d) => d.name === `${e.view}.name`);
       exNotes.push(`CHECK-INS / attendance / scans / entries: ALWAYS use the measure ${ciCount.name}${station ? `, grouped by ${station.name} for per-gate/per-station numbers` : ''}${evName ? `; the event name on this data is ${evName.name} (NOT core_events.name)` : ''}. NEVER answer check-in questions from sales/transaction rows or a sales station category — those are payments, not scans.`);
-      // Real-world caveat (caught live at KFF): most scans carry NO timestamp, so a
-      // date/hour-filtered check-in count silently undercounts by 10x+. Force the
-      // cross-check + disclosure instead of letting a partial figure pass as truth.
-      const ciDate = ds.find((d) => /check_?ins?\./i.test(d.name) && d.type === 'date');
+      // Time field choice matters (caught live at KFF): the family's *_date_time
+      // style field is mostly EMPTY (only ~700 of 8,132 scans carried it → "today"
+      // undercounted 10x), while the scan's CREATED-AT timestamp is on every row.
+      // Prefer created-at when enabled, explicitly warn off the sparse field(s),
+      // and keep the unfiltered cross-check so a partial figure can't pass as truth.
+      const ciDates = ds.filter((d) => /check_?ins?\./i.test(d.name) && d.type === 'date');
+      const ciCreated = ciDates.find((d) => /creat/i.test(d.name));
+      const ciDate = ciCreated || ciDates[0];
       if (ciDate) {
-        exNotes.push(`TIME-FILTERED CHECK-INS ("today", "per hour", "since gates opened"): filter/group ${ciDate.name} (the check-in family's own time field) — but BE AWARE many scans carry NO timestamp, so a time-filtered count can massively undercount. ALWAYS also run the SAME count without the time filter; if the time-filtered figure is well below the total, report BOTH and say plainly that N of the total scans have no timestamp so time-based cuts are unreliable. NEVER present a time-filtered check-in count alone as the day's attendance.`);
+        const others = ciDates.filter((d) => d.name !== ciDate.name).map((d) => d.name);
+        exNotes.push(`TIME-FILTERED CHECK-INS ("today", "per hour", "since gates opened"): filter/group ${ciDate.name}${ciCreated ? " — the scan's created-at timestamp, present on every row" : ''}${others.length ? `. Do NOT time-filter on ${others.join(' or ')} — ${others.length > 1 ? 'they are' : 'it is'} sparsely populated and undercounts massively` : ''}. Sanity-check: also run the SAME count without the time filter; if the time-filtered figure is far below the total, report both and say some scans lack that timestamp — never present a time-filtered check-in count alone as the day's attendance.`);
       }
     }
     return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: exNotes };
