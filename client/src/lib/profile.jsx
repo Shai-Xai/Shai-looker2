@@ -10,6 +10,12 @@ const ProfileCtx = createContext(null);
 const KEY = 'howler_active_profile';
 const MODE_KEY = 'howler_active_mode'; // admins only: 'console' | 'client'
 const PREVIEW_KEY = 'howler_admin_preview'; // admins: a previewed client NOT in their linked list
+// Split view: each /split iframe pane is PINNED to one side via its window.name
+// (set on the <iframe> tag — it survives SPA navigation inside the pane). A
+// pinned pane keeps mode switches in React state only and NEVER writes the
+// shared localStorage, or the two panes would fight over the login-wide mode.
+const PANE = typeof window !== 'undefined' && window.name === 'pulse-pane-client' ? 'client'
+  : typeof window !== 'undefined' && window.name === 'pulse-pane-console' ? 'console' : '';
 
 export function ProfileProvider({ children }) {
   const { user, isAdmin, refresh } = useAuth();
@@ -17,8 +23,9 @@ export function ProfileProvider({ children }) {
   // useMemo/useEffect every render (which would defeat their dependency arrays).
   const entities = useMemo(() => user?.entities || [], [user]);
   const [activeId, setActiveId] = useState(() => localStorage.getItem(KEY) || null);
-  // Admins default to the console; clients are always in client mode.
-  const [mode, setMode] = useState(() => (isAdmin ? (localStorage.getItem(MODE_KEY) || 'console') : 'client'));
+  // Admins default to the console; clients are always in client mode. A split
+  // pane boots pinned to its side regardless of the stored mode.
+  const [mode, setMode] = useState(() => (isAdmin ? (PANE || localStorage.getItem(MODE_KEY) || 'console') : 'client'));
   // An admin previewing a client they aren't a member of: we stash {id,name,logo}
   // so the client shell has an identity (header branding, inClientView) even though
   // the entity isn't in their linked `entities`. Server already authorises admins
@@ -47,14 +54,13 @@ export function ProfileProvider({ children }) {
   // role/permissions are fresh — a role change made elsewhere applies without a
   // re-login.
   const setProfile = useCallback((id, entityObj = null) => {
-    localStorage.setItem(KEY, id);
-    localStorage.setItem(MODE_KEY, 'client');
+    if (!PANE) { localStorage.setItem(KEY, id); localStorage.setItem(MODE_KEY, 'client'); }
     if (entityObj && !(user?.entities || []).some((e) => e.id === id)) {
       const p = { id, name: entityObj.name || '', logo: entityObj.logo || '' };
-      localStorage.setItem(PREVIEW_KEY, JSON.stringify(p));
+      if (!PANE) localStorage.setItem(PREVIEW_KEY, JSON.stringify(p));
       setPreviewEntity(p);
     } else {
-      localStorage.removeItem(PREVIEW_KEY);
+      if (!PANE) localStorage.removeItem(PREVIEW_KEY);
       setPreviewEntity(null);
     }
     setActiveId(id);
@@ -63,8 +69,7 @@ export function ProfileProvider({ children }) {
   }, [refresh, user]);
   // Admins: return to the admin console.
   const enterConsole = useCallback(() => {
-    localStorage.setItem(MODE_KEY, 'console');
-    localStorage.removeItem(PREVIEW_KEY);
+    if (!PANE) { localStorage.setItem(MODE_KEY, 'console'); localStorage.removeItem(PREVIEW_KEY); }
     setPreviewEntity(null);
     setMode('console');
     refresh?.();
@@ -83,10 +88,9 @@ export function ProfileProvider({ children }) {
     if (!entities.length) return; // wait for the profile list to load
     entityParamDone.current = true;
     if (entities.some((e) => e.id === want)) {
-      localStorage.setItem(KEY, want);
-      localStorage.setItem(MODE_KEY, 'client');
+      if (!PANE) { localStorage.setItem(KEY, want); localStorage.setItem(MODE_KEY, 'client'); }
       setActiveId(want);
-      setMode('client');
+      setMode(PANE === 'console' ? 'console' : 'client');
     }
     try {
       const u = new URL(window.location.href);
