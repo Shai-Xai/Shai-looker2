@@ -217,7 +217,8 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   const [station, setStation] = useState(''); // '' = all stations; else one station's devices only
   const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
   const [interval, setIntervalMin] = useState(10); // 10-min blocks by default — hour blocks hide short dropouts
-  const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
+  const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report) | 'observed' (Pulse's own offline log)
+  const [obs, setObs] = useState(null); // the observed log, fetched on demand
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const load = async (h, iv, st = station) => {
@@ -232,6 +233,12 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block/station change
   useEffect(() => { load(hours, interval, station); }, [monitorId, hours, interval, station]);
+  useEffect(() => {
+    if (mode !== 'observed') return;
+    setObs(null);
+    fetch(`${base}/monitors/${monitorId}/observed?hours=${hours}`)
+      .then((r) => r.json()).then(setObs).catch((e) => setObs({ error: e.message }));
+  }, [mode, monitorId, hours, base]);
   if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours, interval)}>Retry</button></div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the day timeline from Looker…</div>;
   if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.reason || 'No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.'}</div>;
@@ -284,7 +291,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
             <span style={{ fontSize: 11, color: 'var(--muted)' }}> (no sync in {onlineMin}m)</span>
           </span>
         )}
-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'observed' ? 'each cell = one Pulse check · red = seen OFFLINE at that check — late syncs never repaint this' : mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
         {stations.length > 1 && (
           <select value={station} disabled={busy} onChange={(e) => setStation(e.target.value)}
             style={{ ...input, width: 'auto', maxWidth: 230, padding: '4px 8px', fontSize: 12 }}>
@@ -293,7 +300,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
           </select>
         )}
         <span style={{ flex: 1 }} />
-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts']].map(([k, l]) => (
+        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log']].map(([k, l]) => (
           <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
         ))}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
@@ -311,7 +318,52 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
       {(data.trimmedStart || (typeof hours === 'number' && data.hours < hours)) && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
       {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range, bigger blocks, or pick one station.</div>}
       {(data.devicesTotal || 0) > data.devices.length && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>Showing {data.devices.length} of {data.devicesTotal} devices — pick a station above to see the rest.</div>}
-      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+      {mode === 'observed' ? (
+        !obs ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Reading Pulse's own check history…</div>
+          : obs.error ? <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {obs.error}</div>
+            : !obs.configured ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No observations in this window yet — the log builds from Pulse's own checks (every few minutes) from now on.</div>
+              : (() => {
+                const ticks = obs.ticks || [];
+                const per = Math.max(1, Math.round(ticks.length / 10)); // ~10 time labels
+                const offSets = ticks.map(() => new Set());
+                (obs.devices || []).forEach((d) => d.offAt.forEach((i) => offSets[i] && offSets[i].add(d.device)));
+                const totalNow = ticks.length ? ticks[ticks.length - 1].total : 0;
+                const clean = Math.max(0, totalNow - (obs.devices || []).length);
+                return (
+                  <div style={{ overflowX: 'auto' }}>
+                    <div style={{ display: 'flex', gap: 2, marginLeft: 208, marginBottom: 2 }}>
+                      {ticks.map((t, i) => (
+                        <span key={i} style={{ width: 8, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % per === 0 ? hourLabel(t.at) : ''}</span>
+                      ))}
+                    </div>
+                    {/* Fleet strip: devices ONLINE at each check. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 6 }}>
+                      <span style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>Fleet online</span>
+                      {ticks.map((t, i) => (
+                        <span key={i} title={`${hourLabel(t.at)} — ${t.online} of ${t.total} online`}
+                          style={{ width: 8, height: 16, flexShrink: 0, borderRadius: 2, background: STATUS_COLOR.fresh, opacity: t.total ? Math.max(0.15, t.online / t.total) : 0.15 }} />
+                      ))}
+                    </div>
+                    {(obs.devices || []).map(({ device, offAt }) => {
+                      const offSet = new Set(offAt);
+                      return (
+                        <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+                          <span title={device} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: offSet.has(ticks.length - 1) ? STATUS_COLOR.stale : 'var(--text)' }}>{device}</span>
+                          {ticks.map((t, i) => (
+                            <span key={i} title={`${hourLabel(t.at)} — ${offSet.has(i) ? 'seen OFFLINE at this check' : 'online at this check'}`}
+                              style={{ width: 8, height: 16, flexShrink: 0, borderRadius: 2, background: offSet.has(i) ? STATUS_COLOR.stale : STATUS_COLOR.fresh, opacity: offSet.has(i) ? 1 : 0.35 }} />
+                          ))}
+                        </div>
+                      );
+                    })}
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>
+                      {(obs.devices || []).length ? `${obs.devices.length} device${obs.devices.length === 1 ? '' : 's'} seen offline at least once · ` : ''}
+                      <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{clean}</span> device{clean === 1 ? '' : 's'} online at every check. This log is what Pulse observed — a device that traded offline and synced late stays red here.
+                    </div>
+                  </div>
+                );
+              })()
+      ) : !data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse' }}>
             <thead>
@@ -579,7 +631,13 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
                   {!off.length ? <span style={{ color: STATUS_COLOR.fresh }}>✅ Every linked device has synced within the online window.</span> : groups.map(([stn, devs]) => (
                     <div key={stn} style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4 }}>{stn} <span style={{ color: STATUS_COLOR.stale }}>{devs.length}</span></div>
-                      <div style={{ color: 'var(--muted)' }}>{devs.map((d) => `${d.device} (${Math.round(d.lagMin)}m${d.operator ? ` · ${d.operator}` : ''})`).join(' · ')}</div>
+                      {devs.map((d) => (
+                        <div key={d.device} style={{ display: 'flex', gap: 10, padding: '1px 0', fontVariantNumeric: 'tabular-nums' }}>
+                          <strong style={{ color: STATUS_COLOR.stale, minWidth: 76 }}>{d.device}</strong>
+                          <span style={{ color: 'var(--muted)', minWidth: 78 }}>{Math.round(d.lagMin)}m silent</span>
+                          {d.operator ? <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.operator}</span> : null}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
