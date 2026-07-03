@@ -514,7 +514,7 @@ test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows
   h.setRowsFn(async (b) => { body = b; return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 }]; });
   const t = await h.mod.deviceTimeline(m, 12, 10, 'Bar One');
   assert.ok(body.fields.includes('scans.scanned_at_minute10')); // aggregated in Looker — one row per device+block, not per scan
-  assert.equal(body.filters['scans.station_name'], '"Bar One"'); // quoted = exact station match
+  assert.equal(body.filters['scans.station_name'], 'Bar One'); // plain value — same form as every other filter
   assert.equal(t.station, 'Bar One');
   assert.equal(t.devicesTotal, 1);
   const d1 = t.devices.find((d) => d.device === 'D-1');
@@ -524,6 +524,9 @@ test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows
   await h.mod.deviceTimeline(m, 12, 10);
   assert.ok(body.fields.includes('scans.scanned_at_minute10'));
   assert.equal(body.filters['scans.station_name'], undefined); // no station → whole monitor
+  // Values carrying filter-syntax characters get quoted so they stay literal.
+  await h.mod.deviceTimeline(m, 12, 10, 'Bar, The');
+  assert.equal(body.filters['scans.station_name'], '"Bar, The"');
 });
 
 test('fleet alert: ≥ rosterAlertPct % of devices offline fires once, recovers once', async () => {
