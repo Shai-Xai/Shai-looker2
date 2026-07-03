@@ -1,0 +1,257 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 955e35b..7665c37 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -220 +220,2 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-  const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
++  const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report) | 'observed' (Pulse's own offline log)
++  const [obs, setObs] = useState(null); // the observed log, fetched on demand
+@@ -234,0 +236,6 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
++  useEffect(() => {
++    if (mode !== 'observed') return;
++    setObs(null);
++    fetch(`${base}/monitors/${monitorId}/observed?hours=${hours}`)
++      .then((r) => r.json()).then(setObs).catch((e) => setObs({ error: e.message }));
++  }, [mode, monitorId, hours, base]);
+@@ -287 +294 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
++        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'observed' ? 'each cell = one Pulse check · red = seen OFFLINE at that check — late syncs never repaint this' : mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
+@@ -296 +303 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts']].map(([k, l]) => (
++        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log']].map(([k, l]) => (
+@@ -314 +321,46 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
++      {mode === 'observed' ? (
++        !obs ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Reading Pulse's own check history…</div>
++          : obs.error ? <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {obs.error}</div>
++            : !obs.configured ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No observations in this window yet — the log builds from Pulse's own checks (every few minutes) from now on.</div>
++              : (() => {
++                const ticks = obs.ticks || [];
++                const per = Math.max(1, Math.round(ticks.length / 10)); // ~10 time labels
++                const offSets = ticks.map(() => new Set());
++                (obs.devices || []).forEach((d) => d.offAt.forEach((i) => offSets[i] && offSets[i].add(d.device)));
++                const totalNow = ticks.length ? ticks[ticks.length - 1].total : 0;
++                const clean = Math.max(0, totalNow - (obs.devices || []).length);
++                return (
++                  <div style={{ overflowX: 'auto' }}>
++                    <div style={{ display: 'flex', gap: 2, marginLeft: 208, marginBottom: 2 }}>
++                      {ticks.map((t, i) => (
++                        <span key={i} style={{ width: 8, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % per === 0 ? hourLabel(t.at) : ''}</span>
++                      ))}
++                    </div>
++                    {/* Fleet strip: devices ONLINE at each check. */}
++                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 6 }}>
++                      <span style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>Fleet online</span>
++                      {ticks.map((t, i) => (
++                        <span key={i} title={`${hourLabel(t.at)} — ${t.online} of ${t.total} online`}
++                          style={{ width: 8, height: 16, flexShrink: 0, borderRadius: 2, background: STATUS_COLOR.fresh, opacity: t.total ? Math.max(0.15, t.online / t.total) : 0.15 }} />
++                      ))}
++                    </div>
++                    {(obs.devices || []).map(({ device, offAt }) => {
++                      const offSet = new Set(offAt);
++                      return (
++                        <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
++                          <span title={device} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: offSet.has(ticks.length - 1) ? STATUS_COLOR.stale : 'var(--text)' }}>{device}</span>
++                          {ticks.map((t, i) => (
++                            <span key={i} title={`${hourLabel(t.at)} — ${offSet.has(i) ? 'seen OFFLINE at this check' : 'online at this check'}`}
++                              style={{ width: 8, height: 16, flexShrink: 0, borderRadius: 2, background: offSet.has(i) ? STATUS_COLOR.stale : STATUS_COLOR.fresh, opacity: offSet.has(i) ? 1 : 0.35 }} />
++                          ))}
++                        </div>
++                      );
++                    })}
++                    <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>
++                      {(obs.devices || []).length ? `${obs.devices.length} device${obs.devices.length === 1 ? '' : 's'} seen offline at least once · ` : ''}
++                      <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{clean}</span> device{clean === 1 ? '' : 's'} online at every check. This log is what Pulse observed — a device that traded offline and synced late stays red here.
++                    </div>
++                  </div>
++                );
++              })()
++      ) : !data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+@@ -582 +634,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-                      <div style={{ color: 'var(--muted)' }}>{devs.map((d) => `${d.device} (${Math.round(d.lagMin)}m${d.operator ? ` · ${d.operator}` : ''})`).join(' · ')}</div>
++                      {devs.map((d) => (
++                        <div key={d.device} style={{ display: 'flex', gap: 10, padding: '1px 0', fontVariantNumeric: 'tabular-nums' }}>
++                          <strong style={{ color: STATUS_COLOR.stale, minWidth: 76 }}>{d.device}</strong>
++                          <span style={{ color: 'var(--muted)', minWidth: 78 }}>{Math.round(d.lagMin)}m silent</span>
++                          {d.operator ? <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.operator}</span> : null}
++                        </div>
++                      ))}
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 6835a73..41f2cd8 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -49 +49 @@ Write a SHORT diagnostics verdict an ops person can act on mid-event:
+-Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Call the per-record activity by monitor.unit — "transactions" for bars/vendors, "scans" for gates. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
++Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. observedOfflineWindows (when present) are what Pulse ITSELF saw at check time — the authoritative connectivity record a late-syncing device cannot repaint; where the transaction timeline looks green inside an observed window, the device kept trading offline and synced late — say so. Call the per-record activity by monitor.unit — "transactions" for bars/vendors, "scans" for gates. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
+@@ -64 +64 @@ Write the report in clean Markdown:
+-Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Each station carries a unit ("scans" or "transactions") — use that word for its activity (bars/vendors transact, gates scan). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
++Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Prefer each station's observedOfflineWindows (what Pulse itself saw at check time — never repainted by late syncs) as the connectivity record in §4; a green transaction timeline inside an observed window means the device traded offline and synced late. Each station carries a unit ("scans" or "transactions") — use that word for its activity (bars/vendors transact, gates scan). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
+@@ -152,0 +153,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    CREATE TABLE IF NOT EXISTS data_monitor_obs (
++      monitor_id    TEXT NOT NULL,
++      at            TEXT NOT NULL,               -- when Pulse looked
++      total         INTEGER NOT NULL,
++      online        INTEGER NOT NULL,
++      offline_names TEXT NOT NULL DEFAULT '[]'   -- devices offline AT THAT MOMENT
++    );
++    CREATE INDEX IF NOT EXISTS idx_dmo ON data_monitor_obs(monitor_id, at);
+@@ -504,0 +513,45 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++  // ── the OBSERVED offline log ─────────────────────────────────────────────
++  // Every check writes down what Pulse SAW: who was offline at that moment.
++  // Unlike the transaction timeline, a device that kept trading offline and
++  // synced late can NEVER repaint this — it is the connectivity record.
++  function recordObservation(m, r, at) {
++    try {
++      sql.prepare('INSERT INTO data_monitor_obs (monitor_id, at, total, online, offline_names) VALUES (?,?,?,?,?)')
++        .run(m.id, at, r.total, r.online, JSON.stringify(r.offline.map((d) => d.device)));
++      sql.prepare('DELETE FROM data_monitor_obs WHERE monitor_id=? AND at<?').run(m.id, new Date(Date.now() - 14 * 86400000).toISOString());
++    } catch (e) { console.warn('[data-health] observation write failed', m.id, e.message); }
++  }
++
++  // The log since a moment: per-check online counts, which ticks each device
++  // was offline at, and per-device contiguous offline WINDOWS (worst first).
++  function observedLog(m, sinceIso) {
++    const rows = sql.prepare('SELECT at, total, online, offline_names FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, sinceIso);
++    const ticks = rows.map((r) => ({ at: r.at, total: r.total, online: r.online, offline: parseJson(r.offline_names, []) })).slice(-288);
++    const byDevice = new Map(); // device -> tick indexes it was offline at
++    ticks.forEach((tk, i) => { for (const d of tk.offline) { if (!byDevice.has(d)) byDevice.set(d, []); byDevice.get(d).push(i); } });
++    const windows = [];
++    for (const [device, idx] of byDevice) {
++      let s0 = idx[0];
++      for (let j = 1; j <= idx.length; j++) {
++        if (j === idx.length || idx[j] !== idx[j - 1] + 1) {
++          const last = idx[j - 1];
++          windows.push({ device, fromUTC: ticks[s0].at.slice(11, 16), toUTC: last === ticks.length - 1 ? 'now' : ticks[last].at.slice(11, 16), checks: last - s0 + 1 });
++          if (j < idx.length) s0 = idx[j];
++        }
++      }
++    }
++    windows.sort((a, b) => b.checks - a.checks);
++    return {
++      configured: ticks.length > 0,
++      ticks: ticks.map((t) => ({ at: t.at, online: t.online, total: t.total })),
++      devices: [...byDevice.entries()].map(([device, idx]) => ({ device, offAt: idx })).sort((a, b) => b.offAt.length - a.offAt.length).slice(0, 200),
++      windows: windows.slice(0, 150),
++    };
++  }
++  const obsSinceFor = (m, hours) => {
++    const a = String(hours || 'start') === 'start' ? rosterAnchor(m) : null;
++    if (a) return a.toISOString();
++    const h = Math.max(1, Math.min(72, Math.round(Number(hours) || 12)));
++    return new Date(Date.now() - h * 3600000).toISOString();
++  };
++
+@@ -566 +619,16 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
++    // When nothing is memoized yet, also ask the explore for ITS OWN count-ish
++    // measures on the time field's view — the guessed names can exist yet count
++    // another view's rows, and custom (dynamic) measures may be disallowed for
++    // the API user entirely. A real measure from the catalogue beats both.
++    let probed = [];
++    if (!countModeByMonitor.has(m.id)) {
++      try {
++        const ef = await looker.getExploreFields(m.model, m.view);
++        const tv = String(m.timeField).split('.')[0];
++        probed = (ef.measures || [])
++          .map((x) => (x && x.name) || x)
++          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count/i.test(n))
++          .slice(0, 3);
++      } catch (e) { void e; }
++    }
++    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), ...probed, 'distinct', 'distinct2', 'none'];
+@@ -568 +636,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const fieldFor = { native: nativeField, native2: viewField, distinct: CNT_FIELD };
++    // A cand containing '.' IS the measure field (a probed catalogue measure).
++    const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
+@@ -575 +644 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
++        if (cand === 'native' || cand === 'native2' || cand.includes('.')) body.fields = [...body.fields, fieldFor(cand)];
+@@ -587 +656 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-          const cTry = fieldFor[cand] || CNT_FIELD;
++          const cTry = fieldFor(cand);
+@@ -602 +671 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const cKey = fieldFor[mode] || CNT_FIELD;
++    const cKey = mode === 'none' ? CNT_FIELD : fieldFor(mode);
+@@ -650 +719 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
++      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' || mode.includes('.') ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
+@@ -828,0 +898 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++        recordObservation(m, r, ts); // the connectivity record — see observedLog()
+@@ -858,0 +929,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++        // The tile day-graph reads the OBSERVED log once it has any history —
++        // what Pulse saw at each check, which a late sync can never repaint.
++        // The transaction-based series above stays as the fallback (fresh DB).
++        try {
++          const obs = sql.prepare('SELECT at, online FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, r.startAt || new Date(nowMs - 12 * 3600000).toISOString());
++          if (obs.length >= 3) coverage = obs.map((o) => ({ t: o.at.slice(11, 16), n: o.online })).slice(-288);
++        } catch (e) { console.warn('[data-health] observed coverage failed', m.id, e.message); }
+@@ -1057,0 +1135,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++  // The OBSERVED offline log (no live query — Pulse's own check history).
++  app.get('/api/admin/data-health/monitors/:id/observed', auth.requireAdmin, (req, res) => {
++    if (!enabled()) return off(res);
++    const m = monitorById(req.params.id);
++    if (!m) return res.status(404).json({ error: 'Monitor not found' });
++    res.json(observedLog(m, obsSinceFor(m, req.query.hours)));
++  });
++
+@@ -1118,0 +1204,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++      // What Pulse ITSELF saw at check time — never repainted by late syncs.
++      const ob = observedLog(m, obsSinceFor(m, 'start'));
++      if (ob.configured) p.observedOfflineWindows = ob.windows.slice(0, 100);
+@@ -1210,0 +1299 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    observed: async (req, m) => observedLog(m, obsSinceFor(m, req.query.hours)),
+@@ -1276 +1365 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster, deviceTimeline, rosterAnchor, healthSummary, diagnosticsPayload, diagnose, eventReport };
++  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster, deviceTimeline, rosterAnchor, observedLog, obsSinceFor, healthSummary, diagnosticsPayload, diagnose, eventReport };
+diff --git a/server/owlTools.js b/server/owlTools.js
+index b743af2..f1ecaca 100644
+--- a/server/owlTools.js
++++ b/server/owlTools.js
+@@ -1052,0 +1053,10 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
++      if (q === 'observed') {
++        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no offline log.`);
++        const ob = api.observedLog(m, api.obsSinceFor(m, args.hours || 'start'));
++        return {
++          ok: true, monitor: m.name,
++          note: 'The OBSERVED log is what Pulse itself saw at each check — a device that traded offline and synced late can NEVER repaint it. Treat it as the authoritative connectivity record; times are UTC — convert to the client\'s local time.',
++          onlineSeries: ob.ticks.map((t) => ({ atUTC: t.at.slice(11, 16), online: t.online, total: t.total })),
++          offlineWindows: ob.windows.slice(0, 80),
++        };
++      }
+@@ -1065 +1075 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
+-        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'latest'], description: 'What to fetch (default overview).' },
++        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index a21eff6..a227c53 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -13 +13 @@ function fakeApp() { return { get() {}, post() {}, put() {}, delete() {} }; }
+-function mountHealth() {
++function mountHealth(over = {}) {
+@@ -28 +28 @@ function mountHealth() {
+-    looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
++    looker: over.looker || { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
+@@ -455,0 +456,23 @@ test('deviceTimeline: station fallback filters the whole feed by the labels map'
++test('deviceTimeline: probes the explore catalogue for a real count measure', async () => {
++  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.tx_count' }, { name: 'other.count' }] }) } });
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
++  const bodies = [];
++  h.setRowsFn(async (b) => {
++    bodies.push(b);
++    // The guessed native measure exists but counts another view — zero-only.
++    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
++    if (b.fields.includes('scans.tx_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.tx_count': 41 }];
++    throw new Error('unexpected read');
++  });
++  const t = await h.mod.deviceTimeline(m, 12);
++  assert.equal(t.countBasis, 'native');
++  assert.equal(t.devices[0].counts[11], 41); // the catalogue measure carries the real volume
++  assert.equal(t.grandTotal, 41);
++  // Remembered — the next read goes straight to the probed measure.
++  bodies.length = 0;
++  await h.mod.deviceTimeline(m, 12);
++  assert.equal(bodies.length, 1);
++  assert.ok(bodies[0].fields.includes('scans.tx_count'));
++});
++
