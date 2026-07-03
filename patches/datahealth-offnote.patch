@@ -1,0 +1,7 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 7665c37..dd7b530 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -627 +627 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}</span>
++                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}{m.rosterSnapshot && m.rosterSnapshot.offline !== off.length ? ` · the tile's ${m.rosterSnapshot.offline} was the picture at the last check (${ago(m.lastCheckedAt)}) — devices have crossed the threshold since` : ''}</span>
