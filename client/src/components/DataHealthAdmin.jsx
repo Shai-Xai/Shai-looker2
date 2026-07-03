@@ -238,6 +238,35 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
   );
 }
 
+// Field pickers get one <optgroup> per Looker view, labelled with the fields'
+// shared label prefix ("Check-Ins", "Closed Loop Sales", …) which is stripped
+// from each option — so the dropdown reads Date Time / Created At Hour instead
+// of a flat wall of forty near-identical names. timeFirst floats full-timestamp
+// variants to the top of each group (they're the recommended pick).
+function groupFields(list, { timeFirst = false } = {}) {
+  const byView = new Map();
+  for (const d of list || []) {
+    const v = String(d.name).split('.')[0];
+    if (!byView.has(v)) byView.set(v, []);
+    byView.get(v).push(d);
+  }
+  const out = [];
+  for (const [v, arr] of byView) {
+    let prefix = arr.length > 1 ? String(arr[0].label || '') : '';
+    for (const d of arr) {
+      const l = String(d.label || '');
+      let i = 0; while (i < prefix.length && i < l.length && prefix[i] === l[i]) i++;
+      prefix = prefix.slice(0, i);
+    }
+    prefix = prefix.replace(/[^ ]*$/, '').trim(); // never cut mid-word
+    const title = prefix.length >= 3 ? prefix : v.replace(/^(cashless|core)_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const items = arr.map((d) => ({ ...d, short: (prefix.length >= 3 && String(d.label).startsWith(prefix) && String(d.label).slice(prefix.length).trim()) || d.label }));
+    items.sort((a, b) => (timeFirst ? (/time/i.test(String(b.type || '')) ? 1 : 0) - (/time/i.test(String(a.type || '')) ? 1 : 0) : 0) || String(a.short).localeCompare(String(b.short)));
+    out.push([title, items]);
+  }
+  return out.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+}
+
 // Create / edit form. Explore + field pickers come from Looker metadata; filters
 // let a monitor watch one event's feed (e.g. Event Name = this weekend's festival).
 function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
@@ -329,7 +358,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               <>
                 <select style={input} value={f.timeField} onChange={(e) => set('timeField', e.target.value)}>
                   <option value="">— pick the record time —</option>
-                  {(fields.timeFields || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}{/time/i.test(d.type || '') ? '' : ' (day-level)'}</option>)}
+                  {groupFields(fields.timeFields, { timeFirst: true }).map(([g, items]) => (
+                    <optgroup key={g} label={g}>
+                      {items.map((d) => <option key={d.name} value={d.name}>{d.short}{/time/i.test(d.type || '') ? '' : ' (day-level)'}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
                 <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the finest granularity available (a <em>Time</em> variant, not <em>Date</em>) — a day-level field can read as up to 24h behind.</span>
               </>
@@ -340,7 +373,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
             {!fields ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }} /> : (
               <select style={input} value={f.stationField} onChange={(e) => set('stationField', e.target.value)}>
                 <option value="">Whole feed (no split)</option>
-                {(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || '')).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+                {groupFields((fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || ''))).map(([g, items]) => (
+                  <optgroup key={g} label={g}>
+                    {items.map((d) => <option key={d.name} value={d.name}>{d.short}</option>)}
+                  </optgroup>
+                ))}
               </select>
             )}
           </div>
@@ -371,7 +408,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               <select style={{ ...input, flex: 1 }} value={k}
                 onChange={(e) => { const nf = e.target.value; setFilterRows((rows) => rows.map((r, j) => (j === i ? [nf, r[1]] : r))); loadDimValues(nf); }}>
                 <option value="">— dimension —</option>
-                {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
+                {groupFields(fields.dimensions).map(([g, items]) => (
+                  <optgroup key={g} label={g}>
+                    {items.map((d) => <option key={d.name} value={d.name}>{d.short}</option>)}
+                  </optgroup>
+                ))}
               </select>
               {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
               <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
