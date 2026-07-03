@@ -609,6 +609,24 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
+    // Some explore join paths return NOTHING when the station filter rides the
+    // count read (the join that resolves the station drops the sales rows).
+    // Fall back: read the whole feed and keep the devices whose latest station
+    // — from the labels lookup, which joins the same pair successfully — is
+    // the one asked for.
+    if (st && !devices.length) {
+      const info = await deviceDetails(m, timeFilter);
+      if (info && [...info.values()].some((v) => v.station === st)) {
+        const whole = await deviceTimeline(m, hours, interval, '', false);
+        const keep = whole.devices.filter((d) => (info.get(d.device) || {}).station === st);
+        if (keep.length) {
+          labelDevices(keep, info);
+          const totals = Array(whole.buckets.length).fill(0);
+          for (const d of keep) d.counts.forEach((c, i) => { totals[i] += c; });
+          return { ...whole, station: st, devices: keep, devicesTotal: keep.length, bucketTotals: totals, grandTotal: totals.reduce((a, b) => a + b, 0) };
+        }
+      }
+    }
     if (withInfo && devices.length) labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
