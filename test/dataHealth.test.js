@@ -341,6 +341,35 @@ test('fieldValues: distinct dimension values, deduped and scoped', async () => {
   assert.equal(h.getScopedUser().role, 'admin'); // no entity → platform read
 });
 
+test('deviceRoster: linked vs online vs offline, learned from the baseline window', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterBaselineMin: 1440, rosterOnlineMin: 30 });
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(2) },
+      { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(500) }, // older row, same device
+      { 'scans.device_id': 'D-102', 'scans.scanned_at': minsAgo(45) },  // silent past 30m → offline
+      { 'scans.device_id': 'D-103', 'scans.scanned_at': minsAgo(700) }, // long silent → offline
+      { 'scans.device_id': '', 'scans.scanned_at': minsAgo(1) },        // blank device ignored
+    ];
+  });
+  const r = await h.mod.deviceRoster(m);
+  assert.equal(r.configured, true);
+  assert.equal(r.total, 3);
+  assert.equal(r.online, 1);
+  assert.deepEqual(r.offline.map((d) => d.device), ['D-103', 'D-102']); // longest silent first
+  // The baseline window is enforced in Looker itself, newest rows first.
+  assert.equal(body.filters['scans.scanned_at'], 'last 1440 minutes');
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at']);
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+
+  // No roster field configured → explicitly unconfigured, no query.
+  const plain = makeMonitor(h, { name: 'No roster' });
+  assert.deepEqual(await h.mod.deviceRoster(plain), { configured: false });
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
