@@ -297,10 +297,13 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
           <div>
             <span style={label}>Timestamp field (what “new data” means)</span>
             {!fields ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading fields…</div> : (
-              <select style={input} value={f.timeField} onChange={(e) => set('timeField', e.target.value)}>
-                <option value="">— pick the record time —</option>
-                {(fields.timeFields || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
-              </select>
+              <>
+                <select style={input} value={f.timeField} onChange={(e) => set('timeField', e.target.value)}>
+                  <option value="">— pick the record time —</option>
+                  {(fields.timeFields || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}{/time/i.test(d.type || '') ? '' : ' (day-level)'}</option>)}
+                </select>
+                <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the finest granularity available (a <em>Time</em> variant, not <em>Date</em>) — a day-level field can read as up to 24h behind.</span>
+              </>
             )}
           </div>
           <div>
