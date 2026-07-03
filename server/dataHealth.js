@@ -295,6 +295,19 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     });
   }
 
+  // Distinct values of a dimension (scoped) — feeds the editor's linked filter
+  // dropdowns so users pick a real station/event/type instead of typing blind.
+  async function fieldValues({ model, view, field, entityId, suiteId }) {
+    const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
+    const rows = await runScoped(mLike, { model: mLike.model, view: mLike.view, fields: [String(field)], filters: {}, sorts: [String(field)], limit: '500', query_timezone: 'UTC' });
+    const out = [];
+    for (const r of rows) {
+      const v = r[String(field)];
+      if (v != null && v !== '' && !out.includes(String(v))) { out.push(String(v)); if (out.length >= 200) break; }
+    }
+    return out;
+  }
+
   function reduceRows(m, rows, timeKey) {
     const seen = new Map(); // station -> latest Date
     for (const r of rows) {
@@ -574,6 +587,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     res.json({ models: _models });
   }));
 
+  // Distinct values of one dimension, scoped like the monitor would be — powers
+  // the editor's linked value dropdowns (e.g. pick a real station name).
+  app.post('/api/admin/data-health/field-values', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const { model, view, field, entityId, suiteId } = req.body || {};
+    if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
+    res.json({ values: await fieldValues({ model, view, field, entityId, suiteId }) });
+  }));
+
   const _fieldCache = new Map();
   app.get('/api/admin/data-health/fields', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
@@ -593,7 +615,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }));
 
   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords };
+  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues };
 }
 
 module.exports = { mount, AREAS, CHANNELS };

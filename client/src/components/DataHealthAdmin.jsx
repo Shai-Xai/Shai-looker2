@@ -224,6 +224,8 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
         <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
         <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
         <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
+        <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
+          onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
         <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
           {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
         </button>
@@ -248,10 +250,24 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [fields, setFields] = useState(null);
   const [filterRows, setFilterRows] = useState(() => Object.entries((initial && initial.filters) || {}));
   const [detailRows, setDetailRows] = useState(() => (initial && initial.detailFields) || []);
+  const [dimValues, setDimValues] = useState({}); // field -> 'loading' | [values] (linked filter dropdowns)
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
   const isMobile = useIsMobile();
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // Linked values: once a filter dimension is picked, fetch its real (scoped)
+  // distinct values so the value box offers them as suggestions — live Looker
+  // read, so only on demand and cached per field for this editor session.
+  const loadDimValues = (field) => {
+    if (!field || dimValues[field] != null || !f.model || !f.view) return;
+    setDimValues((p) => ({ ...p, [field]: 'loading' }));
+    fetch('/api/admin/data-health/field-values', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: f.model, view: f.view, field, entityId: f.entityId, suiteId: f.suiteId }),
+    }).then((r) => r.json()).then((d) => setDimValues((p) => ({ ...p, [field]: Array.isArray(d.values) ? d.values : [] })))
+      .catch(() => setDimValues((p) => ({ ...p, [field]: [] })));
+  };
 
   useEffect(() => { api.dataHealthExplores().then((r) => setModels(r.models || [])).catch((e) => setErr(e.message)); }, []);
   useEffect(() => {
@@ -350,11 +366,19 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
           <span style={label}>Filters (optional — e.g. one event only)</span>
           {filterRows.map(([k, v], i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-              <select style={{ ...input, flex: 1 }} value={k} onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}>
+              <select style={{ ...input, flex: 1 }} value={k}
+                onChange={(e) => { const nf = e.target.value; setFilterRows((rows) => rows.map((r, j) => (j === i ? [nf, r[1]] : r))); loadDimValues(nf); }}>
                 <option value="">— dimension —</option>
                 {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.label}</option>)}
               </select>
-              <input style={{ ...input, flex: 1 }} value={v} placeholder="value" onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+              {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
+              <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
+                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value' : 'value'}
+                onFocus={() => loadDimValues(k)}
+                onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
+              <datalist id={`dh-vals-${i}`}>
+                {(Array.isArray(dimValues[k]) ? dimValues[k] : []).map((val) => <option key={val} value={val} />)}
+              </datalist>
               <button style={ghostBtn} onClick={() => setFilterRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
