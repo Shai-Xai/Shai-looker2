@@ -391,7 +391,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   const LAST_FIELD = 'data_health_last';
   const rosterAggByMonitor = new Map(); // monitor id -> does the dynamic MAX read work?
 
-  async function deviceRoster(m) {
+  async function deviceRoster(m, withInfo = false) {
     if (!m.rosterField) return { configured: false };
     // Constrain the roster in Looker itself: the daily/fixed "since doors opened"
     // anchor when set (queries run in UTC), else the rolling baseline window.
@@ -433,6 +433,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       .map(([device, ts]) => ({ device, lagMin: Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 }))
       .sort((a, b) => b.lagMin - a.lagMin);
     const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
+    if (withInfo) labelDevices(offline, await deviceDetails(m, timeFilter));
     return {
       configured: true,
       baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
@@ -441,6 +442,47 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       truncated: !aggRead && rows.length >= 5000, // raw fallback on a busy window — idle devices may be under-counted
     };
   }
+
+  // Which detail field names an operator/staff member (for device labelling).
+  const OPERATOR_RE = /(handler|operator|staff|cashier)/i;
+
+  // device → its latest station / operator, in one aggregated read. Kept as a
+  // SEPARATE query on purpose: joining the extra views must never distort the
+  // count reads, so a failure here only costs labels (returns null).
+  async function deviceDetails(m, timeFilter, stationExpr = '') {
+    const ex = [];
+    if (m.stationField) ex.push(m.stationField);
+    const opField = (m.detailFields || []).find((f) => f && OPERATOR_RE.test(f) && f !== m.rosterField && f !== m.timeField && f !== m.stationField);
+    if (opField) ex.push(opField);
+    if (!m.rosterField || !ex.length) return null;
+    try {
+      const b = { ...baseBody(m), fields: [m.rosterField, ...ex, LAST_FIELD], sorts: [`${LAST_FIELD} desc`], limit: '5000' };
+      b.filters[m.timeField] = timeFilter;
+      if (stationExpr && m.stationField) b.filters[m.stationField] = stationExpr;
+      b.dynamic_fields = JSON.stringify([{ measure: LAST_FIELD, based_on: m.timeField, type: 'max' }]);
+      const rows = await runScoped(m, b);
+      const map = new Map();
+      for (const r of rows) {
+        const d = String(r[m.rosterField] ?? '').trim();
+        const ts = parseTs(r[LAST_FIELD]);
+        if (!d || !ts) continue;
+        const prev = map.get(d);
+        if (!prev || ts > prev.ts) map.set(d, { ts, station: m.stationField ? String(r[m.stationField] ?? '').trim() : '', operator: opField ? String(r[opField] ?? '').trim() : '' });
+      }
+      return map;
+    } catch (e) { void e; return null; }
+  }
+
+  // Merge station/operator labels onto device entries (mutates in place).
+  const labelDevices = (list, info) => {
+    if (!info) return;
+    for (const d of list) {
+      const i = info.get(d.device);
+      if (!i) continue;
+      if (i.station) d.station = i.station;
+      if (i.operator) d.operator = i.operator;
+    }
+  };
 
   // Block sizes the timeline can bucket by, in minutes.
   const TIMELINE_INTERVALS = [5, 10, 20, 30, 60];
@@ -460,7 +502,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // created_at_hour) so Looker aggregates to one row per (device, hour) — a
   // whole busy day fits. Finer blocks read the raw time dimension and bucket
   // here (5000-row cap → `truncated` warns when a very busy window overflows).
-  async function deviceTimeline(m, hours = 24, interval = 60, station = '') {
+  async function deviceTimeline(m, hours = 24, interval = 60, station = '', withInfo = false) {
     if (!m.rosterField) return { configured: false };
     // Looker dimension groups name every timeframe `${group}_${timeframe}` —
     // swap the picked timeframe for `_hour` (or append it when the picked field
@@ -567,6 +609,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
+    if (withInfo && devices.length) labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
@@ -958,7 +1001,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json(await deviceRoster(m));
+    res.json(await deviceRoster(m, true));
   }));
 
   // The per-device day timeline (live Looker read, opened on demand).
@@ -966,7 +1009,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''));
+    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || '', true));
   }));
 
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
@@ -1013,10 +1056,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 20').all(m.id),
     };
     if (m.rosterField) {
-      try { const r = await deviceRoster(m); p.roster = { ...r, offline: r.offline.slice(0, 40) }; }
+      try { const r = await deviceRoster(m, true); p.roster = { ...r, offline: r.offline.slice(0, 40) }; }
       catch (e) { p.rosterError = String(e.message || e).slice(0, 200); }
       try {
-        const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
+        const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10, '', true);
         if (t.configured) {
           p.timeline = {
             intervalMin: t.intervalMin, startAt: t.startAt || '', countBasis: t.countBasis,
@@ -1026,7 +1069,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             // time block, how many devices sent data. Times are UTC HH:MM.
             coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
             devicesSeen: t.devices.length,
-            devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+            devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
           };
         }
       } catch (e) { p.timelineError = String(e.message || e).slice(0, 200); }
@@ -1121,8 +1164,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   });
   const MY_READS = {
     latest: async (req, m) => ({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) }),
-    roster: async (_req, m) => deviceRoster(m),
-    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''),
+    roster: async (_req, m) => deviceRoster(m, true),
+    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || '', true),
     history: async (_req, m) => ({
       checks: sql.prepare('SELECT at, ok, stations, fresh, warn, stale, max_lag_min, latest_event_at, error FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 200').all(m.id),
       events: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 200').all(m.id),
