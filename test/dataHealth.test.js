@@ -460,6 +460,34 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   assert.equal(capped.buckets.length, 288);
 });
 
+test('check() stores a roster snapshot for collapsed cards', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.device_id')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at': minsAgo(5) },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at': minsAgo(120) }, // silent past the online window
+      ];
+    }
+    return [feedRow('Gate B', 3)];
+  });
+  await h.mod.check(m);
+  const snap = h.mod.monitorById(m.id).rosterSnapshot;
+  assert.equal(snap.total, 2);
+  assert.equal(snap.online, 1);
+  assert.equal(snap.offline, 1);
+  assert.equal(snap.onlineMin, 30);
+  // A roster read failure must not fail the check or wipe the last snapshot.
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.device_id')) throw new Error('roster boom');
+    return [feedRow('Gate B', 2)];
+  });
+  const r = await h.mod.check(h.mod.monitorById(m.id));
+  assert.equal(r.ok, true);
+  assert.equal(h.mod.monitorById(m.id).rosterSnapshot.total, 2);
+});
+
 test('deviceTimeline: hours="start" anchors the window to the roster start time', async () => {
   const h = mountHealth();
   // Once-off start 5 hours ago (stable regardless of wall clock, unlike a daily HH:MM).
