@@ -725,6 +725,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **Reliable check-in numbers from the Owl** 🧪: the Owl now answers
+  check-in/scanning questions with the **same recipe Inventive uses** — the dedicated
+  check-in count grouped by station, keyed on the cashless data's own event field (enabled
+  automatically) — with an explicit steer never to count sales transactions at check-in
+  stations as "check-ins". Per-gate numbers now match the source reports.
 - **2026-07-03** — **Custom sending domain** ✅ (Admin → client → Settings + client Settings →
   Email): clients can send campaigns/digests from their own domain (e.g. events@mail.brand.com).
   Register the domain, hand the DNS records to IT, verify — until verified, sends safely use the

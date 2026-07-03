@@ -122,7 +122,18 @@ function effective(db) {
     const ds = raw.filter((f) => f.kind !== 'measure').map((f) => ({ name: f.name, label: String(f.label || f.name), type: coarseType(f.type), group: 'Custom', filter: true, aka: [] }));
     if (!ms.length) return null; // need at least one measure to be queryable
     const dateDim = ds.find((d) => d.type === 'date');
-    return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: [] };
+    // Usage notes generated from the ENABLED fields — the reliable check-in recipe
+    // (mirrors how Inventive queries this explore): the dedicated check-in count,
+    // grouped by its station, keyed on the explore's OWN event-name field. Without
+    // this steer the model tends to count SALES rows at check-in stations instead.
+    const exNotes = [];
+    const ciCount = ms.find((m) => /check_?ins?\./i.test(m.name) && /\.count$/i.test(m.name));
+    if (ciCount) {
+      const station = ds.find((d) => /check_?ins?\./i.test(d.name) && /station/i.test(d.name));
+      const evName = ds.find((d) => d.name === `${e.view}.name`);
+      exNotes.push(`CHECK-INS / attendance / scans / entries: ALWAYS use the measure ${ciCount.name}${station ? `, grouped by ${station.name} for per-gate/per-station numbers` : ''}${evName ? `; the event name on this data is ${evName.name} (NOT core_events.name)` : ''}. NEVER answer check-in questions from sales/transaction rows or a sales station category — those are payments, not scans.`);
+    }
+    return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: exNotes };
   }).filter(Boolean);
   // NB: no global "you also have these sources" note here — each extra explore's tool
   // carries its own routing/combine guidance in its schema description, so a client
@@ -280,6 +291,35 @@ async function seedCheckinExplore(db, getExploreFields) {
   return { ok: true, registered };
 }
 
+// One-shot: enable the cashless explore's OWN event-name dimension
+// (`<view>.name`, e.g. cashless_combine_data.name). Inventive's reliable check-in
+// recipe groups/filters by THIS field — core_events.name is not how that explore
+// names events — but its view prefix is outside the families seedCashlessFields
+// targets, so it's never picked up there. Adds only this one dimension; admin
+// unticks stay respected.
+const EVENTNAME_SEED_FLAG = 'owl_catalogue_cashless_eventname_seeded';
+async function seedCashlessEventName(db, getExploreFields) {
+  if (db.getSetting(EVENTNAME_SEED_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+  const target = readExplores(db).find((e) => /cashless/i.test(e.view));
+  if (!target) return { ok: false, skipped: 'no cashless explore registered' };
+  let f;
+  try { f = (await getExploreFields(target.model, target.view)) || {}; }
+  catch (e) { return { ok: false, skipped: `looker unreachable: ${e.message}` }; } // no flag → retried next boot
+  const wanted = `${target.view}.name`;
+  const dim = (f.dimensions || []).find((x) => x.name === wanted);
+  const key = keyOf(target.model, target.view);
+  const map = readExpFields(db);
+  const current = normalizeExpFields(map[key]);
+  let added = 0;
+  if (dim && !current.some((x) => x.name === wanted)) {
+    map[key] = [...current, { name: wanted, label: dim.label_short || dim.label || 'Event Name', kind: 'dimension', type: dim.type }];
+    db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
+    added = 1;
+  }
+  db.setSetting(EVENTNAME_SEED_FLAG, new Date().toISOString());
+  return { ok: true, explore: key, added };
+}
+
 // Register / unregister an EXTRA explore (the primary can't be removed).
 function registerExplore(db, { model, view, label }) {
   if (!model || !view || isPrimary(model, view)) return { ok: false, error: 'That explore is already available.' };
@@ -344,13 +384,17 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
     catch (e) { res.status(500).json({ error: 'Could not save the catalogue selection.' }); }
   });
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
-  // Fire-and-forget, SEQUENTIAL (both write the same field-selection setting):
-  // enrich the cashless catalogue, then register any dashboard-proven check-in explore.
+  // Fire-and-forget, SEQUENTIAL (all write the same field-selection setting):
+  // enrich the cashless catalogue, add its event-name dimension (the field
+  // Inventive's check-in queries key on), then register any dashboard-proven
+  // dedicated check-in explore.
   seedCashlessFields(db, getExploreFields)
     .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless field seed:', JSON.stringify(r)); })
+    .then(() => seedCashlessEventName(db, getExploreFields))
+    .then((r) => { if (r && r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless event-name seed:', JSON.stringify(r)); })
     .then(() => seedCheckinExplore(db, getExploreFields))
-    .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in explore seed:', JSON.stringify(r)); })
+    .then((r) => { if (r && r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in explore seed:', JSON.stringify(r)); })
     .catch((e) => console.error('[owlCatalogue] catalogue seed failed:', e.message));
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore, seedCashlessEventName };
