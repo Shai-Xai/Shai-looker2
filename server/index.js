@@ -135,7 +135,7 @@ socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
 const push = require('./push');
-push.mount(app, { db, auth });
+push.mount(app, { db, auth }); require('./reportingTz').mount(app, { db, auth }); // per-client reporting timezone (dual-surface) — makes relative date filters ("today") resolve on the client's local day
 // Owl auto-ingest — settlements/invoices that arrive by CC-the-Owl email
 // (disposable module; no tables/routes of its own). Triggered by the os inbound
 // hook below. Safe by default: does nothing unless the sender is on the allowlist
