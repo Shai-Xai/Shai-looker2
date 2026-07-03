@@ -491,9 +491,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const timeFilter = anchor
       ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${h} hours`;
-    // Optional station narrowing (quoted = exact match) — the per-station view
-    // of a monitor that spans many bars/gates.
+    // Optional station narrowing — the per-station view of a monitor that
+    // spans many bars/gates. Plain value (the form every other filter in this
+    // module uses); quoted only when the value carries filter-syntax chars
+    // (comma = OR, % and _ = wildcards, leading - = NOT).
     const st = String(station || '').trim();
+    const stExpr = /[,%_^"]|^-/.test(st) ? `"${st.replace(/"/g, '')}"` : st;
     // Count-measure candidates, in order: the TIME FIELD's own view's count
     // (right on combined explores, where m.view is the explore name and the
     // real measure is e.g. cashless_check_ins.count), then the explore-name
@@ -510,7 +513,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       for (const cand of modes) {
         const body = { ...baseBody(m), sorts: [`${bf} desc`], limit: '20000', fields: [m.rosterField, bf] };
         body.filters[m.timeField] = timeFilter;
-        if (st && m.stationField) body.filters[m.stationField] = `"${st.replace(/"/g, '')}"`;
+        if (st && m.stationField) body.filters[m.stationField] = stExpr;
         if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
         if (cand === 'distinct') {
           body.fields = [...body.fields, CNT_FIELD];
