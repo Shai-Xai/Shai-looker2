@@ -17,6 +17,10 @@ function mountHealth() {
   let scopeOk = true;
   const announced = [];         // OS-spine (client inbox) deliveries
   const opsAlerts = [];         // internal ops Slack deliveries
+  const testEmails = [];        // test-mode direct emails
+  // Test mode defaults ON in the module (trial phase); pin it OFF here so the
+  // live-delivery tests exercise the real fan-out. The test-mode test flips it.
+  db.setSetting('data_health_test_mode', '0');
   const mod = require('../server/dataHealth').mount(fakeApp(), {
     db,
     auth: { requireAdmin: (_req, _res, next) => next && next() },
@@ -25,9 +29,10 @@ function mountHealth() {
     applyScope: async (_body, user) => { scopedUser = user; return scopeOk; },
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
     ops: { alert: (kind, msg) => opsAlerts.push({ kind, msg }) },
+    mailer: { send: async (msg) => { testEmails.push(msg); return { ok: true }; } },
   });
   return {
-    mod, sql, announced, opsAlerts,
+    mod, sql, announced, opsAlerts, testEmails,
     setRows: (r) => { rows = r; },
     setScopeOk: (v) => { scopeOk = v; },
     getScopedUser: () => scopedUser,
@@ -184,6 +189,34 @@ test('a failed pull is logged as a health signal, and fail-closed scope never re
   // The error event fires once, not every failing tick.
   await h.mod.check(h.mod.monitorById(m.id));
   assert.equal(eventKinds(h, m.id).filter((k) => k === 'error').length, 1);
+});
+
+test('test mode routes every alert ONLY to the test address (ops + client muted)', async () => {
+  const h = mountHealth();
+  db.setSetting('data_health_test_mode', '1');
+  db.setSetting('data_health_test_email', 'shai@test.local');
+  try {
+    const m = makeMonitor(h, { name: 'TM', entityId: 'entX', suiteId: 'sX' });
+    h.setRows([feedRow('Gate A', 90)]); // straight to stale
+    await h.mod.check(m);
+    assert.equal(h.opsAlerts.length, 0);      // ops Slack muted
+    assert.equal(h.announced.length, 0);      // client team muted (despite entityId)
+    assert.equal(h.testEmails.length, 1);     // only the test address hears it
+    assert.equal(h.testEmails[0].to, 'shai@test.local');
+    assert.match(h.testEmails[0].subject, /^\[TEST\] /);
+    // The event history records where the alert actually went.
+    const ev = h.sql.prepare("SELECT message FROM data_monitor_events WHERE monitor_id=? AND kind='alert'").get(m.id);
+    assert.match(ev.message, /test-email:shai@test\.local/);
+
+    // Recovery notice honours test mode too.
+    h.setRows([feedRow('Gate A', 1)]);
+    await h.mod.check(h.mod.monitorById(m.id));
+    assert.equal(h.testEmails.length, 2);
+    assert.equal(h.opsAlerts.length, 0);
+    assert.equal(h.announced.length, 0);
+  } finally {
+    db.setSetting('data_health_test_mode', '0');
+  }
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {
