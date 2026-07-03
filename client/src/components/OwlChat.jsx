@@ -226,13 +226,14 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setBusy(true);
     const ac = new AbortController(); // powers the ⏹ Stop button
     abortRef.current = ac;
+    liveTidRef.current = threadId || null; // refreshed by onThread as soon as the server names the thread
     const appendToOwl = (delta) => setMessages((m) => {
       const next = m.slice();
       for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], text: next[i].text + delta }; break; } }
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal }, appendToOwl, setStatus);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -242,14 +243,52 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       if (fu && fu.length) setFollowups(fu);
     } catch (e) {
       if (e && (e.name === 'AbortError' || ac.signal.aborted)) appendToOwl('⏹ Stopped.');
-      else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
+      else if (liveTidRef.current) {
+        // The STREAM died (navigated away / phone locked / flaky network) but the
+        // server keeps working and saves the answer to the thread — recover it
+        // instead of failing (the "loading failed after switching screens" bug).
+        setStatus('Connection dropped — still working…');
+        await recoverAnswer(liveTidRef.current);
+      } else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
       abortRef.current = null;
       setBusy(false);
       setStatus('');
     }
   }
-  const stop = () => { try { abortRef.current && abortRef.current.abort(); } catch { /* already gone */ } };
+  // Poll the thread until the persisted answer lands (the turn keeps running
+  // server-side after a dropped stream), then swap the whole thread in. Bounded:
+  // ~2.5 min of polling, then an honest "reopen this chat" note.
+  const liveTidRef = useRef(null);
+  async function recoverAnswer(tid) {
+    setThreadId((cur) => cur || tid);
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        const r = await api.owlThreadMessages(tid);
+        const msgs = r.messages || [];
+        const last = msgs[msgs.length - 1];
+        if (last && last.role !== 'user' && String(last.body || '').trim()) {
+          setMessages(msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'owl', text: m.body, sources: m.sources })));
+          refreshThreads();
+          return;
+        }
+      } catch { /* transient — keep polling */ }
+    }
+    appendLastOwl('📡 The connection dropped and the answer is taking a while — reopen this chat in a minute and it\'ll be here.');
+  }
+  const appendLastOwl = (delta) => setMessages((m) => {
+    const next = m.slice();
+    for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], text: (next[i].text ? `${next[i].text}\n\n` : '') + delta }; break; } }
+    return next;
+  });
+  // ⏹ Stop: tell the server to end the turn (a socket close alone no longer
+  // stops it — it can't tell "stopped" from "switched screens"), THEN abort.
+  const stop = () => {
+    const tid = liveTidRef.current || threadId;
+    if (tid) api.owlStop(tid).catch(() => {});
+    try { abortRef.current && abortRef.current.abort(); } catch { /* already gone */ }
+  };
   // "/" command palette: open while the input is just "/word" (no space yet), so it
   // never triggers mid-sentence or on a date like "1/2". Picking a command drops its
   // example question into the box (editable), per the chosen behaviour.

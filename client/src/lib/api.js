@@ -107,12 +107,15 @@ export const api = {
   // Agentic Owl chat: POST a question, stream the grounded answer as plain text
   // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
   // so a new conversation can be continued).
-  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode, signal }, onText, onStatus) => {
-    // `signal` (AbortController) powers the ⏹ Stop button — aborting closes the socket,
-    // which the server notices and bails out of the loop instead of finishing the answer.
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode, signal, onThread }, onText, onStatus) => {
+    // `signal` powers ⏹ Stop (paired with owlStop — a socket close alone no longer
+    // stops the server; it finishes and PERSISTS the answer so a dropped stream can
+    // be recovered from the thread). `onThread` fires as soon as the server names
+    // the thread — before any text — so recovery knows where to look.
     const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId, mode }), signal });
     if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
+    try { onThread?.(tid); } catch { /* advisory only */ }
     const persona = res.headers.get('X-Owl-Persona') || mode || 'quick';
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -198,6 +201,7 @@ export const api = {
   owlThreads: () => fetch('/api/owl/threads').then(json),
   owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlStop: (threadId) => fetch('/api/owl/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threadId }) }).then(json),
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
   owlSetThreadFolder: (id, folder) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }).then(json),

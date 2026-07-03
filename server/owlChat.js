@@ -457,12 +457,15 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
     const { toolMap, toolSchemas } = currentTools(scopeEntityId);
-    // The user tapping ⏹ Stop aborts the fetch → the socket closes → we bail between
-    // rounds/tools instead of finishing an answer nobody is waiting for.
-    // Listen on the RESPONSE socket, not the request: on modern Node, req 'close'
-    // fires as soon as the request body is consumed (milliseconds in, client still
-    // connected) — that read as "user left" and could silently abort multi-round
-    // (tool-using) answers. res 'close' with writableEnded false = truly gone.
+    // A closed socket NO LONGER kills the turn — navigating away / backgrounding
+    // the app (mobile) drops the stream, and bailing there lost the answer ("it
+    // says loading failed"). We keep working, PERSIST the answer to the thread,
+    // and the client recovers it by re-reading the thread. Only an explicit
+    // ⏹ Stop (POST /api/owl/stop, sent before the client aborts) ends the loop.
+    // clientGone still gates stream writes so we never write to a dead socket.
+    // (res 'close' with writableEnded false = truly gone; req 'close' fires way
+    // too early on modern Node.)
+    const turnStart = Date.now();
     let clientGone = false;
     res.on('close', () => { if (!res.writableEnded) clientGone = true; });
     // Heartbeat: a long Looker/model call can sit silent for minutes (Looker's own
@@ -479,26 +482,41 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
         maxRounds: persona.maxRounds,
-        shouldStop: () => clientGone,
-        onText: (t) => res.write(t),
+        shouldStop: () => (stopAsked.get(thread.id) || 0) >= turnStart,
+        onText: (t) => { if (!clientGone) { try { res.write(t); } catch { /* socket gone */ } } },
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: writeStatus,
       }));
-      if (stopped) { logToolStop(thread.id, trail); res.end(); return; }
+      if (stopped) { logToolStop(thread.id, trail); try { res.end(); } catch { /* gone */ } return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
+      // ALWAYS — even to a dead socket — so a dropped stream can recover it.
       const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
-      // Citation chips: stream the sources as a trailing record the client splits off.
-      res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
-      // Proposed actions (e.g. a drafted alert) — the confirm card; live response only.
-      const actions = actionsFromTrail(trail);
-      if (actions.length) res.write(ACTIONS_MARK + JSON.stringify(actions));
-      res.end();
+      if (!clientGone) {
+        // Citation chips: stream the sources as a trailing record the client splits off.
+        try {
+          res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
+          // Proposed actions (e.g. a drafted alert) — the confirm card; live response only.
+          const actions = actionsFromTrail(trail);
+          if (actions.length) res.write(ACTIONS_MARK + JSON.stringify(actions));
+        } catch { /* socket died mid-trailer — the persisted answer covers it */ }
+      }
+      try { res.end(); } catch { /* gone */ }
     } catch (err) {
       console.error('[POST /api/owl/chat]', err.message);
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a problem answering that.' });
-      else { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); }
-    } finally { clearInterval(heartbeat); }
+      else { try { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); } catch { /* gone */ } }
+    } finally { clearInterval(heartbeat); stopAsked.delete(thread.id); }
+  });
+  // Explicit ⏹ Stop for the CURRENT turn of a thread. The client calls this just
+  // before aborting its fetch — a socket close alone no longer stops the loop
+  // (it can't tell "stopped" from "navigated away / phone locked").
+  const stopAsked = new Map(); // threadId -> ts of the stop request
+  app.post('/api/owl/stop', auth.requireAuth, (req, res) => {
+    const t = getThread.get(String((req.body || {}).threadId || ''));
+    if (!t || t.user_id !== req.user.id) return res.status(404).json({ error: 'Thread not found' });
+    stopAsked.set(t.id, Date.now());
+    res.json({ ok: true });
   });
   // A stopped turn still records what ran (audit) — with a marker so history shows it.
   function logToolStop(threadId, trail) {
