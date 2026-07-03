@@ -874,6 +874,19 @@ function HealthMetrics({ monitors: allMonitors }) {
   // Scans (gates) and transactions (bars/vendors) are DIFFERENT metrics — each
   // unit gets its own volume tiles, never summed together. Totals include
   // closed stations' frozen snapshots; last-hour/avg only the open ones.
+  // The Total tile shows the WHOLE FEED's day figure when the checks captured
+  // it (event scope, station narrowing dropped) — monitors on the same feed
+  // report the same number, so take one per feed, not a sum of overlaps.
+  const feedFor = (u) => {
+    const byFeed = new Map();
+    for (const m of allMonitors) {
+      const ft = m.rosterSnapshot && m.rosterSnapshot.feedTotal;
+      if (ft == null || unitFor(m) !== u) continue;
+      const key = `${m.entityId}|${m.suiteId}|${m.view}`;
+      byFeed.set(key, Math.max(byFeed.get(key) || 0, ft));
+    }
+    return byFeed.size ? [...byFeed.values()].reduce((a, b) => a + b, 0) : null;
+  };
   const volTiles = [];
   for (const u of ['scans', 'transactions']) {
     const vol = allMonitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
@@ -881,8 +894,9 @@ function HealthMetrics({ monitors: allMonitors }) {
     const open = monitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
     const ap = vol.some((x) => x.scansApprox) ? '≥' : '';
     const shortU = u === 'transactions' ? 'txns' : 'scans';
+    const feed = feedFor(u);
     volTiles.push(
-      [`Total ${shortU}`, sumOf(vol, 'totalScans') == null ? '—' : `${ap}${num(sumOf(vol, 'totalScans'))}`],
+      [`Total ${shortU}`, feed != null ? num(feed) : sumOf(vol, 'totalScans') == null ? '—' : `${ap}${num(sumOf(vol, 'totalScans'))}`],
       [`Last hr ${shortU}`, num(sumOf(open, 'lastHourScans'))],
       [`Avg ${shortU}/h`, sumOf(open, 'scansPerHour') == null ? '—' : `~${num(sumOf(open, 'scansPerHour'))}`],
     );
