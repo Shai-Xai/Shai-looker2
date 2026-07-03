@@ -1,0 +1,209 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index f581769..0d172cf 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -183,58 +183,68 @@ function RosterPanel({ monitorId }) {
+   );
+ }
+ 
+-// The day timeline: rows = devices, columns = hours, green = sent data that hour,
+-// grey = silent — the "see the impact through the whole day" view. A red device
+-// name means it hasn't been active in the current hour.
++// The day timeline: rows = devices, columns = time blocks (5–60 min each),
++// green = sent data in that block, grey = silent — the "see the impact through
++// the whole day" view. A red device name means nothing in the last ~30 minutes.
+ function TimelinePanel({ monitorId }) {
+   const [data, setData] = useState(null);
+   const [hours, setHours] = useState(24);
++  const [interval, setIntervalMin] = useState(60);
+   const [busy, setBusy] = useState(false);
+   const [err, setErr] = useState('');
+-  const load = async (h) => {
++  const load = async (h, iv) => {
+     setBusy(true); setErr('');
+     try {
+-      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/timeline?hours=${h}`);
++      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}`);
+       const d = await res.json().catch(() => ({}));
+       if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+       setData(d);
+     } catch (e) { setErr(e.message); }
+     setBusy(false);
+   };
+-  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window change
+-  useEffect(() => { load(hours); }, [monitorId, hours]);
+-  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours)}>Retry</button></div>;
++  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block change
++  useEffect(() => { load(hours, interval); }, [monitorId, hours, interval]);
++  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours, interval)}>Retry</button></div>;
+   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the day timeline from Looker…</div>;
+   if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.reason || 'No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.'}</div>;
++  const iv = data.intervalMin || 60;
+   const hourLabel = (iso) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }).slice(0, 5);
++  const bw = iv >= 30 ? 12 : 8; // finer blocks get narrower cells so more fit before scrolling
++  const perLabel = Math.max(1, Math.round((data.hours <= 12 ? 60 : 180) / iv)); // a time label every 1h (short windows) or 3h
++  const lookback = Math.max(1, Math.ceil(30 / iv)); // "live" = active within the last ~30 min
+   return (
+     <div>
+       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
+-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>each block = one hour · green = sent data · grey = silent</span>
++        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>each block = {iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent</span>
+         <span style={{ flex: 1 }} />
+         {[12, 24, 48].map((h) => (
+           <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
+         ))}
+-        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours)}>{busy ? '…' : '🔄'}</button>
++        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
++        {[5, 10, 20, 30, 60].map((m) => (
++          <button key={m} style={{ ...ghostBtn, padding: '4px 8px', ...(interval === m ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setIntervalMin(m)}>{m === 60 ? '1h' : `${m}m`}</button>
++        ))}
++        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours, interval)}>{busy ? '…' : '🔄'}</button>
+       </div>
+-      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some device-hours may be missing; try a shorter range.</div>}
++      {data.hours < hours && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
++      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
+       {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : (
+         <div style={{ overflowX: 'auto' }}>
+-          {/* Hour scale: a label every 3rd bucket, aligned to the 12px blocks. */}
++          {/* Time scale: periodic labels aligned to the blocks. */}
+           <div style={{ display: 'flex', gap: 2, marginLeft: 148, marginBottom: 2 }}>
+             {data.buckets.map((b, i) => (
+-              <span key={b} style={{ width: 12, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % 3 === 0 ? hourLabel(b) : ''}</span>
++              <span key={b} style={{ width: bw, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % perLabel === 0 ? hourLabel(b) : ''}</span>
+             ))}
+           </div>
+           {data.devices.map(({ device, active }) => {
+-            const liveNow = active[active.length - 1] === 1;
++            const liveNow = active.slice(-lookback).some((a) => a === 1);
+             return (
+               <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+                 <span title={device} style={{ width: 140, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+                 {active.map((a, i) => (
+                   <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
+-                    style={{ width: 12, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
++                    style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                 ))}
+               </div>
+             );
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 88c1626..24b70fe 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -382,12 +382,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     };
+   }
+ 
+-  // The day timeline: per device, which HOURS of the window it produced data —
+-  // rows × 24 hour-buckets the UI renders as a green/grey activity grid, so you
+-  // can SEE when each device dropped and for how long. Uses the timestamp's
+-  // hour-granularity sibling dimension (created_at_time → created_at_hour) so
+-  // Looker aggregates to one row per (device, hour) — a whole busy day fits.
+-  async function deviceTimeline(m, hours = 24) {
++  // Block sizes the timeline can bucket by, in minutes.
++  const TIMELINE_INTERVALS = [5, 10, 20, 30, 60];
++
++  // The day timeline: per device, which time blocks of the window it produced
++  // data — rows × buckets the UI renders as a green/grey activity grid, so you
++  // can SEE when each device dropped and for how long. At 60-min blocks it uses
++  // the timestamp's hour-granularity sibling dimension (created_at_time →
++  // created_at_hour) so Looker aggregates to one row per (device, hour) — a
++  // whole busy day fits. Finer blocks read the raw time dimension and bucket
++  // here (5000-row cap → `truncated` warns when a very busy window overflows).
++  async function deviceTimeline(m, hours = 24, interval = 60) {
+     if (!m.rosterField) return { configured: false };
+     // Looker dimension groups name every timeframe `${group}_${timeframe}` —
+     // swap the picked timeframe for `_hour` (or append it when the picked field
+@@ -395,28 +400,33 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     // shows the error rather than silently lying.
+     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
+     const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
+-    const h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+-    const body = { ...baseBody(m), fields: [m.rosterField, hourField], sorts: [`${hourField} desc`], limit: '5000' };
++    const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
++    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
++    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
++    const ivMs = iv * 60000;
++    const bucketField = iv === 60 ? hourField : m.timeField;
++    const body = { ...baseBody(m), fields: [m.rosterField, bucketField], sorts: [`${bucketField} desc`], limit: '5000' };
+     body.filters[m.timeField] = `last ${h} hours`;
+     const rows = await runScoped(m, body);
+     const nowMs = Date.now();
+-    const lastBucket = Math.floor(nowMs / 3600000) * 3600000; // current hour start (UTC)
+-    const firstBucket = lastBucket - (h - 1) * 3600000;
+-    const byDevice = new Map(); // device -> Uint-ish array of 0/1 per bucket
++    const n = Math.round((h * 60) / iv);
++    const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
++    const firstBucket = lastBucket - (n - 1) * ivMs;
++    const byDevice = new Map(); // device -> array of 0/1 per bucket
+     for (const r of rows) {
+       const d = String(r[m.rosterField] ?? '').trim();
+-      const ts = parseTs(r[hourField]);
++      const ts = parseTs(r[bucketField]);
+       if (!d || !ts) continue;
+-      const idx = Math.floor((ts.getTime() - firstBucket) / 3600000);
+-      if (idx < 0 || idx >= h) continue;
+-      if (!byDevice.has(d)) byDevice.set(d, Array(h).fill(0));
++      const idx = Math.floor((ts.getTime() - firstBucket) / ivMs);
++      if (idx < 0 || idx >= n) continue;
++      if (!byDevice.has(d)) byDevice.set(d, Array(n).fill(0));
+       byDevice.get(d)[idx] = 1;
+     }
+     const devices = [...byDevice.entries()].map(([device, active]) => ({ device, active }))
+       .sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
+     return {
+-      configured: true, hours: h, hourField,
+-      buckets: Array.from({ length: h }, (_, i) => new Date(firstBucket + i * 3600000).toISOString()),
++      configured: true, hours: h, intervalMin: iv, hourField, bucketField,
++      buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
+       devices,
+       truncated: rows.length >= 5000,
+     };
+@@ -712,7 +722,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+     if (!enabled()) return off(res);
+     const m = monitorById(req.params.id);
+     if (!m) return res.status(404).json({ error: 'Monitor not found' });
+-    res.json(await deviceTimeline(m, req.query.hours));
++    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60));
+   }));
+ 
+   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index d962f2b..79a99a5 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -425,6 +425,34 @@ test('deviceTimeline: per-device hour buckets over the window', async () => {
+   assert.equal((await h.mod.deviceTimeline(timey, 12)).hourField, 'scans.created_at_hour');
+ });
+ 
++test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interval', async () => {
++  const h = mountHealth();
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  let body = null;
++  // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
++  const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
++  h.setRowsFn(async (b) => {
++    body = b;
++    return [
++      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0) },  // current 10-min block
++      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(95) }, // ~9 blocks back
++    ];
++  });
++  const t = await h.mod.deviceTimeline(m, 12, 10);
++  assert.equal(t.intervalMin, 10);
++  assert.equal(t.buckets.length, 72); // 12h of 10-min blocks
++  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at']); // raw dim, no hour sibling
++  assert.equal(body.filters['scans.scanned_at'], 'last 12 hours');
++  const d1 = t.devices.find((d) => d.device === 'D-1');
++  assert.equal(d1.active[71], 1);
++  assert.equal(d1.active.filter(Boolean).length, 2);
++  // Junk interval falls back to hourly; tiny blocks cap the window at 288 blocks.
++  assert.equal((await h.mod.deviceTimeline(m, 12, 7)).intervalMin, 60);
++  const capped = await h.mod.deviceTimeline(m, 48, 5);
++  assert.equal(capped.hours, 24); // 5-min blocks top out at 24h
++  assert.equal(capped.buckets.length, 288);
++});
++
+ test('clean() bounds thresholds and drops junk filters', () => {
+   const h = mountHealth();
+   const c = h.mod.clean({
