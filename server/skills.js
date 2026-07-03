@@ -204,7 +204,7 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
   function listForEntity(entityId) {
     const rows = sql.prepare('SELECT * FROM skills WHERE entity_id=?').all(entityId).map(rowToSkill);
     return Object.values(SKILL_DEFS).map((d) => ({
-      key: d.key, name: d.name, emoji: d.emoji, blurb: d.blurb,
+      key: d.key, name: d.name, emoji: d.emoji, blurb: d.blurb, defaultPlaybook: d.defaultPlaybook,
       instances: rows.filter((r) => r.key === d.key),
     }));
   }
