@@ -1038,10 +1038,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       if (q === 'timeline') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
         const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10);
-        // activeBlocks: compact 0/1 string per device, oldest→newest; counts = scans per block.
+        // activeBlocks: compact 0/1 string per device, oldest→newest; coverage:
+        // devices sending per block — the offline-trend series the Owl should
+        // analyse (same shape the 🩺 Diagnose uses).
         return {
           ok: true, monitor: m.name, intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
-          totalScans: t.grandTotal, note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC.',
+          totalScans: t.grandTotal,
+          note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
+          coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          devicesSeen: t.devices.length,
           devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
         };
       }
@@ -1053,7 +1058,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   }
   const dataHealthSchema = {
     name: 'dataHealth',
-    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "when did device X stop", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + scan counts per time block through the day (spot gaps, flappers, late joiners). latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series: analyse it for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up — that window analysis is what the user usually wants. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
     input_schema: {
       type: 'object',
       properties: {
