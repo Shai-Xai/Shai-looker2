@@ -718,6 +718,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
           totalScans, scansPerHour, lastHourScans, scansApprox, coverage, flowScore, flow,
+          // WHICH devices are offline (worst first, capped) — shown on the tile
+          // and in the dashboard breakdown without opening the Devices tab.
+          offlineDevices: r.offline.slice(0, 15).map((d) => ({ device: d.device, lagMin: d.lagMin })),
         }), m.id);
         if (breach && !wasBreach) {
           const names = r.offline.slice(0, 8).map((d) => `${d.device} (${fmtLag(d.lagMin)})`).join(', ');
