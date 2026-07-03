@@ -234,25 +234,45 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     //     while its event is in that phase (a launch board leads during Launch,
     //     the gates board on Event Day). The dashboard's own event decides; a
     //     non-event dashboard matches when ANY of the client's events is in the
-    //     phase (that's what "a management board for event week" means).
+    //     phase (that's what "a management board for event week" means). When NO
+    //     event has a resolvable phase at all (no dates, no manual phase), scoping
+    //     has nothing to bite on — the pick feeds anyway rather than silently
+    //     dropping the reader's explicit choice (the Tune UI nudges to set dates).
+    //     Every pick's outcome lands in focusDiag so "why isn't my tile in the
+    //     briefing?" is answerable (admin diagnose + server log).
+    const FOCUS_WHOLE_CAP = 6; // a whole-dashboard pick can't eat the whole tile budget
     let focus = [];
     try { focus = JSON.parse(db.getUserPref(user.id, `briefing_tiles:${entityId}`) || '[]'); } catch { focus = []; }
     const suitePhase = (sid) => { const su = sid && db.getSuite(sid); return su ? resolvePhase(su.briefing || {}).key : null; };
     const entityPhases = new Set(db.listSuitesForEntity(entityId).map((su) => resolvePhase(su.briefing || {}).key).filter(Boolean));
+    const focusDiag = []; // { dashboard, tile, phase, status } per pick, in pick order
     for (const fsel of Array.isArray(focus) ? focus : []) {
-      if (picks.length >= maxTiles) break;
       const def = store.get(fsel.dashboardId);
-      if (!def || !dashMeta[def.id]) continue; // must be in this client's catalogue
+      const dTitle = def?.title || fsel.dashboardId;
+      const allTiles = def ? [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))] : [];
+      const tTitle = fsel.tileId === '*' ? '(whole board)' : (allTiles.find((t) => t.id === fsel.tileId)?.title || fsel.tileId);
+      const note = (status) => focusDiag.push({ dashboard: dTitle, tile: tTitle, phase: fsel.phase || '', status });
+      if (picks.length >= maxTiles) { note('tile budget full'); continue; }
+      if (!def || !dashMeta[def.id]) { note('not in this client\'s catalogue'); continue; } // must be in this client's catalogue
+      let phaseNote = '';
       if (fsel.phase && PHASES.some((p) => p.key === fsel.phase)) {
         const cur = suitePhase(dashMeta[def.id]?.suiteId);
-        if (cur ? cur !== fsel.phase : !entityPhases.has(fsel.phase)) continue; // out of phase right now
+        const anyPhase = cur != null || entityPhases.size > 0; // is ANY event phase resolvable?
+        if (anyPhase && !(cur ? cur === fsel.phase : entityPhases.has(fsel.phase))) {
+          note(`out of phase (event is in ${cur || [...entityPhases].join('/') || '?'})`);
+          continue; // out of phase right now
+        }
+        if (!anyPhase) phaseNote = ' (phase scope ignored — set the event dates/phase in Tune)'; // fail open, but say so
       }
-      const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
       const chosen = fsel.tileId === '*'
-        ? tiles.filter((t) => t.type !== 'text' && t.query?.fields?.length)
-        : tiles.filter((t) => t.id === fsel.tileId);
+        ? allTiles.filter((t) => t.type !== 'text' && t.query?.fields?.length).sort((a, b) => tilePriority(a) - tilePriority(b)).slice(0, FOCUS_WHOLE_CAP)
+        : allTiles.filter((t) => t.id === fsel.tileId);
+      if (!chosen.length) { note('tile not found on the dashboard'); continue; }
+      const before = picks.length;
       for (const t of chosen) addTile(def, t, dashMeta[def.id]?.suiteId, true);
+      note((picks.length > before ? 'feeding the briefing' : 'already included') + phaseNote);
     }
+    if (focusDiag.length) console.log(`[facts] entity=${entityId} focus picks: ${focusDiag.map((f) => `${f.dashboard}›${f.tile}${f.phase ? `@${f.phase}` : ''} → ${f.status}`).join(' · ')}`);
     const PER_DASH = 4; // per-dashboard cap, shared by the priority seed + rotation fill
     // 1c) "Always include" dashboards (digest config) — their headline/cumulative
     //     tiles are guaranteed in, ahead of the rotation, so the boards that
@@ -494,7 +514,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     console.log(`[briefing-timing] facts entity=${entityId} force=${!!force} picks=${picks.length} ran=${slow.length} overlays=${overlayMs}ms sweep=${sweepMs}ms slowest=[${top.map((s) => `${s.ms}ms ${s.t}`).join(' | ')}]`);
     const timing = { overlayMs, sweepMs, picks: picks.length, ran: slow.length, slowest: top };
 
-    return { tiles, catalogue, dropped, timing };
+    return { tiles, catalogue, dropped, timing, focusDiag };
   }
 
   // Current calendar date in the client's timezone, e.g. "Tuesday, 16 June 2026".

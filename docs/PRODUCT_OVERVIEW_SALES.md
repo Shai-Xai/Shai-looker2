@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (📶 Data health: per-station timeline drill-down, scans vs transactions split, device labels) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (Briefing focus tiles made dependable: fail-open phase scoping, admin diagnose) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -75,7 +75,11 @@ longer they use Pulse, the better it gets."
   one tap, with room to add a personal note and a link back to the view.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
-  follow and view.
+  follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
+  optionally scoped to a **lifecycle phase** (e.g. the gates board on Event Day —
+  needs the event's key dates set so Pulse knows the phase); picked tiles always
+  feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
+  make a given briefing.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
@@ -750,6 +754,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+  Tune now always feed the briefing — a phase-scoped pick (e.g. "gates board on
+  Event Day") whose event has **no dates/phase set** feeds anyway instead of
+  silently vanishing, and the Tune modal warns to set the key dates. A
+  whole-dashboard pick no longer crowds out the reader's other picks, and admins
+  get a **🔍 Diagnose focus tiles** panel on the home briefing showing why each
+  pick did or didn't make that briefing.
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking

@@ -1949,7 +1949,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
     const tStart = Date.now();
-    const { tiles, catalogue, timing: factTiming } = await buildFacts(user, entityId, force, true);
+    const { tiles, catalogue, timing: factTiming, dropped = [], focusDiag = [] } = await buildFacts(user, entityId, force, true);
     const factsMs = Date.now() - tStart;
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1971,8 +1971,8 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     console.log(`[briefing-timing] single entity=${entityId} force=${!!force} total=${totalMs}ms facts=${factsMs}ms goalsWait=${goalsWaitMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
-    const out = {
-      available: true,
+    const out = { // _focus/_dropped: admin-only diagnose — why each focus pick did/didn't feed (see ClientHome)
+      available: true, ...(user.role === 'admin' ? { _focus: focusDiag, _dropped: dropped } : {}),
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
       bullets: (raw.bullets || []).slice(0, 4)
