@@ -207,7 +207,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
         {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
         {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
         {entityName ? ` · scoped to ${entityName}` : ' · platform-wide'}
-        {' '}· every {m.checkEveryMin}m · warn {m.warnMin}m · stale {m.staleMin}m
+        {' '}· every {m.checkEveryMin >= 1 ? `${m.checkEveryMin}m` : 'master'} · warn {m.warnMin}m · stale {m.staleMin}m
       </div>
       {m.lastError && <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 8 }}>⚠️ Last pull failed: {m.lastError}</div>}
       {m.streams.length ? (
@@ -243,7 +243,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
 function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
-    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 5, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+    filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -410,7 +410,10 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
         {[['warnMin', 'Warn after (min)'], ['staleMin', 'Stale after (min)'], ['checkEveryMin', 'Check every (min)'], ['cooldownMin', 'Alert cooldown (min)']].map(([k, l]) => (
           <div key={k}>
             <span style={label}>{l}</span>
-            <input style={input} type="number" min="1" value={f[k]} onChange={(e) => set(k, e.target.value)} />
+            <input style={input} type="number" min={k === 'checkEveryMin' ? '0' : '1'}
+              value={k === 'checkEveryMin' ? (Number(f[k]) >= 1 ? f[k] : '') : f[k]}
+              placeholder={k === 'checkEveryMin' ? 'master' : undefined}
+              onChange={(e) => set(k, e.target.value)} />
           </div>
         ))}
       </div>
@@ -480,7 +483,7 @@ export default function DataHealthAdmin() {
             <span key={i} style={{ fontSize: 12.5, fontWeight: 700, color: c, padding: '5px 12px', borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)' }}>{t}</span>
           ))}
           <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>auto-checks every {data.tickMin || 5} min · page refreshes every minute</span>
+          <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
           {editing == null && <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>}
         </div>
       )}
@@ -505,6 +508,37 @@ export default function DataHealthAdmin() {
           <MonitorCard key={m.id} m={m} entities={entities} onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
     </div>
+  );
+}
+
+// Master auto-check cadence: how often the background sweep pulls each monitor
+// (a monitor can still set its own cadence in the editor; blank = follow this).
+// Saved via the same settings PUT the test-mode banner uses; applies within a
+// minute — the server heartbeat re-reads it every 60s, no restart needed.
+function MasterCadence({ tickMin, onChanged }) {
+  const [v, setV] = useState(String(tickMin));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setV(String(tickMin)); }, [tickMin]);
+  const save = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tickMin: Number(v) }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--muted)' }}>
+      auto-check every
+      <input type="number" min="1" max="120" value={v} onChange={(e) => setV(e.target.value)}
+        style={{ ...input, width: 58, padding: '4px 6px', fontSize: 12 }} />
+      min
+      {Number(v) !== Number(tickMin) && <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={save}>{busy ? '…' : 'Save'}</button>}
+      {err && <span style={{ color: STATUS_COLOR.stale }}>{err}</span>}
+    </span>
   );
 }
 
