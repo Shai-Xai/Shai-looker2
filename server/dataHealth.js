@@ -7,10 +7,10 @@
 //
 // WHAT it measures: Pulse reads everything through Looker, which reflects BigQuery,
 // which reflects Howler's stations on the ground (check-in scanners, bars, vendors).
-// A monitor asks Looker for max(timestamp) on an explore — optionally split by a
-// station dimension — on a cadence, ALWAYS bypassing the query cache (measuring
-// freshness through a cache would lie). The lag between that max timestamp and now
-// is the end-to-end health of the whole pipe: station → Howler → BigQuery → Looker.
+// A monitor asks Looker for the latest record timestamp on an explore — optionally
+// split by a station dimension — on a cadence, ALWAYS bypassing the query cache
+// (measuring freshness through a cache would lie). The lag between that timestamp and
+// now is the end-to-end health of the whole pipe: station → Howler → BigQuery → Looker.
 //
 // The hard parts (the real deliverable):
 //   • per-station memory — a station that DISAPPEARS from the query result (rows
@@ -203,25 +203,66 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return { id: 'datahealth', email: 'datahealth@howler', role: 'admin' };
   }
 
-  async function readLatest(m) {
-    const fields = m.stationField ? [m.stationField, MAX_FIELD] : [MAX_FIELD];
-    const body = {
-      model: m.model, view: m.view, fields,
-      // A dynamic custom measure — max(time_field) — so Looker aggregates server-side
-      // and one small query covers every station, however busy the raw table is.
-      dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
-      filters: { ...(m.filters || {}) },
-      limit: m.stationField ? '500' : '1',
-      query_timezone: 'UTC',
-    };
+  // Run one scoped, cache-bypassed Looker query. force=true matters: a cached row
+  // would make the pipe look exactly as stale as our own cache, defeating the point.
+  async function runScoped(m, body) {
     if (!(await applyScope(body, evalUser(m), m.suiteId || null))) throw new Error('scope failed (fail closed)');
-    // force=true: bypass the shared query cache — a cached row would make the pipe
-    // look exactly as stale as our own cache, defeating the measurement.
     const rows = await runLookerQuery('/queries/run/json', body, 0, true);
     if (!Array.isArray(rows)) throw new Error('unexpected Looker response shape');
+    return rows;
+  }
+  const baseBody = (m) => ({ model: m.model, view: m.view, filters: { ...(m.filters || {}) }, query_timezone: 'UTC' });
+
+  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
+  // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
+  // monitor hits that, remember it and go straight to the sorted-scan path.
+  const maxMeasureUnsupported = new Set();
+
+  async function readLatest(m) {
+    // Whole feed: the single newest row IS the answer — no aggregation needed.
+    if (!m.stationField) {
+      const rows = await runScoped(m, { ...baseBody(m), fields: [m.timeField], sorts: [`${m.timeField} desc`], limit: '1' });
+      const ts = rows.length ? parseTs(rows[0][m.timeField]) : null;
+      return ts ? new Map([['', ts]]) : new Map();
+    }
+
+    // Station split, preferred path: a dynamic max(time) measure — one tiny row per
+    // station regardless of how busy the raw table is.
+    if (!maxMeasureUnsupported.has(m.id)) {
+      try {
+        const rows = await runScoped(m, {
+          ...baseBody(m),
+          fields: [m.stationField, MAX_FIELD],
+          dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
+          limit: '500',
+        });
+        return reduceRows(m, rows, MAX_FIELD);
+      } catch (e) {
+        // Custom-measure rejection is permanent for this field — memoise and fall
+        // through to the scan. Any other failure also gets one scan attempt (it
+        // may still work); if the scan fails too, THAT error surfaces.
+        if (/must evaluate to/i.test(String(e.message || ''))) maxMeasureUnsupported.add(m.id);
+        console.warn('[data-health] max-measure read failed, trying sorted scan', m.id, e.message);
+      }
+    }
+
+    // Fallback: newest rows first, reduced to max-per-station in JS. Sorted desc,
+    // so the FIRST time a station appears is its latest record. Stations idle for
+    // longer than the window won't appear — the per-station memory keeps evaluating
+    // them from their remembered last_event_at, which is exactly the stale signal.
+    const rows = await runScoped(m, {
+      ...baseBody(m),
+      fields: [m.stationField, m.timeField],
+      sorts: [`${m.timeField} desc`],
+      limit: '5000',
+    });
+    return reduceRows(m, rows, m.timeField);
+  }
+
+  function reduceRows(m, rows, timeKey) {
     const seen = new Map(); // station -> latest Date
     for (const r of rows) {
-      const ts = parseTs(r[MAX_FIELD]);
+      const ts = parseTs(r[timeKey]);
       if (!ts) continue;
       const station = m.stationField ? String(r[m.stationField] ?? '').trim() || '—' : '';
       const prev = seen.get(station);
@@ -432,6 +473,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // The explore/split changed → the remembered stations belong to the old feed.
     if (c.model !== m.model || c.view !== m.view || c.timeField !== m.timeField || c.stationField !== m.stationField) {
       sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=?').run(m.id);
+      maxMeasureUnsupported.delete(m.id);
     }
     res.json({ monitor: upsert(m.id, c, req.user.email) });
   });
