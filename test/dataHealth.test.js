@@ -261,7 +261,10 @@ test('test mode routes every alert ONLY to the test address (ops + client muted)
 
 test('latestRecords: the raw feed tail, newest first, scoped and mapped', async () => {
   const h = mountHealth();
-  const m = makeMonitor(h, { detailFields: ['scans.record_type', 'scans.scanned_at'] }); // time field deduped out
+  const m = makeMonitor(h, {
+    detailFields: ['scans.record_type', 'scans.scanned_at'], // time field deduped out
+    filters: { 'scans.event_name': 'Festival X', 'scans.pending': '' }, // one real, one "open"
+  });
   let body = null;
   h.setRowsFn(async (b) => {
     body = b;
@@ -272,6 +275,10 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async 
   });
   const recs = await h.mod.latestRecords(m, 20);
   assert.deepEqual(body.fields, ['scans.station_name', 'scans.scanned_at', 'scans.record_type']);
+  // The "open" (blank-valued) filter is saved on the monitor but never sent to
+  // Looker — an empty string would filter for blank values.
+  assert.deepEqual(m.filters, { 'scans.event_name': 'Festival X', 'scans.pending': '' });
+  assert.deepEqual(body.filters, { 'scans.event_name': 'Festival X' });
   assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
   assert.equal(body.limit, '20');
   assert.equal(body.dynamic_fields, undefined); // plain rows, no aggregation
@@ -345,6 +352,6 @@ test('clean() bounds thresholds and drops junk filters', () => {
   assert.equal(c.staleMin, 10080);
   assert.equal(c.checkEveryMin, 0); // 0 = follow the master cadence
   assert.deepEqual(c.channels, ['push', 'email']);
-  assert.equal(Object.keys(c.filters).length, 2);
-  assert.ok(!('empty' in c.filters));
+  assert.equal(Object.keys(c.filters).length, 3);
+  assert.equal(c.filters.empty, ''); // "open" filter: dimension kept, blank value
 });
