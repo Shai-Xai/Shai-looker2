@@ -865,4 +865,16 @@ export const api = {
   eventopsCreateStaff: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/staff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateStaff: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsDeleteStaff: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+
+  // Data health (Admin) — the BigQuery → Looker stream monitor.
+  dataHealth: () => fetch('/api/admin/data-health').then(json),
+  createDataMonitor: (b) => fetch('/api/admin/data-health/monitors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateDataMonitor: (id, b) => fetch(`/api/admin/data-health/monitors/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteDataMonitor: (id) => fetch(`/api/admin/data-health/monitors/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  setDataMonitorStatus: (id, status) => fetch(`/api/admin/data-health/monitors/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
+  checkDataMonitor: (id) => fetch(`/api/admin/data-health/monitors/${id}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  dataMonitorHistory: (id) => fetch(`/api/admin/data-health/monitors/${id}/history`).then(json),
+  forgetDataStream: (id, station) => fetch(`/api/admin/data-health/monitors/${id}/streams/${encodeURIComponent(station)}`, { method: 'DELETE' }).then(json),
+  dataHealthExplores: () => fetch('/api/admin/data-health/explores').then(json),
+  dataHealthFields: (model, view) => fetch(`/api/admin/data-health/fields?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}`).then(json),
 };
