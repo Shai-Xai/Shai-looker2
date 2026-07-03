@@ -121,7 +121,7 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
     {
       name: 'pulse_query_data',
       title: 'Query event data',
-      description: 'LIVE query (~1-3s, cached after). THE MOST POWERFUL READ: compute any curated measure grouped by any curated dimensions with filters and a date range, straight from the client\'s data — use this when no dashboard tile matches the question (e.g. "revenue by ticket type last 30 days"). Field names must come from pulse_list_data_sources. Aggregate results only; personal fields are filter-only lookups, never listable.',
+      description: 'LIVE query (~1-3s, cached after). THE MOST POWERFUL READ: compute any curated measure grouped by any curated dimensions with filters and a date range, straight from the client\'s data — use this when no dashboard tile matches the question (e.g. "revenue by ticket type last 30 days"). Field names must come from pulse_list_data_sources. In a COMBINED source (several field-name prefixes), group a measure by dimensions of its OWN family (matching prefix, or shared core_events/date fields) — a cross-family group-by repeats one total on every row instead of a real breakdown (the result carries a `note` when that happens; heed it). Aggregate results only; personal fields are filter-only lookups, never listable.',
       input: {
         source: z.string().optional().describe('Data source key from pulse_list_data_sources (default: primary, the ticketing data)'),
         measure: z.string().describe('The number to compute — a measure name from the source'),
