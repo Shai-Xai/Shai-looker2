@@ -653,9 +653,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       try {
         const ef = await looker.getExploreFields(m.model, m.view);
         const tv = String(m.timeField).split('.')[0];
+        // Rank the candidates: transaction_count IS the per-sale counter the
+        // dashboards use; cumulative/topup/tip/customer counters count other
+        // things entirely and must never win just by sorting first.
+        const score = (n) => {
+          const f = String(n).split('.')[1] || '';
+          if (/^transaction_count$/i.test(f)) return 0;
+          if (/transaction/i.test(f)) return 1;
+          if (/cumulative|topup|tip|customer|operator|distinct|tab/i.test(f)) return 9;
+          return 5;
+        };
         probed = (ef.measures || [])
           .map((x) => (x && x.name) || x)
           .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count/i.test(n))
+          .filter((n) => score(n) < 9)
+          .sort((a, b) => score(a) - score(b))
           .slice(0, 3);
       } catch (e) { void e; }
     }

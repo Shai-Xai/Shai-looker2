@@ -478,7 +478,9 @@ test('labels: devices the timed read lost still get a station via the combo read
 });
 
 test('deviceTimeline: probes the explore catalogue for a real count measure', async () => {
-  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.tx_count' }, { name: 'other.count' }] }) } });
+  // Cumulative_topups_count sorts first alphabetically — the ranking must pick
+  // transaction_count (the per-sale counter) and never query the topup one.
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.Cumulative_topups_count' }, { name: 'scans.transaction_count' }, { name: 'other.count' }] }) } });
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
   const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
   const bodies = [];
@@ -486,18 +488,19 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
     bodies.push(b);
     // The guessed native measure exists but counts another view — zero-only.
     if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
-    if (b.fields.includes('scans.tx_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.tx_count': 41 }];
+    if (b.fields.includes('scans.transaction_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.transaction_count': 41 }];
     throw new Error('unexpected read');
   });
   const t = await h.mod.deviceTimeline(m, 12);
   assert.equal(t.countBasis, 'native');
-  assert.equal(t.devices[0].counts[11], 41); // the catalogue measure carries the real volume
+  assert.equal(t.devices[0].counts[11], 41); // the real per-sale volume
   assert.equal(t.grandTotal, 41);
+  assert.ok(bodies.every((b) => !b.fields.includes('scans.Cumulative_topups_count'))); // the decoy never ran
   // Remembered — the next read goes straight to the probed measure.
   bodies.length = 0;
   await h.mod.deviceTimeline(m, 12);
   assert.equal(bodies.length, 1);
-  assert.ok(bodies[0].fields.includes('scans.tx_count'));
+  assert.ok(bodies[0].fields.includes('scans.transaction_count'));
 });
 
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
