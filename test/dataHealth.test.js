@@ -368,6 +368,145 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   // No roster field configured → explicitly unconfigured, no query.
   const plain = makeMonitor(h, { name: 'No roster' });
   assert.deepEqual(await h.mod.deviceRoster(plain), { configured: false });
+
+  // A fixed start time anchors the roster ("since doors opened") and beats the
+  // rolling window; the Looker filter is an UTC `after` expression.
+  const startIso = new Date(Date.now() - 2 * 3600000).toISOString();
+  const anchored = makeMonitor(h, { name: 'Anchored', rosterField: 'scans.device_id', rosterStart: startIso, rosterBaselineMin: 60 });
+  assert.equal(anchored.rosterStart, startIso);
+  const r2 = await h.mod.deviceRoster(anchored);
+  assert.equal(body.filters['scans.scanned_at'], `after ${startIso.slice(0, 16).replace('T', ' ')}`);
+  assert.equal(r2.startAt, startIso);
+  // Junk start time is dropped at clean() — falls back to the rolling window.
+  const junk = makeMonitor(h, { name: 'Junk start', rosterField: 'scans.device_id', rosterStart: 'not-a-date' });
+  assert.equal(junk.rosterStart, '');
+});
+
+test('rosterAnchor: daily SAST time beats fixed start; wraps to yesterday', () => {
+  const h = mountHealth();
+  const now = Date.parse('2026-07-03T10:00:00Z'); // 12:00 SAST
+  const a = h.mod.rosterAnchor({ rosterDaily: '09:00', rosterStart: '2026-01-01T00:00:00.000Z' }, now);
+  assert.equal(a.toISOString(), '2026-07-03T07:00:00.000Z'); // today 09:00 SAST (daily wins)
+  const b = h.mod.rosterAnchor({ rosterDaily: '14:00' }, now); // today's 14:00 SAST still ahead
+  assert.equal(b.toISOString(), '2026-07-02T12:00:00.000Z'); // → since yesterday 14:00 SAST
+  assert.equal(h.mod.rosterAnchor({ rosterStart: '2026-01-01T00:00:00.000Z' }, now).toISOString(), '2026-01-01T00:00:00.000Z');
+  assert.equal(h.mod.rosterAnchor({}, now), null);
+});
+
+test('deviceTimeline: per-device hour buckets over the window', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  let body = null;
+  // Real Looker hour dims render "YYYY-MM-DD HH" (query_timezone UTC).
+  const hourStr = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(0), 'scans.count': 42 },   // this hour
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(180), 'scans.count': 7 },  // 3 hours back
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(600), 'scans.count': 3 },  // 10 hours back
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 24);
+  assert.equal(t.configured, true);
+  assert.equal(t.hours, 24);
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at_hour', 'scans.count']); // hour sibling + native count measure
+  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.active[23], 1);
+  assert.equal(d1.active[20], 1);
+  assert.equal(d1.active.filter(Boolean).length, 2);
+  assert.equal(d1.counts[23], 42); // scans per block, straight from the count measure
+  assert.equal(d1.total, 49);
+  const d2 = t.devices.find((d) => d.device === 'D-2');
+  assert.equal(d2.active[13], 1);
+  assert.equal(t.bucketTotals[23], 42);
+  assert.equal(t.grandTotal, 52);
+  assert.equal(t.countBasis, 'native');
+  // Hour-sibling derivation follows Looker's `${group}_${timeframe}` naming.
+  const daily = makeMonitor(h, { name: 'Day level', rosterField: 'scans.device_id', timeField: 'scans.created_at_date' });
+  assert.equal((await h.mod.deviceTimeline(daily, 12)).hourField, 'scans.created_at_hour');
+  const timey = makeMonitor(h, { name: 'Timey', rosterField: 'scans.device_id', timeField: 'scans.created_at_time' });
+  assert.equal((await h.mod.deviceTimeline(timey, 12)).hourField, 'scans.created_at_hour');
+});
+
+test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interval', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  let body = null;
+  // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
+  const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0), 'scans.count': 2 },  // current 10-min block
+      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(95), 'scans.count': 5 }, // ~9 blocks back
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.intervalMin, 10);
+  assert.equal(t.buckets.length, 72); // 12h of 10-min blocks
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at', 'scans.count']); // raw dim + count, no hour sibling
+  assert.equal(body.filters['scans.scanned_at'], 'last 12 hours');
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.active[71], 1);
+  assert.equal(d1.active.filter(Boolean).length, 2);
+  assert.equal(d1.counts[71], 2); // per-second rows sum into their block
+  assert.equal(d1.total, 7);
+  // Junk interval falls back to hourly; tiny blocks cap the window at 288 blocks.
+  assert.equal((await h.mod.deviceTimeline(m, 12, 7)).intervalMin, 60);
+  const capped = await h.mod.deviceTimeline(m, 48, 5);
+  assert.equal(capped.hours, 24); // 5-min blocks top out at 24h
+  assert.equal(capped.buckets.length, 288);
+});
+
+test('deviceTimeline: hours="start" anchors the window to the roster start time', async () => {
+  const h = mountHealth();
+  // Once-off start 5 hours ago (stable regardless of wall clock, unlike a daily HH:MM).
+  const start = new Date(Date.now() - 5 * 3600000);
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterStart: start.toISOString() });
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return []; });
+  const t = await h.mod.deviceTimeline(m, 'start', 10);
+  assert.equal(t.anchored, true);
+  assert.equal(body.filters['scans.scanned_at'], `after ${start.toISOString().slice(0, 16).replace('T', ' ')}`);
+  // First block is the one containing the start time; last is the current block.
+  const first = Date.parse(t.buckets[0]);
+  assert.ok(first <= start.getTime() && start.getTime() < first + 10 * 60000);
+  const last = Date.parse(t.buckets[t.buckets.length - 1]);
+  assert.ok(last <= Date.now() && Date.now() < last + 10 * 60000);
+  // No anchor on the monitor → falls back to a rolling 24h.
+  const plain = makeMonitor(h, { name: 'No anchor', rosterField: 'scans.device_id' });
+  const f = await h.mod.deviceTimeline(plain, 'start', 60);
+  assert.equal(f.anchored, false);
+  assert.equal(f.hours, 24);
+  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
+  // Long anchored windows keep the most recent 288 blocks and say so.
+  const old = makeMonitor(h, { name: 'Old start', rosterField: 'scans.device_id', rosterStart: new Date(Date.now() - 60 * 3600000).toISOString() });
+  const trimmed = await h.mod.deviceTimeline(old, 'start', 5);
+  assert.equal(trimmed.buckets.length, 288);
+  assert.equal(trimmed.trimmedStart, true);
+});
+
+test('deviceTimeline: falls back to a dynamic count when the view has no native count measure', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  const bodies = [];
+  h.setRowsFn(async (b) => {
+    bodies.push(b);
+    if (b.fields.includes('scans.count')) throw new Error('Unknown field "scans.count"'); // no native count on this view
+    return [{ 'scans.device_id': 'D-9', 'scans.scanned_at_hour': hourStr(), data_health_scans: 11 }];
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'distinct');
+  const dyn = JSON.parse(bodies[1].dynamic_fields);
+  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at', type: 'count_distinct' }]);
+  assert.equal(t.devices[0].counts[11], 11);
+  // The working mode is remembered — the next read goes straight to the dynamic measure.
+  await h.mod.deviceTimeline(m, 12);
+  assert.equal(bodies.length, 3);
+  assert.ok(bodies[2].fields.includes('data_health_scans'));
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {
