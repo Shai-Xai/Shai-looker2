@@ -132,6 +132,13 @@ function effective(db) {
       const station = ds.find((d) => /check_?ins?\./i.test(d.name) && /station/i.test(d.name));
       const evName = ds.find((d) => d.name === `${e.view}.name`);
       exNotes.push(`CHECK-INS / attendance / scans / entries: ALWAYS use the measure ${ciCount.name}${station ? `, grouped by ${station.name} for per-gate/per-station numbers` : ''}${evName ? `; the event name on this data is ${evName.name} (NOT core_events.name)` : ''}. NEVER answer check-in questions from sales/transaction rows or a sales station category — those are payments, not scans.`);
+      // Real-world caveat (caught live at KFF): most scans carry NO timestamp, so a
+      // date/hour-filtered check-in count silently undercounts by 10x+. Force the
+      // cross-check + disclosure instead of letting a partial figure pass as truth.
+      const ciDate = ds.find((d) => /check_?ins?\./i.test(d.name) && d.type === 'date');
+      if (ciDate) {
+        exNotes.push(`TIME-FILTERED CHECK-INS ("today", "per hour", "since gates opened"): filter/group ${ciDate.name} (the check-in family's own time field) — but BE AWARE many scans carry NO timestamp, so a time-filtered count can massively undercount. ALWAYS also run the SAME count without the time filter; if the time-filtered figure is well below the total, report BOTH and say plainly that N of the total scans have no timestamp so time-based cuts are unreliable. NEVER present a time-filtered check-in count alone as the day's attendance.`);
+      }
     }
     return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: exNotes };
   }).filter(Boolean);
