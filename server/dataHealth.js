@@ -834,11 +834,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // Scan volume for the tile: total + average per hour over the roster
         // window (hour-level timeline read — tiny aggregated result).
         let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null;
+        const hourlyN = []; // devices seen per HOUR — keeps the flow score stable at fine blocks
         try {
-          let t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 60);
-          // Row-presence fallback at hour blocks = one row per device-hour, a
-          // wild undercount — re-read at 10-min blocks where a raw row ≈ a scan.
-          if (t.configured && t.countBasis === 'none') t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
+          // 10-min blocks: the tile graph shows the day at the same resolution
+          // as the live timeline (hour bars hid the short dropouts).
+          const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
           if (t.configured) {
             totalScans = t.grandTotal;
             scansApprox = t.countBasis === 'none' || !!t.truncated;
@@ -847,6 +847,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             lastHourScans = t.bucketTotals.slice(-perHour).reduce((a, b) => a + b, 0); // rolling last ~60 min
             // Compact sparkline series for the tile: {t: 'HH:MM' UTC, n: devices sending}.
             coverage = t.buckets.map((b, i) => ({ t: b.slice(11, 16), n: t.devices.reduce((a, d) => a + (d.active[i] ? 1 : 0), 0) })).slice(-288);
+            // A device counts as "on" for an hour if ANY of its blocks in that
+            // hour sent data — a bar selling hourly isn't down five blocks of six.
+            const perH = Math.max(1, Math.round(60 / t.intervalMin));
+            for (let i = 0; i < t.buckets.length; i += perH) {
+              const end = Math.min(i + perH, t.buckets.length);
+              hourlyN.push(t.devices.reduce((a, d) => a + (d.active.slice(i, end).some((x) => x) ? 1 : 0), 0));
+            }
           }
         } catch (e) { console.warn('[data-health] scan-rate read failed', m.id, e.message); }
         // FLOW SCORE (0-100): one number for "is this station's device fleet
@@ -855,9 +862,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // data — the connectivity dimension), 20% throughput (last-hour scan
         // rate holding up vs the day's average, capped at 1).
         let flowScore = null, flow = null;
-        if (coverage && coverage.length && r.total) {
-          const uptime = coverage.reduce((a, c) => a + Math.min(1, c.n / r.total), 0) / coverage.length;
-          const continuity = coverage.filter((c) => c.n > 0).length / coverage.length;
+        if (hourlyN.length && r.total) {
+          const uptime = hourlyN.reduce((a, n) => a + Math.min(1, n / r.total), 0) / hourlyN.length;
+          const continuity = hourlyN.filter((n) => n > 0).length / hourlyN.length;
           const throughput = scansPerHour ? Math.min(1, (lastHourScans || 0) / Math.max(1, scansPerHour)) : (continuity ? 1 : 0);
           flowScore = Math.round(100 * (0.6 * uptime + 0.2 * continuity + 0.2 * throughput));
           flow = { uptimePct: Math.round(uptime * 100), continuityPct: Math.round(continuity * 100), throughputPct: Math.round(throughput * 100) };
