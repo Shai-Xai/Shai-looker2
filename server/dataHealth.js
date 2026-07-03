@@ -761,6 +761,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     }
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' || mode.includes('.') ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
+      countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
@@ -947,7 +948,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         const breach = m.rosterAlertPct >= 1 && r.total >= 3 && offlinePct >= m.rosterAlertPct;
         // Scan volume for the tile: total + average per hour over the roster
         // window (hour-level timeline read — tiny aggregated result).
-        let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null;
+        let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null, countField = null;
         const hourlyN = []; // devices seen per HOUR — keeps the flow score stable at fine blocks
         try {
           // 10-min blocks: the tile graph shows the day at the same resolution
@@ -955,6 +956,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
           if (t.configured) {
             totalScans = t.grandTotal;
+            countField = t.countField || null;
             scansApprox = t.countBasis === 'none' || !!t.truncated;
             scansPerHour = Math.round(t.grandTotal / Math.max(0.25, (Date.now() - Date.parse(t.buckets[0])) / 3600000));
             const perHour = Math.max(1, Math.round(60 / t.intervalMin));
@@ -970,6 +972,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             }
           }
         } catch (e) { console.warn('[data-health] scan-rate read failed', m.id, e.message); }
+        // The WHOLE FEED's day total: same explore and event scope, but the
+        // station/category narrowing dropped — the headline can then show the
+        // DAY'S transactions, not just the slice this monitor watches.
+        let feedTotal = null;
+        try {
+          if (countField) {
+            const b = { ...baseBody(m), fields: [countField], limit: '1' };
+            for (const k of Object.keys(b.filters)) if (k === m.stationField || /station/i.test(k)) delete b.filters[k];
+            const a2 = rosterAnchor(m);
+            b.filters[m.timeField] = a2 ? `after ${a2.toISOString().slice(0, 16).replace('T', ' ')}` : 'last 12 hours';
+            const rows2 = await runScoped(m, b);
+            const v = rows2.length ? Number(rows2[0][countField]) : NaN;
+            if (Number.isFinite(v)) feedTotal = v;
+          }
+        } catch (e) { console.warn('[data-health] feed total read failed', m.id, e.message); }
         // The tile day-graph reads the OBSERVED log once it has any history —
         // what Pulse saw at each check, which a late sync can never repaint.
         // The transaction-based series above stays as the fallback (fresh DB).
@@ -993,7 +1010,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
-          totalScans, scansPerHour, lastHourScans, scansApprox, coverage, flowScore, flow,
+          totalScans, scansPerHour, lastHourScans, scansApprox, feedTotal, coverage, flowScore, flow,
           // WHICH devices are offline (worst first, capped) — shown on the tile
           // and in the dashboard breakdown without opening the Devices tab.
           offlineDevices: r.offline.slice(0, 15).map((d) => ({ device: d.device, lagMin: d.lagMin })),
