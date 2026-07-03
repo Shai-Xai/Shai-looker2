@@ -504,10 +504,9 @@ require('./dashboards').mount(app, {
 // A tile-sourced goal reads the live number off a dashboard tile through the
 // SHARED, scope-enforced query path (so the goal value == what the dashboard
 // shows, and the per-tenant scope can't be bypassed). The suite's filter locks
-// (which event) are applied exactly as a dashboard view would apply them.
-// The tile readers themselves live in server/tileValues.js (required at the top
-// of this file, above their first consumer).
+// (which event) apply exactly as a dashboard view would; the tile readers live in server/tileValues.js.
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
+require('./skills').mount(app, { db, auth, insights, getOwlTools, getGoalsApi: () => goalsApi, anthropicKeyForSuite, aiInstructionsFor, resolveEventDate }); // Skills: autonomous specialists (SKILLS_BRIEF P1) — the Owl's scheduled "push" door (advise-only, backtest + AM feedback); disposable → server/skills.js
 
 // ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
 // A self-contained module that watches a number (a dashboard tile via the SAME
@@ -982,6 +981,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       (jobsByEntity[j.entity_id] = jobsByEntity[j.entity_id] || []).push({ title: j.title || '', role: j.role, roleFocus: (j.role_focus || '').trim(), focusMode: j.focus_mode || 'override', customMessage: (j.custom_message || '').trim() });
     }
   } catch { /* scheduler table may not exist */ }
+  const skillsByEntity = require('./skills').playbookLayersByEntity(db.db); // per-client skill playbook additions (the trainable layer — server/skills.js)
   const users = db.listUsers();
   const clients = db.listEntities().map((ent) => {
     const events = db.listSuitesForEntity(ent.id).map((su) => {
@@ -993,7 +993,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes, skills: skillsByEntity[ent.id] || [] };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).

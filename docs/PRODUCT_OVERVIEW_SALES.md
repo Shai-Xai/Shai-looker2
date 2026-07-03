@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-02 (named Howler approvers) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (Skills runtime — Ticketing Manager) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -204,6 +204,28 @@ ticket like a well-informed friend who's already going.
 
 **Pitch:** "Your website stays the story; the Owl turns it into the shop — every
 page gets a personal ticket guide that answers, recommends and sells."
+
+### Skills — autonomous specialists (first: the Ticketing Manager)  🧪
+Self-running specialists that review a client's event on a schedule and write
+grounded advice — the Owl's "push" door. The first hire is the **Ticketing
+Manager 🎟️**: every morning it checks the event's goals, pace and forecast,
+digs into per-tier sales for the *why*, and writes a short review (headline →
+status → flags → concrete recommendations) into the run log.
+- **Advise-only by design** — a skill reads through the same scoped, fail-closed
+  data gate as everything else and **cannot send, change prices or touch money**;
+  every recommendation is for a human. Instances start **paused** (shadow mode).
+- **Trainable** — each skill has a playbook (platform default + per-client
+  additions, all visible in the Admin → AI audit), and every run can be graded
+  👍/👎 with a note by the AM: the induction loop from `docs/SKILLS_BRIEF.md`.
+- **Backtestable** — freeze a *finished* event at N days out and let the skill
+  write the advice it *would* have given (it physically cannot read data past
+  the freeze date), then mark its homework against what actually happened.
+- **Status 🧪:** internal/dogfood — the runtime, backtest + grading loop shipped;
+  admin UI, briefing delivery and client surfaces are next. Not client-visible yet.
+
+**Pitch (when it graduates):** "Pulse stops being a dashboard you check and
+becomes a team of specialists that check it for you — and tap you on the
+shoulder when it's worth your time."
 
 ## 2. Scheduled digests  ✅
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
@@ -700,6 +722,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **Skills — autonomous specialists** 🧪 (internal): the Skills
+  runtime landed with the first specialist, the **Ticketing Manager** — scheduled,
+  advise-only reviews of an event's sales/pace/tiers, a trainable playbook, AM
+  grading (👍/👎 + note) and a **backtest** mode that freezes a finished event at
+  N days out. Dogfood-only; no client surface yet.
 - **2026-07-02** — **One-click connects** 🟡: "Connect with Google" (pick the
   exact files in a native Google picker — the app can only ever see what you
   pick) and "Continue with Facebook" (login + choose the ad account, no tokens
