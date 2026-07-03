@@ -188,6 +188,43 @@ async function setEnabled(db, enabledNames, getExploreFields, model = seed.model
   return { ok: true, version: version(db) };
 }
 
+// ── One-shot enrichment: check-in / access-control fields on the cashless explore ──
+// Clients ask "who scanned where, on which device, for which ticket type" — those
+// answers live on the cashless explore's check-in family views, which were never
+// ticked in the admin catalogue (only counts + access-control dates were), so the
+// Owl couldn't answer scanning questions. This does exactly what an admin would in
+// Admin → AI → Owl catalogue: read the explore's REAL fields from Looker and enable
+// the non-PII check-in-family ones. Runs once (flag), only ADDS (never unticks),
+// and never re-runs — so later admin edits are always respected.
+const CHECKIN_SEED_FLAG = 'owl_catalogue_checkin_seeded';
+const CHECKIN_FAMILY_RE = /check_?in|access_control/i; // matched against the field's view prefix
+async function seedCheckinFields(db, getExploreFields) {
+  if (db.getSetting(CHECKIN_SEED_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+  const target = readExplores(db).find((e) => /cashless/i.test(e.view));
+  if (!target) return { ok: false, skipped: 'no cashless explore registered' };
+  let f;
+  try { f = (await getExploreFields(target.model, target.view)) || {}; }
+  catch (e) { return { ok: false, skipped: `looker unreachable: ${e.message}` }; } // no flag → retried next boot
+  const key = keyOf(target.model, target.view);
+  const map = readExpFields(db);
+  const current = normalizeExpFields(map[key]);
+  const have = new Set(current.map((x) => x.name));
+  const added = [];
+  const take = (arr, kind) => {
+    for (const x of arr || []) {
+      if (!CHECKIN_FAMILY_RE.test(String(x.name).split('.')[0])) continue; // its VIEW must be check-in family
+      if (isPII(x.name) || have.has(x.name)) continue;
+      added.push({ name: x.name, label: x.label_short || x.label || x.name, kind, type: x.type });
+      have.add(x.name);
+    }
+  };
+  take(f.measures, 'measure');
+  take(f.dimensions, 'dimension');
+  if (added.length) { map[key] = [...current, ...added]; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map)); }
+  db.setSetting(CHECKIN_SEED_FLAG, new Date().toISOString());
+  return { ok: true, explore: key, added: added.length };
+}
+
 // Register / unregister an EXTRA explore (the primary can't be removed).
 function registerExplore(db, { model, view, label }) {
   if (!model || !view || isPrimary(model, view)) return { ok: false, error: 'That explore is already available.' };
@@ -252,6 +289,10 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
     catch (e) { res.status(500).json({ error: 'Could not save the catalogue selection.' }); }
   });
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
+  // Fire-and-forget: enrich the cashless catalogue with check-in fields once.
+  seedCheckinFields(db, getExploreFields)
+    .then((r) => { if (!r.skipped || r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in field seed:', JSON.stringify(r)); })
+    .catch((e) => console.error('[owlCatalogue] check-in field seed failed:', e.message));
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCheckinFields };
