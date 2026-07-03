@@ -208,6 +208,10 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     const enabledCats = briefingCats(user.id, entityId); // which always-include categories are on
     const picks = []; // { tile, def, suiteId, setName, dashTitle, pinned }
     const seen = new Set();
+    // `pinned` = READER-CHOSEN (a followed tile or an explicit Tune focus pick).
+    // It renders as [FOLLOWED] to the model, which must address every one — so
+    // the auto-guaranteed fillers (ticket headline, GA4, rotation) must NOT set
+    // it, or the reader's actual picks drown in a sea of [FOLLOWED] ticketing.
     const addTile = (def, tile, suiteId, pinned) => {
       const meta = dashMeta[def.id];
       const sid = suiteId || meta?.suiteId;
@@ -270,9 +274,10 @@ module.exports = function createBriefingEngine({ db, store, query }) {
       if (!chosen.length) { note('tile not found on the dashboard'); continue; }
       const before = picks.length;
       for (const t of chosen) addTile(def, t, dashMeta[def.id]?.suiteId, true);
+      const diagIdx = focusDiag.length; // patched after the sweep if the query drops it
       note((picks.length > before ? 'feeding the briefing' : 'already included') + phaseNote);
+      focusDiag[diagIdx]._check = { dashTitle: def.title, titles: chosen.map((t) => t.title || '(untitled)') };
     }
-    if (focusDiag.length) console.log(`[facts] entity=${entityId} focus picks: ${focusDiag.map((f) => `${f.dashboard}›${f.tile}${f.phase ? `@${f.phase}` : ''} → ${f.status}`).join(' · ')}`);
     const PER_DASH = 4; // per-dashboard cap, shared by the priority seed + rotation fill
     // 1c) "Always include" dashboards (digest config) — their headline/cumulative
     //     tiles are guaranteed in, ahead of the rotation, so the boards that
@@ -286,7 +291,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
         .filter((t) => t.type !== 'text' && t.query?.fields?.length)
         .sort((a, b) => tilePriority(a) - tilePriority(b));
       let taken = 0;
-      for (const t of tiles) { if (taken >= PER_DASH || picks.length >= maxTiles) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, true); if (picks.length > before) taken += 1; }
+      for (const t of tiles) { if (taken >= PER_DASH || picks.length >= maxTiles) break; const before = picks.length; addTile(def, t, dashMeta[did]?.suiteId, false); if (picks.length > before) taken += 1; }
     }
     const isAnalyticsName = (name) => /\bga4\b|analytics|google/i.test(name || '');
     // 1d0) Guarantee the AUTHORITATIVE ticketing HEADLINE tiles by CONTENT, so the lead
@@ -306,7 +311,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
         .sort((a, b) => tilePriority(a) - tilePriority(b));
       for (const t of tiles) {
         if (head >= HEAD_BUDGET || picks.length >= maxTiles) break;
-        const before = picks.length; addTile(def, t, c.suiteId, true);
+        const before = picks.length; addTile(def, t, c.suiteId, false);
         if (picks.length > before) head += 1;
       }
     }
@@ -343,7 +348,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
         for (const re of MUST) {
           for (const def of dashes) {
             const m = [...(def.tiles || []), ...((def.carousels || []).flatMap((t) => t.tiles || []))].find((t) => t.type !== 'text' && t.query?.fields?.length && re.test(t.title || ''));
-            if (m) { const before = picks.length; addTile(def, m, sid, true); if (picks.length > before) count += 1; break; }
+            if (m) { const before = picks.length; addTile(def, m, sid, false); if (picks.length > before) count += 1; break; }
           }
         }
         const pools = catalogue.filter((c) => c.suiteId === sid)
@@ -359,7 +364,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
             if (count >= perEvent || picks.length >= maxTiles) break;
             if (pool.idx < pool.tiles.length && pool.taken < PER_DASH) {
               const t = pool.tiles[pool.idx++]; const before = picks.length;
-              addTile(pool.def, t, sid, true);
+              addTile(pool.def, t, sid, false);
               if (picks.length > before) { pool.taken += 1; count += 1; progressed = true; }
             }
           }
@@ -380,7 +385,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
       let taken = 0;
       for (const t of tiles) {
         if (taken >= PER_DASH || tkt >= TKT_BUDGET || picks.length >= maxTiles) break;
-        const before = picks.length; addTile(def, t, c.suiteId, true);
+        const before = picks.length; addTile(def, t, c.suiteId, false);
         if (picks.length > before) { taken += 1; tkt += 1; }
       }
     }
@@ -402,7 +407,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
         let taken = 0;
         for (const t of tiles) {
           if (taken >= PER_DASH || ga >= GA_BUDGET || picks.length >= maxTiles) break;
-          const before = picks.length; addTile(def, t, lead.suiteId, true);
+          const before = picks.length; addTile(def, t, lead.suiteId, false);
           if (picks.length > before) { taken += 1; ga += 1; }
         }
       }
@@ -502,6 +507,18 @@ module.exports = function createBriefingEngine({ db, store, query }) {
       } catch (e) { slow.push({ t: `${p.dashTitle} › ${p.tile.title || '?'}`, ms: Date.now() - tQ }); dropped.push(`${p.dashTitle} › ${p.tile.title || '?'} (error: ${e.message})`); return null; }
     }))).filter(Boolean);
     const sweepMs = Date.now() - tSweep;
+
+    // Reconcile the focus diag with what actually RAN: a pick can pass selection
+    // yet still drop at query time (no rows / scope blocked). Patch its status so
+    // the diagnose tells the truth instead of "feeding the briefing".
+    for (const f of focusDiag) {
+      if (!f._check) continue;
+      const fed = tiles.filter((t) => t.dashTitle === f._check.dashTitle && f._check.titles.includes(t.title)).length;
+      if (!fed) f.status = 'picked, but the query returned no rows / was blocked — see dropped tiles' + (f.status.includes('(') ? f.status.slice(f.status.indexOf(' (')) : '');
+      else if (f.tile === '(whole board)' && fed < f._check.titles.length) f.status = f.status.replace('feeding the briefing', `feeding the briefing (${fed}/${f._check.titles.length} tiles returned data)`);
+      delete f._check;
+    }
+    if (focusDiag.length) console.log(`[facts] entity=${entityId} focus picks: ${focusDiag.map((f) => `${f.dashboard}›${f.tile}${f.phase ? `@${f.phase}` : ''} → ${f.status}`).join(' · ')}`);
 
     // Why a dashboard might be missing from a briefing/digest: tiles drop when the
     // explore can't be scoped, or the query returns no rows. Log it so it's not a

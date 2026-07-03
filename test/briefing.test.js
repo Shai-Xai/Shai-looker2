@@ -153,6 +153,27 @@ test('buildFacts: a phase-scoped pick feeds ON the phase, and FAILS OPEN when no
   assert.match(b.focusDiag.find((f) => f.tile === 'GATE A').status, /phase scope ignored/);
 });
 
+test('buildFacts: a focus pick whose query returns no rows is reported, not claimed as feeding', async () => {
+  const noRowsFor = new Set(['GATE A']);
+  const query = {
+    ...liveQuery,
+    tileQueryBody: async (tile) => ({ filters: {}, _title: tile.title }),
+    runLookerQuery: async (_path, body) => (noRowsFor.has(body._title) ? { fields: {}, data: [] } : { fields: { measures: [{ name: 'v' }] }, data: [{ v: { value: 1 } }] }),
+  };
+  const e = makeEngine({ ...focusFixture(), query, prefs: { 'briefing_tiles:e1': JSON.stringify([{ dashboardId: 'gates', tileId: 'g1' }, { dashboardId: 'bar', tileId: 'b1' }]) } });
+  const { focusDiag } = await e.buildFacts({ id: 'u1' }, 'e1');
+  assert.match(focusDiag.find((f) => f.tile === 'GATE A').status, /no rows/, 'query-time drop is surfaced on the pick');
+  assert.equal(focusDiag.find((f) => f.tile === 'Total Bar Sales').status, 'feeding the briefing');
+});
+
+test('buildFacts: only reader-chosen tiles are marked pinned/[FOLLOWED] — auto-guaranteed fillers are not', async () => {
+  const e = makeEngine({ ...focusFixture(), prefs: { 'briefing_tiles:e1': JSON.stringify([{ dashboardId: 'bar', tileId: 'b1' }]) } });
+  const { tiles } = await e.buildFacts({ id: 'u1' }, 'e1');
+  const pinned = tiles.filter((t) => t.pinned).map((t) => t.title);
+  assert.deepEqual(pinned, ['Total Bar Sales'], 'the Tune pick is the only [FOLLOWED] tile');
+  assert.ok(tiles.length > 1, 'the rotation still fills the rest of the budget');
+});
+
 test('buildFacts: a whole-dashboard focus pick is capped so it cannot eat the tile budget', async () => {
   const many = Array.from({ length: 15 }, (_, i) => tile(`t${i}`, `Tile ${i}`));
   const e = makeEngine({
