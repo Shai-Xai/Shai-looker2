@@ -66,3 +66,51 @@ services:
       # writing to the log stream.
       - key: OPS_SLACK_WEBHOOK_URL
         sync: false
+
+  # ── STAGING ────────────────────────────────────────────────────────────────
+  # A second, isolated copy for testing deploys before they reach customers.
+  # Deploys from the `staging` branch; has its OWN disk/database, its OWN secrets,
+  # and — critically — OUTBOUND_DISABLED=1, which hard-kills all email/SMS/push/
+  # Slack sending so a test run (or a scheduler tick) can NEVER reach a real
+  # customer, even if you load production-like data. Workflow: merge to `staging`
+  # → auto-deploys here → test → then merge `staging` → `main` for production.
+  # See docs/STAGING.md. (This is a second paid instance + disk — extra cost.)
+  - type: web
+    name: howler-pulse-staging
+    runtime: node
+    plan: starter
+    branch: staging
+    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1
+    disk:
+      name: pulse-data-staging
+      mountPath: /var/lib/pulse
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production          # still 'production' so cookies are Secure behind Render HTTPS
+      - key: OUTBOUND_DISABLED
+        value: "1"                 # SAFETY: no email/SMS/push/Slack ever leaves staging
+      - key: DATA_DIR
+        value: /var/lib/pulse
+      - key: SESSION_SECRET
+        generateValue: true        # staging's own — separate from production
+      - key: MASTER_KEY
+        generateValue: true        # staging's own secrets key (its DB is separate)
+      - key: ADMIN_EMAIL
+        sync: false                # a staging-only admin login
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOOKER_BASE_URL
+        sync: false                # ideally a read-only Looker connection
+      - key: LOOKER_CLIENT_ID
+        sync: false
+      - key: LOOKER_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false                # a separate (or spend-capped) key is wise for staging
+      # Leave BACKUP_S3_* and OPS_SLACK_WEBHOOK_URL UNSET on staging — no off-box
+      # backups or ops pages needed for a throwaway environment.
