@@ -493,6 +493,7 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
   });
   const t = await h.mod.deviceTimeline(m, 12);
   assert.equal(t.countBasis, 'native');
+  assert.equal(t.countField, 'scans.transaction_count'); // exposed for the feed-total read
   assert.equal(t.devices[0].counts[11], 41); // the real per-sale volume
   assert.equal(t.grandTotal, 41);
   assert.ok(bodies.every((b) => !b.fields.includes('scans.Cumulative_topups_count'))); // the decoy never ran
@@ -768,6 +769,32 @@ test('deviceTimeline: falls back to a dynamic count when the view has no native 
   await h.mod.deviceTimeline(m, 12);
   assert.equal(bodies.length, 3);
   assert.ok(bodies[2].fields.includes('data_health_scans'));
+});
+
+test('check() stores the whole-feed day total with station narrowing dropped', async () => {
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.transaction_count' }] }) } });
+  const m = makeMonitor(h, {
+    rosterField: 'scans.device_id',
+    filters: { 'ev.name': 'KFF 26', 'scans.station_category': 'bar' },
+  });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  let feedBody = null;
+  h.setRowsFn(async (b) => {
+    // The feed-total read: ONLY the count measure, no device dimension.
+    if (b.fields.length === 1 && b.fields[0] === 'scans.transaction_count') { feedBody = b; return [{ 'scans.transaction_count': 555 }]; }
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-1', data_health_last: minsAgo(2) }];
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 0 }];
+    if (b.fields.includes('scans.transaction_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.transaction_count': 5 }];
+    if (b.fields.includes('scans.device_id')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at': minsAgo(2) }];
+    return [feedRow('Gate B', 2)];
+  });
+  await h.mod.check(m);
+  const snap = h.mod.monitorById(m.id).rosterSnapshot;
+  assert.equal(snap.feedTotal, 555);
+  assert.ok(feedBody);
+  assert.equal(feedBody.filters['scans.station_category'], undefined); // narrowing dropped
+  assert.equal(feedBody.filters['scans.station_name'], undefined);
+  assert.equal(feedBody.filters['ev.name'], 'KFF 26'); // event scope kept
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {

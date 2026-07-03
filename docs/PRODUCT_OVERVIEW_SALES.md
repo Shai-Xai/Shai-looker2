@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (📶 Data health: per-station timeline drill-down, scans vs transactions split, device labels) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -75,7 +75,11 @@ longer they use Pulse, the better it gets."
   one tap, with room to add a personal note and a link back to the view.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
-  follow and view.
+  follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
+  optionally scoped to a **lifecycle phase** (e.g. the gates board on Event Day —
+  needs the event's key dates set so Pulse knows the phase); picked tiles always
+  feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
+  make a given briefing.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
@@ -594,8 +598,23 @@ client's* numbers.
   product, literally beating. *(Desktop for now; urgent alerts already reach the phone
   via push. Momentum auto-picks key tiles today; hand-picking comes later.)*
 
+- **⚡ Live updates (event-day mini report)** 🧪 — a second tab on the Alerts page for
+  **during the event**: instead of one threshold, Pulse sends the team a **compact
+  multi-metric snapshot every 15–120 minutes while the event runs** — people through
+  the gates with the **+change since the last update** and the **pace per hour**, bar
+  revenue, a **top-3 bars/vendors** list read off any breakdown tile, and (for Event
+  Ops clients) **device health** (deployed devices + open issues). A block can also
+  show **"% of last year"** against a chosen past event. Press **Go live** when doors
+  open (or set a start/end window and it runs itself); it lands in the **inbox** (the
+  whole night in one thread) plus **app push, email, SMS** and **WhatsApp** — WhatsApp
+  reaches anyone who's messaged the Owl in the last 24h (WhatsApp's own service-window
+  rule; others are skipped, the rest still deliver). The **Owl can set one up from
+  chat** ("update me every 30 minutes on event night") with the usual confirm-before-
+  create card.
+
 **Pitch:** "Stop watching dashboards — tell Pulse the number that matters and it taps
-you on the shoulder the moment it happens, on whatever screen you're on."
+you on the shoulder the moment it happens, on whatever screen you're on. And on event
+night, it becomes your control room in your pocket — a mini report every half hour."
 *Checked every few minutes (data refreshes on the ~30-min pipeline). Coming next:
 sales-surge/stall detection, AI-written alert messages, and one-tap actions from the
 alert itself.*
@@ -750,6 +769,22 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
+  page gains a **Live updates** tab — while the event runs, Pulse sends the team a
+  compact multi-metric snapshot every 15–120 min (gates in with **+change** and
+  **pace/hr**, bar revenue, **top-3 bars/vendors**, Event Ops device health, optional
+  **"% of last year"** vs a chosen past event). Manual **Go live** switch or a
+  scheduled window; delivered to the inbox (one thread for the whole night) + app
+  push, email, SMS and **WhatsApp** (24h service-window rule respected). The **Owl
+  can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`
+  permission as Alerts.
+- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+  Tune now always feed the briefing — a phase-scoped pick (e.g. "gates board on
+  Event Day") whose event has **no dates/phase set** feeds anyway instead of
+  silently vanishing, and the Tune modal warns to set the key dates. A
+  whole-dashboard pick no longer crowds out the reader's other picks, and admins
+  get a **🔍 Diagnose focus tiles** panel on the home briefing showing why each
+  pick did or didn't make that briefing.
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking

@@ -240,7 +240,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getLivePulseApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -700,6 +700,23 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const r = alertsApi.createAlert({ suiteId, draft, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(400).json({ error: r.error || 'Could not create the alert.' });
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
+  });
+
+  // POST /api/owl/act/create-live-update — the user tapping "Set it up" on the card
+  // the createLiveUpdate tool produced. Same draft→confirm shape as create-alert;
+  // permission is re-checked inside livepulse.createLivePulse (alerts.manage).
+  app.post('/api/owl/act/create-live-update', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { suiteId, draft } = req.body || {};
+    if (!suiteId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'suiteId and draft are required.' });
+    const su = db.getSuite(suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found.' });
+    if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
+    const lpApi = typeof getLivePulseApi === 'function' ? getLivePulseApi() : null;
+    if (!lpApi || !lpApi.createLivePulse) return res.status(503).json({ error: 'Live updates aren\'t available right now.' });
+    const r = lpApi.createLivePulse({ suiteId, draft, user: req.user, via: 'owl' });
+    if (!r.ok) return res.status(400).json({ error: r.error || 'Could not set up the live update.' });
+    res.status(201).json({ ok: true, pulse: { id: r.pulse.id, name: r.pulse.name }, url: actionViewPath('createLiveUpdate') });
   });
 
   // POST /api/owl/act/submit-report — the user tapping "File it" on the card the
