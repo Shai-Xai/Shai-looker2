@@ -421,7 +421,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   const [checkMsg, setCheckMsg] = useState('');
   const stale = m.streams.filter((s) => s.status === 'stale').length;
   const warn = m.streams.filter((s) => s.status === 'warn').length;
-  const overall = m.status === 'paused' ? 'paused' : m.lastError ? 'error' : stale ? 'stale' : warn ? 'warn' : m.streams.length ? 'fresh' : 'new';
+  const overall = m.status === 'closed' ? 'closed' : m.status === 'paused' ? 'paused' : m.lastError ? 'error' : stale ? 'stale' : warn ? 'warn' : m.streams.length ? 'fresh' : 'new';
   const headColor = overall === 'stale' || overall === 'error' ? STATUS_COLOR.stale : overall === 'warn' ? STATUS_COLOR.warn : overall === 'fresh' ? STATUS_COLOR.fresh : 'var(--muted)';
   const entityName = m.entityId ? (entities.find((e) => e.id === m.entityId)?.name || 'client') : '';
 
@@ -436,13 +436,14 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   });
 
   return (
-    <div style={{ ...card, borderLeft: `4px solid ${headColor}`, opacity: m.status === 'paused' ? 0.75 : 1 }}>
+    <div style={{ ...card, borderLeft: `4px solid ${headColor}`, opacity: m.status === 'paused' || m.status === 'closed' ? 0.75 : 1 }}>
       <div style={{ cursor: 'pointer' }} title={expanded ? 'Collapse' : 'Expand'} onClick={() => setExpanded((v) => !v)}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minHeight: 28 }}>
           <Dot status={overall === 'error' ? 'stale' : overall === 'paused' || overall === 'new' ? undefined : overall} />
           <strong style={{ fontSize: 14.5 }}>{m.name}</strong>
           {m.area && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--hairline)', color: 'var(--text)' }}>{m.area}</span>}
           {m.status === 'paused' && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>PAUSED</span>}
+          {m.status === 'closed' && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--hairline)', color: 'var(--muted)' }}>🚪 CLOSED</span>}
           {!expanded && m.lastError && <span style={{ fontSize: 11.5, fontWeight: 700, color: STATUS_COLOR.stale }}>pull failed</span>}
           {!expanded && !m.streams.length && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>no data yet</span>}
           <span style={{ flex: 1 }} />
@@ -538,6 +539,11 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
           <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
             {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
+          </button>
+          <button style={ghostBtn} disabled={!!busy}
+            title="Closed = the station is intentionally shut (gate closed for the night) — no checks, no alerts, and it drops out of the dashboard numbers until reopened"
+            onClick={() => run('close', () => api.setDataMonitorStatus(m.id, m.status === 'closed' ? 'active' : 'closed'))}>
+            {m.status === 'closed' ? '🚪 Reopen' : '🚪 Mark closed'}
           </button>
           <button style={{ ...ghostBtn, color: STATUS_COLOR.stale }} disabled={!!busy}
             onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
@@ -653,7 +659,10 @@ function ReportPanel({ url, body, title }) {
 
 // Permanent metrics row: fleet + volume headline computed from the stored
 // snapshots (no live queries) — shown on the Admin page and the client tab.
-function HealthMetrics({ monitors }) {
+function HealthMetrics({ monitors: allMonitors }) {
+  // Closed stations are intentionally shut — their silence must not drag the
+  // fleet numbers, so they drop out of every aggregate until reopened.
+  const monitors = allMonitors.filter((m) => m.status !== 'closed');
   const snaps = monitors.map((m) => m.rosterSnapshot).filter(Boolean);
   if (!snaps.length) return null;
   const sum = (k) => (snaps.some((x) => x[k] != null) ? snaps.reduce((a, x) => a + (x[k] || 0), 0) : null);
@@ -707,8 +716,9 @@ function HealthMetrics({ monitors }) {
 // monitor cards — the platform overview drills down instead of a flat list.
 function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpen, reportBody }) {
   const [open, setOpen] = useState(defaultOpen);
-  const streams = monitors.flatMap((m) => m.streams);
-  const staleN = streams.filter((s) => s.status === 'stale').length + monitors.filter((m) => m.lastError).length;
+  const openMons = monitors.filter((m) => m.status !== 'closed');
+  const streams = openMons.flatMap((m) => m.streams);
+  const staleN = streams.filter((s) => s.status === 'stale').length + openMons.filter((m) => m.lastError).length;
   const warnN = streams.filter((s) => s.status === 'warn').length;
   const dot = staleN ? 'stale' : warnN ? 'warn' : streams.length ? 'fresh' : undefined;
   return (
@@ -863,14 +873,20 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   // Linked values: once a filter dimension is picked, fetch its real (scoped)
   // distinct values so the value box offers them as suggestions — live Looker
   // read, so only on demand and cached per field for this editor session.
+  // Value lookups ride the OTHER filled-in filters (event name → only that
+  // event's stations); the signature makes a changed filter refetch on focus.
+  const dimFilters = (field) => Object.fromEntries(filterRows.filter(([k2, v2]) => k2 && k2 !== field && String(v2).trim()));
   const loadDimValues = (field) => {
-    if (!field || dimValues[field] != null || !f.model || !f.view) return;
+    if (!field || !f.model || !f.view) return;
+    const sig = JSON.stringify(dimFilters(field));
+    const cur = dimValues[field];
+    if (cur === 'loading' || (cur && cur.sig === sig)) return;
     setDimValues((p) => ({ ...p, [field]: 'loading' }));
     fetch('/api/admin/data-health/field-values', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: f.model, view: f.view, field, entityId: f.entityId, suiteId: f.suiteId }),
-    }).then((r) => r.json()).then((d) => setDimValues((p) => ({ ...p, [field]: Array.isArray(d.values) ? d.values : [] })))
-      .catch(() => setDimValues((p) => ({ ...p, [field]: [] })));
+      body: JSON.stringify({ model: f.model, view: f.view, field, entityId: f.entityId, suiteId: f.suiteId, filters: dimFilters(field) }),
+    }).then((r) => r.json()).then((d) => setDimValues((p) => ({ ...p, [field]: { sig, values: Array.isArray(d.values) ? d.values : [] } })))
+      .catch(() => setDimValues((p) => ({ ...p, [field]: { sig, values: [] } })));
   };
 
   useEffect(() => { api.dataHealthExplores().then((r) => setModels(r.models || [])).catch((e) => setErr(e.message)); }, []);
@@ -1030,11 +1046,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               </div>
               {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
               <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
-                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value (blank = not applied yet)' : 'value (blank = not applied yet)'}
+                placeholder={dimValues[k] === 'loading' ? 'loading values…' : (dimValues[k]?.values || []).length ? 'pick or type a value (blank = not applied yet)' : 'value (blank = not applied yet)'}
                 onFocus={() => loadDimValues(k)}
                 onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
               <datalist id={`dh-vals-${i}`}>
-                {(Array.isArray(dimValues[k]) ? dimValues[k] : []).map((val) => <option key={val} value={val} />)}
+                {(dimValues[k]?.values || []).map((val) => <option key={val} value={val} />)}
               </datalist>
               <button style={ghostBtn} onClick={() => setFilterRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
             </div>
@@ -1108,7 +1124,7 @@ const MONITOR_TEMPLATES = {
     stationField: 'cashless_stations.name',
     rosterField: 'cashless_open_loop_sales.device_id',
     detailFields: ['cashless_open_loop_sales.device_id', 'event_sales_operators.handler', 'cashless_operation_sale_item.product_name'],
-    filters: { 'cashless_stations.name': '' },
+    filters: { 'cashless_combine_data.name': '', 'cashless_stations.name': '' },
     rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
   },
   checkin: {
@@ -1117,7 +1133,7 @@ const MONITOR_TEMPLATES = {
     stationField: 'cashless_check_ins.station_name',
     rosterField: 'cashless_check_ins.device_id',
     detailFields: ['cashless_check_ins.device_id', 'Check_in_operators.handler', 'cashless_check_ins.station_name'],
-    filters: { 'cashless_check_ins.station_name': '' },
+    filters: { 'cashless_combine_data.name': '', 'cashless_check_ins.station_name': '' },
     rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
   },
 };
@@ -1140,8 +1156,9 @@ export default function DataHealthAdmin() {
   }, []);
 
   const monitors = data?.monitors || [];
-  const allStreams = monitors.flatMap((m) => m.streams);
-  const staleN = allStreams.filter((s) => s.status === 'stale').length + monitors.filter((m) => m.lastError).length;
+  const openMonitors = monitors.filter((m) => m.status !== 'closed');
+  const allStreams = openMonitors.flatMap((m) => m.streams);
+  const staleN = allStreams.filter((s) => s.status === 'stale').length + openMonitors.filter((m) => m.lastError).length;
   const warnN = allStreams.filter((s) => s.status === 'warn').length;
 
   // Platform overview → drill in: group monitors by client · event. Monitors

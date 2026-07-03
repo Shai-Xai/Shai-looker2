@@ -233,7 +233,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       channels,
       notifyRecovery: b.notifyRecovery === false ? 0 : 1,
       cooldownMin: num(b.cooldownMin, 60, 0, 10080),
-      status: b.status === 'paused' ? 'paused' : 'active',
+      status: b.status === 'paused' ? 'paused' : b.status === 'closed' ? 'closed' : 'active',
     };
   }
 
@@ -518,9 +518,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 
   // Distinct values of a dimension (scoped) — feeds the editor's linked filter
   // dropdowns so users pick a real station/event/type instead of typing blind.
-  async function fieldValues({ model, view, field, entityId, suiteId }) {
+  async function fieldValues({ model, view, field, entityId, suiteId, filters }) {
     const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
-    const rows = await runScoped(mLike, { model: mLike.model, view: mLike.view, fields: [String(field)], filters: {}, sorts: [String(field)], limit: '500', query_timezone: 'UTC' });
+    // The editor's OTHER filters constrain the value list — with an event
+    // filter set, the station dropdown offers only THAT event's stations.
+    const extra = {};
+    if (filters && typeof filters === 'object' && !Array.isArray(filters)) {
+      for (const [k, v] of Object.entries(filters).slice(0, 10)) {
+        if (k && k !== String(field) && String(v ?? '').trim()) extra[String(k).slice(0, 200)] = String(v).trim().slice(0, 500);
+      }
+    }
+    const rows = await runScoped(mLike, { model: mLike.model, view: mLike.view, fields: [String(field)], filters: extra, sorts: [String(field)], limit: '500', query_timezone: 'UTC' });
     const out = [];
     for (const r of rows) {
       const v = r[String(field)];
@@ -857,7 +865,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    const status = (req.body || {}).status === 'paused' ? 'paused' : 'active';
+    // 'closed' = the station is intentionally shut (gate closed for the night)
+    // — no checks, no alerts, excluded from the dashboard numbers.
+    const want = (req.body || {}).status;
+    const status = want === 'paused' ? 'paused' : want === 'closed' ? 'closed' : 'active';
     sql.prepare('UPDATE data_monitors SET status=?, updated_at=? WHERE id=?').run(status, now(), m.id);
     res.json({ monitor: monitorById(m.id) });
   });
@@ -1090,9 +1101,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // the editor's linked value dropdowns (e.g. pick a real station name).
   app.post('/api/admin/data-health/field-values', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
-    const { model, view, field, entityId, suiteId } = req.body || {};
+    const { model, view, field, entityId, suiteId, filters } = req.body || {};
     if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
-    res.json({ values: await fieldValues({ model, view, field, entityId, suiteId }) });
+    res.json({ values: await fieldValues({ model, view, field, entityId, suiteId, filters }) });
   }));
 
   const _fieldCache = new Map();
