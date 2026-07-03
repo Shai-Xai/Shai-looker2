@@ -120,10 +120,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     CREATE INDEX IF NOT EXISTS idx_dme ON data_monitor_events(monitor_id, at);
   `);
 
-  // Additive migration for DBs created before detail columns (Latest-20 extras).
+  // Additive migrations for DBs created before detail columns / the device roster.
   try {
     const cols = sql.prepare('PRAGMA table_info(data_monitors)').all().map((c) => c.name);
-    if (!cols.includes('detail_fields')) sql.exec("ALTER TABLE data_monitors ADD COLUMN detail_fields TEXT NOT NULL DEFAULT '[]'");
+    const add = (name, ddl) => { if (!cols.includes(name)) sql.exec(`ALTER TABLE data_monitors ADD COLUMN ${ddl}`); };
+    add('detail_fields', "detail_fields TEXT NOT NULL DEFAULT '[]'");
+    add('roster_field', "roster_field TEXT NOT NULL DEFAULT ''");           // device/operator dimension for the roster view
+    add('roster_baseline_min', 'roster_baseline_min INTEGER NOT NULL DEFAULT 1440'); // seen within this window = "linked"
+    add('roster_online_min', 'roster_online_min INTEGER NOT NULL DEFAULT 30');       // synced within this window = "online"
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -134,6 +138,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min,
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -172,6 +177,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       detailFields: Array.isArray(b.detailFields)
         ? [...new Set(b.detailFields.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().slice(0, 200)))].slice(0, 4)
         : [],
+      // Device roster: dimension identifying a device/operator, plus the "linked"
+      // baseline window and the "online" recency window (minutes).
+      rosterField: String(b.rosterField || '').slice(0, 200),
+      rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
+      rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
@@ -187,16 +197,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const ts = now();
     if (id) {
       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
+        roster_field=?, roster_baseline_min=?, roster_online_min=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields, filters,
+    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
+      roster_field, roster_baseline_min, roster_online_min, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
-      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields), JSON.stringify(c.filters),
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
+        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -304,6 +318,40 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         agoMin: ts ? Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 : null,
       };
     });
+  }
+
+  // The device roster: "expected vs actual". Every device/operator seen within
+  // the BASELINE window counts as linked; any of those not seen within the
+  // ONLINE window is offline — named, with how long it's been silent. This
+  // learns the expected set from the data itself (no manual device register):
+  // one scoped query over the baseline window, reduced to last-seen per device.
+  async function deviceRoster(m) {
+    if (!m.rosterField) return { configured: false };
+    const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+    // Constrain to the baseline window in Looker itself, so a long-lived explore
+    // doesn't drag ancient devices into the roster.
+    body.filters[m.timeField] = `last ${m.rosterBaselineMin} minutes`;
+    const rows = await runScoped(m, body);
+    const seen = new Map(); // device -> latest Date
+    for (const r of rows) {
+      const d = String(r[m.rosterField] ?? '').trim();
+      const ts = parseTs(r[m.timeField]);
+      if (!d || !ts) continue;
+      const prev = seen.get(d);
+      if (!prev || ts > prev) seen.set(d, ts);
+    }
+    const nowMs = Date.now();
+    const devices = [...seen.entries()]
+      .map(([device, ts]) => ({ device, lagMin: Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 }))
+      .sort((a, b) => b.lagMin - a.lagMin);
+    const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
+    return {
+      configured: true,
+      baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin,
+      total: devices.length, online: devices.length - offline.length,
+      offline: offline.slice(0, 100),
+      truncated: rows.length >= 5000, // baseline window busier than the scan window — counts may undercount idle devices
+    };
   }
 
   // Distinct values of a dimension (scoped) — feeds the editor's linked filter
@@ -583,6 +631,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     res.json({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) });
   }));
 
+  // The device roster (live Looker read — opened on demand from the log panel).
+  app.get('/api/admin/data-health/monitors/:id/roster', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const m = monitorById(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Monitor not found' });
+    res.json(await deviceRoster(m));
+  }));
+
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
     if (!enabled()) return off(res);
     if (!monitorById(req.params.id)) return res.status(404).json({ error: 'Monitor not found' });
@@ -635,7 +691,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }));
 
   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
-  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues };
+  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords, fieldValues, deviceRoster };
 }
 
 module.exports = { mount, AREAS, CHANNELS };

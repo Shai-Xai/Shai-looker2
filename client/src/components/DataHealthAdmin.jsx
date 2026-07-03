@@ -118,9 +118,66 @@ function LatestRecords({ monitorId }) {
   );
 }
 
+// The device roster: expected vs actual. Everything seen in the baseline window
+// is "linked"; anything silent longer than the online window is offline, named,
+// with how long it's been quiet — the go-check-these list.
+function RosterPanel({ monitorId }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async () => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/roster`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch only when the monitor changes
+  useEffect(() => { load(); }, [monitorId]);
+  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={load}>Retry</button></div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the device roster from Looker…</div>;
+  if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.</div>;
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.total} linked</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(seen in the last {fmtLag(data.baselineMin)})</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: STATUS_COLOR.fresh }}>{data.online} online</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: data.offline.length ? STATUS_COLOR.stale : 'var(--muted)' }}>{data.offline.length} offline</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>(no sync in {fmtLag(data.onlineMin)})</span>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={load}>{busy ? 'Refreshing…' : '🔄 Refresh'}</button>
+      </div>
+      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — idle devices may be under-counted; consider a shorter linked window.</div>}
+      {!data.offline.length ? (
+        <div style={{ fontSize: 12.5, color: STATUS_COLOR.fresh }}>✅ Every linked device has synced within the online window.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 }}>Check these — longest silent first:</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>Device / operator</th>
+              <th style={{ padding: '4px 8px', fontWeight: 600 }}>Last sync</th>
+            </tr></thead>
+            <tbody>{data.offline.map((d) => (
+              <tr key={d.device} style={{ borderTop: '1px solid var(--hairline)' }}>
+                <td style={{ padding: '5px 8px 5px 0', fontWeight: 700, color: STATUS_COLOR.stale }}>{d.device}</td>
+                <td style={{ padding: '5px 8px' }}>{fmtLag(d.lagMin)} ago</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Expandable history: the transition/alert feed + the raw pull log + a live peek
-// at the last 20 records off the feed.
-function HistoryPanel({ monitorId }) {
+// at the last 20 records off the feed (+ the device roster when configured).
+function HistoryPanel({ monitorId, rosterField }) {
   const [hist, setHist] = useState(null);
   const [tab, setTab] = useState('events');
   useEffect(() => { api.dataMonitorHistory(monitorId).then(setHist).catch(() => setHist({ checks: [], events: [] })); }, [monitorId]);
@@ -128,7 +185,8 @@ function HistoryPanel({ monitorId }) {
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)']].map(([k, l]) => (
+        {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)'],
+          ...(rosterField ? [['roster', '📟 Devices (live)']] : [])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
         ))}
       </div>
@@ -168,6 +226,7 @@ function HistoryPanel({ monitorId }) {
           </div>
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
         {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
+        {tab === 'roster' && <RosterPanel monitorId={monitorId} />}
       </div>
     </div>
   );
@@ -233,7 +292,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
           onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
       </div>
-      {showHist && <HistoryPanel monitorId={m.id} />}
+      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} />}
     </div>
   );
 }
@@ -244,6 +303,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
+    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -344,6 +404,31 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               </select>
             )}
           </div>
+        </div>
+      )}
+
+      {f.model && f.view && fields && (
+        <div style={{ ...grid2, marginTop: 12 }}>
+          <div>
+            <span style={label}>Device roster (optional — count linked vs offline)</span>
+            <select style={input} value={f.rosterField} onChange={(e) => set('rosterField', e.target.value)}>
+              <option value="">No roster</option>
+              {(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || '')).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+            </select>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the device ID or operator dimension. Anything seen in the linked window counts as connected; silence past the online window flags it offline by name.</span>
+          </div>
+          {f.rosterField && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <span style={label}>Linked window (min)</span>
+                <input style={input} type="number" min="10" value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
+              </div>
+              <div>
+                <span style={label}>Online window (min)</span>
+                <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
