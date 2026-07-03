@@ -337,7 +337,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
           queryBody: qb, // the live Looker query — used when pinning the chart to a dashboard
           // Auto-chart hint: a breakdown (>=1 dimension, >1 row) charts; a date
           // dimension → line, otherwise → bar. A single scalar stays text.
-          chartType: (dims.length >= 1 && rows.length > 1) ? (((ex ? (exD.get(dims[0]) || {}).type : dimType.get(dims[0])) === 'date') ? 'line' : 'bar') : null,
+          chartType: (dims.length >= 1 && rows.length > 1) ? (dims.some((d) => (ex ? (exD.get(d) || {}).type : dimType.get(d)) === 'date') ? 'line' : 'bar') : null,
         };
       });
     // getDashboard answers carry no Looker query of their own, but the model read the
