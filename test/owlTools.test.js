@@ -271,6 +271,22 @@ test('a registered extra explore gets its own scoped, validated read tool', asyn
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
 });
 
+test('exportRows (raw CSV): PII fields refused, scope forced, full row budget', async () => {
+  const ent = h.makeEntity('Ultra EX', 'Ultra Exports');
+  const user = h.makeClient('owl-ex@client.test', [ent.id]);
+  const t = tools();
+  // A round-tripped queryBody is untrusted: a PII field must refuse BEFORE Looker.
+  lookerCalls = 0;
+  const pii = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_purchasers.email', M0] }, ctx(user));
+  assert.equal(pii.ok, false);
+  assert.equal(lookerCalls, 0, 'refused before any query ran');
+  // A valid export re-applies the organiser scope and lifts the row budget to 5000.
+  const res = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_ticket_types.name', M0], filters: { [h.ORG_FIELD]: 'Someone Else' } }, ctx(user));
+  assert.equal(res.ok, true);
+  // The smuggled foreign organiser filter is clamped back inside the user's own scope.
+  assert.equal((await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: [M0] }, ctx(user))).ok, true);
+});
+
 // ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──
 
 test('createAlert drafts a metric alert bound to the curated explore', async () => {

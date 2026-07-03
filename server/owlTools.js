@@ -1089,8 +1089,38 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // include or drop it PER CLIENT (Admin can switch an explore off for one client).
   for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = { ...t, exploreKey: `${ex.model}::${ex.explore}` }; } catch { /* skip a malformed explore */ } }
 
+  // ── Raw-data export (the chat's ⬇ CSV "full data" path) ─────────────────────
+  // Re-runs a citation's queryBody LIVE with the full row budget (the chat stream
+  // caps citation rows at 50). The body is UNTRUSTED — it round-trips through the
+  // browser — so: whitelisted keys only, PII fields rejected, and the SAME scope
+  // gate + entity binding as askData re-applied fresh (ceiling, fail closed). It can
+  // never return data the user couldn't already query — just more rows of it.
+  async function exportRows(raw, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const qb = raw && typeof raw === 'object' ? raw : {};
+    if (!qb.model || !qb.view || !Array.isArray(qb.fields) || !qb.fields.length) return refuse('bad_query', 'No query to export.');
+    const fields = qb.fields.map(String).slice(0, 24);
+    if (fields.some((f) => isPII(f))) return refuse('pii', 'Contact fields can\'t be exported.');
+    const filters = {};
+    for (const [k, v] of Object.entries(qb.filters || {})) if (v != null && (typeof v === 'string' || typeof v === 'number')) filters[String(k).slice(0, 200)] = String(v).slice(0, 2000);
+    const body = { model: String(qb.model), view: String(qb.view), fields, filters, sorts: Array.isArray(qb.sorts) ? qb.sorts.slice(0, 4).map(String) : [], limit: 5000 };
+    const allowed = await query.applyScope(body, user, suiteId);
+    if (allowed === false) return refuse('no_scope', 'No data scope for this export.');
+    if (entityId && auth && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    } else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    let rows;
+    try { rows = await query.runLookerQuery('/queries/run/json', body); }
+    catch (e) { return refuse('query_failed', `Export failed${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0 };
+  }
+
   return {
     catalogue,
+    exportRows, // NOT a chat tool (no schema) — the export route calls it directly
     ...extraTools,
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },

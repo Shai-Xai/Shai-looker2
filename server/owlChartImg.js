@@ -36,7 +36,7 @@ function chartFromTrail(trail, opts = {}) {
 // One askData/queryDashboard call with a category dimension + >1 row → a bar/line.
 function groupedFromTrail(trail, opts) {
   const cands = (trail || [])
-    .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
+    .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard' || t.name.startsWith('ask_')) && t.result && t.result.ok)
     .map((t) => ({ dims: t.input.dimensions || [], rows: t.result.rows || [], m: t.input.measure }))
     .filter((c) => c.dims.length >= 1 && c.rows.length > 1 && c.m);
   if (!cands.length) return null;
@@ -57,7 +57,7 @@ function groupedFromTrail(trail, opts) {
 // how the Owl answers "compare X vs Y" when it runs a separate lookup per side.
 function comparisonFromTrail(trail, opts) {
   const scalars = (trail || [])
-    .filter((t) => t.name === 'askData' && t.result && t.result.ok && (t.input.dimensions || []).length === 0)
+    .filter((t) => (t.name === 'askData' || t.name.startsWith('ask_')) && t.result && t.result.ok && (t.input.dimensions || []).length === 0)
     .map((t) => {
       const m = t.input.measure;
       const rows = t.result.rows || [];
