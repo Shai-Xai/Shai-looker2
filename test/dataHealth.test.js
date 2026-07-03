@@ -13,6 +13,7 @@ function fakeApp() { return { get() {}, post() {}, put() {}, delete() {} }; }
 function mountHealth() {
   const sql = db.db;
   let rows = [];                // what the next Looker pull returns
+  let rowsFn = async () => rows; // body-aware override (fallback-path tests)
   let scopedUser = null;        // the user applyScope saw
   let scopeOk = true;
   const announced = [];         // OS-spine (client inbox) deliveries
@@ -25,7 +26,7 @@ function mountHealth() {
     db,
     auth: { requireAdmin: (_req, _res, next) => next && next() },
     looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
-    runLookerQuery: async () => rows,
+    runLookerQuery: async (_path, body) => rowsFn(body),
     applyScope: async (_body, user) => { scopedUser = user; return scopeOk; },
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
     ops: { alert: (kind, msg) => opsAlerts.push({ kind, msg }) },
@@ -33,7 +34,8 @@ function mountHealth() {
   });
   return {
     mod, sql, announced, opsAlerts, testEmails,
-    setRows: (r) => { rows = r; },
+    setRows: (r) => { rows = r; rowsFn = async () => rows; },
+    setRowsFn: (fn) => { rowsFn = fn; },
     setScopeOk: (v) => { scopeOk = v; },
     getScopedUser: () => scopedUser,
   };
@@ -144,14 +146,51 @@ test('cooldown: a second station going stale inside the window is logged, not re
   assert.equal(h.opsAlerts.length, 1);
 });
 
-test('whole-feed monitor (no station split) works with a single stream', async () => {
+test('whole-feed monitor (no station split) reads the newest row directly', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { stationField: '' });
-  h.setRows([{ data_health_latest: minsAgo(3) }]);
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return [{ 'scans.scanned_at': minsAgo(3) }]; });
   const r = await h.mod.check(m);
   assert.equal(r.stations, 1);
   assert.equal(streamRows(h, m.id)[0].station, '');
   assert.equal(streamRows(h, m.id)[0].status, 'fresh');
+  // No custom measure involved: plain newest-row query (the max() measure is
+  // rejected on some Looker versions, so the whole-feed path never uses it).
+  assert.equal(body.dynamic_fields, undefined);
+  assert.deepEqual(body.sorts, ['scans.scanned_at desc']);
+  assert.equal(body.limit, '1');
+});
+
+test('Looker rejecting the max() measure → sorted-scan fallback, memoised', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h);
+  let dynAttempts = 0;
+  const scanBodies = [];
+  h.setRowsFn(async (body) => {
+    if (body.dynamic_fields) {
+      dynAttempts += 1;
+      throw new Error('Looker API POST /queries/run/json failed (400): {"message":"Expressions for fields of type \\"max\\" must evaluate to \\"number\\", but the provided expression evaluates to \\"date\\"."}');
+    }
+    scanBodies.push(body);
+    return [
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(2) },
+      { 'scans.station_name': 'Gate A', 'scans.scanned_at': minsAgo(9) },  // older row — first (newest) wins
+      { 'scans.station_name': 'Gate B', 'scans.scanned_at': minsAgo(45) }, // past the 30m threshold
+    ];
+  });
+  const r = await h.mod.check(m);
+  assert.equal(r.ok, true);
+  assert.equal(r.stations, 2);
+  assert.deepEqual(scanBodies[0].sorts, ['scans.scanned_at desc']);
+  const gateA = streamRows(h, m.id).find((s) => s.station === 'Gate A');
+  assert.equal(gateA.status, 'fresh'); // 2m, not the older 9m row
+  assert.equal(h.opsAlerts.length, 1); // Gate B stale → alert fired off fallback data
+  assert.match(h.opsAlerts[0].msg, /Gate B/);
+
+  // Second check skips the doomed max() attempt entirely (memoised).
+  await h.mod.check(h.mod.monitorById(m.id));
+  assert.equal(dynAttempts, 1);
 });
 
 test('scoped reads: entity monitors run as a locked client, platform monitors as admin', async () => {
@@ -163,6 +202,7 @@ test('scoped reads: entity monitors run as a locked client, platform monitors as
   assert.deepEqual(h.getScopedUser().entityIds, ['ent42']);
 
   const p = makeMonitor(h, { name: 'Platform', entityId: '', suiteId: '' });
+  h.setRows([{ 'scans.scanned_at': minsAgo(1) }]);
   await h.mod.check(p);
   assert.equal(h.getScopedUser().role, 'admin');
 
