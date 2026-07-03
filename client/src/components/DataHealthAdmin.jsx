@@ -74,6 +74,9 @@ const EVENT_META = {
 const ADMIN_BASE = '/api/admin/data-health';
 // UTC 'HH:MM' -> South Africa time label (fixed UTC+2, no DST).
 const saTime = (hhmm) => { const [h, m2] = String(hhmm).split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(m2).padStart(2, '0')}`; };
+// Flow score banding: ≥85 healthy, 60-84 needs attention, <60 degraded.
+const flowColor = (v) => (v == null ? 'var(--muted)' : v >= 85 ? STATUS_COLOR.fresh : v >= 60 ? STATUS_COLOR.warn : STATUS_COLOR.stale);
+const flowTitle = (f) => (f ? `Flow score = 60% uptime (${f.uptimePct}% of linked devices sending, averaged over the day's blocks) + 20% continuity (${f.continuityPct}% of blocks had data) + 20% throughput (last hour at ${f.throughputPct}% of the day's avg rate)` : '');
 async function jget(url, opts) {
   const res = await fetch(url, opts);
   const d = await res.json().catch(() => ({}));
@@ -461,6 +464,9 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {' · '}<strong style={{ color: STATUS_COLOR.fresh }}>{m.rosterSnapshot.online} online</strong>
             {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)' }}>{m.rosterSnapshot.offline} offline</strong>
             {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
+            {m.rosterSnapshot.flowScore != null && <>
+              {' · '}<strong title={flowTitle(m.rosterSnapshot.flow)} style={{ color: flowColor(m.rosterSnapshot.flowScore) }}>flow {m.rosterSnapshot.flowScore}</strong>
+            </>}
             {m.rosterSnapshot.scansPerHour != null && <>
               {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
               {m.rosterSnapshot.lastHourScans != null && <> · last hour <strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.lastHourScans).toLocaleString('en-ZA')}</strong></>}
@@ -633,7 +639,10 @@ function HealthMetrics({ monitors }) {
   const sum = (k) => (snaps.some((x) => x[k] != null) ? snaps.reduce((a, x) => a + (x[k] || 0), 0) : null);
   const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
   const approx = snaps.some((x) => x.scansApprox) ? '≥' : '';
+  const scored = snaps.filter((x) => x.flowScore != null && x.total);
+  const flowAgg = scored.length ? Math.round(scored.reduce((a, x) => a + x.flowScore * x.total, 0) / Math.max(1, scored.reduce((a, x) => a + x.total, 0))) : null;
   const tiles = [
+    ['Flow score', flowAgg == null ? '—' : String(flowAgg), flowColor(flowAgg)],
     ['Stations', num(monitors.length)],
     ['Devices linked', num(sum('total'))],
     ['Online', num(sum('online')), STATUS_COLOR.fresh],

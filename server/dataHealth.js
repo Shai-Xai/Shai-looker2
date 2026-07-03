@@ -701,10 +701,23 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             coverage = t.buckets.map((b, i) => ({ t: b.slice(11, 16), n: t.devices.reduce((a, d) => a + (d.active[i] ? 1 : 0), 0) })).slice(-288);
           }
         } catch (e) { console.warn('[data-health] scan-rate read failed', m.id, e.message); }
+        // FLOW SCORE (0-100): one number for "is this station's device fleet
+        // flowing" across the whole day. 60% uptime (mean share of LINKED
+        // devices sending per block), 20% continuity (share of blocks with ANY
+        // data — the connectivity dimension), 20% throughput (last-hour scan
+        // rate holding up vs the day's average, capped at 1).
+        let flowScore = null, flow = null;
+        if (coverage && coverage.length && r.total) {
+          const uptime = coverage.reduce((a, c) => a + Math.min(1, c.n / r.total), 0) / coverage.length;
+          const continuity = coverage.filter((c) => c.n > 0).length / coverage.length;
+          const throughput = scansPerHour ? Math.min(1, (lastHourScans || 0) / Math.max(1, scansPerHour)) : (continuity ? 1 : 0);
+          flowScore = Math.round(100 * (0.6 * uptime + 0.2 * continuity + 0.2 * throughput));
+          flow = { uptimePct: Math.round(uptime * 100), continuityPct: Math.round(continuity * 100), throughputPct: Math.round(throughput * 100) };
+        }
         sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
-          totalScans, scansPerHour, lastHourScans, scansApprox, coverage,
+          totalScans, scansPerHour, lastHourScans, scansApprox, coverage, flowScore, flow,
         }), m.id);
         if (breach && !wasBreach) {
           const names = r.offline.slice(0, 8).map((d) => `${d.device} (${fmtLag(d.lagMin)})`).join(', ');
