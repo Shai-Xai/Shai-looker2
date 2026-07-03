@@ -459,7 +459,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       .map(([device, ts]) => ({ device, lagMin: Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 }))
       .sort((a, b) => b.lagMin - a.lagMin);
     const offline = devices.filter((d) => d.lagMin > m.rosterOnlineMin);
-    if (withInfo) labelDevices(offline, await deviceDetails(m, timeFilter));
+    if (withInfo) {
+      labelDevices(offline, await deviceDetails(m, timeFilter));
+      const missing = offline.filter((d) => !d.station);
+      if (m.stationField && missing.length) labelDevices(missing, await deviceDetailsLite(m, timeFilter));
+    }
     return {
       configured: true,
       baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
@@ -490,6 +494,30 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         if (!d || !ts) continue;
         const prev = map.get(d);
         if (!prev || ts > prev.ts) map.set(d, { ts, station: m.stationField ? String(r[m.stationField] ?? '').trim() : '', operator: opField ? String(r[opField] ?? '').trim() : '' });
+      }
+      return map;
+    } catch (e) { void e; return null; }
+  }
+
+  // Labels WITHOUT timestamps: distinct (device, station, operator) combos in
+  // the window — no measures, no time dim, so it works on the strictest Looker
+  // and can't lose long-quiet devices to a newest-first row cap. Fills the
+  // devices the timed read missed (they'd otherwise land under "No station").
+  async function deviceDetailsLite(m, timeFilter) {
+    const ex = [];
+    if (m.stationField) ex.push(m.stationField);
+    const opField = (m.detailFields || []).find((f) => f && OPERATOR_RE.test(f) && f !== m.rosterField && f !== m.timeField && f !== m.stationField);
+    if (opField) ex.push(opField);
+    if (!m.rosterField || !ex.length) return null;
+    try {
+      const b = { ...baseBody(m), fields: [m.rosterField, ...ex], sorts: [m.rosterField], limit: '20000' };
+      b.filters[m.timeField] = timeFilter;
+      const rows = await runScoped(m, b);
+      const map = new Map();
+      for (const r of rows) {
+        const d = String(r[m.rosterField] ?? '').trim();
+        if (!d || map.has(d)) continue;
+        map.set(d, { station: m.stationField ? String(r[m.stationField] ?? '').trim() : '', operator: opField ? String(r[opField] ?? '').trim() : '' });
       }
       return map;
     } catch (e) { void e; return null; }
@@ -714,7 +742,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
       }
     }
-    if (withInfo && devices.length) labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
+    if (withInfo && devices.length) {
+      labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
+      const missing = devices.filter((d) => !d.station);
+      if (m.stationField && missing.length) labelDevices(missing, await deviceDetailsLite(m, timeFilter));
+    }
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' || mode.includes('.') ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
