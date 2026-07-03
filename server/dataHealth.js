@@ -388,20 +388,42 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // ONLINE window is offline — named, with how long it's been silent. This
   // learns the expected set from the data itself (no manual device register):
   // one scoped query over the baseline window, reduced to last-seen per device.
+  const LAST_FIELD = 'data_health_last';
+  const rosterAggByMonitor = new Map(); // monitor id -> does the dynamic MAX read work?
+
   async function deviceRoster(m) {
     if (!m.rosterField) return { configured: false };
-    const body = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
     // Constrain the roster in Looker itself: the daily/fixed "since doors opened"
     // anchor when set (queries run in UTC), else the rolling baseline window.
     const startAt = rosterAnchor(m);
-    body.filters[m.timeField] = startAt
+    const timeFilter = startAt
       ? `after ${startAt.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${m.rosterBaselineMin} minutes`;
-    const rows = await runScoped(m, body);
+    // Prefer ONE aggregated row per device (MAX of the time dim): a raw read of
+    // a busy sales day truncates at the row cap, silently dropping idle devices
+    // — the linked/offline counts then JITTER between pulls. Falls back to the
+    // raw read when the dynamic measure can't run, and remembers which worked.
+    let rows = null; let aggRead = false;
+    if (rosterAggByMonitor.get(m.id) !== false) {
+      try {
+        const b = { ...baseBody(m), fields: [m.rosterField, LAST_FIELD], sorts: [`${LAST_FIELD} desc`], limit: '5000' };
+        b.filters[m.timeField] = timeFilter;
+        b.dynamic_fields = JSON.stringify([{ measure: LAST_FIELD, based_on: m.timeField, type: 'max' }]);
+        const got = await runScoped(m, b);
+        if (!got.length || got.some((r) => parseTs(r[LAST_FIELD]))) { rows = got; aggRead = true; }
+      } catch (e) { rows = null; void e; }
+    }
+    if (!rows) {
+      const b = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+      b.filters[m.timeField] = timeFilter;
+      rows = await runScoped(m, b);
+    }
+    rosterAggByMonitor.set(m.id, aggRead);
+    const tKey = aggRead ? LAST_FIELD : m.timeField;
     const seen = new Map(); // device -> latest Date
     for (const r of rows) {
       const d = String(r[m.rosterField] ?? '').trim();
-      const ts = parseTs(r[m.timeField]);
+      const ts = parseTs(r[tKey]);
       if (!d || !ts) continue;
       const prev = seen.get(d);
       if (!prev || ts > prev) seen.set(d, ts);
@@ -416,7 +438,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
       total: devices.length, online: devices.length - offline.length,
       offline: offline.slice(0, 100),
-      truncated: rows.length >= 5000, // baseline window busier than the scan window — counts may undercount idle devices
+      truncated: !aggRead && rows.length >= 5000, // raw fallback on a busy window — idle devices may be under-counted
     };
   }
 
@@ -494,7 +516,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           body.fields = [...body.fields, CNT_FIELD];
           body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
         }
-        try { rows = await runScoped(m, body); mode = cand; bucketField = bf; break; } catch (e) {
+        try {
+          const got = await runScoped(m, body);
+          // Combined-explore trap: a count measure can exist yet count ANOTHER
+          // view's rows — every returned row then reads 0. Rows prove activity,
+          // so a zero-only count is a soft failure: try the next counting mode.
+          const cTry = fieldFor[cand] || CNT_FIELD;
+          if (cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
+            lastErr = new Error(`${cTry} returned 0 for every row`); continue;
+          }
+          rows = got; mode = cand; bucketField = bf; break;
+        } catch (e) {
           lastErr = e;
           if (String(e.message || e).includes(bf)) break; // the bucket dim itself is unknown — next candidate
         }
