@@ -287,6 +287,33 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async 
   assert.equal(body.limit, '100');
 });
 
+test('master cadence: monitors with no own cadence follow data_health_tick_min', async () => {
+  const h = mountHealth();
+  db.setSetting('data_health_tick_min', '7');
+  try {
+    const follows = makeMonitor(h, { name: 'Follows master', checkEveryMin: 0 });
+    const own = makeMonitor(h, { name: 'Own cadence', checkEveryMin: 1 });
+    let checked = [];
+    h.setRowsFn(async (b) => { checked.push(b.filters ? 1 : 1); return [{ 'scans.scanned_at': minsAgo(1), 'scans.station_name': 'A', data_health_latest: minsAgo(1) }]; });
+    // Both were checked 3 minutes ago.
+    const threeAgo = new Date(Date.now() - 3 * 60000).toISOString();
+    h.sql.prepare('UPDATE data_monitors SET last_checked_at=?').run(threeAgo);
+    checked = [];
+    await h.mod.tick();
+    // 3m elapsed: own cadence (1m) is due; master follower (7m) is not.
+    assert.equal(checked.length, 1);
+    assert.equal(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo); // untouched
+    assert.notEqual(h.mod.monitorById(own.id).lastCheckedAt, threeAgo);  // re-checked
+    // 8 minutes elapsed → the follower is due too.
+    h.sql.prepare('UPDATE data_monitors SET last_checked_at=? WHERE id=?').run(new Date(Date.now() - 8 * 60000).toISOString(), follows.id);
+    checked = [];
+    await h.mod.tick();
+    assert.notEqual(h.mod.monitorById(follows.id).lastCheckedAt, threeAgo);
+  } finally {
+    db.setSetting('data_health_tick_min', '5');
+  }
+});
+
 test('fieldValues: distinct dimension values, deduped and scoped', async () => {
   const h = mountHealth();
   let body = null;
@@ -316,7 +343,7 @@ test('clean() bounds thresholds and drops junk filters', () => {
   assert.equal(c.name.length, 120);
   assert.equal(c.warnMin, 1);
   assert.equal(c.staleMin, 10080);
-  assert.equal(c.checkEveryMin, 1);
+  assert.equal(c.checkEveryMin, 0); // 0 = follow the master cadence
   assert.deepEqual(c.channels, ['push', 'email']);
   assert.equal(Object.keys(c.filters).length, 2);
   assert.ok(!('empty' in c.filters));

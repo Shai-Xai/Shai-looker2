@@ -45,6 +45,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // the team or a client. Toggle + address live in Admin → Data health.
   const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
   const testEmail = () => String(db.getSetting('data_health_test_email', 'shai.evian@howler.co.za') || '').trim();
+  // Master auto-check cadence (minutes). Monitors with check_every_min = 0
+  // follow this; a monitor with its own value keeps it. Editable in the UI.
+  const masterMin = () => { const n = Math.round(Number(db.getSetting('data_health_tick_min', '5'))); return Number.isFinite(n) ? Math.max(1, Math.min(120, n)) : 5; };
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS data_monitors (
@@ -170,7 +173,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
-      checkEveryMin: num(b.checkEveryMin, 5, 1, 1440),
+      checkEveryMin: num(b.checkEveryMin, 0, 0, 1440), // 0 = follow the master cadence
       channels,
       notifyRecovery: b.notifyRecovery === false ? 0 : 1,
       cooldownMin: num(b.cooldownMin, 60, 0, 10080),
@@ -451,7 +454,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }
 
   // ── the tick ──
-  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 5 * 60000;
+  // A 60s heartbeat; each monitor is actually checked when its cadence elapses —
+  // its own check_every_min if set, else the master setting. Changing the master
+  // in the UI therefore takes effect within a minute, no restart.
+  const TICK_MS = Number(process.env.DATA_HEALTH_TICK_MS) || 60000;
   let ticking = false;
   async function tick() {
     if (!enabled() || ticking) return;
@@ -459,9 +465,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     try {
       const rows = sql.prepare("SELECT * FROM data_monitors WHERE status='active' AND model<>'' AND view<>'' AND time_field<>''").all().map(rowToMonitor);
       const nowMs = Date.now();
+      const master = masterMin();
       for (const m of rows) {
-        // Per-monitor cadence: skip until its own interval has elapsed.
-        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < m.checkEveryMin * 60000 - 5000) continue;
+        const cadence = m.checkEveryMin >= 1 ? m.checkEveryMin : master;
+        if (m.lastCheckedAt && nowMs - new Date(m.lastCheckedAt).getTime() < cadence * 60000 - 5000) continue;
         try { await check(m); } catch (e) { console.error('[data-health] check failed', m.id, e.message); }
       }
       // Keep the logs bounded: pulls are noisy (14d), transitions are history (60d).
@@ -485,7 +492,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         lastCheck: sql.prepare('SELECT * FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 1').get(m.id) || null,
         recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 5').all(m.id),
       }));
-    res.json({ enabled: true, tickMin: Math.round(TICK_MS / 60000), testMode: testMode(), testEmail: testEmail(), monitors });
+    res.json({ enabled: true, tickMin: masterMin(), testMode: testMode(), testEmail: testEmail(), monitors });
   });
 
   // Test-mode switch: while on, alerts email ONLY the test address (ops Slack +
@@ -499,7 +506,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That test email doesn’t look valid.' });
       db.setSetting('data_health_test_email', email);
     }
-    res.json({ testMode: testMode(), testEmail: testEmail() });
+    if (b.tickMin != null) {
+      const n = Math.round(Number(b.tickMin));
+      if (!Number.isFinite(n) || n < 1 || n > 120) return res.status(400).json({ error: 'Auto-check must be between 1 and 120 minutes.' });
+      db.setSetting('data_health_tick_min', String(n));
+    }
+    res.json({ testMode: testMode(), testEmail: testEmail(), tickMin: masterMin() });
   });
 
   app.post('/api/admin/data-health/monitors', auth.requireAdmin, (req, res) => {
