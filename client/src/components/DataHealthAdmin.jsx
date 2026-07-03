@@ -624,7 +624,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
                 <div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
                     <strong style={{ color: off.length ? STATUS_COLOR.stale : STATUS_COLOR.fresh }}>{off.length} offline device{off.length === 1 ? '' : 's'}</strong>
-                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}{m.rosterSnapshot && m.rosterSnapshot.offline !== off.length ? ` · the tile's ${m.rosterSnapshot.offline} was the picture at the last check (${ago(m.lastCheckedAt)}) — devices have crossed the threshold since` : ''}</span>
                     <span style={{ flex: 1 }} />
                     <button style={{ ...ghostBtn, padding: '1px 8px', fontSize: 11 }} onClick={(e) => { e.stopPropagation(); setOffPanel(null); }}>✕</button>
                   </div>
