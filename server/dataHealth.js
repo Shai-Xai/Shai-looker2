@@ -31,6 +31,8 @@ const { asyncHandler } = require('./http');
 const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's name
 const CNT_FIELD = 'data_health_scans';  // the dynamic scan-count measure's name (timeline fallback)
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
+// Bars & vendors sell — their per-record activity is "transactions"; gates scan.
+const unitFor = (m) => (m.area === 'Bar' || m.area === 'Vendors' ? 'transactions' : 'scans');
 
 // ── AI prompts (registered in server/insights.js promptRegistry — the audit) ──
 // 🩺 Diagnose: one station's live picture → a plain-language verdict.
@@ -44,7 +46,7 @@ Write a SHORT diagnostics verdict an ops person can act on mid-event:
 5. "Concerns:" a numbered list, worst first — shared-window incidents FIRST, then single-device drops/flappers. For each: what, the evidence (times, counts, gap lengths), and ONE concrete action (→ send a runner / swap / reboot / check battery or signal / raise with the network provider).
 6. End with what you RULED OUT: single-device faults vs this station's connectivity — justify from whether silent blocks were shared or isolated. Remember each station has its own coverage area: simultaneous drops HERE are a connectivity signal for THIS station even if other stations ran clean.
 
-Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
+Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Call the per-record activity by monitor.unit — "transactions" for bars/vendors, "scans" for gates. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
 
 // 📝 Event report: every station of one event → a shareable ops report.
 const DATA_HEALTH_REPORT_SYSTEM = `You write Pulse's DATA HEALTH & DIAGNOSTICS REPORT for one event — used by the ops team and shared externally with network/connectivity providers. You receive JSON: the event & client name, and per station: thresholds, stream lags, device roster, per-device scan counts, a per-device activity timeline (activeBlocks: 0/1 string, oldest→newest) and the alert history.
@@ -59,7 +61,7 @@ Write the report in clean Markdown:
 ## 4. Connectivity & offline trends — PER STATION. Each station has its OWN connectivity (its own area of the venue, its own coverage), so analyse every station separately — NEVER require a cross-station signature before flagging connectivity, and never conclude "no connectivity issue" just because stations dropped at different times. For each station, read its devices' activeBlocks and the coverage series and describe its offline TREND through the day: the exact SAST windows where several of ITS devices were silent at the same time, how deep each dip was (X of N devices), whether dips recur around particular times of day, and which devices were affected. Classify each window: previously-active devices at one station going dark TOGETHER = that station's connectivity likely degraded in that window — say so plainly and list the window for the provider; staggered/isolated silences = device-level; devices that had not yet sent their first data = ramp-up, not a fault. If several stations share a window, escalate that to a venue-wide note. Be precise and neutral — this section may be forwarded verbatim.
 ## 5. Recommendations — numbered, concrete, ordered by impact (hardware swaps, spares, placement, network follow-ups).
 
-Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
+Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Each station carries a unit ("scans" or "transactions") — use that word for its activity (bars/vendors transact, gates scan). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
 const CHANNELS = ['push', 'email', 'slack']; // entity fan-out via the OS spine; ops Slack is always-on
 
 // `mailer` is injectable for tests but defaults to the real module so the
@@ -426,6 +428,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // count_distinct on the time dim, else plain row presence (counts of 1).
   const countModeByMonitor = new Map();
 
+  // Which bucket dimension worked per monitor+interval (minuteN vs raw time).
+  const bucketFieldByMonitor = new Map();
+
   // The day timeline: per device, which time blocks of the window it produced
   // data AND how many scans landed in each — rows × buckets the UI renders as a
   // green/grey activity grid or a per-block counts report. At 60-min blocks it
@@ -433,14 +438,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // created_at_hour) so Looker aggregates to one row per (device, hour) — a
   // whole busy day fits. Finer blocks read the raw time dimension and bucket
   // here (5000-row cap → `truncated` warns when a very busy window overflows).
-  async function deviceTimeline(m, hours = 24, interval = 60) {
+  async function deviceTimeline(m, hours = 24, interval = 60, station = '') {
     if (!m.rosterField) return { configured: false };
     // Looker dimension groups name every timeframe `${group}_${timeframe}` —
     // swap the picked timeframe for `_hour` (or append it when the picked field
     // is the bare group name). If the guess is wrong Looker 400s and the panel
     // shows the error rather than silently lying.
     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
-    const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
+    const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
+    const hourField = `${group}_hour`;
     const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
     const ivMs = iv * 60000;
     // hours === 'start' anchors the window to the roster's start time (daily
@@ -451,11 +457,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
       : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
     h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
-    const bucketField = iv === 60 ? hourField : m.timeField;
-    const base = { ...baseBody(m), sorts: [`${bucketField} desc`], limit: '5000' };
-    base.filters[m.timeField] = anchor
+    // Sub-hour blocks first try the matching minuteN sibling dimension so
+    // Looker aggregates to one row per (device, block) — a busy bar day stops
+    // overflowing the row cap instead of returning one row per scan. LookML
+    // without that timeframe 400s → raw-time fallback; whichever works is
+    // remembered per monitor+interval.
+    const bKey = `${m.id}:${iv}`;
+    const bucketCands = iv === 60 ? [hourField]
+      : bucketFieldByMonitor.has(bKey) ? [bucketFieldByMonitor.get(bKey)]
+        : [`${group}_minute${iv}`, m.timeField];
+    const timeFilter = anchor
       ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${h} hours`;
+    // Optional station narrowing (quoted = exact match) — the per-station view
+    // of a monitor that spans many bars/gates.
+    const st = String(station || '').trim();
     // Count-measure candidates, in order: the TIME FIELD's own view's count
     // (right on combined explores, where m.view is the explore name and the
     // real measure is e.g. cashless_check_ins.count), then the explore-name
@@ -467,17 +483,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'none'];
     const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : allModes;
     const fieldFor = { native: nativeField, native2: viewField, distinct: CNT_FIELD };
-    let rows = null; let mode = 'none'; let lastErr = null;
-    for (const cand of modes) {
-      const body = { ...base, fields: [m.rosterField, bucketField] };
-      if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
-      if (cand === 'distinct') {
-        body.fields = [...body.fields, CNT_FIELD];
-        body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
+    let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
+    for (const bf of bucketCands) {
+      for (const cand of modes) {
+        const body = { ...baseBody(m), sorts: [`${bf} desc`], limit: '20000', fields: [m.rosterField, bf] };
+        body.filters[m.timeField] = timeFilter;
+        if (st && m.stationField) body.filters[m.stationField] = `"${st.replace(/"/g, '')}"`;
+        if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
+        if (cand === 'distinct') {
+          body.fields = [...body.fields, CNT_FIELD];
+          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
+        }
+        try { rows = await runScoped(m, body); mode = cand; bucketField = bf; break; } catch (e) {
+          lastErr = e;
+          if (String(e.message || e).includes(bf)) break; // the bucket dim itself is unknown — next candidate
+        }
       }
-      try { rows = await runScoped(m, body); mode = cand; break; } catch (e) { lastErr = e; }
+      if (rows) break;
     }
     if (!rows) throw lastErr;
+    if (iv !== 60) bucketFieldByMonitor.set(bKey, bucketField);
     if (mode !== 'none') countModeByMonitor.set(m.id, mode); else countModeByMonitor.delete(m.id);
     const cKey = fieldFor[mode] || CNT_FIELD;
     const nowMs = Date.now();
@@ -506,13 +531,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const devices = [...byDevice.entries()].map(([device, counts]) => {
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
-    }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
+    }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
+      station: st, devicesTotal: byDevice.size,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
-      truncated: rows.length >= 5000,
+      truncated: rows.length >= 20000,
     };
   }
 
@@ -866,7 +892,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
     // 'closed' = the station is intentionally shut (gate closed for the night)
-    // — no checks, no alerts, excluded from the dashboard numbers.
+    // — no checks, no alerts; its devices leave the fleet numbers, but its
+    // frozen day totals still count (the sales it made DID happen).
     const want = (req.body || {}).status;
     const status = want === 'paused' ? 'paused' : want === 'closed' ? 'closed' : 'active';
     sql.prepare('UPDATE data_monitors SET status=?, updated_at=? WHERE id=?').run(status, now(), m.id);
@@ -904,7 +931,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60));
+    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''));
   }));
 
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
@@ -933,7 +960,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (entityId) ms = ms.filter((m) => m.entityId === entityId);
     if (suiteId) ms = ms.filter((m) => !m.suiteId || m.suiteId === suiteId);
     return ms.map((m) => ({
-      id: m.id, name: m.name, area: m.area, entityId: m.entityId, suiteId: m.suiteId,
+      id: m.id, name: m.name, area: m.area, unit: unitFor(m), entityId: m.entityId, suiteId: m.suiteId,
       status: m.status, state: m.state, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError,
       warnMin: m.warnMin, staleMin: m.staleMin, checkEveryMin: m.checkEveryMin,
       stationField: m.stationField, detailFields: m.detailFields,
@@ -946,7 +973,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // are fresh Looker reads; activeBlocks is a compact 0/1 string per device).
   async function diagnosticsPayload(m) {
     const p = {
-      monitor: { name: m.name, area: m.area, warnMin: m.warnMin, staleMin: m.staleMin, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError || undefined },
+      monitor: { name: m.name, area: m.area, unit: unitFor(m), warnMin: m.warnMin, staleMin: m.staleMin, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError || undefined },
       streams: streamsFor(m.id),
       recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 20').all(m.id),
     };
@@ -997,7 +1024,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   async function eventReport({ entityId = '', suiteId = '' }) {
     const list = healthSummary({ entityId, suiteId }).filter((s) => s.entityId).slice(0, 12);
     const stations = [];
-    for (const s of list) stations.push({ station: s.name, area: s.area, detail: await diagnosticsPayload(monitorById(s.id)) });
+    for (const s of list) stations.push({ station: s.name, area: s.area, unit: s.unit, detail: await diagnosticsPayload(monitorById(s.id)) });
     const suite = suiteId && db.getSuite ? db.getSuite(suiteId) : null;
     const entity = entityId && db.getEntity ? db.getEntity(entityId) : null;
     const payload = { generatedAt: now(), event: suite ? suite.name : '', client: entity ? entity.name : '', stations };
@@ -1010,7 +1037,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       const r = st.detail.roster || null;
       const hrs = t ? Math.max(0.25, (Date.parse(t.window.to) + t.intervalMin * 60000 - Date.parse(t.window.from)) / 3600000) : 0;
       return {
-        station: st.station, area: st.area,
+        station: st.station, area: st.area, unit: st.unit,
         linked: r ? r.total : null, online: r ? r.online : null, offline: r ? r.total - r.online : null,
         totalScans: t ? t.totalScans : null, scansPerHour: t ? Math.round(t.totalScans / hrs) : null,
         intervalMin: t ? t.intervalMin : null, coverage: t ? t.coverage : [], devicesSeen: t ? t.devicesSeen : 0,
@@ -1060,7 +1087,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   const MY_READS = {
     latest: async (req, m) => ({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) }),
     roster: async (_req, m) => deviceRoster(m),
-    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60),
+    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''),
     history: async (_req, m) => ({
       checks: sql.prepare('SELECT at, ok, stations, fresh, warn, stale, max_lag_min, latest_event_at, error FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 200').all(m.id),
       events: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 200').all(m.id),
