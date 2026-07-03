@@ -1,0 +1,27 @@
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index daf3803..8684f0b 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -494,2 +494,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    // Optional station narrowing (quoted = exact match) — the per-station view
+-    // of a monitor that spans many bars/gates.
++    // Optional station narrowing — the per-station view of a monitor that
++    // spans many bars/gates. Plain value (the form every other filter in this
++    // module uses); quoted only when the value carries filter-syntax chars
++    // (comma = OR, % and _ = wildcards, leading - = NOT).
+@@ -496,0 +499 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    const stExpr = /[,%_^"]|^-/.test(st) ? `"${st.replace(/"/g, '')}"` : st;
+@@ -513 +516 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        if (st && m.stationField) body.filters[m.stationField] = `"${st.replace(/"/g, '')}"`;
++        if (st && m.stationField) body.filters[m.stationField] = stExpr;
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 28be6ff..2b29bff 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -517 +517 @@ test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows
+-  assert.equal(body.filters['scans.station_name'], '"Bar One"'); // quoted = exact station match
++  assert.equal(body.filters['scans.station_name'], 'Bar One'); // plain value — same form as every other filter
+@@ -526,0 +527,3 @@ test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows
++  // Values carrying filter-syntax characters get quoted so they stay literal.
++  await h.mod.deviceTimeline(m, 12, 10, 'Bar, The');
++  assert.equal(body.filters['scans.station_name'], '"Bar, The"');
