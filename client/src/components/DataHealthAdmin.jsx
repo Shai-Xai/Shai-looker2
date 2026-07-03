@@ -65,20 +65,32 @@ function StationChip({ s, onForget }) {
 const EVENT_META = {
   stale: ['⛔', '#dc2626'], recovered: ['✅', '#16a34a'], alert: ['📣', '#dc2626'],
   recovery_alert: ['📣', '#16a34a'], error: ['⚠️', '#d97706'],
+  device_alert: ['📟', '#dc2626'], device_recovered: ['📟', '#16a34a'],
 };
+
+// Shared JSON fetch for the live panels; `base` switches the same components
+// between the admin surface (/api/admin/data-health) and the client one
+// (/api/my/data-health — read-only, entity-enforced server-side).
+const ADMIN_BASE = '/api/admin/data-health';
+async function jget(url, opts) {
+  const res = await fetch(url, opts);
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+  return d;
+}
 
 // The raw tail of the feed: the last N (station, timestamp) records, pulled LIVE
 // from Looker on open/refresh (cache-bypassed server-side) — so you can see what
 // the pipe actually delivered, not just the lag number. (Inline fetch, same
 // reasoning as TestModeBanner: keep this module out of the shared lib/api.js.)
-function LatestRecords({ monitorId }) {
+function LatestRecords({ monitorId, base = ADMIN_BASE }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const load = async () => {
     setBusy(true); setErr('');
     try {
-      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/latest?limit=20`);
+      const res = await fetch(`${base}/monitors/${monitorId}/latest?limit=20`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
       setData(d);
@@ -129,14 +141,14 @@ function LatestRecords({ monitorId }) {
 // The device roster: expected vs actual. Everything seen in the baseline window
 // is "linked"; anything silent longer than the online window is offline, named,
 // with how long it's been quiet — the go-check-these list.
-function RosterPanel({ monitorId }) {
+function RosterPanel({ monitorId, base = ADMIN_BASE }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const load = async () => {
     setBusy(true); setErr('');
     try {
-      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/roster`);
+      const res = await fetch(`${base}/monitors/${monitorId}/roster`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
       setData(d);
@@ -188,7 +200,7 @@ function RosterPanel({ monitorId }) {
 // the whole day" view. A red device name means nothing in the last ~30 minutes.
 // The 🔢 Counts mode turns the same grid into a report: scans per device per
 // block, with per-device and per-block totals.
-function TimelinePanel({ monitorId }) {
+function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
   const [data, setData] = useState(null);
   const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
   const [interval, setIntervalMin] = useState(10); // 10-min blocks by default — hour blocks hide short dropouts
@@ -198,7 +210,7 @@ function TimelinePanel({ monitorId }) {
   const load = async (h, iv) => {
     setBusy(true); setErr('');
     try {
-      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}`);
+      const res = await fetch(`${base}/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
       setData(d);
@@ -306,12 +318,12 @@ function TimelinePanel({ monitorId }) {
 
 // Expandable history: the transition/alert feed + the raw pull log + a live peek
 // at the last 20 records off the feed (+ the device roster when configured).
-function HistoryPanel({ monitorId, rosterField }) {
+function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE }) {
   const [hist, setHist] = useState(null);
   // Roster monitors open straight onto the live timeline — that's the view the
   // card is expanded for; the history lists are one click away.
   const [tab, setTab] = useState(rosterField ? 'timeline' : 'events');
-  useEffect(() => { api.dataMonitorHistory(monitorId).then(setHist).catch(() => setHist({ checks: [], events: [] })); }, [monitorId]);
+  useEffect(() => { jget(`${base}/monitors/${monitorId}/history`).then(setHist).catch(() => setHist({ checks: [], events: [] })); }, [monitorId, base]);
   if (!hist) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: '8px 0' }}>Loading history…</div>;
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
@@ -359,15 +371,42 @@ function HistoryPanel({ monitorId, rosterField }) {
             </table>
           </div>
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
-        {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
-        {tab === 'roster' && <RosterPanel monitorId={monitorId} />}
-        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} />}
+        {tab === 'latest' && <LatestRecords monitorId={monitorId} base={base} />}
+        {tab === 'roster' && <RosterPanel monitorId={monitorId} base={base} />}
+        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} base={base} />}
       </div>
     </div>
   );
 }
 
-function MonitorCard({ m, entities, onChanged, onEdit }) {
+// 🩺 One-tap AI diagnostics: the server pulls the station's live picture (lag,
+// roster, per-device scan counts, timeline) and the AI returns a plain-language
+// verdict with ranked concerns. Works on both surfaces via `base`.
+function DiagnosePanel({ monitorId, base }) {
+  const [state, setState] = useState(null); // null | 'busy' | {text, at} | {error}
+  const run = async () => {
+    setState('busy');
+    try { setState(await jget(`${base}/monitors/${monitorId}/diagnose`, { method: 'POST' })); }
+    catch (e) { setState({ error: e.message }); }
+  };
+  if (state == null) return <button style={{ ...ghostBtn, borderColor: 'var(--brand)', color: 'var(--brand)' }} onClick={run}>🩺 Diagnose</button>;
+  if (state === 'busy') return <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>🩺 Reading the live feed, roster and timeline…</span>;
+  if (state.error) return <span style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {state.error} <button style={{ ...ghostBtn, marginLeft: 6, padding: '3px 9px' }} onClick={run}>Retry</button></span>;
+  return (
+    <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: '12px 14px', width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <strong style={{ fontSize: 13 }}>🩺 Diagnostics — {fmtAt(state.at)}</strong>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={run}>↻ Re-run</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={() => navigator.clipboard?.writeText(state.text)}>📋 Copy</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={() => setState(null)}>✕</button>
+      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{state.text}</div>
+    </div>
+  );
+}
+
+function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, readOnly = false }) {
   const [busy, setBusy] = useState('');
   // Cards start collapsed to one summary row — with many monitors the page
   // stays scannable. Expanding opens the log straight away (that's what you
@@ -420,42 +459,191 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
             {' · '}<strong style={{ color: STATUS_COLOR.fresh }}>{m.rosterSnapshot.online} online</strong>
             {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)' }}>{m.rosterSnapshot.offline} offline</strong>
             {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
+            {m.rosterSnapshot.scansPerHour != null && <>
+              {' · '}<strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
+              {' '}(~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg)
+            </>}
           </div>
         )}
       </div>
       {expanded && <>
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 10px' }}>
-        {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
-        {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
-        {entityName ? ` · scoped to ${entityName}` : ' · platform-wide'}
-        {' '}· every {m.checkEveryMin >= 1 ? `${m.checkEveryMin}m` : 'master'} · warn {m.warnMin}m · stale {m.staleMin}m
+        {readOnly ? (
+          <>Watching {m.streams.length || 'the'} stream{m.streams.length === 1 ? '' : 's'} · warn after {m.warnMin}m of silence · stale after {m.staleMin}m</>
+        ) : (
+          <>
+            {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
+            {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
+            {entityName ? ` · scoped to ${entityName}` : ' · platform-wide'}
+            {' '}· every {m.checkEveryMin >= 1 ? `${m.checkEveryMin}m` : 'master'} · warn {m.warnMin}m · stale {m.staleMin}m
+          </>
+        )}
       </div>
       {m.lastError && <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 8 }}>⚠️ Last pull failed: {m.lastError}</div>}
       {m.streams.length ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
           {m.streams.map((s) => (
             <StationChip key={s.station || '__feed'} s={s}
-              onForget={() => run('forget', () => api.forgetDataStream(m.id, s.station))} />
+              onForget={readOnly ? undefined : () => run('forget', () => api.forgetDataStream(m.id, s.station))} />
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>No data pulled yet — hit <strong>Check now</strong> to take the first reading.</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>{readOnly ? 'No data pulled yet.' : <>No data pulled yet — hit <strong>Check now</strong> to take the first reading.</>}</div>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
-        <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
-        <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
-        <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
-          onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
-        <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
-          {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
-        </button>
-        <button style={{ ...ghostBtn, color: STATUS_COLOR.stale }} disabled={!!busy}
-          onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        {!readOnly && <>
+          <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
+          <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
+          <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
+          <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
+            onClick={() => onEdit({ ...m, id: undefined, name: `${m.name} (copy)` })}>⧉ Duplicate</button>
+          <button style={ghostBtn} disabled={!!busy} onClick={() => run('pause', () => api.setDataMonitorStatus(m.id, m.status === 'paused' ? 'active' : 'paused'))}>
+            {m.status === 'paused' ? '▶️ Resume' : '⏸ Pause'}
+          </button>
+          <button style={{ ...ghostBtn, color: STATUS_COLOR.stale }} disabled={!!busy}
+            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
+        </>}
+        <DiagnosePanel monitorId={m.id} base={base} />
         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
       </div>
-      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} />}
+      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} />}
       </>}
+    </div>
+  );
+}
+
+// 📝 The event-level Data health & diagnostics report: every station of the
+// event in one AI-written Markdown document — for the ops team, and clean
+// enough to forward to a network provider. Light markdown rendering; Copy /
+// Download (.md) / Print for sharing.
+function ReportPanel({ url, body, title }) {
+  const [state, setState] = useState(null); // null | 'busy' | {markdown, at} | {error}
+  const run = async () => {
+    setState('busy');
+    try { setState(await jget(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })); }
+    catch (e) { setState({ error: e.message }); }
+  };
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([state.markdown], { type: 'text/markdown' }));
+    a.download = `${(title || 'data-health-report').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.md`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  const print = () => {
+    const w = window.open('', '_blank');
+    w.document.write(`<title>${title || 'Data health report'}</title><pre style="font:13px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;white-space:pre-wrap;max-width:800px;margin:24px auto;">${state.markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre>`);
+    w.document.close(); w.print();
+  };
+  const mdLine = (line, i) => {
+    const h = line.match(/^(#{1,3})\s+(.*)/);
+    if (h) return <div key={i} style={{ fontWeight: 800, fontSize: h[1].length === 1 ? 16 : h[1].length === 2 ? 14 : 13, margin: '12px 0 4px' }}>{h[2].replace(/\*\*/g, '')}</div>;
+    const bold = line.split(/(\*\*[^*]+\*\*)/g).map((p, j) => (p.startsWith('**') && p.endsWith('**') ? <strong key={j}>{p.slice(2, -2)}</strong> : p));
+    if (/^\s*\|/.test(line)) return <div key={i} style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5, whiteSpace: 'pre' }}>{line}</div>;
+    return <div key={i} style={{ minHeight: line.trim() ? undefined : 8 }}>{bold}</div>;
+  };
+  if (state == null) return <button style={{ ...ghostBtn, borderColor: 'var(--brand)', color: 'var(--brand)' }} onClick={run}>📝 Draft health report</button>;
+  if (state === 'busy') return <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>📝 Reading every station and drafting the report…</span>;
+  if (state.error) return <span style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {state.error} <button style={{ ...ghostBtn, marginLeft: 6, padding: '3px 9px' }} onClick={run}>Retry</button></span>;
+  const charts = (state.charts || []).filter((c) => c.coverage && c.coverage.length);
+  const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
+  const sum = (k) => ((state.charts || []).some((c) => c[k] != null) ? (state.charts || []).reduce((a, c) => a + (c[k] || 0), 0) : null);
+  const utcLabel = (hhmm) => { const [h, mm] = hhmm.split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+  return (
+    <div style={{ ...card, borderLeft: '4px solid var(--brand)', width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13.5 }}>📝 Data health & diagnostics report — {fmtAt(state.at)}</strong>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={run}>↻ Redraft</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={() => navigator.clipboard?.writeText(state.markdown)}>📋 Copy</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={download}>⬇️ Download</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={print}>🖨 Print / PDF</button>
+        <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={() => setState(null)}>✕</button>
+      </div>
+      {/* Metric tiles — computed from the live data, not the AI text. */}
+      {(state.charts || []).length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          {[['Stations', num((state.charts || []).length)], ['Devices linked', num(sum('linked'))],
+            ['Online', num(sum('online')), STATUS_COLOR.fresh], ['Offline', num(sum('offline')), sum('offline') ? STATUS_COLOR.stale : undefined],
+            ['Total scans', num(sum('totalScans'))], ['Avg scans/h', num(sum('scansPerHour'))]].map(([l, v, c]) => (
+            <div key={l} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Per-station coverage strips: devices sending per time block — the
+          offline-trend picture behind report §4. One series per strip, so the
+          row label carries identity; hover a column for the exact reading. */}
+      {charts.map((c) => {
+        const max = Math.max(1, c.devicesSeen, ...c.coverage.map((p) => p.activeDevices));
+        const perLabel = Math.max(1, Math.round(180 / (c.intervalMin || 10)));
+        return (
+          <div key={c.station} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
+              <strong>{c.station}</strong>
+              {c.area && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 8px', borderRadius: 999, background: 'var(--hairline)' }}>{c.area}</span>}
+              <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>
+                {num(c.linked)} linked · <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{num(c.online)} online</span> ·{' '}
+                <span style={{ color: c.offline ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: 700 }}>{num(c.offline)} offline</span> ·{' '}
+                {num(c.totalScans)} scans · ~{num(c.scansPerHour)}/h
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto', paddingTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 40 }}>
+                {c.coverage.map((pt, i) => (
+                  <span key={i} title={`${utcLabel(pt.atUTC)} SA — ${pt.activeDevices} of ${max} devices sending`}
+                    style={{ width: 5, flexShrink: 0, borderRadius: '2px 2px 0 0', height: Math.max(2, Math.round((pt.activeDevices / max) * 40)),
+                      background: pt.activeDevices ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 1, borderTop: '1px solid var(--hairline)', marginTop: 1 }}>
+                {c.coverage.map((pt, i) => (
+                  <span key={i} style={{ width: 5, flexShrink: 0, fontSize: 8, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % perLabel === 0 ? utcLabel(pt.atUTC) : ''}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>Devices sending per {c.intervalMin || 10}-min block (bar height = share of {max}) — dips are the offline windows; times SA.</div>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 13, lineHeight: 1.6, overflowX: 'auto', borderTop: charts.length ? '1px solid var(--hairline)' : 'none', paddingTop: charts.length ? 10 : 0 }}>{state.markdown.split('\n').map(mdLine)}</div>
+    </div>
+  );
+}
+
+// One client·event group on the Admin page: its own health row, opened to the
+// monitor cards — the platform overview drills down instead of a flat list.
+function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpen, reportBody }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const streams = monitors.flatMap((m) => m.streams);
+  const staleN = streams.filter((s) => s.status === 'stale').length + monitors.filter((m) => m.lastError).length;
+  const warnN = streams.filter((s) => s.status === 'warn').length;
+  const dot = staleN ? 'stale' : warnN ? 'warn' : streams.length ? 'fresh' : undefined;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', marginBottom: open ? 10 : 0, cursor: 'pointer' }}
+        title={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
+        <Dot status={dot} />
+        <strong style={{ fontSize: 14 }}>{label}</strong>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          {monitors.length} monitor{monitors.length === 1 ? '' : 's'} · {streams.length} stream{streams.length === 1 ? '' : 's'} ·{' '}
+          {staleN ? <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>{staleN} stale</span>
+            : warnN ? <span style={{ color: STATUS_COLOR.warn, fontWeight: 700 }}>{warnN} warn</span>
+              : streams.length ? <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>all fresh</span>
+                : <span>no data yet</span>}
+        </span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
+      </div>
+      {open && (
+        <div style={{ marginLeft: 14 }}>
+          {reportBody && <div style={{ marginBottom: 10 }}><ReportPanel url={`${ADMIN_BASE}/report`} body={reportBody} title={`Data health — ${label}`} /></div>}
+          {monitors.map((m) => (
+            <MonitorCard key={m.id} m={m} entities={entities} onChanged={onChanged} onEdit={onEdit} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -495,7 +683,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
-    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '',
+    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '', rosterAlertPct: 0,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -636,14 +824,21 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
                     value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
                 </div>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <span style={label}>Online window (min)</span>
-                <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+                <div>
+                  <span style={label}>Online window (min)</span>
+                  <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
+                </div>
+                <div>
+                  <span style={label}>⚠️ Alert at % offline (0 = off)</span>
+                  <input style={input} type="number" min="0" max="100" value={f.rosterAlertPct || 0} onChange={(e) => set('rosterAlertPct', e.target.value)} />
+                </div>
               </div>
               <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>
                 {f.rosterDaily ? `Roster restarts every day at ${f.rosterDaily} (South Africa time) — the multi-day event shape.`
                   : f.rosterStart ? 'Roster = every device seen since the once-off start time (your local time). Clear it to use the rolling window.'
                     : 'Pick a daily time (multi-day events), a once-off start (single event day), or leave both blank for a rolling window.'}
+                {Number(f.rosterAlertPct) >= 1 ? ` Fleet alert: fires once when ≥${f.rosterAlertPct}% of linked devices are offline (needs 3+ linked; shares the cooldown).` : ''}
               </span>
             </div>
           )}
@@ -769,8 +964,26 @@ export default function DataHealthAdmin() {
 
   const monitors = data?.monitors || [];
   const allStreams = monitors.flatMap((m) => m.streams);
-  const staleN = allStreams.filter((s) => s.status === 'stale').length;
+  const staleN = allStreams.filter((s) => s.status === 'stale').length + monitors.filter((m) => m.lastError).length;
   const warnN = allStreams.filter((s) => s.status === 'warn').length;
+
+  // Platform overview → drill in: group monitors by client · event. Monitors
+  // without an event group under the client; platform-wide ones under 🌐.
+  const groups = [];
+  {
+    const byKey = new Map();
+    for (const m of monitors) {
+      const key = `${m.entityId || ''}|${m.suiteId || ''}`;
+      if (!byKey.has(key)) {
+        const ent = m.entityId ? (entities.find((e) => e.id === m.entityId)?.name || 'Client') : '';
+        const su = m.suiteId ? (suites.find((s) => s.id === m.suiteId)?.name || 'Event') : '';
+        byKey.set(key, { key, label: ent ? (su ? `${ent} · ${su}` : ent) : '🌐 Platform-wide', entityId: m.entityId, suiteId: m.suiteId, monitors: [] });
+      }
+      byKey.get(key).monitors.push(m);
+    }
+    groups.push(...[...byKey.values()].sort((a, b) => a.label.localeCompare(b.label)));
+  }
+  const platformDot = staleN ? 'stale' : warnN ? 'warn' : allStreams.length ? 'fresh' : undefined;
 
   return (
     <div>
@@ -784,13 +997,23 @@ export default function DataHealthAdmin() {
       {data && <TestModeBanner testMode={!!data.testMode} testEmail={data.testEmail || ''} onChanged={load} />}
 
       {data && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
-          {[[`${monitors.length} monitor${monitors.length === 1 ? '' : 's'}`, 'var(--text)'],
-            [`${allStreams.length - staleN - warnN} fresh`, STATUS_COLOR.fresh],
-            [`${warnN} warning`, STATUS_COLOR.warn],
-            [`${staleN} stale`, STATUS_COLOR.stale]].map(([t, c], i) => (
-            <span key={i} style={{ fontSize: 12.5, fontWeight: 700, color: c, padding: '5px 12px', borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)' }}>{t}</span>
-          ))}
+        <div style={{ ...card, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', borderLeft: `4px solid ${platformDot ? STATUS_COLOR[platformDot] : 'var(--hairline)'}` }}>
+          <span style={{ fontSize: 22 }}>📡</span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 14.5 }}>
+              Platform health:{' '}
+              {staleN ? <span style={{ color: STATUS_COLOR.stale }}>{staleN} stream{staleN === 1 ? '' : 's'} down</span>
+                : warnN ? <span style={{ color: STATUS_COLOR.warn }}>{warnN} stream{warnN === 1 ? '' : 's'} need{warnN === 1 ? 's' : ''} attention</span>
+                  : allStreams.length ? <span style={{ color: STATUS_COLOR.fresh }}>all streams flowing</span>
+                    : <span style={{ color: 'var(--muted)' }}>no data yet</span>}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+              {monitors.length} monitor{monitors.length === 1 ? '' : 's'} · {allStreams.length} stream{allStreams.length === 1 ? '' : 's'} ·{' '}
+              <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{allStreams.length - allStreams.filter((s) => s.status !== 'fresh').length} fresh</span> ·{' '}
+              <span style={{ color: STATUS_COLOR.warn, fontWeight: 700 }}>{warnN} warning</span> ·{' '}
+              <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>{staleN} stale</span>
+            </div>
+          </div>
           <span style={{ flex: 1 }} />
           <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
           {editing == null && <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>}
@@ -813,9 +1036,53 @@ export default function DataHealthAdmin() {
             </p>
             <button style={btn} onClick={() => setEditing('new')}>+ Create the first monitor</button>
           </div>
-        ) : monitors.map((m) => (
-          <MonitorCard key={m.id} m={m} entities={entities} onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+        ) : groups.map((g) => (
+          <MonitorGroup key={g.key} label={g.label} monitors={g.monitors} entities={entities}
+            defaultOpen={groups.length === 1}
+            reportBody={g.entityId ? { entityId: g.entityId, suiteId: g.suiteId || '' } : null}
+            onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+    </div>
+  );
+}
+
+// ── Client-facing surface: the 📶 Data health tab inside Event Ops ──
+// Same cards, read-only, scoped server-side to the caller's entity (+ the
+// picked event). Renders in BOTH consoles — the client's /event-ops page and
+// Admin → client → Event Ops (the dual-surface rule).
+export function DataHealthOps({ entityId, suiteId }) {
+  const [monitors, setMonitors] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const load = () => jget(`/api/my/data-health?entityId=${encodeURIComponent(entityId || '')}&suiteId=${encodeURIComponent(suiteId || '')}`)
+      .then((r) => { if (alive) { setMonitors(r.monitors || []); setErr(''); } })
+      .catch((e) => { if (alive) { setErr(e.message); setMonitors((m) => m || []); } });
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [entityId, suiteId]);
+  if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px' }}>
+        Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
+        Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
+      </p>
+      {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
+      {!monitors.length ? (
+        <div style={card}>
+          <strong style={{ fontSize: 14 }}>No data-health monitors yet</strong>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
+        </div>
+      ) : <>
+        <div style={{ marginBottom: 12 }}>
+          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
+        </div>
+        {monitors.map((m) => (
+          <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />
+        ))}
+      </>}
     </div>
   );
 }

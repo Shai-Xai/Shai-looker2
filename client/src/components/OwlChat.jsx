@@ -779,7 +779,44 @@ function SourceTable({ source }) {
 // show the biggest first (rows arrive measure-desc); line charts re-sort by the
 // date dimension so time runs left→right.
 const VIS = { line: 'looker_line', bar: 'looker_column', pie: 'looker_pie' };
+
+// Two dimensions + one measure (e.g. check-ins by GATE and HOUR) pivot into one
+// SERIES per value of the lower-cardinality dimension — so gates compare side by
+// side (and can Stack) instead of flattening both dims onto one long axis.
+function pivotInfo(s) {
+  const dims = (s.columns || []).filter((c) => c.kind === 'dimension');
+  const meas = (s.columns || []).filter((c) => c.kind === 'measure');
+  if (dims.length !== 2 || meas.length !== 1) return null;
+  const rows = s.rows || [];
+  if (rows.length < 3) return null;
+  const d0 = new Set(rows.map((r) => String(r[dims[0].field]))).size;
+  const d1 = new Set(rows.map((r) => String(r[dims[1].field]))).size;
+  const [sCol, xCol] = d0 <= d1 ? [dims[0], dims[1]] : [dims[1], dims[0]];
+  const sN = Math.min(d0, d1); const xN = Math.max(d0, d1);
+  if (sN < 2 || sN > 12 || xN < 2) return null; // a legend of 13+ series is unreadable
+  return { sCol, xCol, mCol: meas[0], seriesVals: [...new Set(rows.map((r) => String(r[sCol.field])))] };
+}
+const timeLike = (v) => /^\d{4}-\d{2}/.test(v) || /^\d{1,2}:\d{2}/.test(v) || /^\d+$/.test(v);
 function chartDataFromSource(s) {
+  const p = pivotInfo(s);
+  if (p) {
+    const { sCol, xCol, mCol, seriesVals } = p;
+    const byX = new Map();
+    for (const r of (s.rows || [])) { const x = String(r[xCol.field]); if (!byX.has(x)) byX.set(x, {}); byX.get(x)[String(r[sCol.field])] = r[mCol.field]; }
+    let xs = [...byX.keys()];
+    const sumX = (x) => Object.values(byX.get(x)).reduce((t, v) => t + (Number(v) || 0), 0);
+    // Time-ish x (dates, hours) runs left→right; categorical x sorts biggest-first.
+    if (s.chartType === 'line' || xs.every(timeLike)) xs.sort((a, b) => a.localeCompare(b));
+    else { xs.sort((a, b) => sumX(b) - sumX(a)); xs = xs.slice(0, 15); }
+    const key = (v) => `${mCol.field}|${v}`;
+    return {
+      fields: {
+        dimensions: [{ name: xCol.field, label: xCol.label, label_short: xCol.label }],
+        measures: seriesVals.map((v) => ({ name: key(v), label: v, label_short: v })),
+      },
+      data: xs.map((x) => { const o = { [xCol.field]: { value: x } }; const m = byX.get(x); for (const v of seriesVals) o[key(v)] = { value: m[v] != null ? m[v] : null }; return o; }),
+    };
+  }
   const dims = s.columns.filter((c) => c.kind === 'dimension');
   const meas = s.columns.filter((c) => c.kind === 'measure');
   let rows = s.rows || [];
@@ -1194,7 +1231,9 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
   const showPin = canPin && source.queryBody && entityId;
-  const canStack = multiMeasure && (type === 'bar' || type === 'line');
+  // Stack applies to any multi-series chart: several measures, OR a two-dimension
+  // result pivoted into one series per category (e.g. check-ins by gate over hours).
+  const canStack = (multiMeasure || !!pivotInfo(source)) && (type === 'bar' || type === 'line');
   return (
     <div style={{ margin: '2px 0 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>

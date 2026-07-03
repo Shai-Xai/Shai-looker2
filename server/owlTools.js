@@ -20,7 +20,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 const reportingTz = require('./timezone');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -1001,6 +1001,71 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── dataHealth (READ) ─────────────────────────────────────────────────────────
+  // The Data health monitors: is the data pipe from the venue flowing, per
+  // station? Everything the Admin/Event-Ops page shows is queryable: monitor
+  // status + per-station lag, the device roster (linked/online/offline and
+  // WHICH devices), the per-device day timeline with scan counts, and the
+  // latest transactions. Scope: clients only see monitors pinned to their own
+  // entity; the live reads run through the same fail-closed scope gate.
+  async function runDataHealth(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const api = typeof getDataHealthApi === 'function' ? getDataHealthApi() : null;
+    if (!api || !api.healthSummary) return refuse('unavailable', 'Data health monitoring isn\'t available right now.');
+    const isAdmin = user.role === 'admin';
+    const mine = user.entityIds || [];
+    const list = api.healthSummary({
+      entityIds: isAdmin ? null : mine,
+      entityId: entityId && (isAdmin || mine.includes(entityId)) ? entityId : '',
+      suiteId: suiteId || '',
+    }).filter((m) => isAdmin || m.entityId);
+    if (!list.length) return { ok: true, monitors: [], message: 'No data-health monitors are set up for this scope yet.' };
+    const q = args.query || 'overview';
+    if (q === 'overview') return { ok: true, monitors: list };
+    // The deeper reads are per monitor/station — fuzzy match by name/area.
+    const want = String(args.monitor || '').trim().toLowerCase();
+    const hit = (want && list.find((m) => m.name.toLowerCase() === want))
+      || (want && list.find((m) => m.name.toLowerCase().includes(want) || String(m.area).toLowerCase() === want))
+      || (list.length === 1 ? list[0] : null);
+    if (!hit) return refuse('which_monitor', `Which station/monitor? One of: ${list.map((m) => `"${m.name}"`).join(', ')}.`);
+    const m = api.monitorById(hit.id);
+    try {
+      if (q === 'devices') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured — I can only see its stream lag.`);
+        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m) };
+      }
+      if (q === 'timeline') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
+        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10);
+        // activeBlocks: compact 0/1 string per device, oldest→newest; counts = scans per block.
+        return {
+          ok: true, monitor: m.name, intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
+          totalScans: t.grandTotal, note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC.',
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+        };
+      }
+      if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
+      return { ok: true, monitors: [hit] }; // 'stations' or anything else → that monitor's summary
+    } catch (e) {
+      return refuse('error', `Couldn't read data health: ${String(e.message || e).slice(0, 160)}`);
+    }
+  }
+  const dataHealthSchema = {
+    name: 'dataHealth',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "when did device X stop", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + scan counts per time block through the day (spot gaps, flappers, late joiners). latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'latest'], description: 'What to fetch (default overview).' },
+        monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
+        hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
+        intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
+        limit: { type: 'number', description: 'For latest: how many records (default 20, max 50).' },
+      },
+    },
+  };
+
   // ── draftReport (ACT) ─────────────────────────────────────────────────────────
   // DRAFT a product report (bug / improvement / idea) the user describes in chat.
   // Nothing is filed until they tap "File it" — confirm pattern like the others.
@@ -1108,7 +1173,9 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       limit: { type: 'number', description: 'Max rows (default 500).' },
     };
     if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
-    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression on ${cat.label}'s date (e.g. "last 7 days").` };
+    // Name the bound field so the model KNOWS which date this rides — and routes a
+    // different family's time question (e.g. check-in created-at) via filters instead.
+    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression applied to ${cat.dateDimension} (e.g. "last 7 days"). To time-filter a DIFFERENT date field, put the date expression in filters under that field's name instead.` };
     // A combined explore stitches several views (families) together; not every
     // view joins to every other. Warn the model up front so it pairs a measure
     // with its own family's dimensions instead of producing a fan-out.
@@ -1176,6 +1243,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     ...extraTools,
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
+    dataHealth: { schema: dataHealthSchema, run: runDataHealth, menu: { cmd: 'datahealth', label: 'Data health', icon: '📶', example: 'Is the check-in data flowing — any devices offline?' } },
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
     getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },

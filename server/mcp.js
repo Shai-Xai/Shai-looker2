@@ -99,6 +99,21 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
       run: (u, a) => core.eventOps(u, a),
     },
     {
+      name: 'pulse_data_health',
+      title: 'Check data-stream health',
+      scope: 'read_rows', // device ids + operator names are operational row-level data
+      description: 'LIVE data-pipe health per station — is data (check-ins, bar sales, vendors) flowing from the venue into the platform? query=overview (every monitor: status, per-station lag vs warn/stale thresholds, device roster counts), devices (ONE monitor\'s live roster incl. WHICH devices are offline and for how long), timeline (per-device activity + scan counts per time block through the day — spot gaps/flappers), latest (newest raw records). Times are UTC — present them in the client\'s local time. Requires the read_rows scope.',
+      input: {
+        query: z.enum(['overview', 'devices', 'timeline', 'latest']).optional().describe('What to fetch (default overview)'),
+        monitor: z.string().optional().describe('For devices/timeline/latest: the monitor/station name (fuzzy, e.g. "Gate B")'),
+        suiteId: z.string().optional().describe('Optional event (suite) id to narrow to one event'),
+        hours: z.string().optional().describe('For timeline: "start" (from the roster start time) or rolling hours like "12"'),
+        intervalMin: z.number().optional().describe('For timeline: block minutes (5/10/20/30/60; default 10)'),
+        limit: z.number().optional().describe('For latest: how many records (default 20)'),
+      },
+      run: (u, a) => core.dataHealth(u, a),
+    },
+    {
       name: 'pulse_get_tile_rows',
       title: 'Pull row-level data',
       scope: 'read_rows', // only registered for keys that explicitly carry it
