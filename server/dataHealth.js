@@ -456,11 +456,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     base.filters[m.timeField] = anchor
       ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${h} hours`;
-    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : ['native', 'distinct', 'none'];
+    // Count-measure candidates, in order: the TIME FIELD's own view's count
+    // (right on combined explores, where m.view is the explore name and the
+    // real measure is e.g. cashless_check_ins.count), then the explore-name
+    // guess, then a dynamic count_distinct, then plain row presence. The
+    // working mode is remembered — but 'none' never is, so a transient Looker
+    // error can't poison a monitor into inflating/deflating counts forever.
+    const nativeField = `${String(m.timeField).split('.')[0]}.count`;
+    const viewField = `${m.view}.count`;
+    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'none'];
+    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : allModes;
+    const fieldFor = { native: nativeField, native2: viewField, distinct: CNT_FIELD };
     let rows = null; let mode = 'none'; let lastErr = null;
     for (const cand of modes) {
       const body = { ...base, fields: [m.rosterField, bucketField] };
-      if (cand === 'native') body.fields = [...body.fields, `${m.view}.count`];
+      if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
       if (cand === 'distinct') {
         body.fields = [...body.fields, CNT_FIELD];
         body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
@@ -468,8 +478,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       try { rows = await runScoped(m, body); mode = cand; break; } catch (e) { lastErr = e; }
     }
     if (!rows) throw lastErr;
-    countModeByMonitor.set(m.id, mode);
-    const cKey = mode === 'native' ? `${m.view}.count` : CNT_FIELD;
+    if (mode !== 'none') countModeByMonitor.set(m.id, mode); else countModeByMonitor.delete(m.id);
+    const cKey = fieldFor[mode] || CNT_FIELD;
     const nowMs = Date.now();
     const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
     // Anchored: first block is the one containing the start time; rolling: n
@@ -498,7 +508,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
     return {
-      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode,
+      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
@@ -675,18 +685,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         const breach = m.rosterAlertPct >= 1 && r.total >= 3 && offlinePct >= m.rosterAlertPct;
         // Scan volume for the tile: total + average per hour over the roster
         // window (hour-level timeline read — tiny aggregated result).
-        let totalScans = null, scansPerHour = null;
+        let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null;
         try {
-          const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 60);
+          let t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 60);
+          // Row-presence fallback at hour blocks = one row per device-hour, a
+          // wild undercount — re-read at 10-min blocks where a raw row ≈ a scan.
+          if (t.configured && t.countBasis === 'none') t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
           if (t.configured) {
             totalScans = t.grandTotal;
+            scansApprox = t.countBasis === 'none' || !!t.truncated;
             scansPerHour = Math.round(t.grandTotal / Math.max(0.25, (Date.now() - Date.parse(t.buckets[0])) / 3600000));
+            const perHour = Math.max(1, Math.round(60 / t.intervalMin));
+            lastHourScans = t.bucketTotals.slice(-perHour).reduce((a, b) => a + b, 0); // rolling last ~60 min
+            // Compact sparkline series for the tile: {t: 'HH:MM' UTC, n: devices sending}.
+            coverage = t.buckets.map((b, i) => ({ t: b.slice(11, 16), n: t.devices.reduce((a, d) => a + (d.active[i] ? 1 : 0), 0) })).slice(-288);
           }
         } catch (e) { console.warn('[data-health] scan-rate read failed', m.id, e.message); }
         sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
-          totalScans, scansPerHour,
+          totalScans, scansPerHour, lastHourScans, scansApprox, coverage,
         }), m.id);
         if (breach && !wasBreach) {
           const names = r.offline.slice(0, 8).map((d) => `${d.device} (${fmtLag(d.lagMin)})`).join(', ');
