@@ -1,0 +1,28 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 453db8e..47f3d7d 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -1155,6 +1155,15 @@ const MONITOR_TEMPLATES = {
+     filters: { 'cashless_combine_data.name': '', 'cashless_open_loop_sales.station_category': '', 'cashless_stations.name': '' },
+     rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
+   },
++  vendor: {
++    name: 'Vendors', area: 'Vendors', templateView: 'cashless_combine_data',
++    timeField: 'cashless_open_loop_sales.date_time',
++    stationField: 'cashless_stations.name',
++    rosterField: 'cashless_open_loop_sales.device_id',
++    detailFields: ['cashless_open_loop_sales.device_id', 'event_sales_operators.handler', 'cashless_operation_sale_item.product_name'],
++    filters: { 'cashless_combine_data.name': '', 'cashless_open_loop_sales.station_category': 'vendor', 'cashless_stations.name': '' },
++    rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
++  },
+   checkin: {
+     name: 'Check-in gate', area: 'Check-in', templateView: 'cashless_combine_data',
+     timeField: 'cashless_check_ins.created_at_time',
+@@ -1241,6 +1250,7 @@ export default function DataHealthAdmin() {
+           {editing == null && <>
+             <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>
+             <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.bar })}>🍺 Bar template</button>
++            <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.vendor })}>🧾 Vendor template</button>
+             <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.checkin })}>🛂 Check-in template</button>
+           </>}
+         </div>
