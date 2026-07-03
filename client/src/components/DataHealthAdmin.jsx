@@ -281,7 +281,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
 
   const save = async () => {
     setErr('');
-    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k, v]) => k && String(v).trim())), detailFields: detailRows.filter(Boolean) };
+    // Filter rows with a dimension but no value yet are kept as "open" filters
+    // (saved with the monitor, applied only once a value is chosen).
+    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k]) => k)), detailFields: detailRows.filter(Boolean) };
     if (!body.name.trim()) return setErr('Give the monitor a name.');
     if (!body.model || !body.view || !body.timeField) return setErr('Pick the explore and its timestamp field.');
     setSaving(true);
@@ -373,7 +375,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               </select>
               {/* Linked value box: native combo (datalist) — pick a real value or type one. */}
               <input style={{ ...input, flex: 1 }} value={v} list={`dh-vals-${i}`}
-                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value' : 'value'}
+                placeholder={dimValues[k] === 'loading' ? 'loading values…' : Array.isArray(dimValues[k]) && dimValues[k].length ? 'pick or type a value (blank = not applied yet)' : 'value (blank = not applied yet)'}
                 onFocus={() => loadDimValues(k)}
                 onChange={(e) => setFilterRows((rows) => rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
               <datalist id={`dh-vals-${i}`}>

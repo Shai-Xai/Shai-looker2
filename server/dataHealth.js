@@ -151,7 +151,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const filters = {};
     if (b.filters && typeof b.filters === 'object' && !Array.isArray(b.filters)) {
       for (const [k, v] of Object.entries(b.filters).slice(0, 10)) {
-        if (k && v != null && String(v).trim()) filters[String(k).slice(0, 200)] = String(v).slice(0, 500);
+        // A blank value is kept: an "open" filter the admin is still deciding on
+        // (the dimension survives a save). Blanks are stripped from queries.
+        if (k) filters[String(k).slice(0, 200)] = v == null ? '' : String(v).trim().slice(0, 500);
       }
     }
     const channels = Array.isArray(b.channels) ? [...new Set(b.channels.filter((c) => CHANNELS.includes(c)))] : ['push'];
@@ -226,7 +228,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!Array.isArray(rows)) throw new Error('unexpected Looker response shape');
     return rows;
   }
-  const baseBody = (m) => ({ model: m.model, view: m.view, filters: { ...(m.filters || {}) }, query_timezone: 'UTC' });
+  // Blank-valued ("open") filters are config-only — sending "" to Looker would
+  // filter for blank values, so they never reach the query.
+  const baseBody = (m) => ({
+    model: m.model, view: m.view,
+    filters: Object.fromEntries(Object.entries(m.filters || {}).filter(([, v]) => String(v).trim())),
+    query_timezone: 'UTC',
+  });
 
   // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
   // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
