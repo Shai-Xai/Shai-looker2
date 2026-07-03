@@ -642,9 +642,9 @@ require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
 const eventopsApi = require('./eventops').mount(app, { db, auth }); // pilot: device/station logistics, per-client opt-in → server/eventops.js
 
-// ── Pulse: the header "heartbeat" strip's merged feed → server/pulse.js ──────────
-// Merges alert fires (alerts.recentBeats) with live tile momentum (sampled here).
+// ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
+require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) → server/dataHealth.js
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing

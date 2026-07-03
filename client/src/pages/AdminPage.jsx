@@ -20,6 +20,7 @@ import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
@@ -149,6 +150,7 @@ const ADMIN_NAV = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
+  ['datahealth', 'Data health', '📡'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
@@ -173,6 +175,7 @@ export default function AdminPage() {
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
+      {tab === 'datahealth' && <DataHealthAdmin />}
       {tab === 'product' && <Product />}
       {tab === 'backup' && <BackupRestore />}
     </>
