@@ -191,7 +191,7 @@ function RosterPanel({ monitorId }) {
 function TimelinePanel({ monitorId }) {
   const [data, setData] = useState(null);
   const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
-  const [interval, setIntervalMin] = useState(60);
+  const [interval, setIntervalMin] = useState(10); // 10-min blocks by default — hour blocks hide short dropouts
   const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -308,7 +308,9 @@ function TimelinePanel({ monitorId }) {
 // at the last 20 records off the feed (+ the device roster when configured).
 function HistoryPanel({ monitorId, rosterField }) {
   const [hist, setHist] = useState(null);
-  const [tab, setTab] = useState('events');
+  // Roster monitors open straight onto the live timeline — that's the view the
+  // card is expanded for; the history lists are one click away.
+  const [tab, setTab] = useState(rosterField ? 'timeline' : 'events');
   useEffect(() => { api.dataMonitorHistory(monitorId).then(setHist).catch(() => setHist({ checks: [], events: [] })); }, [monitorId]);
   if (!hist) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: '8px 0' }}>Loading history…</div>;
   return (
@@ -319,7 +321,10 @@ function HistoryPanel({ monitorId, rosterField }) {
           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
         ))}
       </div>
-      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+      {/* History lists scroll in place; the live tabs (Latest 20 / Devices /
+          Timeline) get full height — a long device timeline should be seen
+          whole, scrolling the page, not a letterbox. */}
+      <div style={tab === 'events' || tab === 'checks' ? { maxHeight: 260, overflowY: 'auto' } : undefined}>
         {tab === 'events' && (hist.events.length ? hist.events.map((e, i) => {
           const [icon, color] = EVENT_META[e.kind] || ['·', 'var(--muted)'];
           return (
@@ -364,7 +369,11 @@ function HistoryPanel({ monitorId, rosterField }) {
 
 function MonitorCard({ m, entities, onChanged, onEdit }) {
   const [busy, setBusy] = useState('');
-  const [showHist, setShowHist] = useState(false);
+  // Cards start collapsed to one summary row — with many monitors the page
+  // stays scannable. Expanding opens the log straight away (that's what you
+  // expanded for), full-height so a big device timeline is fully visible.
+  const [expanded, setExpanded] = useState(false);
+  const [showHist, setShowHist] = useState(true);
   const [checkMsg, setCheckMsg] = useState('');
   const stale = m.streams.filter((s) => s.status === 'stale').length;
   const warn = m.streams.filter((s) => s.status === 'warn').length;
@@ -384,14 +393,37 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
 
   return (
     <div style={{ ...card, borderLeft: `4px solid ${headColor}`, opacity: m.status === 'paused' ? 0.75 : 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <Dot status={overall === 'error' ? 'stale' : overall === 'paused' || overall === 'new' ? undefined : overall} />
-        <strong style={{ fontSize: 14.5 }}>{m.name}</strong>
-        {m.area && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--hairline)', color: 'var(--text)' }}>{m.area}</span>}
-        {m.status === 'paused' && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>PAUSED</span>}
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>checked {ago(m.lastCheckedAt)}</span>
+      <div style={{ cursor: 'pointer' }} title={expanded ? 'Collapse' : 'Expand'} onClick={() => setExpanded((v) => !v)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minHeight: 28 }}>
+          <Dot status={overall === 'error' ? 'stale' : overall === 'paused' || overall === 'new' ? undefined : overall} />
+          <strong style={{ fontSize: 14.5 }}>{m.name}</strong>
+          {m.area && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--hairline)', color: 'var(--text)' }}>{m.area}</span>}
+          {m.status === 'paused' && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>PAUSED</span>}
+          {!expanded && m.lastError && <span style={{ fontSize: 11.5, fontWeight: 700, color: STATUS_COLOR.stale }}>pull failed</span>}
+          {!expanded && !m.streams.length && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>no data yet</span>}
+          <span style={{ flex: 1 }} />
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>checked {ago(m.lastCheckedAt)}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{expanded ? '▾' : '▸'}</span>
+        </div>
+        {/* Collapsed peek: the station chips (status + lag) and the last roster
+            counts — enough to triage without opening the card. */}
+        {!expanded && m.streams.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>
+            {m.streams.slice(0, 6).map((s) => <StationChip key={s.station || '__feed'} s={s} />)}
+            {m.streams.length > 6 && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>+{m.streams.length - 6} more</span>}
+          </div>
+        )}
+        {!expanded && m.rosterField && m.rosterSnapshot && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+            📟 <strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.total} linked</strong>
+            {' '}({m.rosterSnapshot.startAt ? `seen since ${fmtAt(m.rosterSnapshot.startAt)}` : `last ${m.rosterSnapshot.baselineMin}m`})
+            {' · '}<strong style={{ color: STATUS_COLOR.fresh }}>{m.rosterSnapshot.online} online</strong>
+            {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)' }}>{m.rosterSnapshot.offline} offline</strong>
+            {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
+          </div>
+        )}
       </div>
+      {expanded && <>
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 10px' }}>
         {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
         {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
@@ -423,6 +455,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
       </div>
       {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} />}
+      </>}
     </div>
   );
 }
