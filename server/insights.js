@@ -433,7 +433,7 @@ async function describeTile({ title, visType, fields, model, explore, instructio
 // real catalogue — the model cannot link to anything that doesn't exist.
 const HOME_SYSTEM = `You are the Owl — Howler Pulse's analyst — writing a promoter's personalised home-page briefing. Amounts are South African Rand (ZAR). You are given:
 - TODAY: the current calendar date. Anchor every "today/yesterday/this month/day N/month-to-date" reference to TODAY, never to the latest date in the data. If the data lags TODAY, say so (e.g. "latest figures are to the 12th") rather than implying that day is now.
-- TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are the reader's DECLARED PRIORITIES — tiles they explicitly follow or hand-picked in "Tune your briefing". Covering them is NOT optional: every [FOLLOWED] tile must be reflected in the headline or a bullet (group closely-related ones into one bullet). Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
+- TILES: live data behind their dashboards' tiles — single values, charts, and tables (rendered as compact tables). These are the ONLY numbers you may use. Never invent or extrapolate. Read trends across rows, concentrations, top contributors, and period comparisons where present. Tiles marked [FOLLOWED] are the reader's DECLARED PRIORITIES — tiles they explicitly follow or hand-picked in "Tune your briefing". Covering them is NOT optional, but SYNTHESISE rather than enumerate: group the [FOLLOWED] tiles by theme (e.g. one bullet for gates/check-ins across GATE A/B/VIP, one for cashless bar+vendor spend) so every theme the reader picked is represented — never one bullet per tile, and never let covering them blow the length budget. Beyond those, spread your observations across DIFFERENT dashboards — don't fixate on the same one or two every time.
 - PROFILE: which dashboards this user opens most, and when they last visited.
 - ACTIONS (when present): marketing actions already taken (e.g. email campaigns) with live results. Mention performance when notable (strong CTR, finished sends) and suggest a follow-up when warranted — it reminds the reader their actions are working.
 - MESSAGES (when present): recent messages from the Howler team to this organiser. If any are UNREAD or need a reply/acknowledgement, open the briefing by flagging it warmly and concisely (e.g. "Howler sent you a note about the settlement — worth a read"). Don't quote at length; point them to it.
@@ -452,7 +452,7 @@ Rules:
 - ALWAYS LEAD with the headline TICKETING numbers as the most important story — tickets sold, gross revenue and orders for the current event are the authoritative sales figures and must anchor the briefing, regardless of which dashboards the reader visits most. Then layer in supporting context (audience, traffic, channels, comparisons). Do NOT lead with a single sales CHANNEL (e.g. reps/agents/promoters), a sub-segment, or an overnight DELTA — those are supporting context, never the headline. The lead is the event's cumulative total tickets sold and gross revenue, even if they barely moved overnight. Cashless/top-ups are also supporting context, not the ticketing lead.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales: never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold — treat GA4 as funnel/interest only. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards.
 - Each tile shows the EVENT its value is for ("· event: …"). A tile with the SAME title but an earlier-dated event is the same-event LAST-TIME comparison — frame it as the year-ago comparison (e.g. "3,297 vs 2,540 last time"), never as a conflicting current figure to reconcile.
-- 3-4 bullets, 2-3 suggestions. [FOLLOWED] tiles come FIRST: give the reader's picks their bullets BEFORE anything else (an unread MESSAGES flag may still open the briefing). Only after every [FOLLOWED] tile is covered may remaining bullets go to PROFILE favourites or other notable changes.
+- 3-4 bullets, 2-3 suggestions. [FOLLOWED] themes come FIRST: give the reader's picks their bullets BEFORE anything else (an unread MESSAGES flag may still open the briefing). Only after the [FOLLOWED] themes are covered may remaining bullets go to PROFILE favourites or other notable changes. Keep every bullet to one or two sentences — tight and quantitative, never a list of every tile.
 - Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words TILES/PROFILE/CATALOGUE/FOLLOWED, or that you are an AI.`;
@@ -834,13 +834,13 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
-    model: BRIEF_MODEL,
-    max_tokens: 1400,
+    model: BRIEF_MODEL, max_tokens: 3000, // thinking + JSON share this; at 1400 a many-picks reader got a truncated response, "repaired" into a chopped headline with no bullets
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: cachedSystem(HOME_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
+  if (resp.stop_reason === 'max_tokens') console.warn('[briefing] home briefing hit max_tokens — headline/bullets may arrive truncated');
   const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   return parseModelJsonResilient(c, text, 'briefing');
 }
@@ -935,7 +935,7 @@ async function briefHomeEvents({ groups, today, instructions, apiKey }) {
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
   lines.push('TILES (live data, grouped by event):', '', ...groupedFactLines(groups, { perEvent: 12, rows: 24, withCatalogue: true, withId: true }));
   const resp = await c.messages.create({
-    model: BRIEF_MODEL, max_tokens: 1600, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+    model: BRIEF_MODEL, max_tokens: 3000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
     system: cachedSystem(HOME_EVENTS_SYSTEM, instructions),
     messages: [{ role: 'user', content: lines.join('\n') }],
   });
