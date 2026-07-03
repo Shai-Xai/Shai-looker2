@@ -671,7 +671,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           .slice(0, 3);
       } catch (e) { void e; }
     }
-    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), ...probed, 'distinct', 'distinct2', 'none'];
+    // Catalogue measures FIRST: the explore-name guess can be a measure like
+    // "Cashless Events Count" that returns 1 per group — non-zero, so the
+    // zero-check can't catch it, and it must never outrank transaction_count.
+    const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
     const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : allModes;
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
