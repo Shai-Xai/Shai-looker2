@@ -400,7 +400,7 @@ test('deviceRoster: aggregates last-seen per device in Looker when the MAX measu
   assert.equal(r.total, 2);
   assert.equal(r.online, 1);
   assert.equal(r.truncated, false); // one row per device — the cap is out of reach
-  assert.deepEqual(JSON.parse(bodies[0].dynamic_fields), [{ measure: 'data_health_last', based_on: 'scans.scanned_at', type: 'max' }]);
+  assert.deepEqual(JSON.parse(bodies[0].dynamic_fields), [{ measure: 'data_health_last', based_on: 'scans.scanned_at_raw', type: 'max' }]);
   // Remembered — the next pull is still a single aggregated query.
   await h.mod.deviceRoster(m);
   assert.equal(bodies.length, 2);
