@@ -1102,7 +1102,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
     const props = {
-      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}.` },
+      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}. For money totals ("sales", "revenue", "spend") prefer a *sum_credit_amount / *sale_item_total_price measure — a *sum_sale_item_unit_price measure adds up UNIT prices ignoring quantities and understates real takings.` },
       measures: { type: 'array', items: { type: 'string', enum: cat.measures.map((m) => m.name) }, description: 'Optional: 2+ measures side by side.' },
       filters: { type: 'object', description: 'Optional {field: value} filters on this data.' },
       limit: { type: 'number', description: 'Max rows (default 500).' },
@@ -1116,10 +1116,17 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     const combinedHint = families.size > 2
       ? ' This explore COMBINES several views — group a measure by dimensions of its OWN family (matching field-name prefix, or shared core_events/date fields). A cross-family group-by returns the same total repeated on every row, not a real breakdown.'
       : '';
+    // Category-style dimensions (station_category, catalog_item_type, …) are how a
+    // subset question is answered. Without this hint the model answered "bar sales"
+    // across ALL stations (food, merch, coffee included) — issue caught live at KFF.
+    const categoryDims = (cat.dimensions || []).map((d) => d.name).filter((n) => /(^|[._])(category|category_\d+|type)([._]|$)/i.test(n));
+    const subsetHint = categoryDims.length
+      ? ` SUBSET QUESTIONS ("bars only", "food vendors", "merch"): do NOT answer across everything — FILTER a category field (${categoryDims.slice(0, 4).join(', ')}). Group by it once without a filter to learn its exact case-sensitive values, then filter and answer the subset.`
+      : '';
     return {
       schema: {
         name: toolName,
-        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}`,
+        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}${subsetHint}`,
         input_schema: { type: 'object', properties: props, required: ['measure'] },
       },
       run,

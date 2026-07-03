@@ -596,3 +596,14 @@ test('a dateRange on the measured view\'s OWN date carries no caution note', asy
   assert.equal(res.ok, true);
   assert.equal(res.note, undefined);
 });
+
+test('an explore with a category dimension advertises subset-filtering in its tool description', () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_sales.sum_credit_amount', label: 'Sale Amount', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.station_category', label: 'Station Category', type: 'string' }, { name: 'cashless_x_sales.station_name', label: 'Station', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  assert.match(t.ask_cashless_x.schema.description, /SUBSET QUESTIONS/, 'subset guidance present');
+  assert.match(t.ask_cashless_x.schema.description, /cashless_x_sales\.station_category/, 'names the category field');
+  // No category-style dimension → no subset hint.
+  const cat2 = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_y', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_y.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_y.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat2 });
+  assert.doesNotMatch(t2.ask_cashless_y.schema.description, /SUBSET QUESTIONS/);
+});
