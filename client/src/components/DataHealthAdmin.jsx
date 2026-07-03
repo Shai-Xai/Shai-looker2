@@ -240,6 +240,34 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   const bw = iv >= 30 ? 12 : 8; // finer blocks get narrower cells so more fit before scrolling
   const perLabel = Math.max(1, Math.round((data.hours <= 12 ? 60 : 180) / iv)); // a time label every 1h (short windows) or 3h
   const lookback = Math.max(1, Math.ceil(30 / iv)); // "live" = active within the last ~30 min
+  // Online vs offline for the devices IN VIEW (the picked station's summary):
+  // exact last-seen lag when the labels lookup delivered it, else recent blocks.
+  const onlineMin = data.onlineMin || 30;
+  const hasLag = data.devices.some((d) => d.lagMin != null);
+  const onlineN = hasLag
+    ? data.devices.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
+    : data.devices.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length;
+  const offlineN = data.devices.length - onlineN;
+  // All-stations view groups the rows under a station header — one glance per
+  // station instead of one long pile. A picked station needs no grouping.
+  const grouped = (!station && data.devices.some((d) => d.station))
+    ? [...data.devices.reduce((m, d) => {
+      const k = d.station || 'No station';
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(d); return m;
+    }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    : null;
+  const grpOnline = (devs) => (hasLag
+    ? devs.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
+    : devs.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length);
+  const stationHeader = (grpName, devs) => (
+    <>
+      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase' }}>{grpName}</span>{' '}
+      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>
+        {devs.length} device{devs.length === 1 ? '' : 's'} · <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{grpOnline(devs)} online</span> · <span style={{ color: devs.length - grpOnline(devs) ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: 700 }}>{devs.length - grpOnline(devs)} offline</span>
+      </span>
+    </>
+  );
   const maxCount = Math.max(1, ...data.devices.flatMap((d) => d.counts || []));
   const heat = (c) => `rgba(22, 163, 74, ${0.12 + 0.38 * Math.min(1, c / maxCount)})`; // busier block = deeper green
   const nameCell = { maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, padding: '2px 8px 2px 0', textAlign: 'left' };
@@ -248,6 +276,14 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
+        {data.devices.length > 0 && (
+          <span style={{ fontSize: 12.5 }}>
+            <strong style={{ color: STATUS_COLOR.fresh }}>{onlineN} online</strong>
+            {' · '}
+            <strong style={{ color: offlineN ? STATUS_COLOR.stale : 'var(--muted)' }}>{offlineN} offline</strong>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}> (no sync in {onlineMin}m)</span>
+          </span>
+        )}
         <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
         {stations.length > 1 && (
           <select value={station} disabled={busy} onChange={(e) => setStation(e.target.value)}
@@ -287,22 +323,28 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
                 <th style={{ ...numCell, color: 'var(--muted)', fontWeight: 700, fontSize: 10.5 }}>Σ</th>
               </tr>
             </thead>
+            {(grouped || [['', data.devices]]).map(([grpName, devs]) => (
+              <tbody key={grpName || '__all'}>
+                {grouped && <tr><td colSpan={data.buckets.length + 2} style={{ padding: '8px 8px 2px 0', whiteSpace: 'nowrap', textAlign: 'left' }}>{stationHeader(grpName, devs)}</td></tr>}
+                {devs.map(({ device, counts, active, total, station: stn, operator: op }) => {
+                  const liveNow = active.slice(-lookback).some((a) => a === 1);
+                  const suffix = grouped ? op : `${stn || ''}${stn && op ? ' · ' : ''}${op || ''}`;
+                  return (
+                    <tr key={device}>
+                      <td title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>
+                        {device}{suffix ? <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}> {suffix}</span> : null}
+                      </td>
+                      {counts.map((c, i) => (
+                        <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
+                          style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
+                      ))}
+                      <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            ))}
             <tbody>
-              {data.devices.map(({ device, counts, active, total, station: stn, operator: op }) => {
-                const liveNow = active.slice(-lookback).some((a) => a === 1);
-                return (
-                  <tr key={device}>
-                    <td title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>
-                      {device}{(stn || op) && <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
-                    </td>
-                    {counts.map((c, i) => (
-                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
-                        style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
-                    ))}
-                    <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
-                  </tr>
-                );
-              })}
               <tr>
                 <td style={{ ...nameCell, fontWeight: 700, borderTop: '1px solid var(--hairline)' }}>All devices</td>
                 {data.bucketTotals.map((c, i) => (
@@ -321,21 +363,27 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
               <span key={b} style={{ width: bw, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % perLabel === 0 ? hourLabel(b) : ''}</span>
             ))}
           </div>
-          {data.devices.map(({ device, active, station: stn, operator: op }) => {
-            const liveNow = active.slice(-lookback).some((a) => a === 1);
-            return (
-              <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
-                <span title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
-                  {(stn || op) && <span style={{ fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
-                </span>
-                {active.map((a, i) => (
-                  <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
-                    style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
-                ))}
-              </div>
-            );
-          })}
+          {(grouped || [['', data.devices]]).map(([grpName, devs]) => (
+            <div key={grpName || '__all'}>
+              {grouped && <div style={{ margin: '10px 0 3px' }}>{stationHeader(grpName, devs)}</div>}
+              {devs.map(({ device, active, station: stn, operator: op }) => {
+                const liveNow = active.slice(-lookback).some((a) => a === 1);
+                const suffix = grouped ? op : `${stn || ''}${stn && op ? ' · ' : ''}${op || ''}`;
+                return (
+                  <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+                    <span title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+                      {suffix ? <span style={{ fontSize: 10, color: 'var(--muted)' }}> {suffix}</span> : null}
+                    </span>
+                    {active.map((a, i) => (
+                      <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
+                        style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -440,6 +488,15 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   const [expanded, setExpanded] = useState(false);
   const [showHist, setShowHist] = useState(true);
   const [checkMsg, setCheckMsg] = useState('');
+  // Clicking the offline count opens a LIVE offline list split by station.
+  const [offPanel, setOffPanel] = useState(null); // null | 'busy' | roster json | {error}
+  const loadOffline = async (e) => {
+    e.stopPropagation();
+    if (offPanel) { setOffPanel(null); return; }
+    setOffPanel('busy');
+    try { setOffPanel(await jget(`${base}/monitors/${m.id}/roster`)); }
+    catch (err) { setOffPanel({ error: err.message }); }
+  };
   const stale = m.streams.filter((s) => s.status === 'stale').length;
   const warn = m.streams.filter((s) => s.status === 'warn').length;
   const overall = m.status === 'closed' ? 'closed' : m.status === 'paused' ? 'paused' : m.lastError ? 'error' : stale ? 'stale' : warn ? 'warn' : m.streams.length ? 'fresh' : 'new';
@@ -487,8 +544,9 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             📟 <strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.total} linked</strong>
             {' '}({m.rosterSnapshot.startAt ? `seen since ${fmtAt(m.rosterSnapshot.startAt)}` : `last ${m.rosterSnapshot.baselineMin}m`})
             {' · '}<strong style={{ color: STATUS_COLOR.fresh }}>{m.rosterSnapshot.online} online</strong>
-            {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)', cursor: m.rosterSnapshot.offline ? 'help' : undefined }}
-              title={(m.rosterSnapshot.offlineDevices || []).length ? `Offline: ${m.rosterSnapshot.offlineDevices.map((d) => `${d.device} (${Math.round(d.lagMin)}m)`).join(', ')}${m.rosterSnapshot.offline > m.rosterSnapshot.offlineDevices.length ? ` +${m.rosterSnapshot.offline - m.rosterSnapshot.offlineDevices.length} more` : ''}` : undefined}>
+            {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)', cursor: m.rosterSnapshot.offline ? 'pointer' : undefined, textDecoration: m.rosterSnapshot.offline ? 'underline dotted' : undefined }}
+              onClick={m.rosterSnapshot.offline ? loadOffline : undefined}
+              title={m.rosterSnapshot.offline ? 'Click for the live offline list, split by station' : undefined}>
               {m.rosterSnapshot.offline} offline{m.rosterSnapshot.total ? ` (${Math.round((m.rosterSnapshot.offline / m.rosterSnapshot.total) * 100)}%)` : ''}</strong>
             {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
             {m.rosterSnapshot.flowScore != null && <>
@@ -499,6 +557,34 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
               {m.rosterSnapshot.lastHourScans != null && <> · last hour <strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.lastHourScans).toLocaleString('en-ZA')}</strong></>}
               {' '}· ~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg
             </>}
+          </div>
+        )}
+        {offPanel === 'busy' && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }} onClick={(e) => e.stopPropagation()}>Reading the live roster…</div>}
+        {offPanel && offPanel !== 'busy' && (
+          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', cursor: 'default', fontSize: 12 }}>
+            {offPanel.error ? <span style={{ color: STATUS_COLOR.stale }}>⚠️ {offPanel.error}</span> : (() => {
+              const off = offPanel.offline || [];
+              const by = new Map();
+              for (const d of off) { const k = d.station || 'No station'; if (!by.has(k)) by.set(k, []); by.get(k).push(d); }
+              const groups = [...by.entries()].sort((a, b) => b[1].length - a[1].length);
+              const missing = Math.max(0, (offPanel.total - offPanel.online) - off.length);
+              return (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                    <strong style={{ color: off.length ? STATUS_COLOR.stale : STATUS_COLOR.fresh }}>{off.length} offline device{off.length === 1 ? '' : 's'}</strong>
+                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}</span>
+                    <span style={{ flex: 1 }} />
+                    <button style={{ ...ghostBtn, padding: '1px 8px', fontSize: 11 }} onClick={(e) => { e.stopPropagation(); setOffPanel(null); }}>✕</button>
+                  </div>
+                  {!off.length ? <span style={{ color: STATUS_COLOR.fresh }}>✅ Every linked device has synced within the online window.</span> : groups.map(([stn, devs]) => (
+                    <div key={stn} style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4 }}>{stn} <span style={{ color: STATUS_COLOR.stale }}>{devs.length}</span></div>
+                      <div style={{ color: 'var(--muted)' }}>{devs.map((d) => `${d.device} (${Math.round(d.lagMin)}m${d.operator ? ` · ${d.operator}` : ''})`).join(' · ')}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
         </div>
@@ -614,8 +700,15 @@ function ReportPanel({ url, body, title }) {
   const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
   const sum = (k) => ((state.charts || []).some((c) => c[k] != null) ? (state.charts || []).reduce((a, c) => a + (c[k] || 0), 0) : null);
   const utcLabel = (hhmm) => { const [h, mm] = hhmm.split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
-  const rUnits = new Set((state.charts || []).map((c) => c.unit || 'scans'));
-  const rShort = rUnits.size > 1 ? 'scans+txns' : rUnits.has('transactions') ? 'txns' : 'scans';
+  // One tile pair per metric — scans and transactions are never summed together.
+  const rTiles = [];
+  for (const u of ['scans', 'transactions']) {
+    const cs = (state.charts || []).filter((c) => (c.unit || 'scans') === u);
+    if (!cs.length) continue;
+    const sumU = (k) => (cs.some((c) => c[k] != null) ? cs.reduce((a, c) => a + (c[k] || 0), 0) : null);
+    const shortU = u === 'transactions' ? 'txns' : 'scans';
+    rTiles.push([`Total ${shortU}`, num(sumU('totalScans'))], [`Avg ${shortU}/h`, num(sumU('scansPerHour'))]);
+  }
   return (
     <div style={{ ...card, borderLeft: '4px solid var(--brand)', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -632,7 +725,7 @@ function ReportPanel({ url, body, title }) {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
           {[['Stations', num((state.charts || []).length)], ['Devices linked', num(sum('linked'))],
             ['Online', num(sum('online')), STATUS_COLOR.fresh], ['Offline', num(sum('offline')), sum('offline') ? STATUS_COLOR.stale : undefined],
-            [`Total ${rShort}`, num(sum('totalScans'))], [`Avg ${rShort}/h`, num(sum('scansPerHour'))]].map(([l, v, c]) => (
+            ...rTiles].map(([l, v, c]) => (
             <div key={l} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
               <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
@@ -693,9 +786,22 @@ function HealthMetrics({ monitors: allMonitors }) {
   const sumOf = (arr, k) => (arr.some((x) => x[k] != null) ? arr.reduce((a, x) => a + (x[k] || 0), 0) : null);
   const sum = (k) => sumOf(snaps, k);
   const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
-  const approx = volSnaps.some((x) => x.scansApprox) ? '≥' : '';
-  const units = new Set(allMonitors.filter((m) => m.rosterSnapshot).map((m) => unitFor(m)));
-  const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
+  // Scans (gates) and transactions (bars/vendors) are DIFFERENT metrics — each
+  // unit gets its own volume tiles, never summed together. Totals include
+  // closed stations' frozen snapshots; last-hour/avg only the open ones.
+  const volTiles = [];
+  for (const u of ['scans', 'transactions']) {
+    const vol = allMonitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
+    if (!vol.length) continue;
+    const open = monitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
+    const ap = vol.some((x) => x.scansApprox) ? '≥' : '';
+    const shortU = u === 'transactions' ? 'txns' : 'scans';
+    volTiles.push(
+      [`Total ${shortU}`, sumOf(vol, 'totalScans') == null ? '—' : `${ap}${num(sumOf(vol, 'totalScans'))}`],
+      [`Last hr ${shortU}`, num(sumOf(open, 'lastHourScans'))],
+      [`Avg ${shortU}/h`, sumOf(open, 'scansPerHour') == null ? '—' : `~${num(sumOf(open, 'scansPerHour'))}`],
+    );
+  }
   const scored = snaps.filter((x) => x.flowScore != null && x.total);
   const flowAgg = scored.length ? Math.round(scored.reduce((a, x) => a + x.flowScore * x.total, 0) / Math.max(1, scored.reduce((a, x) => a + x.total, 0))) : null;
   const tiles = [
@@ -704,9 +810,7 @@ function HealthMetrics({ monitors: allMonitors }) {
     ['Devices linked', num(sum('total'))],
     ['Online', num(sum('online')), STATUS_COLOR.fresh],
     ['Offline', sum('offline') == null ? '—' : `${num(sum('offline'))}${sum('total') ? ` (${Math.round((sum('offline') / Math.max(1, sum('total'))) * 100)}%)` : ''}`, sum('offline') ? STATUS_COLOR.stale : undefined],
-    [`Total ${short}`, sumOf(volSnaps, 'totalScans') == null ? '—' : `${approx}${num(sumOf(volSnaps, 'totalScans'))}`],
-    ['Last hour', num(sum('lastHourScans'))],
-    [`Avg ${short}/h`, sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
+    ...volTiles,
   ];
   // Which stations the offline devices belong to — the drill-down for the
   // Offline tile, visible without hovering anything.
