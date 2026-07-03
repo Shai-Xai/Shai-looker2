@@ -311,9 +311,14 @@ module.exports = function createQueryEngine({ looker, auth }) {
     return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || [], preferKey));
   }
 
+  // Wipe every cached query result (admin "Clear cache" — e.g. a live event day
+  // where even background-refreshed entries must be recomputed from scratch).
+  function clearCache() { const n = qCache.size; qCache.clear(); qBytes = 0; qInflight.clear(); return n; }
+
   return {
     runLookerQuery,
     applyScope,
+    clearCache,
     primaryTileValue,
     stripAnyValue,
     ANY_VALUE,

@@ -14,8 +14,13 @@ const fx = require('./filterExpression'); // combined-field OR → Looker filter
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
 }) {
+// Admin: hard-wipe the server's query cache (all dashboards). The client's
+// "Clear cache" refresh calls this first, then re-fetches its tiles live.
+app.post('/api/admin/clear-query-cache', auth.requireAdmin, (req, res) => {
+  res.json({ cleared: clearCache ? clearCache() : 0 });
+});
 app.get('/api/dashboards', auth.requireAuth, (req, res) => {
   res.json(store.list().filter((d) => auth.canAccessDashboard(req.user, d)));
 });

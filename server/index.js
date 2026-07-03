@@ -497,7 +497,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────

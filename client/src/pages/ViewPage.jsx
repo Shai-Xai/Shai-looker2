@@ -353,6 +353,12 @@ export default function ViewPage() {
             {hasTiles && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={refreshNow} title="Refresh — pull the latest data now (bypasses cache)" aria-label="Refresh data">↻ Refresh</button>
             )}
+            {/* Admin nuke: wipe the SERVER's whole query cache, then re-pull this
+                dashboard live — for when even a normal refresh must start from a
+                clean slate (e.g. live event day). */}
+            {hasTiles && !isMobile && isAdmin && (
+              <button className="btn-key no-print" style={summaryBtn} onClick={async () => { try { await api.clearQueryCache(); } catch { /* refresh regardless */ } refreshNow(); }} title="Clear cache — wipe the server's cached query results (all dashboards), then refresh this one live" aria-label="Clear cache and refresh">⌫ Clear cache</button>
+            )}
             {canSummarize && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
             )}
