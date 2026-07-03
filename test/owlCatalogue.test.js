@@ -149,3 +149,75 @@ test('seedCashlessFields without a registered cashless explore is a safe no-op',
   assert.equal(r.ok, false);
   assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v2', ''), '', 'flag not set — seeds when the explore is registered later');
 });
+
+// ── seedCheckinExplore: register the dashboard-proven check-in explore (v3) ───
+
+const dashDb = () => {
+  const m = new Map(); let dashboards = [];
+  return {
+    getSetting: (k, d = '') => (m.has(k) ? m.get(k) : d),
+    setSetting: (k, v) => m.set(k, v),
+    listDashboards: () => dashboards,
+    _setDashboards: (d) => { dashboards = d; },
+  };
+};
+
+test('seedCheckinExplore registers the explore behind a Gates-checkin dashboard and ticks its non-PII fields', async () => {
+  const db = dashDb();
+  db._setDashboards([{
+    id: 'd1', title: 'KFF26 Gates Checkin by Device',
+    tiles: [{ id: 't1', query: { model: 'combined', view: 'access_control_x', fields: ['cashless_check_ins.device_id', 'Check_in_operators.handler', 'cashless_check_ins.count'] } }],
+  }, {
+    id: 'd2', title: 'Ticketing', // unrelated explore, no check-in fields → ignored
+    tiles: [{ id: 't2', query: { model: 'combined', view: 'all_tickets_x', fields: ['core_tickets.count'] } }],
+  }]);
+  const getExploreFields = async (model, view) => {
+    assert.equal(`${model}::${view}`, 'combined::access_control_x', 'reads the discovered explore');
+    return {
+      measures: [{ name: 'cashless_check_ins.count', label: 'Check-Ins', type: 'count' }],
+      dimensions: [
+        { name: 'cashless_check_ins.station_name', label: 'Station Name', type: 'string' },
+        { name: 'Check_in_operators.handler', label: 'Operator Name', type: 'string' },
+        { name: 'cashless_check_ins.device_id', label: 'Device ID', type: 'string' },
+        { name: 'cashless_check_ins.ticket_type', label: 'Ticket Type', type: 'string' },
+        { name: 'cashless_check_ins.date_time', label: 'Check-in Time', type: 'date_time' },
+        { name: 'cashless_check_ins.customer_first_name', label: 'First Name', type: 'string' }, // PII → never
+      ],
+    };
+  };
+  const r = await cat.seedCheckinExplore(db, getExploreFields);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.registered, [{ explore: 'combined::access_control_x', fields: 6 }]);
+  // The explore is registered and queryable with the ticked fields.
+  assert.ok(cat.explores(db).some((e) => e.view === 'access_control_x'));
+  const eff = cat.effective(db);
+  const ex = eff.extras.find((e) => e.explore === 'access_control_x');
+  assert.ok(ex, 'the Owl gets a tool for it');
+  assert.ok(ex.dimensions.some((d) => d.name === 'cashless_check_ins.station_name'));
+  assert.ok(ex.dimensions.some((d) => d.name === 'Check_in_operators.handler'));
+  assert.ok(!ex.dimensions.some((d) => d.name === 'cashless_check_ins.customer_first_name'), 'person-name fields never auto-enabled');
+  // One-shot: a second run is a no-op.
+  assert.equal((await cat.seedCheckinExplore(db, getExploreFields)).skipped, 'already seeded');
+});
+
+test('seedCheckinExplore skips explores already registered (the combined cashless source)', async () => {
+  const db = dashDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  db._setDashboards([{ id: 'd1', tiles: [{ id: 't1', query: { model: 'combined', view: 'cashless_x', fields: ['cashless_check_ins.count', 'cashless_check_ins.device_id'] } }] }]);
+  let lookerCalls = 0;
+  const r = await cat.seedCheckinExplore(db, async () => { lookerCalls++; return { measures: [], dimensions: [] }; });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.registered, [], 'nothing new to register');
+  assert.equal(lookerCalls, 0, 'Looker never consulted');
+});
+
+test('seedCheckinExplore does NOT set its flag when Looker is unreachable (retries next boot)', async () => {
+  const db = dashDb();
+  db._setDashboards([{ id: 'd1', tiles: [{ id: 't1', query: { model: 'combined', view: 'access_control_x', fields: ['cashless_check_ins.count'] } }] }]);
+  const r = await cat.seedCheckinExplore(db, async () => { throw new Error('looker down'); });
+  assert.equal(r.ok, false);
+  assert.equal(db.getSetting('owl_catalogue_checkin_explore_seeded', ''), '', 'flag not set');
+  const r2 = await cat.seedCheckinExplore(db, async () => ({ measures: [{ name: 'cashless_check_ins.count', label: 'Check-Ins', type: 'count' }], dimensions: [] }));
+  assert.equal(r2.ok, true);
+  assert.deepEqual(r2.registered, [{ explore: 'combined::access_control_x', fields: 1 }]);
+});

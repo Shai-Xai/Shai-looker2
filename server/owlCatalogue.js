@@ -233,6 +233,48 @@ async function seedCashlessFields(db, getExploreFields) {
   return { ok: true, explore: key, added: added.length };
 }
 
+// v3: some clients' check-in ROW data (station / operator / device per scan)
+// lives in a DEDICATED explore — e.g. the access-control explore behind their
+// "Gates Checkin" dashboards — that was never registered for the Owl, so the
+// combined-cashless seed above finds nothing to tick. Discover it from the
+// dashboards themselves: a stored tile query whose fields include a
+// check-in-family view is proof that explore carries the data. Register it and
+// tick its non-PII fields, exactly as an admin would. Same one-shot semantics.
+const CHECKIN_EXPLORE_FLAG = 'owl_catalogue_checkin_explore_seeded';
+const CHECKIN_VIEW_RE = /check_?in|access_control/i;
+const exploreLabel = (view) => String(view).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
+async function seedCheckinExplore(db, getExploreFields) {
+  if (db.getSetting(CHECKIN_EXPLORE_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+  if (typeof db.listDashboards !== 'function') return { ok: false, skipped: 'no dashboard access' };
+  const known = new Set([PRIMARY, ...readExplores(db)].map((e) => keyOf(e.model, e.view)));
+  const found = new Map();
+  for (const d of db.listDashboards() || []) {
+    for (const t of [...(d.tiles || []), ...((d.carousels || []).flatMap((c) => c.tiles || []))]) {
+      const q = t && t.query;
+      if (!q || !q.model || !q.view || !Array.isArray(q.fields)) continue;
+      const key = keyOf(q.model, q.view);
+      if (known.has(key) || found.has(key)) continue;
+      if (q.fields.some((f) => CHECKIN_VIEW_RE.test(String(f).split('.')[0]))) found.set(key, { model: q.model, view: q.view });
+    }
+  }
+  const registered = [];
+  for (const e of [...found.values()].slice(0, 3)) { // sanity cap
+    let f;
+    try { f = (await getExploreFields(e.model, e.view)) || {}; }
+    catch (err) { return { ok: false, skipped: `looker unreachable: ${err.message}`, registered }; } // no flag → retried next boot
+    const fields = [];
+    const take = (arr, kind) => { for (const x of arr || []) { if (!isPII(x.name) && !SEED_PII_RE.test(x.name)) fields.push({ name: x.name, label: x.label_short || x.label || x.name, kind, type: x.type }); } };
+    take(f.measures, 'measure');
+    take(f.dimensions, 'dimension');
+    if (!fields.some((x) => x.kind === 'measure')) { registered.push({ explore: keyOf(e.model, e.view), skipped: 'no measures' }); continue; }
+    registerExplore(db, { model: e.model, view: e.view, label: exploreLabel(e.view) });
+    const map = readExpFields(db); map[keyOf(e.model, e.view)] = fields; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map));
+    registered.push({ explore: keyOf(e.model, e.view), fields: fields.length });
+  }
+  db.setSetting(CHECKIN_EXPLORE_FLAG, new Date().toISOString());
+  return { ok: true, registered };
+}
+
 // Register / unregister an EXTRA explore (the primary can't be removed).
 function registerExplore(db, { model, view, label }) {
   if (!model || !view || isPrimary(model, view)) return { ok: false, error: 'That explore is already available.' };
@@ -297,10 +339,13 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
     catch (e) { res.status(500).json({ error: 'Could not save the catalogue selection.' }); }
   });
   console.log('[owlCatalogue] Owl data-catalogue editor mounted');
-  // Fire-and-forget: enrich the cashless catalogue with check-in + sales fields once.
+  // Fire-and-forget, SEQUENTIAL (both write the same field-selection setting):
+  // enrich the cashless catalogue, then register any dashboard-proven check-in explore.
   seedCashlessFields(db, getExploreFields)
-    .then((r) => { if (!r.skipped || r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless field seed:', JSON.stringify(r)); })
-    .catch((e) => console.error('[owlCatalogue] cashless field seed failed:', e.message));
+    .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless field seed:', JSON.stringify(r)); })
+    .then(() => seedCheckinExplore(db, getExploreFields))
+    .then((r) => { if (r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in explore seed:', JSON.stringify(r)); })
+    .catch((e) => console.error('[owlCatalogue] catalogue seed failed:', e.message));
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore };
