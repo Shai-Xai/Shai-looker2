@@ -39,10 +39,10 @@ const DATA_HEALTH_DIAG_SYSTEM = `You are Pulse's data-stream diagnostician for l
 Write a SHORT diagnostics verdict an ops person can act on mid-event:
 1. First line: an overall verdict — healthy / mostly healthy with N concerns / degraded / down — with the single most important fact.
 2. "Flow:" the pipe numbers — minutes since the latest record vs the warn/stale thresholds, and total scans.
-3. "Timeline:" THE CORE ANALYSIS — where the problems were through the day. Walk timeline.coverage (per block: how many devices sent data) chronologically and name EVERY window where a meaningful share of devices was simultaneously silent, as "HH:MM–HH:MM SA: only X of N devices sending". For each window say what it was: a shared outage (devices that were active BEFORE the window went dark TOGETHER — connectivity/venue signature, list the affected devices) vs a slow ramp-up (devices had not yet sent their FIRST data — late start, not a fault, but say how long the ramp took and when coverage became full). Use each device's activeBlocks (one char per block, oldest→newest) to tell those apart. Then name when coverage was at its best.
+3. "Timeline:" THE CORE ANALYSIS — where the problems were through the day. Walk timeline.coverage (per block: how many devices sent data) chronologically and name EVERY window where a meaningful share of devices was simultaneously silent, as "HH:MM–HH:MM SA: only X of N devices sending". For each window say what it was: a shared outage (devices that were active BEFORE the window went dark TOGETHER — this station's connectivity degrading, list the affected devices) vs a slow ramp-up (devices had not yet sent their FIRST data — late start, not a fault, but say how long the ramp took and when coverage became full). Use each device's activeBlocks (one char per block, oldest→newest) to tell those apart. Then name when coverage was at its best.
 4. "Devices:" online vs linked now, scans-per-device spread, and the individual laggards.
 5. "Concerns:" a numbered list, worst first — shared-window incidents FIRST, then single-device drops/flappers. For each: what, the evidence (times, counts, gap lengths), and ONE concrete action (→ send a runner / swap / reboot / check battery or signal / raise with the network provider).
-6. End with what you RULED OUT: single-device faults vs venue network — justify from whether silent blocks were shared or isolated.
+6. End with what you RULED OUT: single-device faults vs this station's connectivity — justify from whether silent blocks were shared or isolated. Remember each station has its own coverage area: simultaneous drops HERE are a connectivity signal for THIS station even if other stations ran clean.
 
 Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
 
@@ -56,7 +56,7 @@ Write the report in clean Markdown:
 ## 1. Executive summary — 3-5 bullet verdict of the whole event's data flow: stations healthy vs affected, device totals (linked/online/offline across all stations), total scans, and the headline incidents.
 ## 2. Station-by-station — one short block per station: status, latest-record lag vs thresholds, devices online/linked, scans, notable gaps (with times and durations).
 ## 3. Device incidents — a Markdown table: Device | Station | What happened | When (SAST) | Duration | Likely cause. Include offline devices, flappers (active-silent-active), and unusually low scanners.
-## 4. Connectivity assessment (for the network provider) — the evidence-based view: were silent periods isolated to single devices (device hardware — not connectivity), or did multiple devices/stations go quiet in the SAME windows (a connectivity signature — list the exact windows in SAST and which stations/devices they affected)? Be precise and neutral — this section may be forwarded verbatim.
+## 4. Connectivity & offline trends — PER STATION. Each station has its OWN connectivity (its own area of the venue, its own coverage), so analyse every station separately — NEVER require a cross-station signature before flagging connectivity, and never conclude "no connectivity issue" just because stations dropped at different times. For each station, read its devices' activeBlocks and the coverage series and describe its offline TREND through the day: the exact SAST windows where several of ITS devices were silent at the same time, how deep each dip was (X of N devices), whether dips recur around particular times of day, and which devices were affected. Classify each window: previously-active devices at one station going dark TOGETHER = that station's connectivity likely degraded in that window — say so plainly and list the window for the provider; staggered/isolated silences = device-level; devices that had not yet sent their first data = ramp-up, not a fault. If several stations share a window, escalate that to a venue-wide note. Be precise and neutral — this section may be forwarded verbatim.
 ## 5. Recommendations — numbered, concrete, ordered by impact (hardware swaps, spares, placement, network follow-ups).
 
 Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
@@ -673,9 +673,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         const wasBreach = !!(m.rosterSnapshot && m.rosterSnapshot.breach);
         // Needs a real fleet (3+ linked) so 1-of-2 offline doesn't page anyone.
         const breach = m.rosterAlertPct >= 1 && r.total >= 3 && offlinePct >= m.rosterAlertPct;
+        // Scan volume for the tile: total + average per hour over the roster
+        // window (hour-level timeline read — tiny aggregated result).
+        let totalScans = null, scansPerHour = null;
+        try {
+          const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 60);
+          if (t.configured) {
+            totalScans = t.grandTotal;
+            scansPerHour = Math.round(t.grandTotal / Math.max(0.25, (Date.now() - Date.parse(t.buckets[0])) / 3600000));
+          }
+        } catch (e) { console.warn('[data-health] scan-rate read failed', m.id, e.message); }
         sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
+          totalScans, scansPerHour,
         }), m.id);
         if (breach && !wasBreach) {
           const names = r.offline.slice(0, 8).map((d) => `${d.device} (${fmtLag(d.lagMin)})`).join(', ');
@@ -947,7 +958,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const payload = { generatedAt: now(), event: suite ? suite.name : '', client: entity ? entity.name : '', stations };
     const eid = entityId || (suite ? suite.entityId : '');
     const markdown = await meter('data_health_report', eid, () => aiComplete(DATA_HEALTH_REPORT_SYSTEM, payload, { entityId: eid, suiteId }, 3500));
-    return { markdown, at: now(), monitors: list.length };
+    // Chart-ready companion data: the UI draws the per-station coverage strips
+    // and metric tiles from this, so the visuals are computed, never AI-guessed.
+    const charts = stations.map((st) => {
+      const t = st.detail.timeline || null;
+      const r = st.detail.roster || null;
+      const hrs = t ? Math.max(0.25, (Date.parse(t.window.to) + t.intervalMin * 60000 - Date.parse(t.window.from)) / 3600000) : 0;
+      return {
+        station: st.station, area: st.area,
+        linked: r ? r.total : null, online: r ? r.online : null, offline: r ? r.total - r.online : null,
+        totalScans: t ? t.totalScans : null, scansPerHour: t ? Math.round(t.totalScans / hrs) : null,
+        intervalMin: t ? t.intervalMin : null, coverage: t ? t.coverage : [], devicesSeen: t ? t.devicesSeen : 0,
+      };
+    });
+    return { markdown, charts, at: now(), monitors: list.length };
   }
 
   app.post('/api/admin/data-health/monitors/:id/diagnose', auth.requireAdmin, asyncHandler(async (req, res) => {

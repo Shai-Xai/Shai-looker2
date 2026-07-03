@@ -459,6 +459,10 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {' · '}<strong style={{ color: STATUS_COLOR.fresh }}>{m.rosterSnapshot.online} online</strong>
             {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)' }}>{m.rosterSnapshot.offline} offline</strong>
             {' '}(no sync in {m.rosterSnapshot.onlineMin}m)
+            {m.rosterSnapshot.scansPerHour != null && <>
+              {' · '}<strong style={{ color: 'var(--text)' }}>{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
+              {' '}(~{Number(m.rosterSnapshot.scansPerHour).toLocaleString('en-ZA')}/h avg)
+            </>}
           </div>
         )}
       </div>
@@ -540,6 +544,10 @@ function ReportPanel({ url, body, title }) {
   if (state == null) return <button style={{ ...ghostBtn, borderColor: 'var(--brand)', color: 'var(--brand)' }} onClick={run}>📝 Draft health report</button>;
   if (state === 'busy') return <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>📝 Reading every station and drafting the report…</span>;
   if (state.error) return <span style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {state.error} <button style={{ ...ghostBtn, marginLeft: 6, padding: '3px 9px' }} onClick={run}>Retry</button></span>;
+  const charts = (state.charts || []).filter((c) => c.coverage && c.coverage.length);
+  const num = (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA'));
+  const sum = (k) => ((state.charts || []).some((c) => c[k] != null) ? (state.charts || []).reduce((a, c) => a + (c[k] || 0), 0) : null);
+  const utcLabel = (hhmm) => { const [h, mm] = hhmm.split(':').map(Number); return `${String((h + 2) % 24).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
   return (
     <div style={{ ...card, borderLeft: '4px solid var(--brand)', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -551,7 +559,55 @@ function ReportPanel({ url, body, title }) {
         <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={print}>🖨 Print / PDF</button>
         <button style={{ ...ghostBtn, padding: '3px 9px' }} onClick={() => setState(null)}>✕</button>
       </div>
-      <div style={{ fontSize: 13, lineHeight: 1.6, overflowX: 'auto' }}>{state.markdown.split('\n').map(mdLine)}</div>
+      {/* Metric tiles — computed from the live data, not the AI text. */}
+      {(state.charts || []).length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          {[['Stations', num((state.charts || []).length)], ['Devices linked', num(sum('linked'))],
+            ['Online', num(sum('online')), STATUS_COLOR.fresh], ['Offline', num(sum('offline')), sum('offline') ? STATUS_COLOR.stale : undefined],
+            ['Total scans', num(sum('totalScans'))], ['Avg scans/h', num(sum('scansPerHour'))]].map(([l, v, c]) => (
+            <div key={l} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Per-station coverage strips: devices sending per time block — the
+          offline-trend picture behind report §4. One series per strip, so the
+          row label carries identity; hover a column for the exact reading. */}
+      {charts.map((c) => {
+        const max = Math.max(1, c.devicesSeen, ...c.coverage.map((p) => p.activeDevices));
+        const perLabel = Math.max(1, Math.round(180 / (c.intervalMin || 10)));
+        return (
+          <div key={c.station} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 12.5 }}>
+              <strong>{c.station}</strong>
+              {c.area && <span style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 8px', borderRadius: 999, background: 'var(--hairline)' }}>{c.area}</span>}
+              <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>
+                {num(c.linked)} linked · <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{num(c.online)} online</span> ·{' '}
+                <span style={{ color: c.offline ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: 700 }}>{num(c.offline)} offline</span> ·{' '}
+                {num(c.totalScans)} scans · ~{num(c.scansPerHour)}/h
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto', paddingTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 40 }}>
+                {c.coverage.map((pt, i) => (
+                  <span key={i} title={`${utcLabel(pt.atUTC)} SA — ${pt.activeDevices} of ${max} devices sending`}
+                    style={{ width: 5, flexShrink: 0, borderRadius: '2px 2px 0 0', height: Math.max(2, Math.round((pt.activeDevices / max) * 40)),
+                      background: pt.activeDevices ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 1, borderTop: '1px solid var(--hairline)', marginTop: 1 }}>
+                {c.coverage.map((pt, i) => (
+                  <span key={i} style={{ width: 5, flexShrink: 0, fontSize: 8, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % perLabel === 0 ? utcLabel(pt.atUTC) : ''}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>Devices sending per {c.intervalMin || 10}-min block (bar height = share of {max}) — dips are the offline windows; times SA.</div>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 13, lineHeight: 1.6, overflowX: 'auto', borderTop: charts.length ? '1px solid var(--hairline)' : 'none', paddingTop: charts.length ? 10 : 0 }}>{state.markdown.split('\n').map(mdLine)}</div>
     </div>
   );
 }
