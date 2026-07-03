@@ -84,7 +84,10 @@ const setting = (key, env) => ((db && db.getSetting(key)) || process.env[env] ||
 const apiKey = () => setting('resend_api_key', 'RESEND_API_KEY');
 const from = () => setting('mail_from', 'MAIL_FROM') || 'Howler Pulse <onboarding@resend.dev>';
 const baseUrl = () => (setting('app_base_url', 'APP_URL') || 'https://howler-pulse-v2.onrender.com').replace(/\/$/, '');
-const enabled = () => !db || db.getSetting('mail_enabled', '1') !== '0';
+// OUTBOUND_DISABLED=1 hard-kills ALL sending regardless of the DB kill switch —
+// the belt-and-braces a STAGING server sets so it can never email real customers
+// even with production data + real Resend keys loaded.
+const enabled = () => process.env.OUTBOUND_DISABLED !== '1' && (!db || db.getSetting('mail_enabled', '1') !== '0');
 
 function isConfigured() { return !!apiKey() && enabled(); }
 

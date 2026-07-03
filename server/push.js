@@ -12,7 +12,7 @@ const webpush = require('web-push');
 let sql = null;
 let _db = null;
 
-const enabled = () => _db && _db.getSetting('push_enabled', '1') !== '0'; // on by default
+const enabled = () => process.env.OUTBOUND_DISABLED !== '1' && _db && _db.getSetting('push_enabled', '1') !== '0'; // on by default; OUTBOUND_DISABLED (staging) hard-kills it
 
 // One-time VAPID identity, persisted. Subject must be a mailto:/https: URI.
 function ensureVapid() {
