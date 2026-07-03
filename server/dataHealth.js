@@ -32,11 +32,19 @@ const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's 
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const CHANNELS = ['push', 'email', 'slack']; // entity fan-out via the OS spine; ops Slack is always-on
 
-function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
+// `mailer` is injectable for tests but defaults to the real module so the
+// index.js mount line stays unchanged (it's only used by test mode below).
+function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mailer = require('./mailer') }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
   const enabled = () => db.getSetting('data_health_enabled', '1') !== '0';
+  // ── test mode (ON by default while the feature is being trialled) ──
+  // While on, EVERY alert goes only to the test address — the internal ops Slack
+  // and the client-team fan-out are muted, so a mis-tuned threshold can't page
+  // the team or a client. Toggle + address live in Admin → Data health.
+  const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
+  const testEmail = () => String(db.getSetting('data_health_test_email', 'shai.evian@howler.co.za') || '').trim();
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS data_monitors (
@@ -237,9 +245,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
 
   // Fan out: internal ops Slack ALWAYS (this is first and foremost a Howler health
   // tool); plus the client's inbox/push/email/Slack via the OS spine when the
-  // monitor is pinned to an entity and has channels ticked.
+  // monitor is pinned to an entity and has channels ticked. In TEST MODE both are
+  // muted and the alert is emailed only to the test address. Returns where the
+  // alert actually went, so the event history stays truthful.
   function deliver(m, title, body) {
-    try { ops?.alert?.(`datahealth-${m.id}`, `${title}\n${body}`); } catch { /* best-effort */ }
+    if (testMode()) {
+      const to = testEmail();
+      if (to && mailer?.send) {
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        mailer.send({
+          to,
+          subject: `[TEST] ${title}`,
+          text: `${body}\n\nData health is in TEST MODE — only you receive these alerts (ops Slack + client notifications are muted). Go live in Admin → Data health.`,
+          html: `<p><strong>${esc(title)}</strong></p><p>${esc(body)}</p><p style="color:#888;font-size:12px">Data health is in <strong>test mode</strong> — only you receive these alerts (ops Slack + client notifications are muted). Go live in Admin → Data health.</p>`,
+          kind: 'notification',
+        }).catch((e) => console.error('[data-health] test email failed', m.id, e.message));
+      }
+      return to ? [`test-email:${to}`] : [];
+    }
+    const sent = [];
+    try { ops?.alert?.(`datahealth-${m.id}`, `${title}\n${body}`); sent.push('ops-slack'); } catch { /* best-effort */ }
     if (m.entityId && os?.announce) {
       try {
         os.announce({
@@ -248,8 +273,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
           channels: (m.channels || []).filter((c) => CHANNELS.includes(c)),
           subjectType: 'data-monitor', subjectId: m.id,
         });
+        sent.push('client-team');
       } catch (e) { console.error('[data-health] announce failed', m.id, e.message); }
     }
+    return sent;
   }
 
   // ── one check: pull → update stream memory → evaluate → alert on transitions ──
@@ -312,8 +339,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
           ? `${names.length} of ${streams.length} station${streams.length === 1 ? '' : 's'} stopped sending data: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ` +${names.length - 8} more` : ''}. Longest silence ${fmtLag(worst)} (threshold ${m.staleMin}m).`
           : `No new data for ${fmtLag(worst)} (threshold ${m.staleMin}m).`;
         const title = `⛔ Data stream stale — ${m.name || m.area || m.view}`;
-        deliver(m, title, bodyMsg);
-        recordEvent(m.id, '', 'alert', worst, bodyMsg);
+        const via = deliver(m, title, bodyMsg);
+        recordEvent(m.id, '', 'alert', worst, `${bodyMsg}${via.length ? ` → ${via.join(', ')}` : ' → no channel delivered'}`);
         sql.prepare('UPDATE data_monitors SET last_alerted_at=? WHERE id=?').run(ts, m.id);
       }
     } else if (stale === 0 && m.state === 'alerting') {
@@ -322,8 +349,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
         const bodyMsg = streams.length > 1
           ? `All ${streams.length} stations are sending data again.`
           : 'Data is flowing again.';
-        deliver(m, `✅ Data stream recovered — ${m.name || m.area || m.view}`, bodyMsg);
-        recordEvent(m.id, '', 'recovery_alert', maxLag, bodyMsg);
+        const via = deliver(m, `✅ Data stream recovered — ${m.name || m.area || m.view}`, bodyMsg);
+        recordEvent(m.id, '', 'recovery_alert', maxLag, `${bodyMsg}${via.length ? ` → ${via.join(', ')}` : ''}`);
       }
     } else if (stale > 0) {
       state = 'alerting'; // still stale (e.g. went stale while paused) — no re-fire, just truthful state
@@ -368,7 +395,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }) {
         lastCheck: sql.prepare('SELECT * FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 1').get(m.id) || null,
         recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 5').all(m.id),
       }));
-    res.json({ enabled: true, tickMin: Math.round(TICK_MS / 60000), monitors });
+    res.json({ enabled: true, tickMin: Math.round(TICK_MS / 60000), testMode: testMode(), testEmail: testEmail(), monitors });
+  });
+
+  // Test-mode switch: while on, alerts email ONLY the test address (ops Slack +
+  // client fan-out muted) — so thresholds can be tuned without paging anyone.
+  app.put('/api/admin/data-health/settings', auth.requireAdmin, (req, res) => {
+    if (!enabled()) return off(res);
+    const b = req.body || {};
+    if (typeof b.testMode === 'boolean') db.setSetting('data_health_test_mode', b.testMode ? '1' : '0');
+    if (typeof b.testEmail === 'string') {
+      const email = b.testEmail.trim().slice(0, 200);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That test email doesn’t look valid.' });
+      db.setSetting('data_health_test_email', email);
+    }
+    res.json({ testMode: testMode(), testEmail: testEmail() });
   });
 
   app.post('/api/admin/data-health/monitors', auth.requireAdmin, (req, res) => {
