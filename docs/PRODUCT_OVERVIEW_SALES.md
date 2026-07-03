@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (📶 Data health: client tab, AI diagnose, event report, fleet alert, Owl/MCP access) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (Report a bug: pinpoint the tile + record your screen) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -747,6 +747,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **Pinpoint the tile + record your screen when reporting** 🧪: filing a
+  bug from a dashboard now lets you say **exactly which tile** is affected (a "which tile
+  is this about?" picker listing that dashboard's tiles) — the tile flows into the ticket,
+  the AI draft, the Copy-for-Claude brief and the triage board, so nobody has to guess.
+  You can also **record your screen** (desktop) as an alternative to a screenshot — perfect
+  for intermittent or interaction bugs — alongside the existing screenshot/video upload
+  (on a phone, attach a video recorded with your camera). Mobile-first, self-service.
 - **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
   per station now has a read-only client tab in Event Ops (streams, device roster,
   day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data

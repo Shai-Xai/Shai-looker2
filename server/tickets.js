@@ -28,7 +28,7 @@ const express = require('express');
 // insights.promptRegistry() so the "Everything the AI is told" audit stays complete.
 const TICKET_DRAFT_SYSTEM = `You turn a rough, internal product report into a clean, actionable engineering ticket for Howler Pulse (a multi-tenant, white-label events analytics + client-engagement platform; Node/Express + SQLite backend, React SPA frontend; mobile-first).
 
-You are given a report's TYPE (bug | improvement | idea), the reporter's short title, the in-app SCREEN/area they were on, and what they wrote. Rewrite it into a crisp ticket a developer (or Claude) could pick up and build.
+You are given a report's TYPE (bug | improvement | idea), the reporter's short title, the in-app SCREEN/area they were on, the specific dashboard TILE they flagged (if any — reports filed from a dashboard can name the offending tile), and what they wrote. Rewrite it into a crisp ticket a developer (or Claude) could pick up and build. When a tile is named, treat it as the primary locus of the issue and reference it in the Affected area.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
 {
@@ -122,6 +122,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat)
     add('github_pr_number', 'github_pr_number INTEGER NOT NULL DEFAULT 0');
     add('github_pr_url', "github_pr_url TEXT NOT NULL DEFAULT ''");
+    // A report filed from a dashboard can pinpoint the specific tile it's about,
+    // so triage doesn't have to guess which chart/table is affected.
+    add('tile_id', "tile_id TEXT NOT NULL DEFAULT ''");     // the tile's id on the dashboard
+    add('tile_name', "tile_name TEXT NOT NULL DEFAULT ''"); // its human title (for display)
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
   // Comments gained a visibility flag (internal dev note vs public reply the
   // reporter sees + gets notified about) after launch — ALTER for existing DBs.
@@ -171,6 +175,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   function ticketRow(r) {
     return {
       id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      tileId: r.tile_id || '', tileName: r.tile_name || '',
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status, priority: r.priority,
       reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
@@ -185,6 +190,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   function myTicketRow(r) {
     return {
       id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      tileId: r.tile_id || '', tileName: r.tile_name || '',
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status,
       aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
@@ -208,13 +214,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // ── AI drafting ───────────────────────────────────────────────────────────────
   // Turn the raw report into a structured ticket. Uses the shared insights client +
   // resilient JSON parser (no prompt in insights.js — see TICKET_DRAFT_SYSTEM above).
-  async function draftTicket({ type, title, body, screen }) {
+  async function draftTicket({ type, title, body, screen, tile }) {
     const apiKey = adminAnthropicKey ? adminAnthropicKey() : (process.env.ANTHROPIC_API_KEY || '');
     const c = insights.requireClient(apiKey); // throws NO_API_KEY when unset (caller handles)
     const user = [
       `Type: ${type}`,
       `Reporter's title: ${title || '(none given)'}`,
       `Screen / area: ${screen || '(unknown)'}`,
+      ...(tile ? [`Affected tile: ${tile}`] : []),
       '',
       'What they wrote:',
       body || '(no description)',
@@ -240,7 +247,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('skipped', id);
       return;
     }
-    draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen })
+    draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name })
       .then(({ title, summary }) => {
         sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=? WHERE id=?')
           .run(title, summary, 'ready', id);
@@ -265,6 +272,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       '',
       `- **Type:** ${t.type}`,
       `- **Screen / area:** ${t.screen || 'unknown'}`,
+      t.tile_name ? `- **Affected tile:** ${t.tile_name}${t.tile_id ? ` (tile id: ${t.tile_id})` : ''}` : '',
       `- **Urgency:** ${t.urgency}`,
       `- **Reported by:** ${t.reporter_name || t.reporter_email}${t.entity_id ? ` (client: ${db.getEntity(t.entity_id)?.name || t.entity_id})` : ''}`,
       `- **Ticket id:** ${t.id}`,
@@ -298,12 +306,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // people prefer. Pre-drafted aiTitle/aiSummary (the Owl already structured it in
   // chat) skip the background AI draft. Entity is derived from the reporter: an
   // admin may target a client; a client is locked to one they own. Throws on empty.
-  function createTicket({ user, type, title, body, screen, urgency, entityId, attachments, source = 'widget', aiTitle, aiSummary }) {
+  function createTicket({ user, type, title, body, screen, urgency, entityId, attachments, source = 'widget', aiTitle, aiSummary, tileId, tileName }) {
     const t = TYPES.includes(type) ? type : 'bug';
     const urg = URGENCIES.includes(urgency) ? urgency : 'normal';
     const ti = clamp(title, 200).trim();
     const bo = clamp(body, 8000).trim();
     const sc = clamp(screen, 300).trim();
+    const tileI = clamp(tileId, 100).trim();     // the flagged tile (optional; dashboards only)
+    const tileN = clamp(tileName, 300).trim();
     if (!bo && !ti) { const e = new Error('Add a title or a description.'); e.code = 'EMPTY'; throw e; }
     const admin = isAdmin(user);
     const eid = admin
@@ -313,9 +323,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     const ts = now();
     const preDrafted = !!(aiTitle || aiSummary);
     sql.prepare(`INSERT INTO tickets
-      (id, type, title, body, screen, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, t, ti, bo, sc, urg, 'inbox', 0, user.id, user.email, userName(user),
+      (id, type, title, body, screen, tile_id, tile_name, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, t, ti, bo, sc, tileI, tileN, urg, 'inbox', 0, user.id, user.email, userName(user),
         admin ? 'admin' : 'client', eid, source === 'owl' ? 'owl' : 'widget',
         clamp(aiTitle || '', 200), String(aiSummary || '').slice(0, 20000), preDrafted ? 'ready' : 'pending', ts, ts);
     saveAttachments(id, attachments); // screenshots / images / short video
@@ -326,7 +336,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
     const b = req.body || {};
     try {
-      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, source: 'widget' });
+      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, tileId: b.tileId, tileName: b.tileName, source: 'widget' });
       res.status(201).json({ ticket });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
@@ -505,7 +515,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       return res.status(400).json({ error: 'Set an Anthropic API key in Admin → Integrations to draft tickets.' });
     }
     try {
-      const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen });
+      const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name });
       sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, updated_at=? WHERE id=?')
         .run(title, summary, 'ready', now(), t.id);
       res.json({ ticket: ticketRow(getTicket(t.id)) });

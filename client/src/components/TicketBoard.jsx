@@ -191,6 +191,9 @@ function Card({ t, onOpen }) {
       <div style={{ fontSize: 11, color: 'var(--muted)' }}>
         {t.screen || 'unknown'}{t.entityName ? ` · ${t.entityName}` : ''}
       </div>
+      {t.tileName && (
+        <div style={{ fontSize: 11, color: 'var(--brand)', marginTop: 2, fontWeight: 600 }}>▦ {t.tileName}</div>
+      )}
       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
         {t.reporterName || t.reporterEmail}{t.assignee ? ` → ${t.assignee}` : ''}
       </div>
@@ -284,6 +287,11 @@ function TicketDetail({ id, onClose, onChange }) {
               {t.screen || 'unknown screen'} · {t.type} · {t.urgency} urgency · by {t.reporterName || t.reporterEmail}
               {t.entityName ? ` (${t.entityName})` : ''}
             </p>
+            {t.tileName && (
+              <p style={{ fontSize: 12.5, marginBottom: 14, marginTop: -8 }}>
+                <span style={{ fontWeight: 700 }}>▦ Affected tile:</span> {t.tileName}
+              </p>
+            )}
 
             {t.clientVerdict === 'rejected' && (
               <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.1)', border: '1px solid var(--brand)' }}>
