@@ -1066,10 +1066,20 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       // issue #28's residual: "today" on bar sales matched every date. Prefer
       // `<measureView>.date_date`, then `<measureView>.created_at_date`, then
       // the catalogue default.
+      let crossDateNote;
       if (args.dateRange && String(args.dateRange).trim()) {
         const mv = String(measure).split('.')[0];
         const dateDim = [`${mv}.date_date`, `${mv}.created_at_date`].find((n) => dByName.has(n)) || cat.dateDimension;
-        if (dateDim) filters[dateDim] = String(args.dateRange).trim();
+        if (dateDim) {
+          filters[dateDim] = String(args.dateRange).trim();
+          // The measured view has NO date field of its own in the catalogue, so the
+          // range rides another view's date. In a combined explore that may not
+          // constrain the measure at all (Inventive-vs-Owl check-ins mismatch) —
+          // the Owl must caveat day/hour figures instead of stating them as fact.
+          if (String(dateDim).split('.')[0] !== mv) {
+            crossDateNote = `CAUTION: the date range was applied on ${dateDim} — ${mv} has no date field in the curated catalogue, and a cross-view date may not constrain ${measure} at all. Treat day/hour figures from this query as unverified and tell the user a ${mv} date field is needed for reliable time filtering.`;
+          }
+        }
       }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
       applySuiteEventLocks(body.filters, suiteId, dByName);
@@ -1088,7 +1098,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
       catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
-      const note = resultNote(rows, measureList, dimensions, args.filters);
+      const note = [crossDateNote, resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
       return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
     const props = {

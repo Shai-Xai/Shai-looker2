@@ -136,7 +136,7 @@ test('seedCashlessFields does NOT set the done-flag when Looker is unreachable (
   cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
   const r = await cat.seedCashlessFields(db, async () => { throw new Error('looker down'); });
   assert.equal(r.ok, false);
-  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v2', ''), '', 'flag not set');
+  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v3', ''), '', 'flag not set');
   // Next boot, Looker is back → it seeds.
   const r2 = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [{ name: 'cashless_check_ins.station_name', label: 'Station', type: 'string' }] }));
   assert.equal(r2.ok, true);
@@ -147,7 +147,7 @@ test('seedCashlessFields without a registered cashless explore is a safe no-op',
   const db = fakeDb();
   const r = await cat.seedCashlessFields(db, async () => ({ measures: [], dimensions: [] }));
   assert.equal(r.ok, false);
-  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v2', ''), '', 'flag not set — seeds when the explore is registered later');
+  assert.equal(db.getSetting('owl_catalogue_cashless_seeded_v3', ''), '', 'flag not set — seeds when the explore is registered later');
 });
 
 // ── seedCheckinExplore: register the dashboard-proven check-in explore (v3) ───
@@ -216,8 +216,33 @@ test('seedCheckinExplore does NOT set its flag when Looker is unreachable (retri
   db._setDashboards([{ id: 'd1', tiles: [{ id: 't1', query: { model: 'combined', view: 'access_control_x', fields: ['cashless_check_ins.count'] } }] }]);
   const r = await cat.seedCheckinExplore(db, async () => { throw new Error('looker down'); });
   assert.equal(r.ok, false);
-  assert.equal(db.getSetting('owl_catalogue_checkin_explore_seeded', ''), '', 'flag not set');
+  assert.equal(db.getSetting('owl_catalogue_checkin_explore_seeded_v2', ''), '', 'flag not set');
   const r2 = await cat.seedCheckinExplore(db, async () => ({ measures: [{ name: 'cashless_check_ins.count', label: 'Check-Ins', type: 'count' }], dimensions: [] }));
   assert.equal(r2.ok, true);
   assert.deepEqual(r2.registered, [{ explore: 'combined::access_control_x', fields: 1 }]);
+});
+
+test('seedCashlessFields ticks HIDDEN check-in fields too (hidden is a UI nicety, not a restriction)', async () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  const r = await cat.seedCashlessFields(db, async () => ({
+    measures: [],
+    dimensions: [
+      { name: 'cashless_check_ins.station_name', label: 'Station', type: 'string', hidden: true },
+      { name: 'cashless_check_ins.date_date', label: 'Check-in Date', type: 'date', hidden: true },
+    ],
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 2, 'hidden fields are ticked like any other');
+});
+
+test('listFields surfaces hidden fields flagged so an admin can tick them', async () => {
+  const db = fakeDb();
+  const fields = await cat.listFields(db, async () => ({
+    measures: [{ name: 'cashless_check_ins.count', label: 'Check-Ins', type: 'count' }],
+    dimensions: [{ name: 'cashless_check_ins.station_name', label: 'Station', type: 'string', hidden: true }],
+  }), 'combined', 'cashless_x');
+  const hiddenRow = fields.dimensions.find((d) => d.name === 'cashless_check_ins.station_name');
+  assert.ok(hiddenRow, 'hidden dimension is listed');
+  assert.equal(hiddenRow.hidden, true, 'and flagged as hidden');
 });

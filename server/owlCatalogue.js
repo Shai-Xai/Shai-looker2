@@ -153,11 +153,14 @@ async function listFields(db, getExploreFields, model = seed.model, view = seed.
       label: (seedFld && seedFld.label) || fld.label || fld.label_short || name,
       type: coarseType(fld.type),
       group: fld.group_label || (seedFld && seedFld.group) || '',
-      inSeed, enabled, pii: !!pii,
+      inSeed, enabled, pii: !!pii, hidden: !!fld.hidden,
     };
   };
-  const measures = (f.measures || []).filter((m) => !m.hidden).map((m) => row(m, 'measure', seedM));
-  const dimensions = (f.dimensions || []).filter((d) => !d.hidden).map((d) => row(d, 'dimension', seedD));
+  // Hidden Looker fields ARE listed (flagged) — hiding is a LookML UI nicety, and
+  // the cashless check-in station/operator/device fields live behind it. An admin
+  // can tick them; the API queries them fine.
+  const measures = (f.measures || []).map((m) => row(m, 'measure', seedM));
+  const dimensions = (f.dimensions || []).map((d) => row(d, 'dimension', seedD));
   return { model, view, primary, label: primary ? seed.label : (readExplores(db).find((e) => e.model === model && e.view === view) || {}).label || view, measures, dimensions };
 }
 
@@ -197,9 +200,11 @@ async function setEnabled(db, enabledNames, getExploreFields, model = seed.model
 // explore's REAL fields from Looker and enable the non-PII fields of those
 // families. Runs once per flag VERSION (bump the flag to sweep newly-needed
 // families), only ADDS (never unticks) — later admin edits are always respected.
-// v1 (owl_catalogue_checkin_seeded) covered check-ins only; v2 adds the sales
-// families (operators, stations, products, operations, payment fields).
-const CASHLESS_SEED_FLAG = 'owl_catalogue_cashless_seeded_v2';
+// v1 (owl_catalogue_checkin_seeded) covered check-ins only; v2 added the sales
+// families (operators, stations, products, operations, payment fields); v3
+// re-sweeps now that getExploreFields also returns HIDDEN fields (which is where
+// the check-in station/operator/device/date fields actually live).
+const CASHLESS_SEED_FLAG = 'owl_catalogue_cashless_seeded_v3';
 const CASHLESS_FAMILY_RE = /check_?in|access_control|sales|operator|operation|station|product/i; // matched against the field's view prefix
 // The platform PII patterns skip customer-name fields (the hand-curated primary
 // marks those filter-only instead). An UNATTENDED seed must be stricter: never
@@ -240,7 +245,7 @@ async function seedCashlessFields(db, getExploreFields) {
 // dashboards themselves: a stored tile query whose fields include a
 // check-in-family view is proof that explore carries the data. Register it and
 // tick its non-PII fields, exactly as an admin would. Same one-shot semantics.
-const CHECKIN_EXPLORE_FLAG = 'owl_catalogue_checkin_explore_seeded';
+const CHECKIN_EXPLORE_FLAG = 'owl_catalogue_checkin_explore_seeded_v2'; // v2: re-sweep with hidden fields visible
 const CHECKIN_VIEW_RE = /check_?in|access_control/i;
 const exploreLabel = (view) => String(view).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60);
 async function seedCheckinExplore(db, getExploreFields) {
