@@ -1,0 +1,65 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index f9d8439..d1cdfb7 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -319,7 +319,10 @@ function HistoryPanel({ monitorId, rosterField }) {
+           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
+         ))}
+       </div>
+-      <div style={{ maxHeight: 260, overflowY: 'auto' }}>
++      {/* History lists scroll in place; the live tabs (Latest 20 / Devices /
++          Timeline) get full height — a long device timeline should be seen
++          whole, scrolling the page, not a letterbox. */}
++      <div style={tab === 'events' || tab === 'checks' ? { maxHeight: 260, overflowY: 'auto' } : undefined}>
+         {tab === 'events' && (hist.events.length ? hist.events.map((e, i) => {
+           const [icon, color] = EVENT_META[e.kind] || ['·', 'var(--muted)'];
+           return (
+@@ -364,7 +367,11 @@ function HistoryPanel({ monitorId, rosterField }) {
+ 
+ function MonitorCard({ m, entities, onChanged, onEdit }) {
+   const [busy, setBusy] = useState('');
+-  const [showHist, setShowHist] = useState(false);
++  // Cards start collapsed to one summary row — with many monitors the page
++  // stays scannable. Expanding opens the log straight away (that's what you
++  // expanded for), full-height so a big device timeline is fully visible.
++  const [expanded, setExpanded] = useState(false);
++  const [showHist, setShowHist] = useState(true);
+   const [checkMsg, setCheckMsg] = useState('');
+   const stale = m.streams.filter((s) => s.status === 'stale').length;
+   const warn = m.streams.filter((s) => s.status === 'warn').length;
+@@ -384,14 +391,26 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
+ 
+   return (
+     <div style={{ ...card, borderLeft: `4px solid ${headColor}`, opacity: m.status === 'paused' ? 0.75 : 1 }}>
+-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
++      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer', minHeight: 28 }}
++        title={expanded ? 'Collapse' : 'Expand'} onClick={() => setExpanded((v) => !v)}>
+         <Dot status={overall === 'error' ? 'stale' : overall === 'paused' || overall === 'new' ? undefined : overall} />
+         <strong style={{ fontSize: 14.5 }}>{m.name}</strong>
+         {m.area && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: 'var(--hairline)', color: 'var(--text)' }}>{m.area}</span>}
+         {m.status === 'paused' && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>PAUSED</span>}
++        {!expanded && (m.streams.length ? (
++          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
++            {m.streams.length} stream{m.streams.length === 1 ? '' : 's'} ·{' '}
++            {m.lastError ? <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>pull failed</span>
++              : stale ? <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>{stale} stale</span>
++                : warn ? <span style={{ color: STATUS_COLOR.warn, fontWeight: 700 }}>{warn} warn</span>
++                  : <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>all fresh</span>}
++          </span>
++        ) : <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>no data yet</span>)}
+         <span style={{ flex: 1 }} />
+         <span style={{ fontSize: 12, color: 'var(--muted)' }}>checked {ago(m.lastCheckedAt)}</span>
++        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{expanded ? '▾' : '▸'}</span>
+       </div>
++      {expanded && <>
+       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 10px' }}>
+         {m.view} · <code style={{ fontSize: 11.5 }}>{m.timeField}</code>
+         {m.stationField ? <> · split by <code style={{ fontSize: 11.5 }}>{m.stationField}</code></> : ' · whole feed'}
+@@ -423,6 +442,7 @@ function MonitorCard({ m, entities, onChanged, onEdit }) {
+         {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
+       </div>
+       {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} />}
++      </>}
+     </div>
+   );
+ }
