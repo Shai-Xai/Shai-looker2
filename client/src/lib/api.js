@@ -190,6 +190,9 @@ export const api = {
   owlCatalogueFields: (model, view) => fetch(`/api/admin/owl/catalogue${model ? `?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}` : ''}`).then(json),
   saveOwlCatalogue: (enabled, model, view) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, model, view }) }).then(json),
   owlStarters: (entityId) => fetch(`/api/owl/starters${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  // Raw-data export for a chat answer: re-runs the citation's query live (scope-gated
+  // server-side) and returns ALL rows — the chat stream itself caps previews at 50.
+  owlExportRows: (body) => fetch('/api/owl/export-rows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
   owlCreateSegment: (body) => fetch('/api/owl/act/create-segment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

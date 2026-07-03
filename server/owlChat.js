@@ -302,13 +302,23 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
   function sourcesFromTrail(trail) {
+    // ask_* = the admin-registered extra explores (e.g. cashless) — they cite, chart
+    // and export exactly like askData. Their labels come from the LIVE catalogue's
+    // extras (not the primary label maps, which only know ticketing fields).
+    const extras = (getOwlTools().catalogue || {}).extras || [];
+    const extraByView = new Map(extras.map((x) => [x.explore, x]));
     const data = (trail || [])
-      .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
+      .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard' || t.name.startsWith('ask_')) && t.result && t.result.ok)
       .map((t) => {
         const qb = t.result.queryBody || {};
         const m = t.input.measure;
         const dims = t.input.dimensions || [];
         const rows = t.result.rows || [];
+        const ex = t.name.startsWith('ask_') ? extraByView.get(t.result.explore || qb.view) : null;
+        const exM = new Map(ex ? ex.measures.map((x) => [x.name, x.label]) : []);
+        const exD = new Map(ex ? ex.dimensions.map((x) => [x.name, x]) : []);
+        const mLbl = (f) => exM.get(f) || measLabel.get(f) || null;
+        const dLbl = (f) => (exD.get(f) || {}).label || dimLabel.get(f) || null;
         // Single scalar answer (one row, no group-by) → surface the value on the chip.
         let value = null;
         if (rows.length === 1 && !dims.length && rows[0][m] != null) value = rows[0][m];
@@ -316,18 +326,18 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
         // citation can show the data — not just the query — like a spreadsheet.
         const fields = qb.fields || [...dims, m];
         return {
-          measure: measLabel.get(m) || m,
+          measure: mLbl(m) || m,
           value,
           count: t.result.count,
-          dimensions: dims.map((d) => dimLabel.get(d) || d),
-          filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
-          explore: cat.label || qb.view || '',
-          columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f), kind: measLabel.has(f) ? 'measure' : 'dimension' })),
+          dimensions: dims.map((d) => dLbl(d) || d),
+          filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: dLbl(f) || fieldLabel(f), value: String(v) })),
+          explore: ex ? ex.label : (cat.label || qb.view || ''),
+          columns: fields.map((f) => ({ field: f, label: mLbl(f) || dLbl(f) || fieldLabel(f), kind: (exM.has(f) || measLabel.has(f)) ? 'measure' : 'dimension' })),
           rows: rows.slice(0, 50),
           queryBody: qb, // the live Looker query — used when pinning the chart to a dashboard
           // Auto-chart hint: a breakdown (>=1 dimension, >1 row) charts; a date
           // dimension → line, otherwise → bar. A single scalar stays text.
-          chartType: (dims.length >= 1 && rows.length > 1) ? (dimType.get(dims[0]) === 'date' ? 'line' : 'bar') : null,
+          chartType: (dims.length >= 1 && rows.length > 1) ? (((ex ? (exD.get(dims[0]) || {}).type : dimType.get(dims[0])) === 'date') ? 'line' : 'bar') : null,
         };
       });
     // getDashboard answers carry no Looker query of their own, but the model read the
@@ -522,6 +532,22 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   function logToolStop(threadId, trail) {
     try { insMsg.run(crypto.randomUUID(), threadId, 'owl', '⏹ Stopped before finishing.', JSON.stringify(trail || []), now()); } catch { /* best-effort */ }
   }
+
+  // POST /api/owl/export-rows — the ⬇ CSV "full data" path. Citation rows in the chat
+  // stream are capped at 50; this re-runs the citation's query LIVE (up to 5000 rows)
+  // so the download holds the complete result. Scope + PII gates re-applied server-side
+  // in owlTools.exportRows — the round-tripped queryBody is never trusted.
+  app.post('/api/owl/export-rows', auth.requireAuth, async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { queryBody, suiteId, entityId } = req.body || {};
+    if (suiteId && req.user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
+    try {
+      const fn = getOwlTools().exportRows;
+      const r = fn ? await fn(queryBody, { user: req.user, suiteId: suiteId || undefined, entityId: entityId || undefined }) : { ok: false, message: 'Export unavailable.' };
+      if (!r.ok) return res.status(400).json({ error: r.message || 'Could not export the data.' });
+      res.json({ rows: r.rows, count: r.count });
+    } catch (e) { res.status(500).json({ error: 'Could not export the data.' }); }
+  });
 
   // GET /api/owl/capabilities — the slash-command palette, derived from the tool
   // registry (each read tool's `menu`). Sourced here so it can never drift from what
