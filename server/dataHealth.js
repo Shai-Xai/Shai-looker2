@@ -259,6 +259,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return reduceRows(m, rows, m.timeField);
   }
 
+  // The raw tail of the feed: the N most recent (station, timestamp) records,
+  // newest first — a live, cache-bypassed peek so an admin can SEE what the pipe
+  // last delivered rather than trusting the lag number. Note Looker groups
+  // identical rows, so same-station-same-second records collapse into one.
+  async function latestRecords(m, limit = 20) {
+    const n = Math.max(1, Math.min(100, Math.round(Number(limit) || 20)));
+    const fields = m.stationField ? [m.stationField, m.timeField] : [m.timeField];
+    const rows = await runScoped(m, { ...baseBody(m), fields, sorts: [`${m.timeField} desc`], limit: String(n) });
+    const nowMs = Date.now();
+    return rows.map((r) => {
+      const ts = parseTs(r[m.timeField]);
+      return {
+        at: ts ? ts.toISOString() : '',
+        raw: String(r[m.timeField] ?? ''),
+        station: m.stationField ? String(r[m.stationField] ?? '').trim() : '',
+        agoMin: ts ? Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 : null,
+      };
+    });
+  }
+
   function reduceRows(m, rows, timeKey) {
     const seen = new Map(); // station -> latest Date
     for (const r of rows) {
@@ -505,6 +525,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     res.json({ ...r, monitor: monitorById(m.id), streams: streamsFor(m.id) });
   }));
 
+  // The last N raw records off the feed (live Looker read — a deliberate click,
+  // not something the page polls).
+  app.get('/api/admin/data-health/monitors/:id/latest', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const m = monitorById(req.params.id);
+    if (!m) return res.status(404).json({ error: 'Monitor not found' });
+    res.json({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField });
+  }));
+
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
     if (!enabled()) return off(res);
     if (!monitorById(req.params.id)) return res.status(404).json({ error: 'Monitor not found' });
@@ -548,7 +577,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }));
 
   console.log('[data-health] mounted', enabled() ? '(enabled)' : '(disabled — set data_health_enabled=1)');
-  return { check, tick, monitorById, upsert, clean, streamsFor };
+  return { check, tick, monitorById, upsert, clean, streamsFor, latestRecords };
 }
 
 module.exports = { mount, AREAS, CHANNELS };
