@@ -1,0 +1,237 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 47f3d7d..a129856 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -17,0 +18,3 @@ const input = { padding: '9px 11px', border: '1.5px solid var(--hairline)', bord
++
++// Bars & vendors sell — their per-record activity is "transactions"; gates scan.
++const unitFor = (m) => (m && (m.area === 'Bar' || m.area === 'Vendors') ? 'transactions' : 'scans');
+@@ -208 +211 @@ function RosterPanel({ monitorId, base = ADMIN_BASE }) {
+-function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
++function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'scans' }) {
+@@ -209,0 +213 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
++  const [station, setStation] = useState(''); // '' = all stations; else one station's devices only
+@@ -215 +219 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-  const load = async (h, iv) => {
++  const load = async (h, iv, st = station) => {
+@@ -218 +222 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-      const res = await fetch(`${base}/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}`);
++      const res = await fetch(`${base}/monitors/${monitorId}/timeline?hours=${h}&interval=${iv}${st ? `&station=${encodeURIComponent(st)}` : ''}`);
+@@ -225,2 +229,2 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block change
+-  useEffect(() => { load(hours, interval); }, [monitorId, hours, interval]);
++  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window/block/station change
++  useEffect(() => { load(hours, interval, station); }, [monitorId, hours, interval, station]);
+@@ -243 +247,8 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `scans per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
++        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{mode === 'counts' ? `${unit} per ${iv >= 60 ? 'hour' : `${iv} min`} · darker green = busier` : `each block = ${iv >= 60 ? '1 hour' : `${iv} min`} · green = sent data · grey = silent`}</span>
++        {stations.length > 1 && (
++          <select value={station} disabled={busy} onChange={(e) => setStation(e.target.value)}
++            style={{ ...input, width: 'auto', maxWidth: 230, padding: '4px 8px', fontSize: 12 }}>
++            <option value="">🏪 All stations</option>
++            {stations.map((s) => <option key={s} value={s}>{s}</option>)}
++          </select>
++        )}
+@@ -261 +272,2 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
++      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range, bigger blocks, or pick one station.</div>}
++      {(data.devicesTotal || 0) > data.devices.length && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>Showing {data.devices.length} of {data.devicesTotal} devices — pick a station above to see the rest.</div>}
+@@ -281 +293 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} scan${c === 1 ? '' : 's'}`}
++                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
+@@ -326 +338 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE }) {
+-function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE }) {
++function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE, stations = [], unit = 'scans' }) {
+@@ -381 +393 @@ function HistoryPanel({ monitorId, rosterField, base = ADMIN_BASE }) {
+-        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} base={base} />}
++        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} base={base} stations={stations} unit={unit} />}
+@@ -477 +489 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-              {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} scans</strong>
++              {' · '}<strong style={{ color: 'var(--text)' }}>{m.rosterSnapshot.scansApprox ? '≥' : ''}{Number(m.rosterSnapshot.totalScans).toLocaleString('en-ZA')} {unitFor(m)}</strong>
+@@ -544 +556 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-            title="Closed = the station is intentionally shut (gate closed for the night) — no checks, no alerts, and it drops out of the dashboard numbers until reopened"
++            title="Closed = the station is intentionally shut (gate closed for the night) — no checks, no alerts; its devices leave the fleet numbers, but its scans/transactions still count in the day totals"
+@@ -554 +566 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} />}
++      {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} stations={m.streams.map((s) => s.station).filter(Boolean)} unit={unitFor(m)} />}
+@@ -595,0 +608,2 @@ function ReportPanel({ url, body, title }) {
++  const rUnits = new Set((state.charts || []).map((c) => c.unit || 'scans'));
++  const rShort = rUnits.size > 1 ? 'scans+txns' : rUnits.has('transactions') ? 'txns' : 'scans';
+@@ -612 +626 @@ function ReportPanel({ url, body, title }) {
+-            ['Total scans', num(sum('totalScans'))], ['Avg scans/h', num(sum('scansPerHour'))]].map(([l, v, c]) => (
++            [`Total ${rShort}`, num(sum('totalScans'))], [`Avg ${rShort}/h`, num(sum('scansPerHour'))]].map(([l, v, c]) => (
+@@ -634 +648 @@ function ReportPanel({ url, body, title }) {
+-                {num(c.totalScans)} scans · ~{num(c.scansPerHour)}/h
++                {num(c.totalScans)} {c.unit || 'scans'} · ~{num(c.scansPerHour)}/h
+@@ -664 +678,2 @@ function HealthMetrics({ monitors: allMonitors }) {
+-  // fleet numbers, so they drop out of every aggregate until reopened.
++  // fleet numbers (devices/online/offline/flow). Their trading DID happen,
++  // though, so the volume totals still count their frozen snapshots.
+@@ -667,2 +682,4 @@ function HealthMetrics({ monitors: allMonitors }) {
+-  if (!snaps.length) return null;
+-  const sum = (k) => (snaps.some((x) => x[k] != null) ? snaps.reduce((a, x) => a + (x[k] || 0), 0) : null);
++  const volSnaps = allMonitors.map((m) => m.rosterSnapshot).filter(Boolean); // incl. closed
++  if (!volSnaps.length) return null;
++  const sumOf = (arr, k) => (arr.some((x) => x[k] != null) ? arr.reduce((a, x) => a + (x[k] || 0), 0) : null);
++  const sum = (k) => sumOf(snaps, k);
+@@ -670 +687,3 @@ function HealthMetrics({ monitors: allMonitors }) {
+-  const approx = snaps.some((x) => x.scansApprox) ? '≥' : '';
++  const approx = volSnaps.some((x) => x.scansApprox) ? '≥' : '';
++  const units = new Set(allMonitors.filter((m) => m.rosterSnapshot).map((m) => unitFor(m)));
++  const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
+@@ -679 +698 @@ function HealthMetrics({ monitors: allMonitors }) {
+-    ['Total scans', sum('totalScans') == null ? '—' : `${approx}${num(sum('totalScans'))}`],
++    [`Total ${short}`, sumOf(volSnaps, 'totalScans') == null ? '—' : `${approx}${num(sumOf(volSnaps, 'totalScans'))}`],
+@@ -681 +700 @@ function HealthMetrics({ monitors: allMonitors }) {
+-    ['Avg scans/h', sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
++    [`Avg ${short}/h`, sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index cecc1cf..8186351 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -33,0 +34,2 @@ const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
++// Bars & vendors sell — their per-record activity is "transactions"; gates scan.
++const unitFor = (m) => (m.area === 'Bar' || m.area === 'Vendors' ? 'transactions' : 'scans');
+@@ -47 +49 @@ Write a SHORT diagnostics verdict an ops person can act on mid-event:
+-Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
++Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Call the per-record activity by monitor.unit — "transactions" for bars/vendors, "scans" for gates. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
+@@ -62 +64 @@ Write the report in clean Markdown:
+-Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
++Rules: every number and time from the JSON — never invent; convert UTC → SAST (UTC+2). Each station carries a unit ("scans" or "transactions") — use that word for its activity (bars/vendors transact, gates scan). Professional and factual — no internal jargon, no hedging filler. If a station has no roster/timeline data, note it in one line rather than guessing. Keep it under ~700 words.`;
+@@ -428,0 +431,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++  // Which bucket dimension worked per monitor+interval (minuteN vs raw time).
++  const bucketFieldByMonitor = new Map();
++
+@@ -436 +441 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-  async function deviceTimeline(m, hours = 24, interval = 60) {
++  async function deviceTimeline(m, hours = 24, interval = 60, station = '') {
+@@ -443 +448,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
++    const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
++    const hourField = `${group}_hour`;
+@@ -454,3 +460,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const bucketField = iv === 60 ? hourField : m.timeField;
+-    const base = { ...baseBody(m), sorts: [`${bucketField} desc`], limit: '5000' };
+-    base.filters[m.timeField] = anchor
++    // Sub-hour blocks first try the matching minuteN sibling dimension so
++    // Looker aggregates to one row per (device, block) — a busy bar day stops
++    // overflowing the row cap instead of returning one row per scan. LookML
++    // without that timeframe 400s → raw-time fallback; whichever works is
++    // remembered per monitor+interval.
++    const bKey = `${m.id}:${iv}`;
++    const bucketCands = iv === 60 ? [hourField]
++      : bucketFieldByMonitor.has(bKey) ? [bucketFieldByMonitor.get(bKey)]
++        : [`${group}_minute${iv}`, m.timeField];
++    const timeFilter = anchor
+@@ -458,0 +472,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    // Optional station narrowing (quoted = exact match) — the per-station view
++    // of a monitor that spans many bars/gates.
++    const st = String(station || '').trim();
+@@ -470,7 +486,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    let rows = null; let mode = 'none'; let lastErr = null;
+-    for (const cand of modes) {
+-      const body = { ...base, fields: [m.rosterField, bucketField] };
+-      if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
+-      if (cand === 'distinct') {
+-        body.fields = [...body.fields, CNT_FIELD];
+-        body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
++    let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
++    for (const bf of bucketCands) {
++      for (const cand of modes) {
++        const body = { ...baseBody(m), sorts: [`${bf} desc`], limit: '20000', fields: [m.rosterField, bf] };
++        body.filters[m.timeField] = timeFilter;
++        if (st && m.stationField) body.filters[m.stationField] = `"${st.replace(/"/g, '')}"`;
++        if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
++        if (cand === 'distinct') {
++          body.fields = [...body.fields, CNT_FIELD];
++          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
++        }
++        try { rows = await runScoped(m, body); mode = cand; bucketField = bf; break; } catch (e) {
++          lastErr = e;
++          if (String(e.message || e).includes(bf)) break; // the bucket dim itself is unknown — next candidate
++        }
+@@ -478 +502 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      try { rows = await runScoped(m, body); mode = cand; break; } catch (e) { lastErr = e; }
++      if (rows) break;
+@@ -480,0 +505 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    if (iv !== 60) bucketFieldByMonitor.set(bKey, bucketField);
+@@ -509 +534 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
++    }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
+@@ -512,0 +538 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++      station: st, devicesTotal: byDevice.size,
+@@ -515 +541 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      truncated: rows.length >= 5000,
++      truncated: rows.length >= 20000,
+@@ -869 +895,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    // — no checks, no alerts, excluded from the dashboard numbers.
++    // — no checks, no alerts; its devices leave the fleet numbers, but its
++    // frozen day totals still count (the sales it made DID happen).
+@@ -907 +934 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60));
++    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''));
+@@ -936 +963 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      id: m.id, name: m.name, area: m.area, entityId: m.entityId, suiteId: m.suiteId,
++      id: m.id, name: m.name, area: m.area, unit: unitFor(m), entityId: m.entityId, suiteId: m.suiteId,
+@@ -949 +976 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      monitor: { name: m.name, area: m.area, warnMin: m.warnMin, staleMin: m.staleMin, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError || undefined },
++      monitor: { name: m.name, area: m.area, unit: unitFor(m), warnMin: m.warnMin, staleMin: m.staleMin, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError || undefined },
+@@ -1000 +1027 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    for (const s of list) stations.push({ station: s.name, area: s.area, detail: await diagnosticsPayload(monitorById(s.id)) });
++    for (const s of list) stations.push({ station: s.name, area: s.area, unit: s.unit, detail: await diagnosticsPayload(monitorById(s.id)) });
+@@ -1013 +1040 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        station: st.station, area: st.area,
++        station: st.station, area: st.area, unit: st.unit,
+@@ -1063 +1090 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60),
++    timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || ''),
+diff --git a/server/owlTools.js b/server/owlTools.js
+index 11ed3a5..dd9273d 100644
+--- a/server/owlTools.js
++++ b/server/owlTools.js
+@@ -1040 +1040 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
+-        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10);
++        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''));
+@@ -1045 +1045 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
+-          ok: true, monitor: m.name, intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
++          ok: true, monitor: m.name, unit: hit.unit || 'scans', station: t.station || '', intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
+@@ -1049 +1049 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
+-          devicesSeen: t.devices.length,
++          devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
+@@ -1068,0 +1069 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
++        station: { type: 'string', description: 'For timeline: narrow to ONE station name exactly as it appears in the monitor\'s streams — use when a monitor spans many bars/vendors.' },
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index c2d00eb..6c1d2c9 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -439,0 +440,3 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
++    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
++    // and the raw time dim takes over.
++    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field "scans.scanned_at_minute10"');
+@@ -462,0 +466,21 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
++test('deviceTimeline: minuteN bucket dim when the LookML has it; station narrows the read', async () => {
++  const h = mountHealth();
++  const m = makeMonitor(h, { name: 'Bars monitor', rosterField: 'scans.device_id' });
++  // Looker minute10 dims render "YYYY-MM-DD HH:MM" floored to the block.
++  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
++  let body = null;
++  h.setRowsFn(async (b) => { body = b; return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 }]; });
++  const t = await h.mod.deviceTimeline(m, 12, 10, 'Bar One');
++  assert.ok(body.fields.includes('scans.scanned_at_minute10')); // aggregated in Looker — one row per device+block, not per scan
++  assert.equal(body.filters['scans.station_name'], '"Bar One"'); // quoted = exact station match
++  assert.equal(t.station, 'Bar One');
++  assert.equal(t.devicesTotal, 1);
++  const d1 = t.devices.find((d) => d.device === 'D-1');
++  assert.equal(d1.counts[71], 4);
++  // The working bucket dim is remembered — the next read goes straight to it.
++  body = null;
++  await h.mod.deviceTimeline(m, 12, 10);
++  assert.ok(body.fields.includes('scans.scanned_at_minute10'));
++  assert.equal(body.filters['scans.station_name'], undefined); // no station → whole monitor
++});
++
+@@ -496,0 +521 @@ test('healthSummary scopes by entity and suite', () => {
++  makeMonitor(h, { name: 'B bar', entityId: 'ent-b', area: 'Bar' });
+@@ -499,0 +525,2 @@ test('healthSummary scopes by entity and suite', () => {
++  assert.equal(all.find((x) => x.name === 'B bar').unit, 'transactions'); // bars/vendors transact
++  assert.equal(all.find((x) => x.name === 'Client B gate').unit, 'scans');
