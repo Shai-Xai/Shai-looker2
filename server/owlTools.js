@@ -20,7 +20,7 @@ const defaultCatalogue = require('./owlCatalogueSeed');
 const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_PRIORITIES } = require('./alerts');
 const reportingTz = require('./timezone');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -33,6 +33,36 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     if (body && !body.query_timezone) body.query_timezone = reportingTz.reportingTimezoneFor(db, ctx || {});
     return body;
   }
+  // Zero rows + caller-supplied filters is USUALLY a case/spelling miss — Looker
+  // string filters are exact and case-sensitive ("Bar" ≠ "bar"). Say so in the
+  // result, so the Owl checks the field's real values instead of concluding
+  // "no data" (or blaming the date filter — how issue #28's retest went wrong).
+  const emptyFilterNote = (userFilters) => ((userFilters && Object.keys(userFilters).length)
+    ? 'No rows matched. Filter values are exact and CASE-SENSITIVE ("Bar" ≠ "bar") — group by the filtered field WITHOUT the filter to see its real values, then retry with the exact value.'
+    : undefined);
+  // A grouped result where EVERY row repeats the IDENTICAL measure value is almost
+  // always a Looker fan-out: the group-by dimension doesn't actually relate to the
+  // measured view in this explore, so the ungrouped total is repeated once per
+  // dimension value (e.g. check-ins by sales station → 185 rows of "4"). Those
+  // numbers look like a real breakdown but are meaningless — say so in the result
+  // so the Owl re-queries instead of confidently presenting garbage.
+  const FANOUT_MIN_ROWS = 8;
+  function fanOutNote(rows, measureList, dimensions) {
+    if (!Array.isArray(rows) || rows.length < FANOUT_MIN_ROWS) return undefined;
+    if (!Array.isArray(dimensions) || !dimensions.length) return undefined;
+    if (!Array.isArray(measureList) || !measureList.length) return undefined;
+    const uniform = measureList.every((m) => {
+      const v0 = rows[0] ? rows[0][m] : undefined;
+      return v0 !== undefined && rows.every((r) => r && r[m] === v0);
+    });
+    if (!uniform) return undefined;
+    const family = String(measureList[0]).split('.')[0];
+    return `SUSPECT RESULT — every row repeats the identical measure value, which means the group-by dimension(s) don't relate to this measure in this explore (Looker repeated the ungrouped total per row). Do NOT present this as a breakdown. Re-query grouping "${measureList[0]}" by a dimension from its own data family (a ${family}.* field or a dimension whose label shares its family), or drop the group-by for the true total.`;
+  }
+  // The first applicable note wins (they're mutually exclusive: empty vs many rows).
+  const resultNote = (rows, measureList, dimensions, userFilters) => ((!Array.isArray(rows) || !rows.length)
+    ? emptyFilterNote(userFilters)
+    : fanOutNote(rows, measureList, dimensions));
   // Resolver for the createSegment act-tool's preview (count + per-channel reach).
   // Server-side only; never returns the people list to the chat. Same scope gate.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
@@ -60,13 +90,19 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // events. We only apply locks valid in THIS explore (core_events.* or a curated
   // dimension) so we never inject a field Looker would reject, and never touch the
   // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
-  function applySuiteEventLocks(filters, suiteId, dims = dimByName) {
+  // `modelPinnedEvent`: the model explicitly filtered this explore's OWN event-name
+  // field (a cross-edition comparison, e.g. cashless "vs last year"). In that case the
+  // blanket core_events.* auto-lock is skipped — otherwise the CURRENT ticketing event
+  // lock would contradict the comparison filter and return empty rows. Locks on the
+  // explore's own dims still apply only when the model hasn't set them (default, not wall).
+  function applySuiteEventLocks(filters, suiteId, dims = dimByName, modelPinnedEvent = false) {
     if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
     let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
     for (const [key, val] of Object.entries(locks)) {
       if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
       const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
       if (!field || field === ORG) continue; // organiser handled by applyScope
+      if (modelPinnedEvent && /^core_events\./.test(field) && !dims.has(field)) continue;
       if ((/^core_events\./.test(field) || dims.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
@@ -230,6 +266,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     } catch (e) {
       return refuse('query_failed', `I couldn't run that query over your data${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}. Try rephrasing or a different breakdown.`);
     }
+    const note = resultNote(rows, measureList, dimensions, args.filters);
     return {
       ok: true,
       rows: Array.isArray(rows) ? rows : [],
@@ -237,6 +274,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       measure,
       dimensions,
       queryBody: body, // stored in the audit ledger (tool_results)
+      ...(note ? { note } : {}),
     };
   }
 
@@ -450,7 +488,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
     stampReportingTz(body, { user, suiteId, entityId });
     const rows = await query.runLookerQuery('/queries/run/json', body);
-    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body };
+    const note = resultNote(rows, measureList, dimensions, args.filters);
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body, ...(note ? { note } : {}) };
   }
   const queryDashboardSchema = {
     name: 'queryDashboard',
@@ -968,6 +1007,87 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     },
   };
 
+  // ── dataHealth (READ) ─────────────────────────────────────────────────────────
+  // The Data health monitors: is the data pipe from the venue flowing, per
+  // station? Everything the Admin/Event-Ops page shows is queryable: monitor
+  // status + per-station lag, the device roster (linked/online/offline and
+  // WHICH devices), the per-device day timeline with scan counts, and the
+  // latest transactions. Scope: clients only see monitors pinned to their own
+  // entity; the live reads run through the same fail-closed scope gate.
+  async function runDataHealth(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const api = typeof getDataHealthApi === 'function' ? getDataHealthApi() : null;
+    if (!api || !api.healthSummary) return refuse('unavailable', 'Data health monitoring isn\'t available right now.');
+    const isAdmin = user.role === 'admin';
+    const mine = user.entityIds || [];
+    const list = api.healthSummary({
+      entityIds: isAdmin ? null : mine,
+      entityId: entityId && (isAdmin || mine.includes(entityId)) ? entityId : '',
+      suiteId: suiteId || '',
+    }).filter((m) => isAdmin || m.entityId);
+    if (!list.length) return { ok: true, monitors: [], message: 'No data-health monitors are set up for this scope yet.' };
+    const q = args.query || 'overview';
+    if (q === 'overview') return { ok: true, monitors: list };
+    // The deeper reads are per monitor/station — fuzzy match by name/area.
+    const want = String(args.monitor || '').trim().toLowerCase();
+    const hit = (want && list.find((m) => m.name.toLowerCase() === want))
+      || (want && list.find((m) => m.name.toLowerCase().includes(want) || String(m.area).toLowerCase() === want))
+      || (list.length === 1 ? list[0] : null);
+    if (!hit) return refuse('which_monitor', `Which station/monitor? One of: ${list.map((m) => `"${m.name}"`).join(', ')}.`);
+    const m = api.monitorById(hit.id);
+    try {
+      if (q === 'devices') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured — I can only see its stream lag.`);
+        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m, true) };
+      }
+      if (q === 'timeline') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
+        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''), true);
+        // activeBlocks: compact 0/1 string per device, oldest→newest; coverage:
+        // devices sending per block — the offline-trend series the Owl should
+        // analyse (same shape the 🩺 Diagnose uses).
+        return {
+          ok: true, monitor: m.name, unit: hit.unit || 'scans', station: t.station || '', intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
+          totalScans: t.grandTotal,
+          note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
+          coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
+        };
+      }
+      if (q === 'observed') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no offline log.`);
+        const ob = api.observedLog(m, api.obsSinceFor(m, args.hours || 'start'));
+        return {
+          ok: true, monitor: m.name,
+          note: 'The OBSERVED log is what Pulse itself saw at each check — a device that traded offline and synced late can NEVER repaint it. Treat it as the authoritative connectivity record; times are UTC — convert to the client\'s local time.',
+          onlineSeries: ob.ticks.map((t) => ({ atUTC: t.at.slice(11, 16), online: t.online, total: t.total })),
+          offlineWindows: ob.windows.slice(0, 80),
+        };
+      }
+      if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
+      return { ok: true, monitors: [hit] }; // 'stations' or anything else → that monitor's summary
+    } catch (e) {
+      return refuse('error', `Couldn't read data health: ${String(e.message || e).slice(0, 160)}`);
+    }
+  }
+  const dataHealthSchema = {
+    name: 'dataHealth',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series: analyse it for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up — that window analysis is what the user usually wants. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
+        monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
+        hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
+        intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
+        station: { type: 'string', description: 'For timeline: narrow to ONE station name exactly as it appears in the monitor\'s streams — use when a monitor spans many bars/vendors.' },
+        limit: { type: 'number', description: 'For latest: how many records (default 20, max 50).' },
+      },
+    },
+  };
+
   // ── draftReport (ACT) ─────────────────────────────────────────────────────────
   // DRAFT a product report (bug / improvement / idea) the user describes in chat.
   // Nothing is filed until they tap "File it" — confirm pattern like the others.
@@ -1033,13 +1153,23 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       // issue #28's residual: "today" on bar sales matched every date. Prefer
       // `<measureView>.date_date`, then `<measureView>.created_at_date`, then
       // the catalogue default.
+      let crossDateNote;
       if (args.dateRange && String(args.dateRange).trim()) {
         const mv = String(measure).split('.')[0];
         const dateDim = [`${mv}.date_date`, `${mv}.created_at_date`].find((n) => dByName.has(n)) || cat.dateDimension;
-        if (dateDim) filters[dateDim] = String(args.dateRange).trim();
+        if (dateDim) {
+          filters[dateDim] = String(args.dateRange).trim();
+          // The measured view has NO date field of its own in the catalogue, so the
+          // range rides another view's date. In a combined explore that may not
+          // constrain the measure at all (Inventive-vs-Owl check-ins mismatch) —
+          // the Owl must caveat day/hour figures instead of stating them as fact.
+          if (String(dateDim).split('.')[0] !== mv) {
+            crossDateNote = `CAUTION: the date range was applied on ${dateDim} — ${mv} has no date field in the curated catalogue, and a cross-view date may not constrain ${measure} at all. Treat day/hour figures from this query as unverified and tell the user a ${mv} date field is needed for reliable time filtering.`;
+          }
+        }
       }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
-      applySuiteEventLocks(body.filters, suiteId, dByName);
+      applySuiteEventLocks(body.filters, suiteId, dByName, filters[`${cat.explore}.name`] != null);
       const allowed = await query.applyScope(body, user, suiteId);
       if (allowed === false) return refuse('no_scope', `I can't scope ${cat.label} to a client here — this data source may not be linkable to your client, or open a client/event first.`);
       if (entityId && auth && auth.accessibleOrgFilters) {
@@ -1055,20 +1185,41 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
       catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
-      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body };
+      const note = [crossDateNote, resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
+      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
     const props = {
-      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}.` },
+      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}. For money totals ("sales", "revenue", "spend") prefer a *sum_credit_amount / *sale_item_total_price measure — a *sum_sale_item_unit_price measure adds up UNIT prices ignoring quantities and understates real takings.` },
       measures: { type: 'array', items: { type: 'string', enum: cat.measures.map((m) => m.name) }, description: 'Optional: 2+ measures side by side.' },
       filters: { type: 'object', description: 'Optional {field: value} filters on this data.' },
       limit: { type: 'number', description: 'Max rows (default 500).' },
     };
     if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
-    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression on ${cat.label}'s date (e.g. "last 7 days").` };
+    // Name the bound field so the model KNOWS which date this rides — and routes a
+    // different family's time question (e.g. check-in created-at) via filters instead.
+    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression applied to ${cat.dateDimension} (e.g. "last 7 days"). To time-filter a DIFFERENT date field, put the date expression in filters under that field's name instead.` };
+    // A combined explore stitches several views (families) together; not every
+    // view joins to every other. Warn the model up front so it pairs a measure
+    // with its own family's dimensions instead of producing a fan-out.
+    const families = new Set([...(cat.measures || []), ...(cat.dimensions || [])].map((f) => String(f.name).split('.')[0]));
+    const combinedHint = families.size > 2
+      ? ' This explore COMBINES several views — group a measure by dimensions of its OWN family (matching field-name prefix, or shared core_events/date fields). A cross-family group-by returns the same total repeated on every row, not a real breakdown.'
+      : '';
+    // Category-style dimensions (station_category, catalog_item_type, …) are how a
+    // subset question is answered. Without this hint the model answered "bar sales"
+    // across ALL stations (food, merch, coffee included) — issue caught live at KFF.
+    const categoryDims = (cat.dimensions || []).map((d) => d.name).filter((n) => /(^|[._])(category|category_\d+|type)([._]|$)/i.test(n));
+    const subsetHint = categoryDims.length
+      ? ` SUBSET QUESTIONS ("bars only", "food vendors", "merch"): do NOT answer across everything — FILTER a category field (${categoryDims.slice(0, 4).join(', ')}). Group by it once without a filter to learn its exact case-sensitive values, then filter and answer the subset.`
+      : '';
+    // Per-explore usage notes (e.g. the reliable check-in recipe from the catalogue)
+    // ride the tool's own description — the guidance only exists for clients who
+    // actually have this tool, so a switched-off explore never leaks a mention.
+    const usage = (cat.notes || []).length ? ` USAGE: ${cat.notes.join(' ')}` : '';
     return {
       schema: {
         name: toolName,
-        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.`,
+        description: `Answer a question from the client's own ${cat.label} data (Looker explore ${cat.model}::${cat.explore}) — a bounded, scoped, read-only query. Use this for ${cat.label} questions. To compare ${cat.label} with ticketing, also call askData and combine on a shared dimension (event or date). Returns rows; cite the figures.${combinedHint}${subsetHint}${usage}`,
         input_schema: { type: 'object', properties: props, required: ['measure'] },
       },
       run,
@@ -1079,11 +1230,42 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // include or drop it PER CLIENT (Admin can switch an explore off for one client).
   for (const ex of (catalogue.extras || [])) { try { const t = makeExploreTool(ex); extraTools[t.schema.name] = { ...t, exploreKey: `${ex.model}::${ex.explore}` }; } catch { /* skip a malformed explore */ } }
 
+  // ── Raw-data export (the chat's ⬇ CSV "full data" path) ─────────────────────
+  // Re-runs a citation's queryBody LIVE with the full row budget (the chat stream
+  // caps citation rows at 50). The body is UNTRUSTED — it round-trips through the
+  // browser — so: whitelisted keys only, PII fields rejected, and the SAME scope
+  // gate + entity binding as askData re-applied fresh (ceiling, fail closed). It can
+  // never return data the user couldn't already query — just more rows of it.
+  async function exportRows(raw, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const qb = raw && typeof raw === 'object' ? raw : {};
+    if (!qb.model || !qb.view || !Array.isArray(qb.fields) || !qb.fields.length) return refuse('bad_query', 'No query to export.');
+    const fields = qb.fields.map(String).slice(0, 24);
+    if (fields.some((f) => isPII(f))) return refuse('pii', 'Contact fields can\'t be exported.');
+    const filters = {};
+    for (const [k, v] of Object.entries(qb.filters || {})) if (v != null && (typeof v === 'string' || typeof v === 'number')) filters[String(k).slice(0, 200)] = String(v).slice(0, 2000);
+    const body = { model: String(qb.model), view: String(qb.view), fields, filters, sorts: Array.isArray(qb.sorts) ? qb.sorts.slice(0, 4).map(String) : [], limit: 5000 };
+    const allowed = await query.applyScope(body, user, suiteId);
+    if (allowed === false) return refuse('no_scope', 'No data scope for this export.');
+    if (entityId && auth && auth.accessibleOrgFilters) {
+      const locks = auth.accessibleOrgFilters(user, entityId);
+      if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+      else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    } else if (!body.filters[ORG]) return refuse('no_scope', 'No data scope for this export.');
+    let rows;
+    try { rows = await query.runLookerQuery('/queries/run/json', body); }
+    catch (e) { return refuse('query_failed', `Export failed${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0 };
+  }
+
   return {
     catalogue,
+    exportRows, // NOT a chat tool (no schema) — the export route calls it directly
     ...extraTools,
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
+    dataHealth: { schema: dataHealthSchema, run: runDataHealth, menu: { cmd: 'datahealth', label: 'Data health', icon: '📶', example: 'Is the check-in data flowing — any devices offline?' } },
     askData: { schema: askDataSchema, run: runAskData, menu: { cmd: 'data', label: 'Ticket data', icon: '📊', example: 'How many tickets have I sold?' } },
     getGoals: { schema: getGoalsSchema, run: runGetGoals, menu: { cmd: 'goals', label: 'Goals', icon: '🎯', example: 'How are my goals tracking?' } },
     getDashboard: { schema: getDashboardSchema, run: runGetDashboard, menu: { cmd: 'dashboard', label: 'This dashboard', icon: '📋', example: 'Summarise what this dashboard is telling me.' } },

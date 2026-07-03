@@ -271,6 +271,88 @@ test('a registered extra explore gets its own scoped, validated read tool', asyn
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
 });
 
+test('extra explore: an explicit cross-edition event filter overrides the suite pin', async () => {
+  const ent = h.makeEntity('Ultra XE', 'Ultra Cross-Edition');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26', lockedFilters: { 'core_events.name': 'Kappa FuturFestival 2026', 'cashless_x.name': 'Kappa FuturFestival 2026' } });
+  const user = h.makeClient('owl-xe@client.test', [ent.id]);
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.name', label: 'Event Name', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  // Default (no model filter): the suite pin applies — current edition only.
+  const pinned = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user, suite.id));
+  assert.equal(pinned.ok, true);
+  assert.equal(pinned.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2026');
+  assert.equal(pinned.queryBody.filters['core_events.name'], 'Kappa FuturFestival 2026');
+  // "vs last year": the model filters the explore's OWN event-name field → its filter
+  // wins AND the contradicting core_events auto-lock is skipped (else empty rows).
+  const compare = await t.ask_cashless_x.run(
+    { measure: 'cashless_x.revenue', filters: { 'cashless_x.name': 'Kappa FuturFestival 2025,Kappa FuturFestival 2026' } },
+    ctx(user, suite.id),
+  );
+  assert.equal(compare.ok, true);
+  assert.equal(compare.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2025,Kappa FuturFestival 2026');
+  assert.equal(compare.queryBody.filters['core_events.name'], undefined, 'ticketing event auto-lock skipped');
+  assert.equal(compare.queryBody.filters[h.ORG_FIELD], 'Ultra Cross-Edition', 'organiser ceiling still forced');
+});
+
+test('exportRows (raw CSV): PII fields refused, scope forced, full row budget', async () => {
+  const ent = h.makeEntity('Ultra EX', 'Ultra Exports');
+  const user = h.makeClient('owl-ex@client.test', [ent.id]);
+  const t = tools();
+  // A round-tripped queryBody is untrusted: a PII field must refuse BEFORE Looker.
+  lookerCalls = 0;
+  const pii = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_purchasers.email', M0] }, ctx(user));
+  assert.equal(pii.ok, false);
+  assert.equal(lookerCalls, 0, 'refused before any query ran');
+  // A valid export re-applies the organiser scope and lifts the row budget to 5000.
+  const res = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_ticket_types.name', M0], filters: { [h.ORG_FIELD]: 'Someone Else' } }, ctx(user));
+  assert.equal(res.ok, true);
+  // The smuggled foreign organiser filter is clamped back inside the user's own scope.
+  assert.equal((await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: [M0] }, ctx(user))).ok, true);
+});
+
+// ── fan-out guard: a grouped result repeating one identical value is flagged ──
+
+test('a grouped result where every row repeats the same value carries a fan-out warning note', async () => {
+  // Reproduces the KFF 26 check-ins bug: grouping cashless_check_ins.count by
+  // cashless_stations.name (an unrelated view) returned 185 rows all showing "4"
+  // — the ungrouped total repeated per station. The Owl must be told it's not real.
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 4 }));
+  const ent = h.makeEntity('Fanout Co', 'Fanout-org');
+  const user = h.makeClient('owl-fo1@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.match(res.note || '', /SUSPECT RESULT/, 'the fan-out is flagged');
+  assert.match(res.note || '', /cashless_x_checkins/, 'points at the measure\'s own family');
+});
+
+test('a genuinely varied breakdown carries NO fan-out note', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 100 - i }));
+  const ent = h.makeEntity('Varied Co', 'Varied-org');
+  const user = h.makeClient('owl-fo2@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.note, undefined);
+});
+
+test('small uniform results and ungrouped totals are NOT flagged as fan-out', async () => {
+  // 3 stations all on the same count is plausible real data; a single-row total
+  // has no group-by to distrust. Neither should scare the Owl off.
+  const ent = h.makeEntity('Small Co', 'Small-org');
+  const user = h.makeClient('owl-fo3@client.test', [ent.id]);
+  looker.lookerRequest = async () => Array.from({ length: 3 }, (_, i) => ({ 'core_ticket_types.name': `T${i}`, [M0]: 4 }));
+  const small = await tools().askData.run({ measure: M0, dimensions: ['core_ticket_types.name'] }, ctx(user));
+  assert.equal(small.ok, true);
+  assert.equal(small.note, undefined, 'few rows → not flagged');
+  looker.lookerRequest = async () => [{ [M0]: 4 }];
+  const total = await tools().askData.run({ measure: M0 }, ctx(user));
+  assert.equal(total.ok, true);
+  assert.equal(total.note, undefined, 'ungrouped total → not flagged');
+});
+
 // ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──
 
 test('createAlert drafts a metric alert bound to the curated explore', async () => {
@@ -510,4 +592,41 @@ test('createAlert carries channel + priority into the draft, defaulting sensibly
   );
   assert.deepEqual(set.action.draft.channels, ['email']);
   assert.equal(set.action.draft.priority, 'important');
+});
+
+test('a dateRange that falls back to ANOTHER view\'s date carries a CAUTION note (check-ins have no own date)', async () => {
+  // The Inventive-vs-Owl mismatch: check-ins have no date field of their own, so
+  // "today" rides the access-control date and may not constrain check-ins at all.
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_access.date_date', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_access.date_date', label: 'AC Date', type: 'date' }], notes: [] }] };
+  looker.lookerRequest = async () => [{ 'cashless_x_checkins.count': 4 }];
+  const ent = h.makeEntity('XDate Co', 'XDate-org');
+  const user = h.makeClient('owl-xd@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x_access.date_date'], 'today', 'still filters (best available)');
+  assert.match(res.note || '', /CAUTION/, 'but flags the cross-view date');
+  assert.match(res.note || '', /cashless_x_checkins/, 'names the dateless view');
+});
+
+test('a dateRange on the measured view\'s OWN date carries no caution note', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_access.date_date', measures: [{ name: 'cashless_x_sales.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.date_date', label: 'Sales Date', type: 'date' }, { name: 'cashless_x_access.date_date', label: 'AC Date', type: 'date' }], notes: [] }] };
+  looker.lookerRequest = async () => [{ 'cashless_x_sales.revenue': 120 }];
+  const ent = h.makeEntity('OwnDate Co', 'OwnDate-org');
+  const user = h.makeClient('owl-od@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.note, undefined);
+});
+
+test('an explore with a category dimension advertises subset-filtering in its tool description', () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_sales.sum_credit_amount', label: 'Sale Amount', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.station_category', label: 'Station Category', type: 'string' }, { name: 'cashless_x_sales.station_name', label: 'Station', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  assert.match(t.ask_cashless_x.schema.description, /SUBSET QUESTIONS/, 'subset guidance present');
+  assert.match(t.ask_cashless_x.schema.description, /cashless_x_sales\.station_category/, 'names the category field');
+  // No category-style dimension → no subset hint.
+  const cat2 = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_y', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_y.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_y.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat2 });
+  assert.doesNotMatch(t2.ask_cashless_y.schema.description, /SUBSET QUESTIONS/);
 });

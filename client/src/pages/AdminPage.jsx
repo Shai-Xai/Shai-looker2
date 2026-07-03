@@ -9,6 +9,7 @@ import { useProfile } from '../lib/profile.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
+import SendingDomainCard from '../components/SendingDomainCard.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
@@ -20,6 +21,7 @@ import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
@@ -149,6 +151,7 @@ const ADMIN_NAV = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
+  ['datahealth', 'Data health', '📡'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
@@ -173,6 +176,7 @@ export default function AdminPage() {
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
+      {tab === 'datahealth' && <DataHealthAdmin />}
       {tab === 'product' && <Product />}
       {tab === 'backup' && <BackupRestore />}
     </>
@@ -1216,7 +1220,7 @@ function SetupWizard({ fields }) {
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
             {entity
-              ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /></>
+              ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /><div data-tour="client-sending-domain" style={{ marginTop: 12 }}><L>Custom sending domain · optional</L><div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div></div></>
               : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
@@ -1336,6 +1340,7 @@ const CLIENT_TOUR = [
   { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
   { tour: 'client-loginbg', icon: '🖼️', title: 'Login background image', body: 'Upload a full-screen background for that vanity login page. A dark scrim is added automatically so the sign-in card stays readable.' },
+  { tour: 'client-sending-domain', icon: '✉️', title: 'Custom sending domain (optional)', body: 'Let this client send campaigns and digests from THEIR own domain (e.g. events@mail.brand.com). Enter the domain, hand the DNS records to their IT, then Verify — until it verifies, emails safely keep sending from the platform address. Clients can also set this up themselves under Settings → Email.' },
 ];
 const SCOPE_TOUR = [
   { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
@@ -3035,6 +3040,10 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <CurrencyField entityId={entity.id} />
       <LanguageField entityId={entity.id} />
       <AudienceCapField entityId={entity.id} />
+      <div style={{ marginTop: 14 }}>
+        <L>Custom sending domain</L>
+        <div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div>
+      </div>
       <SlugField entityId={entity.id} />
       <LoginBackgroundField entityId={entity.id} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />

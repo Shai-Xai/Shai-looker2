@@ -40,9 +40,15 @@ module.exports = function createQueryEngine({ looker, auth }) {
     if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
     return JSON.stringify(obj);
   }
-  function refreshQuery(key, path, body) {
+  function refreshQuery(key, path, body, live = false) {
     if (qInflight.has(key)) return qInflight.get(key);
-    const p = looker.lookerRequest('POST', path, body)
+    // `live` (a user-forced refresh) also busts LOOKER's own result cache —
+    // without it "refresh" could still return Looker's cached run (up to ~1h
+    // old), which is how a live event-day capacity tile sat hours behind.
+    // The cache KEY stays the plain path, so the truly-live result updates the
+    // same entry every other reader shares.
+    const runPath = live ? `${path}${path.includes('?') ? '&' : '?'}cache=false` : path;
+    const p = looker.lookerRequest('POST', runPath, body)
       .then((data) => {
         qInflight.delete(key);
         // Row list: json_detail wraps rows in .data; the compact /json format IS the array.
@@ -68,7 +74,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // hand back up-to-10-minute-old rows instantly and "refresh" changes nothing).
   async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
     const key = path + '|' + stableKey(body);
-    if (force) return refreshQuery(key, path, body);
+    if (force) return refreshQuery(key, path, body, true); // user asked for LIVE — bust Looker's cache too
     const hit = qCache.get(key);
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age < ttl) return hit.data;                       // fresh
@@ -305,9 +311,14 @@ module.exports = function createQueryEngine({ looker, auth }) {
     return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || [], preferKey));
   }
 
+  // Wipe every cached query result (admin "Clear cache" — e.g. a live event day
+  // where even background-refreshed entries must be recomputed from scratch).
+  function clearCache() { const n = qCache.size; qCache.clear(); qBytes = 0; qInflight.clear(); return n; }
+
   return {
     runLookerQuery,
     applyScope,
+    clearCache,
     primaryTileValue,
     stripAnyValue,
     ANY_VALUE,

@@ -105,9 +105,13 @@ function status() {
 }
 
 // The verified sending address (the bit inside <...>), kept stable; only the
-// display name in front of it varies per client.
+// display name in front of it varies per client — UNLESS the entity has its own
+// VERIFIED sending domain (sendingDomain.js registers the resolver below), in
+// which case the whole address switches to theirs.
 function fromAddress() { const m = from().match(/<([^>]+)>/); return m ? m[1] : from(); }
 function fromWithName(name) { const a = fromAddress(); return name && name.trim() ? `${name.trim()} <${a}>` : from(); }
+let customFromFor = () => '';
+function setCustomFrom(fn) { customFromFor = typeof fn === 'function' ? fn : () => ''; }
 
 // The provider call. ALL Resend specifics live here.
 async function deliver({ to, subject, html, text, from: fromOverride, replyTo }) {
@@ -135,7 +139,12 @@ async function send({ to, subject, html, text, fromName, kind = 'other', entity 
   if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)', kind, entity); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
   if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured', kind, entity); return { skipped: true, reason: 'no Resend API key configured' }; }
   try {
-    const r = await deliver({ to: recipients, subject, html, text, from: fromName ? fromWithName(fromName) : undefined, replyTo });
+    // Per-entity custom sending domain: a VERIFIED domain swaps the whole
+    // address; the display name still rides in front. Resolver failures fall
+    // back to the platform address — a bad lookup must never block a send.
+    let custom = ''; try { custom = entity ? String(customFromFor(entity) || '') : ''; } catch { custom = ''; }
+    const fromHdr = custom ? (fromName && fromName.trim() ? `${fromName.trim()} <${custom}>` : custom) : (fromName ? fromWithName(fromName) : undefined);
+    const r = await deliver({ to: recipients, subject, html, text, from: fromHdr, replyTo });
     lastSentAt = new Date().toISOString();
     lastError = '';
     log(recipients.join(', '), subject, 'sent', r.id || '', kind, entity);
@@ -486,6 +495,6 @@ function previewBranding({ edits, entityId, suiteId } = {}) {
 }
 
 module.exports = {
-  init, isConfigured, send, status, recent, recipientLog, notificationEmail, baseUrl,
+  init, isConfigured, send, status, recent, recipientLog, notificationEmail, baseUrl, fromAddress, setCustomFrom,
   DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail, campaignEmail, campaignBlocksEmail,
 };
