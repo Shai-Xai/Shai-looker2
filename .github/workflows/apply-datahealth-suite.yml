@@ -1,11 +1,12 @@
 name: Apply data-health suite
 # ONE-SHOT helper (same pattern as the earlier data-health jobs): the authoring
 # session can only write through the GitHub API, so this decodes the reviewed
-# patch (gzip -> base64, 2 parts, sha256-verified after decode), applies it to
-# MAIN (the patch was authored against the current main tip - shared files like
-# index.js/owlTools had drifted from the feature branch), snapshots the touched
-# files onto the feature branch to keep it in parity, then deletes itself from
-# this (default) branch. Safe to delete by hand if it ever lingers.
+# patch (gzip -> base64, 2 parts + a 1-line splice fixing a transcription slip
+# in part0 line 3, sha256-verified after decode), applies it to MAIN (the patch
+# was authored against the current main tip - shared files like index.js and
+# owlTools.js had drifted from the feature branch), snapshots the touched files
+# onto the feature branch to keep it in parity, then deletes itself from this
+# (default) branch. Safe to delete by hand if it ever lingers.
 on:
   workflow_dispatch: {}
 
@@ -22,7 +23,7 @@ jobs:
       - name: Decode + verify patch, apply to main, snapshot branch, self-clean
         run: |
           set -euo pipefail
-          cat patches/suite.gz.b64.part0 patches/suite.gz.b64.part1 | base64 -d | gunzip > /tmp/d.patch
+          { head -2 patches/suite.gz.b64.part0; cat patches/suite.gz.b64.part0fix; tail -n +4 patches/suite.gz.b64.part0; cat patches/suite.gz.b64.part1; } | base64 -d | gunzip > /tmp/d.patch
           echo "3cdcb47afbcb8dd471c3ea258db3d829332f639d56304920fd3be5dea8057257  /tmp/d.patch" | sha256sum -c -
           git config user.name "Claude"
           git config user.email "noreply@anthropic.com"
@@ -42,6 +43,6 @@ jobs:
             -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
           git push origin work:claude/looker-data-monitoring-jeo2l9
           git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
-          git rm -q --ignore-unmatch patches/suite.gz.b64.part0 patches/suite.gz.b64.part1 .github/workflows/apply-datahealth-suite.yml
+          git rm -q --ignore-unmatch patches/suite.gz.b64.part0 patches/suite.gz.b64.part0fix patches/suite.gz.b64.part1 .github/workflows/apply-datahealth-suite.yml
           git commit -m "chore: remove one-shot suite helper"
           git push origin defclean:claude/ecstatic-thompson-vUFsS
