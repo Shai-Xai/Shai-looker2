@@ -406,6 +406,29 @@ test('deviceRoster: aggregates last-seen per device in Looker when the MAX measu
   assert.equal(bodies.length, 2);
 });
 
+test('withInfo: roster + timeline devices carry their latest station and operator', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30, detailFields: ['scans.device_id', 'ops.handler'] });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // The labels lookup is the only query that joins the station dimension in.
+    if (b.fields.includes('scans.station_name')) {
+      return [{ 'scans.device_id': 'D-9', 'scans.station_name': 'Gate B', 'ops.handler': 'Thabo', data_health_last: minsAgo(45) }];
+    }
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-9', data_health_last: minsAgo(45) }];
+    return [{ 'scans.device_id': 'D-9', 'scans.scanned_at_hour': hourStr(), 'scans.count': 3 }];
+  });
+  const r = await h.mod.deviceRoster(m, true);
+  assert.equal(r.offline[0].station, 'Gate B');
+  assert.equal(r.offline[0].operator, 'Thabo');
+  const t = await h.mod.deviceTimeline(m, 12, 60, '', true);
+  assert.equal(t.devices[0].station, 'Gate B');
+  assert.equal(t.devices[0].operator, 'Thabo');
+  // Without the flag (scheduled checks) no labels query runs and none appear.
+  const plain = await h.mod.deviceRoster(m);
+  assert.equal(plain.offline[0].station, undefined);
+});
+
 test('deviceTimeline: a count measure that reads 0 for every row is a soft failure', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });

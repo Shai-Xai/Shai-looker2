@@ -187,12 +187,16 @@ function RosterPanel({ monitorId, base = ADMIN_BASE }) {
           <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 }}>Check these — longest silent first:</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
-              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>Device / operator</th>
+              <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>Device</th>
+              {data.offline.some((d) => d.station) && <th style={{ padding: '4px 8px', fontWeight: 600 }}>Station</th>}
+              {data.offline.some((d) => d.operator) && <th style={{ padding: '4px 8px', fontWeight: 600 }}>Operator</th>}
               <th style={{ padding: '4px 8px', fontWeight: 600 }}>Last sync</th>
             </tr></thead>
             <tbody>{data.offline.map((d) => (
               <tr key={d.device} style={{ borderTop: '1px solid var(--hairline)' }}>
                 <td style={{ padding: '5px 8px 5px 0', fontWeight: 700, color: STATUS_COLOR.stale }}>{d.device}</td>
+                {data.offline.some((x) => x.station) && <td style={{ padding: '5px 8px' }}>{d.station || '—'}</td>}
+                {data.offline.some((x) => x.operator) && <td style={{ padding: '5px 8px' }}>{d.operator || '—'}</td>}
                 <td style={{ padding: '5px 8px' }}>{fmtLag(d.lagMin)} ago</td>
               </tr>
             ))}</tbody>
@@ -238,7 +242,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   const lookback = Math.max(1, Math.ceil(30 / iv)); // "live" = active within the last ~30 min
   const maxCount = Math.max(1, ...data.devices.flatMap((d) => d.counts || []));
   const heat = (c) => `rgba(22, 163, 74, ${0.12 + 0.38 * Math.min(1, c / maxCount)})`; // busier block = deeper green
-  const nameCell = { maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, padding: '2px 8px 2px 0', textAlign: 'left' };
+  const nameCell = { maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, fontWeight: 600, padding: '2px 8px 2px 0', textAlign: 'left' };
   const numCell = { fontSize: 10.5, padding: '2px 4px', textAlign: 'right', minWidth: 26, fontVariantNumeric: 'tabular-nums' };
   return (
     <div>
@@ -284,11 +288,13 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
               </tr>
             </thead>
             <tbody>
-              {data.devices.map(({ device, counts, active, total }) => {
+              {data.devices.map(({ device, counts, active, total, station: stn, operator: op }) => {
                 const liveNow = active.slice(-lookback).some((a) => a === 1);
                 return (
                   <tr key={device}>
-                    <td title={device} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</td>
+                    <td title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>
+                      {device}{(stn || op) && <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
+                    </td>
                     {counts.map((c, i) => (
                       <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
                         style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
@@ -310,16 +316,19 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
       ) : (
         <div style={{ overflowX: 'auto' }}>
           {/* Time scale: periodic labels aligned to the blocks. */}
-          <div style={{ display: 'flex', gap: 2, marginLeft: 148, marginBottom: 2 }}>
+          <div style={{ display: 'flex', gap: 2, marginLeft: 208, marginBottom: 2 }}>
             {data.buckets.map((b, i) => (
               <span key={b} style={{ width: bw, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % perLabel === 0 ? hourLabel(b) : ''}</span>
             ))}
           </div>
-          {data.devices.map(({ device, active }) => {
+          {data.devices.map(({ device, active, station: stn, operator: op }) => {
             const liveNow = active.slice(-lookback).some((a) => a === 1);
             return (
               <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
-                <span title={device} style={{ width: 140, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+                <span title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+                  {(stn || op) && <span style={{ fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
+                </span>
                 {active.map((a, i) => (
                   <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
                     style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />

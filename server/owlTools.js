@@ -1033,11 +1033,11 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     try {
       if (q === 'devices') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured — I can only see its stream lag.`);
-        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m) };
+        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m, true) };
       }
       if (q === 'timeline') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
-        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''));
+        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''), true);
         // activeBlocks: compact 0/1 string per device, oldest→newest; coverage:
         // devices sending per block — the offline-trend series the Owl should
         // analyse (same shape the 🩺 Diagnose uses).
@@ -1047,7 +1047,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
           note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
           coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
           devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
-          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
         };
       }
       if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
