@@ -1,0 +1,267 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 11d4bfa..42d0732 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -242,0 +243,28 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
++  // Online vs offline for the devices IN VIEW (the picked station's summary):
++  // exact last-seen lag when the labels lookup delivered it, else recent blocks.
++  const onlineMin = data.onlineMin || 30;
++  const hasLag = data.devices.some((d) => d.lagMin != null);
++  const onlineN = hasLag
++    ? data.devices.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
++    : data.devices.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length;
++  const offlineN = data.devices.length - onlineN;
++  // All-stations view groups the rows under a station header — one glance per
++  // station instead of one long pile. A picked station needs no grouping.
++  const grouped = (!station && data.devices.some((d) => d.station))
++    ? [...data.devices.reduce((m, d) => {
++      const k = d.station || 'No station';
++      if (!m.has(k)) m.set(k, []);
++      m.get(k).push(d); return m;
++    }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0]))
++    : null;
++  const grpOnline = (devs) => (hasLag
++    ? devs.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
++    : devs.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length);
++  const stationHeader = (grpName, devs) => (
++    <>
++      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase' }}>{grpName}</span>{' '}
++      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>
++        {devs.length} device{devs.length === 1 ? '' : 's'} · <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>{grpOnline(devs)} online</span> · <span style={{ color: devs.length - grpOnline(devs) ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: 700 }}>{devs.length - grpOnline(devs)} offline</span>
++      </span>
++    </>
++  );
+@@ -250,0 +279,8 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
++        {data.devices.length > 0 && (
++          <span style={{ fontSize: 12.5 }}>
++            <strong style={{ color: STATUS_COLOR.fresh }}>{onlineN} online</strong>
++            {' · '}
++            <strong style={{ color: offlineN ? STATUS_COLOR.stale : 'var(--muted)' }}>{offlineN} offline</strong>
++            <span style={{ fontSize: 11, color: 'var(--muted)' }}> (no sync in {onlineMin}m)</span>
++          </span>
++        )}
+@@ -289,0 +326,21 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
++            {(grouped || [['', data.devices]]).map(([grpName, devs]) => (
++              <tbody key={grpName || '__all'}>
++                {grouped && <tr><td colSpan={data.buckets.length + 2} style={{ padding: '8px 8px 2px 0', whiteSpace: 'nowrap', textAlign: 'left' }}>{stationHeader(grpName, devs)}</td></tr>}
++                {devs.map(({ device, counts, active, total, station: stn, operator: op }) => {
++                  const liveNow = active.slice(-lookback).some((a) => a === 1);
++                  const suffix = grouped ? op : `${stn || ''}${stn && op ? ' · ' : ''}${op || ''}`;
++                  return (
++                    <tr key={device}>
++                      <td title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>
++                        {device}{suffix ? <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}> {suffix}</span> : null}
++                      </td>
++                      {counts.map((c, i) => (
++                        <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
++                          style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
++                      ))}
++                      <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
++                    </tr>
++                  );
++                })}
++              </tbody>
++            ))}
+@@ -291,15 +347,0 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-              {data.devices.map(({ device, counts, active, total, station: stn, operator: op }) => {
+-                const liveNow = active.slice(-lookback).some((a) => a === 1);
+-                return (
+-                  <tr key={device}>
+-                    <td title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ ...nameCell, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>
+-                      {device}{(stn || op) && <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
+-                    </td>
+-                    {counts.map((c, i) => (
+-                      <td key={i} title={`${hourLabel(data.buckets[i])} — ${c} ${c === 1 ? unit.replace(/s$/, '') : unit}`}
+-                        style={{ ...numCell, borderRadius: 2, background: c ? heat(c) : 'transparent', color: c ? 'var(--text)' : 'var(--muted)' }}>{c || '·'}</td>
+-                    ))}
+-                    <td style={{ ...numCell, fontWeight: 700 }}>{total}</td>
+-                  </tr>
+-                );
+-              })}
+@@ -324,15 +366,21 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-          {data.devices.map(({ device, active, station: stn, operator: op }) => {
+-            const liveNow = active.slice(-lookback).some((a) => a === 1);
+-            return (
+-              <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+-                <span title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+-                  <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+-                  {(stn || op) && <span style={{ fontSize: 10, color: 'var(--muted)' }}> {stn}{stn && op ? ' · ' : ''}{op}</span>}
+-                </span>
+-                {active.map((a, i) => (
+-                  <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
+-                    style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+-                ))}
+-              </div>
+-            );
+-          })}
++          {(grouped || [['', data.devices]]).map(([grpName, devs]) => (
++            <div key={grpName || '__all'}>
++              {grouped && <div style={{ margin: '10px 0 3px' }}>{stationHeader(grpName, devs)}</div>}
++              {devs.map(({ device, active, station: stn, operator: op }) => {
++                const liveNow = active.slice(-lookback).some((a) => a === 1);
++                const suffix = grouped ? op : `${stn || ''}${stn && op ? ' · ' : ''}${op || ''}`;
++                return (
++                  <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
++                    <span title={`${device}${stn ? ` — ${stn}` : ''}${op ? ` · ${op}` : ''}`} style={{ width: 200, marginRight: 6, flexShrink: 0, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
++                      <span style={{ fontWeight: 600, color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
++                      {suffix ? <span style={{ fontSize: 10, color: 'var(--muted)' }}> {suffix}</span> : null}
++                    </span>
++                    {active.map((a, i) => (
++                      <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
++                        style={{ width: bw, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
++                    ))}
++                  </div>
++                );
++              })}
++            </div>
++          ))}
+@@ -442,0 +491,9 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
++  // Clicking the offline count opens a LIVE offline list split by station.
++  const [offPanel, setOffPanel] = useState(null); // null | 'busy' | roster json | {error}
++  const loadOffline = async (e) => {
++    e.stopPropagation();
++    if (offPanel) { setOffPanel(null); return; }
++    setOffPanel('busy');
++    try { setOffPanel(await jget(`${base}/monitors/${m.id}/roster`)); }
++    catch (err) { setOffPanel({ error: err.message }); }
++  };
+@@ -490,2 +547,3 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-            {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)', cursor: m.rosterSnapshot.offline ? 'help' : undefined }}
+-              title={(m.rosterSnapshot.offlineDevices || []).length ? `Offline: ${m.rosterSnapshot.offlineDevices.map((d) => `${d.device} (${Math.round(d.lagMin)}m)`).join(', ')}${m.rosterSnapshot.offline > m.rosterSnapshot.offlineDevices.length ? ` +${m.rosterSnapshot.offline - m.rosterSnapshot.offlineDevices.length} more` : ''}` : undefined}>
++            {' · '}<strong style={{ color: m.rosterSnapshot.offline ? STATUS_COLOR.stale : 'var(--muted)', cursor: m.rosterSnapshot.offline ? 'pointer' : undefined, textDecoration: m.rosterSnapshot.offline ? 'underline dotted' : undefined }}
++              onClick={m.rosterSnapshot.offline ? loadOffline : undefined}
++              title={m.rosterSnapshot.offline ? 'Click for the live offline list, split by station' : undefined}>
+@@ -503,0 +562,28 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
++        {offPanel === 'busy' && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }} onClick={(e) => e.stopPropagation()}>Reading the live roster…</div>}
++        {offPanel && offPanel !== 'busy' && (
++          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 6, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', cursor: 'default', fontSize: 12 }}>
++            {offPanel.error ? <span style={{ color: STATUS_COLOR.stale }}>⚠️ {offPanel.error}</span> : (() => {
++              const off = offPanel.offline || [];
++              const by = new Map();
++              for (const d of off) { const k = d.station || 'No station'; if (!by.has(k)) by.set(k, []); by.get(k).push(d); }
++              const groups = [...by.entries()].sort((a, b) => b[1].length - a[1].length);
++              const missing = Math.max(0, (offPanel.total - offPanel.online) - off.length);
++              return (
++                <div>
++                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
++                    <strong style={{ color: off.length ? STATUS_COLOR.stale : STATUS_COLOR.fresh }}>{off.length} offline device{off.length === 1 ? '' : 's'}</strong>
++                    <span style={{ color: 'var(--muted)', fontSize: 11 }}>live read · no sync in {offPanel.onlineMin}m{missing ? ` · +${missing} more` : ''}</span>
++                    <span style={{ flex: 1 }} />
++                    <button style={{ ...ghostBtn, padding: '1px 8px', fontSize: 11 }} onClick={(e) => { e.stopPropagation(); setOffPanel(null); }}>✕</button>
++                  </div>
++                  {!off.length ? <span style={{ color: STATUS_COLOR.fresh }}>✅ Every linked device has synced within the online window.</span> : groups.map(([stn, devs]) => (
++                    <div key={stn} style={{ marginTop: 4 }}>
++                      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.4 }}>{stn} <span style={{ color: STATUS_COLOR.stale }}>{devs.length}</span></div>
++                      <div style={{ color: 'var(--muted)' }}>{devs.map((d) => `${d.device} (${Math.round(d.lagMin)}m${d.operator ? ` · ${d.operator}` : ''})`).join(' · ')}</div>
++                    </div>
++                  ))}
++                </div>
++              );
++            })()}
++          </div>
++        )}
+@@ -617,2 +703,9 @@ function ReportPanel({ url, body, title }) {
+-  const rUnits = new Set((state.charts || []).map((c) => c.unit || 'scans'));
+-  const rShort = rUnits.size > 1 ? 'scans+txns' : rUnits.has('transactions') ? 'txns' : 'scans';
++  // One tile pair per metric — scans and transactions are never summed together.
++  const rTiles = [];
++  for (const u of ['scans', 'transactions']) {
++    const cs = (state.charts || []).filter((c) => (c.unit || 'scans') === u);
++    if (!cs.length) continue;
++    const sumU = (k) => (cs.some((c) => c[k] != null) ? cs.reduce((a, c) => a + (c[k] || 0), 0) : null);
++    const shortU = u === 'transactions' ? 'txns' : 'scans';
++    rTiles.push([`Total ${shortU}`, num(sumU('totalScans'))], [`Avg ${shortU}/h`, num(sumU('scansPerHour'))]);
++  }
+@@ -635 +728 @@ function ReportPanel({ url, body, title }) {
+-            [`Total ${rShort}`, num(sum('totalScans'))], [`Avg ${rShort}/h`, num(sum('scansPerHour'))]].map(([l, v, c]) => (
++            ...rTiles].map(([l, v, c]) => (
+@@ -696,3 +789,16 @@ function HealthMetrics({ monitors: allMonitors }) {
+-  const approx = volSnaps.some((x) => x.scansApprox) ? '≥' : '';
+-  const units = new Set(allMonitors.filter((m) => m.rosterSnapshot).map((m) => unitFor(m)));
+-  const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
++  // Scans (gates) and transactions (bars/vendors) are DIFFERENT metrics — each
++  // unit gets its own volume tiles, never summed together. Totals include
++  // closed stations' frozen snapshots; last-hour/avg only the open ones.
++  const volTiles = [];
++  for (const u of ['scans', 'transactions']) {
++    const vol = allMonitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
++    if (!vol.length) continue;
++    const open = monitors.filter((m) => m.rosterSnapshot && unitFor(m) === u).map((m) => m.rosterSnapshot);
++    const ap = vol.some((x) => x.scansApprox) ? '≥' : '';
++    const shortU = u === 'transactions' ? 'txns' : 'scans';
++    volTiles.push(
++      [`Total ${shortU}`, sumOf(vol, 'totalScans') == null ? '—' : `${ap}${num(sumOf(vol, 'totalScans'))}`],
++      [`Last hr ${shortU}`, num(sumOf(open, 'lastHourScans'))],
++      [`Avg ${shortU}/h`, sumOf(open, 'scansPerHour') == null ? '—' : `~${num(sumOf(open, 'scansPerHour'))}`],
++    );
++  }
+@@ -707,3 +813 @@ function HealthMetrics({ monitors: allMonitors }) {
+-    [`Total ${short}`, sumOf(volSnaps, 'totalScans') == null ? '—' : `${approx}${num(sumOf(volSnaps, 'totalScans'))}`],
+-    ['Last hour', num(sum('lastHourScans'))],
+-    [`Avg ${short}/h`, sum('scansPerHour') == null ? '—' : `~${num(sum('scansPerHour'))}`],
++    ...volTiles,
+diff --git a/docs/PRODUCT_OVERVIEW_SALES.md b/docs/PRODUCT_OVERVIEW_SALES.md
+index 9cbec13..4cc0bdb 100644
+--- a/docs/PRODUCT_OVERVIEW_SALES.md
++++ b/docs/PRODUCT_OVERVIEW_SALES.md
+@@ -7 +7 @@
+-> **Last updated:** 2026-07-03 (📶 Data health: client tab, AI diagnose, event report, fleet alert, Owl/MCP access) · **Maintained:** updated as features ship (see the
++> **Last updated:** 2026-07-03 (📶 Data health: per-station timeline drill-down, scans vs transactions split, device labels) · **Maintained:** updated as features ship (see the
+@@ -749,0 +750,7 @@ see "The continuous comms loop" above.)*
++- **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
++  live day timeline now filters to one station (or groups all stations under
++  headers), every device row is labelled with its station + operator, and clicking
++  a tile's offline count opens the live offline list split by station. Bar/vendor
++  monitors report **transactions** and check-in monitors **scans** — separate
++  metrics, never summed — and closed stations keep their day totals. Roster and
++  count reads are aggregation-backed so busy sales days no longer under-count.
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index d0642ce..d1e5302 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -490,0 +491,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++  // Also carries last-seen lag so the timeline can say online vs offline —
++  // never overwrites a lag the roster already computed.
+@@ -492,0 +495 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++    const nowMs = Date.now();
+@@ -497,0 +501 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++      if (d.lagMin == null && i.ts) d.lagMin = Math.round(((nowMs - i.ts.getTime()) / 60000) * 10) / 10;
+@@ -562 +566 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'none'];
++    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
+@@ -572 +576,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        if (cand === 'distinct') {
++        if (cand === 'distinct' || cand === 'distinct2') {
++          // Like the MAX read: custom measures want the _raw timeframe first —
++          // based_on the picked timeframe errors on some explores.
+@@ -574 +580 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
++          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: cand === 'distinct' ? `${group}_raw` : m.timeField, type: 'count_distinct' }]);
+@@ -644 +650 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
++      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
+@@ -646 +652 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      station: st, devicesTotal: byDevice.size,
++      station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 6618155..a21eff6 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -455,0 +456,14 @@ test('deviceTimeline: station fallback filters the whole feed by the labels map'
++test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
++  const h = mountHealth();
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
++  h.setRowsFn(async (b) => {
++    if (b.fields.includes('scans.count')) throw new Error('Unknown field "scans.count"');
++    if (b.dynamic_fields && b.dynamic_fields.includes('_raw')) throw new Error('Unknown field "scans.scanned_at_raw"');
++    return [{ 'scans.device_id': 'D-3', 'scans.scanned_at_hour': hourStr(), data_health_scans: 6 }];
++  });
++  const t = await h.mod.deviceTimeline(m, 12);
++  assert.equal(t.countBasis, 'distinct');
++  assert.equal(t.devices[0].counts[11], 6);
++});
++
+@@ -701 +715 @@ test('deviceTimeline: falls back to a dynamic count when the view has no native
+-  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at', type: 'count_distinct' }]);
++  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at_raw', type: 'count_distinct' }]);
