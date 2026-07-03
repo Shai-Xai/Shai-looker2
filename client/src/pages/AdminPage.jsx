@@ -31,7 +31,7 @@ import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
 import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
-import SkillsAdmin from '../components/SkillsAdmin.jsx';
+import SkillsAdmin, { SkillDefaultsEditor } from '../components/SkillsAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
@@ -4360,6 +4360,9 @@ function AISettings() {
       <Section title="Owl guidance (chat assistant)">
         <p style={hint}>Steers the agentic Owl (the data chat assistant) — how it should read your data: which measure to use, how to split add-ons, what “revenue”/“today” mean. Separate from the instructions above (which drive tile insights & briefings). Takes effect immediately.</p>
         <OwlGuidanceEditor scope="global" />
+      </Section>
+      <Section title="Skill playbooks (platform defaults)">
+        <SkillDefaultsEditor />
       </Section>
       <Section title="Owl field dictionary">
         <OwlFieldDictionary />

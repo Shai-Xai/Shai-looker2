@@ -70,6 +70,33 @@ test('playbook layering: default only when blank; client additions layered on to
   assert.match(layered, /Comps cap: 5% of capacity\./);
 });
 
+test('platform tier: an admin-edited playbook replaces the built-in seed; blank inherits it', () => {
+  const def = skills.SKILL_DEFS.ticketing;
+
+  // Pure layering: platform override replaces the built-in; client additions still append.
+  const withPlatform = skills.resolvePlaybook(def, 'Never discount VIP.', 'WORKSHOP PLAYBOOK v1: judge by momentum.');
+  assert.ok(withPlatform.startsWith('WORKSHOP PLAYBOOK v1'), 'platform override replaces the built-in seed');
+  assert.ok(!withPlatform.includes('STARTER PLAYBOOK'), 'built-in seed is fully replaced, not appended');
+  assert.match(withPlatform, /Never discount VIP\./);
+
+  // End to end through the setting: listForEntity + the audit reflect the override.
+  const e = makeEntity('PlatformCo', 'OrgP');
+  db.setSetting('skill_playbook:ticketing', 'WORKSHOP PLAYBOOK v1: judge by momentum.');
+  const ticketing = api.listForEntity(e.id).find((s) => s.key === 'ticketing');
+  assert.equal(ticketing.defaultPlaybook, 'WORKSHOP PLAYBOOK v1: judge by momentum.');
+  assert.equal(ticketing.defaultOverridden, true);
+  const audit = skills.defaultsAudit(db).find((s) => s.key === 'ticketing');
+  assert.equal(audit.overridden, true);
+  assert.equal(audit.text, 'WORKSHOP PLAYBOOK v1: judge by momentum.');
+
+  // Clearing the setting falls back to the built-in seed (blank inherits).
+  db.setSetting('skill_playbook:ticketing', '');
+  const back = api.listForEntity(e.id).find((s) => s.key === 'ticketing');
+  assert.equal(back.defaultPlaybook, def.defaultPlaybook);
+  assert.equal(back.defaultOverridden, false);
+  assert.equal(skills.defaultsAudit(db).find((s) => s.key === 'ticketing').overridden, false);
+});
+
 test('backtest clamp: relative ranges are replaced, explicit ends are capped at the freeze', () => {
   const F = '2026-05-20';
   // Relative expression would resolve against TODAY → forced to an explicit range ending at the freeze.

@@ -962,7 +962,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
 
   // Built-in (code) layers — read-only.
   const builtins = {
-    systemPrompts: insights.promptRegistry(),
+    systemPrompts: insights.promptRegistry(), skillDefaults: require('./skills').defaultsAudit(db), // per-skill platform playbooks (override || built-in seed)
     roleLenses: Object.entries(ROLE_LENSES).map(([key, v]) => ({ key, label: v.label, focus: v.focus })),
     phaseDefaults: PHASES.map((p) => ({ key: p.key, label: p.label, text: pd[p.key] || '', overridden: !!(savedPhase[p.key] || '').trim() })),
     timeDefaults: TIMES.map((t) => ({ key: t.key, label: t.label, text: td[t.key] || '', overridden: !!(savedTime[t.key] || '').trim() })),

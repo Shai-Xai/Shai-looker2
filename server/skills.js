@@ -180,9 +180,11 @@ function wrapToolsForBacktest(toolMap, allowed, freezeISO) {
   return out;
 }
 
-// Playbook layering: platform default + per-client additions (blank inherits).
-function resolvePlaybook(def, clientPlaybook) {
-  const parts = [def.defaultPlaybook];
+// Playbook layering (the standard Pulse tiering — blank inherits the tier below):
+//   built-in (code, the v0 seed) → platform playbook (admin-edited, the AM
+//   workshop's home; REPLACES the built-in when set) → client additions (append).
+function resolvePlaybook(def, clientPlaybook, platformPlaybook) {
+  const parts = [(platformPlaybook || '').trim() || def.defaultPlaybook];
   const extra = (clientPlaybook || '').trim();
   if (extra) parts.push(`CLIENT-SPECIFIC PLAYBOOK ADDITIONS (these refine or override the defaults for THIS client):\n${extra}`);
   return parts.join('\n\n');
@@ -268,11 +270,19 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
     return rowToSkill(sql.prepare('SELECT * FROM skills WHERE id=?').get(id));
   }
 
-  // Catalogue (defs) merged with this entity's configured instances.
+  // The platform tier of the playbook: an admin-edited setting per skill. Blank
+  // inherits the built-in v0 seed. This is where the AM workshop output lives —
+  // training the platform tier is self-service, not a code change.
+  const platformPlaybook = (key) => (db.getSetting(`skill_playbook:${key}`, '') || '').trim();
+
+  // Catalogue (defs) merged with this entity's configured instances. The
+  // defaultPlaybook shown is the EFFECTIVE platform tier (override || built-in).
   function listForEntity(entityId) {
     const rows = sql.prepare('SELECT * FROM skills WHERE entity_id=?').all(entityId).map(rowToSkill);
     return Object.values(SKILL_DEFS).map((d) => ({
-      key: d.key, name: d.name, emoji: d.emoji, blurb: d.blurb, defaultPlaybook: d.defaultPlaybook,
+      key: d.key, name: d.name, emoji: d.emoji, blurb: d.blurb,
+      defaultPlaybook: platformPlaybook(d.key) || d.defaultPlaybook,
+      defaultOverridden: !!platformPlaybook(d.key),
       instances: rows.filter((r) => r.key === d.key),
     }));
   }
@@ -320,7 +330,7 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
 
     // Instructions: layered playbook + the same global/client/currency/language
     // layers every Owl surface gets (aiInstructionsFor).
-    const playbook = resolvePlaybook(def, skillRow ? skillRow.playbook : '');
+    const playbook = resolvePlaybook(def, skillRow ? skillRow.playbook : '', platformPlaybook(def.key));
     const instructions = [`PLAYBOOK — your standing operating knowledge:\n${playbook}`, aiInstructionsFor ? aiInstructionsFor(suiteId, entityId) : '']
       .filter(Boolean).join('\n\n');
 
@@ -404,6 +414,16 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
   if (timer.unref) timer.unref();
 
   // ── Admin surface ────────────────────────────────────────────────────────────
+  // Platform tier: the default playbooks every client inherits (Admin → AI).
+  app.get('/api/admin/skills/defaults', auth.requireAdmin, (_req, res) => {
+    res.json({ skills: Object.values(SKILL_DEFS).map((d) => ({ key: d.key, name: d.name, emoji: d.emoji, blurb: d.blurb, builtin: d.defaultPlaybook, override: platformPlaybook(d.key), effective: platformPlaybook(d.key) || d.defaultPlaybook })) });
+  });
+  app.put('/api/admin/skills/defaults/:key', auth.requireAdmin, (req, res) => {
+    if (!SKILL_DEFS[req.params.key]) return res.status(400).json({ error: 'Unknown skill' });
+    db.setSetting(`skill_playbook:${req.params.key}`, String((req.body || {}).playbook || '').trim()); // '' clears → inherit built-in
+    const d = SKILL_DEFS[req.params.key];
+    res.json({ key: d.key, override: platformPlaybook(d.key), effective: platformPlaybook(d.key) || d.defaultPlaybook });
+  });
   app.get('/api/admin/entities/:id/skills', auth.requireAdmin, (req, res) => {
     res.json({ skills: listForEntity(req.params.id), enabled: enabled() });
   });
@@ -457,6 +477,15 @@ function mount(app, { db, auth, insights, getOwlTools, getGoalsApi, anthropicKey
   return { SKILL_DEFS, upsertSkill, listForEntity, runSkill, recordFeedback, tick, _internals: { clampBacktestDates, wrapToolsForBacktest, resolvePlaybook, tzNow } };
 }
 
+// Platform-tier playbooks for the AI audit: per skill, the built-in seed, any
+// admin override, and which one is live (GET /api/admin/ai-overview builtins).
+function defaultsAudit(db) {
+  return Object.values(SKILL_DEFS).map((d) => {
+    const override = (db.getSetting(`skill_playbook:${d.key}`, '') || '').trim();
+    return { key: d.key, label: `${d.emoji} ${d.name}`, text: override || d.defaultPlaybook, overridden: !!override };
+  });
+}
+
 // Per-client skill playbook additions, keyed by entity — the trainable layer,
 // surfaced in Admin → AI "Everything the AI is told" (GET /api/admin/ai-overview).
 function playbookLayersByEntity(sql) {
@@ -469,4 +498,4 @@ function playbookLayersByEntity(sql) {
   return out;
 }
 
-module.exports = { mount, SKILL_DEFS, TICKETING_SKILL_SYSTEM, TICKETING_DEFAULT_PLAYBOOK, OPS_SKILL_SYSTEM, OPS_DEFAULT_PLAYBOOK, clampBacktestDates, wrapToolsForBacktest, expandToolNames, resolvePlaybook, playbookLayersByEntity };
+module.exports = { mount, SKILL_DEFS, TICKETING_SKILL_SYSTEM, TICKETING_DEFAULT_PLAYBOOK, OPS_SKILL_SYSTEM, OPS_DEFAULT_PLAYBOOK, clampBacktestDates, wrapToolsForBacktest, expandToolNames, resolvePlaybook, playbookLayersByEntity, defaultsAudit };
