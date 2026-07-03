@@ -90,13 +90,19 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // events. We only apply locks valid in THIS explore (core_events.* or a curated
   // dimension) so we never inject a field Looker would reject, and never touch the
   // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
-  function applySuiteEventLocks(filters, suiteId, dims = dimByName) {
+  // `modelPinnedEvent`: the model explicitly filtered this explore's OWN event-name
+  // field (a cross-edition comparison, e.g. cashless "vs last year"). In that case the
+  // blanket core_events.* auto-lock is skipped — otherwise the CURRENT ticketing event
+  // lock would contradict the comparison filter and return empty rows. Locks on the
+  // explore's own dims still apply only when the model hasn't set them (default, not wall).
+  function applySuiteEventLocks(filters, suiteId, dims = dimByName, modelPinnedEvent = false) {
     if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
     let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
     for (const [key, val] of Object.entries(locks)) {
       if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
       const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
       if (!field || field === ORG) continue; // organiser handled by applyScope
+      if (modelPinnedEvent && /^core_events\./.test(field) && !dims.has(field)) continue;
       if ((/^core_events\./.test(field) || dims.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
@@ -1033,16 +1039,31 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     try {
       if (q === 'devices') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured — I can only see its stream lag.`);
-        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m) };
+        return { ok: true, monitor: m.name, roster: await api.deviceRoster(m, true) };
       }
       if (q === 'timeline') {
         if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no per-device timeline.`);
-        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10);
-        // activeBlocks: compact 0/1 string per device, oldest→newest; counts = scans per block.
+        const t = await api.deviceTimeline(m, args.hours || (api.rosterAnchor(m) ? 'start' : 12), Number(args.intervalMin) || 10, String(args.station || ''), true);
+        // activeBlocks: compact 0/1 string per device, oldest→newest; coverage:
+        // devices sending per block — the offline-trend series the Owl should
+        // analyse (same shape the 🩺 Diagnose uses).
         return {
-          ok: true, monitor: m.name, intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
-          totalScans: t.grandTotal, note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC.',
-          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+          ok: true, monitor: m.name, unit: hit.unit || 'scans', station: t.station || '', intervalMin: t.intervalMin, startAt: t.startAt || '', window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1] },
+          totalScans: t.grandTotal,
+          note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
+          coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
+        };
+      }
+      if (q === 'observed') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no offline log.`);
+        const ob = api.observedLog(m, api.obsSinceFor(m, args.hours || 'start'));
+        return {
+          ok: true, monitor: m.name,
+          note: 'The OBSERVED log is what Pulse itself saw at each check — a device that traded offline and synced late can NEVER repaint it. Treat it as the authoritative connectivity record; times are UTC — convert to the client\'s local time.',
+          onlineSeries: ob.ticks.map((t) => ({ atUTC: t.at.slice(11, 16), online: t.online, total: t.total })),
+          offlineWindows: ob.windows.slice(0, 80),
         };
       }
       if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
@@ -1053,14 +1074,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   }
   const dataHealthSchema = {
     name: 'dataHealth',
-    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "when did device X stop", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + scan counts per time block through the day (spot gaps, flappers, late joiners). latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series: analyse it for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up — that window analysis is what the user usually wants. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'latest'], description: 'What to fetch (default overview).' },
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
         monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
         hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
         intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
+        station: { type: 'string', description: 'For timeline: narrow to ONE station name exactly as it appears in the monitor\'s streams — use when a monitor spans many bars/vendors.' },
         limit: { type: 'number', description: 'For latest: how many records (default 20, max 50).' },
       },
     },
@@ -1147,7 +1169,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         }
       }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
-      applySuiteEventLocks(body.filters, suiteId, dByName);
+      applySuiteEventLocks(body.filters, suiteId, dByName, filters[`${cat.explore}.name`] != null);
       const allowed = await query.applyScope(body, user, suiteId);
       if (allowed === false) return refuse('no_scope', `I can't scope ${cat.label} to a client here — this data source may not be linkable to your client, or open a client/event first.`);
       if (entityId && auth && auth.accessibleOrgFilters) {

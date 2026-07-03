@@ -407,6 +407,19 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
       `Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.) For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`,
     ];
     if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
+    // A selected event pins queries via the suite's locked filters — surface them so
+    // the Owl KNOWS the pin is a default it may override for cross-edition questions
+    // ("vs last year"), using the suite's own Comparison event value(s). The organiser
+    // scope stays forced either way, so overriding can never leave this client.
+    if (su) {
+      try {
+        const locks = auth.lockedFiltersForSuite ? (auth.lockedFiltersForSuite(suiteId) || {}) : {};
+        const evLocks = Object.entries(locks).filter(([k, v]) => /event/i.test(k) && v != null && String(v).trim() !== '' && v !== ' __ANY_VALUE__');
+        if (evLocks.length) {
+          parts.push(`SELECTED-EVENT LOCKS (defaults, not walls): queries are pinned to this event by: ${evLocks.map(([k, v]) => `${k} = "${v}"`).join('; ')}. For a CROSS-EDITION question ("vs last year", "all editions", "compare to 2025"), OVERRIDE the pin by setting your OWN filter on the matching event-name field — ticketing: core_events.name; an extra data source (e.g. cashless): its own event-name field — using the Comparison value(s) above (a comma-separated value means several events; you can also GROUP BY the event-name field to split editions apart). If no Comparison lock is listed and the user wants other editions, say they can switch the event picker to "All events".`);
+        }
+      } catch { /* locks unavailable — the pin still applies mechanically */ }
+    }
     // Surface the curated catalogue's field meanings + rules to the model — it only
     // sees raw field names in the tool enum otherwise, so labels/synonyms/notes
     // (e.g. the add-on split rule) must be passed in here.
