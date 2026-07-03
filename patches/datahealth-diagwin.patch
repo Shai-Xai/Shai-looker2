@@ -1,0 +1,34 @@
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 3bc3aab..201632f 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -38,12 +38,13 @@ const DATA_HEALTH_DIAG_SYSTEM = `You are Pulse's data-stream diagnostician for l
+ 
+ Write a SHORT diagnostics verdict an ops person can act on mid-event:
+ 1. First line: an overall verdict — healthy / mostly healthy with N concerns / degraded / down — with the single most important fact.
+-2. "Flow:" the pipe numbers — minutes since the latest record vs the warn/stale thresholds, total scans, and the busiest period if the timeline shows one.
+-3. "Devices:" online vs linked, and the scans-per-device spread (call out devices far below the average — they may be weak even if currently online).
+-4. "Concerns:" a numbered list, worst first. For each: what, the evidence (times, counts, gap lengths), and ONE concrete action (→ send a runner / swap / reboot / check battery or signal). If a device died, say when and for how long. If a device flaps (active-silent-active), say so — that pattern fits battery/signal.
+-5. End with what you RULED OUT: if other devices ran clean through the same period, say it's device-level, not the pipe or venue network. If MANY devices share the same silent blocks, say the opposite — that pattern fits a venue network/connectivity problem worth raising with the network provider.
++2. "Flow:" the pipe numbers — minutes since the latest record vs the warn/stale thresholds, and total scans.
++3. "Timeline:" THE CORE ANALYSIS — where the problems were through the day. Walk timeline.coverage (per block: how many devices sent data) chronologically and name EVERY window where a meaningful share of devices was simultaneously silent, as "HH:MM–HH:MM SA: only X of N devices sending". For each window say what it was: a shared outage (devices that were active BEFORE the window went dark TOGETHER — connectivity/venue signature, list the affected devices) vs a slow ramp-up (devices had not yet sent their FIRST data — late start, not a fault, but say how long the ramp took and when coverage became full). Use each device's activeBlocks (one char per block, oldest→newest) to tell those apart. Then name when coverage was at its best.
++4. "Devices:" online vs linked now, scans-per-device spread, and the individual laggards.
++5. "Concerns:" a numbered list, worst first — shared-window incidents FIRST, then single-device drops/flappers. For each: what, the evidence (times, counts, gap lengths), and ONE concrete action (→ send a runner / swap / reboot / check battery or signal / raise with the network provider).
++6. End with what you RULED OUT: single-device faults vs venue network — justify from whether silent blocks were shared or isolated.
+ 
+-Rules: plain text (no markdown headings/tables), ≤ 180 words, every number from the JSON — never invent. Times are UTC ISO in the data; present them as South Africa time (UTC+2), HH:MM. If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
++Rules: plain text (no markdown headings/tables), ≤ 260 words, every number from the JSON — never invent. Times in the data are UTC (coverage.atUTC is UTC HH:MM); ALWAYS present them as South Africa time (UTC+2). If data is missing (rosterError/timelineError), say what you couldn't see. No greetings, no fluff.`;
+ 
+ // 📝 Event report: every station of one event → a shareable ops report.
+ const DATA_HEALTH_REPORT_SYSTEM = `You write Pulse's DATA HEALTH & DIAGNOSTICS REPORT for one event — used by the ops team and shared externally with network/connectivity providers. You receive JSON: the event & client name, and per station: thresholds, stream lags, device roster, per-device scan counts, a per-device activity timeline (activeBlocks: 0/1 string, oldest→newest) and the alert history.
+@@ -903,6 +904,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+             intervalMin: t.intervalMin, startAt: t.startAt || '', countBasis: t.countBasis,
+             window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1], blocks: t.buckets.length },
+             totalScans: t.grandTotal, scansPerBlockAllDevices: t.bucketTotals,
++            // Per-block coverage — the "where were the problems" series: for each
++            // time block, how many devices sent data. Times are UTC HH:MM.
++            coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
++            devicesSeen: t.devices.length,
+             devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, totalScans: d.total, activeBlocks: d.active.join('') })),
+           };
+         }

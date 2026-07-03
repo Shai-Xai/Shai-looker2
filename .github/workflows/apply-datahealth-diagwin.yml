@@ -1,0 +1,42 @@
+name: Apply data-health diagnose windows
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): applies the
+# reviewed patch to the feature branch, copies the file onto main, then deletes
+# itself from this (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply to feature branch, sync main, then self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-diagwin.patch /tmp/d.patch
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --index -3 /tmp/d.patch
+          git commit -m 'Data health diagnose: analyse WHEN devices were offline, not just which' \
+            -m 'The Diagnose verdict now centres on the day''s problem windows: the payload gains a per-block coverage series (devices sending per time block), and the prompt requires a chronological Timeline section naming every window where a meaningful share of devices was simultaneously silent - distinguishing a shared outage (active devices going dark together - connectivity signature) from a slow ramp-up (devices not yet started), with shared-window incidents ranked first among concerns.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- server/dataHealth.js
+          git commit -m 'Data health diagnose: analyse WHEN devices were offline, not just which' \
+            -m 'File copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-diagwin.patch .github/workflows/apply-datahealth-diagwin.yml
+          git commit -m "chore: remove one-shot diagwin helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
