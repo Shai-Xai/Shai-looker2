@@ -453,6 +453,20 @@ test('deviceTimeline: station fallback filters the whole feed by the labels map'
   assert.equal(t.devices[0].station, 'Bar One');
 });
 
+test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.count')) throw new Error('Unknown field "scans.count"');
+    if (b.dynamic_fields && b.dynamic_fields.includes('_raw')) throw new Error('Unknown field "scans.scanned_at_raw"');
+    return [{ 'scans.device_id': 'D-3', 'scans.scanned_at_hour': hourStr(), data_health_scans: 6 }];
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'distinct');
+  assert.equal(t.devices[0].counts[11], 6);
+});
+
 test('deviceTimeline: a count measure that reads 0 for every row is a soft failure', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
@@ -698,7 +712,7 @@ test('deviceTimeline: falls back to a dynamic count when the view has no native 
   const t = await h.mod.deviceTimeline(m, 12);
   assert.equal(t.countBasis, 'distinct');
   const dyn = JSON.parse(bodies[1].dynamic_fields);
-  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at', type: 'count_distinct' }]);
+  assert.deepEqual(dyn, [{ measure: 'data_health_scans', based_on: 'scans.scanned_at_raw', type: 'count_distinct' }]);
   assert.equal(t.devices[0].counts[11], 11);
   // The working mode is remembered — the next read goes straight to the dynamic measure.
   await h.mod.deviceTimeline(m, 12);

@@ -488,13 +488,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }
 
   // Merge station/operator labels onto device entries (mutates in place).
+  // Also carries last-seen lag so the timeline can say online vs offline —
+  // never overwrites a lag the roster already computed.
   const labelDevices = (list, info) => {
     if (!info) return;
+    const nowMs = Date.now();
     for (const d of list) {
       const i = info.get(d.device);
       if (!i) continue;
       if (i.station) d.station = i.station;
       if (i.operator) d.operator = i.operator;
+      if (d.lagMin == null && i.ts) d.lagMin = Math.round(((nowMs - i.ts.getTime()) / 60000) * 10) / 10;
     }
   };
 
@@ -559,7 +563,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // error can't poison a monitor into inflating/deflating counts forever.
     const nativeField = `${String(m.timeField).split('.')[0]}.count`;
     const viewField = `${m.view}.count`;
-    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'none'];
+    const allModes = ['native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
     const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : allModes;
     const fieldFor = { native: nativeField, native2: viewField, distinct: CNT_FIELD };
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
@@ -569,9 +573,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         body.filters[m.timeField] = timeFilter;
         if (st && m.stationField) body.filters[m.stationField] = stExpr;
         if (cand === 'native' || cand === 'native2') body.fields = [...body.fields, fieldFor[cand]];
-        if (cand === 'distinct') {
+        if (cand === 'distinct' || cand === 'distinct2') {
+          // Like the MAX read: custom measures want the _raw timeframe first —
+          // based_on the picked timeframe errors on some explores.
           body.fields = [...body.fields, CNT_FIELD];
-          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
+          body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: cand === 'distinct' ? `${group}_raw` : m.timeField, type: 'count_distinct' }]);
         }
         try {
           const got = await runScoped(m, body);
@@ -641,9 +647,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     }
     if (withInfo && devices.length) labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
     return {
-      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode,
+      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
-      station: st, devicesTotal: byDevice.size,
+      station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
       truncated: rows.length >= 20000,
