@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const { asyncHandler } = require('./http');
 
 const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's name
+const CNT_FIELD = 'data_health_scans';  // the dynamic scan-count measure's name (timeline fallback)
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const CHANNELS = ['push', 'email', 'slack']; // entity fan-out via the OS spine; ops Slack is always-on
 
@@ -385,10 +386,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // Block sizes the timeline can bucket by, in minutes.
   const TIMELINE_INTERVALS = [5, 10, 20, 30, 60];
 
+  // How each monitor's timeline counts scans, learned on first success: the
+  // explore's native row-count measure (`view.count`), else a dynamic
+  // count_distinct on the time dim, else plain row presence (counts of 1).
+  const countModeByMonitor = new Map();
+
   // The day timeline: per device, which time blocks of the window it produced
-  // data — rows × buckets the UI renders as a green/grey activity grid, so you
-  // can SEE when each device dropped and for how long. At 60-min blocks it uses
-  // the timestamp's hour-granularity sibling dimension (created_at_time →
+  // data AND how many scans landed in each — rows × buckets the UI renders as a
+  // green/grey activity grid or a per-block counts report. At 60-min blocks it
+  // uses the timestamp's hour-granularity sibling dimension (created_at_time →
   // created_at_hour) so Looker aggregates to one row per (device, hour) — a
   // whole busy day fits. Finer blocks read the raw time dimension and bucket
   // here (5000-row cap → `truncated` warns when a very busy window overflows).
@@ -401,33 +407,66 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
     const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
     const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
-    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
-    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
     const ivMs = iv * 60000;
+    // hours === 'start' anchors the window to the roster's start time (daily
+    // HH:MM / once-off start) — the event-day view: no dead grey hours before
+    // doors. Falls back to a rolling 24h when the monitor has no anchor.
+    const anchor = String(hours) === 'start' ? rosterAnchor(m) : null;
+    let h = anchor
+      ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
+      : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
     const bucketField = iv === 60 ? hourField : m.timeField;
-    const body = { ...baseBody(m), fields: [m.rosterField, bucketField], sorts: [`${bucketField} desc`], limit: '5000' };
-    body.filters[m.timeField] = `last ${h} hours`;
-    const rows = await runScoped(m, body);
+    const base = { ...baseBody(m), sorts: [`${bucketField} desc`], limit: '5000' };
+    base.filters[m.timeField] = anchor
+      ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
+      : `last ${h} hours`;
+    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : ['native', 'distinct', 'none'];
+    let rows = null; let mode = 'none'; let lastErr = null;
+    for (const cand of modes) {
+      const body = { ...base, fields: [m.rosterField, bucketField] };
+      if (cand === 'native') body.fields = [...body.fields, `${m.view}.count`];
+      if (cand === 'distinct') {
+        body.fields = [...body.fields, CNT_FIELD];
+        body.dynamic_fields = JSON.stringify([{ measure: CNT_FIELD, based_on: m.timeField, type: 'count_distinct' }]);
+      }
+      try { rows = await runScoped(m, body); mode = cand; break; } catch (e) { lastErr = e; }
+    }
+    if (!rows) throw lastErr;
+    countModeByMonitor.set(m.id, mode);
+    const cKey = mode === 'native' ? `${m.view}.count` : CNT_FIELD;
     const nowMs = Date.now();
-    const n = Math.round((h * 60) / iv);
     const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
+    // Anchored: first block is the one containing the start time; rolling: n
+    // blocks back from now. Either way the grid stays capped at 288 blocks
+    // (anchored windows longer than that keep the most recent blocks).
+    let n = anchor
+      ? Math.floor((lastBucket - Math.floor(anchor.getTime() / ivMs) * ivMs) / ivMs) + 1
+      : Math.round((h * 60) / iv);
+    const trimmedStart = n > 288;
+    if (trimmedStart) n = 288;
     const firstBucket = lastBucket - (n - 1) * ivMs;
-    const byDevice = new Map(); // device -> array of 0/1 per bucket
+    const byDevice = new Map(); // device -> scan count per bucket
     for (const r of rows) {
       const d = String(r[m.rosterField] ?? '').trim();
       const ts = parseTs(r[bucketField]);
       if (!d || !ts) continue;
       const idx = Math.floor((ts.getTime() - firstBucket) / ivMs);
       if (idx < 0 || idx >= n) continue;
+      const cRaw = Number(r[cKey]);
       if (!byDevice.has(d)) byDevice.set(d, Array(n).fill(0));
-      byDevice.get(d)[idx] = 1;
+      byDevice.get(d)[idx] += mode !== 'none' && Number.isFinite(cRaw) ? cRaw : 1;
     }
-    const devices = [...byDevice.entries()].map(([device, active]) => ({ device, active }))
-      .sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
+    const bucketTotals = Array(n).fill(0);
+    const devices = [...byDevice.entries()].map(([device, counts]) => {
+      counts.forEach((c, i) => { bucketTotals[i] += c; });
+      return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
+    }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
     return {
-      configured: true, hours: h, intervalMin: iv, hourField, bucketField,
+      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode,
+      anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
-      devices,
+      devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
       truncated: rows.length >= 5000,
     };
   }
@@ -669,6 +708,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (c.model !== m.model || c.view !== m.view || c.timeField !== m.timeField || c.stationField !== m.stationField) {
       sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=?').run(m.id);
       maxMeasureUnsupported.delete(m.id);
+      countModeByMonitor.delete(m.id); // re-learn the scan-count measure on the new explore
     }
     res.json({ monitor: upsert(m.id, c, req.user.email) });
   });
