@@ -382,12 +382,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     };
   }
 
-  // The day timeline: per device, which HOURS of the window it produced data —
-  // rows × 24 hour-buckets the UI renders as a green/grey activity grid, so you
-  // can SEE when each device dropped and for how long. Uses the timestamp's
-  // hour-granularity sibling dimension (created_at_time → created_at_hour) so
-  // Looker aggregates to one row per (device, hour) — a whole busy day fits.
-  async function deviceTimeline(m, hours = 24) {
+  // Block sizes the timeline can bucket by, in minutes.
+  const TIMELINE_INTERVALS = [5, 10, 20, 30, 60];
+
+  // The day timeline: per device, which time blocks of the window it produced
+  // data — rows × buckets the UI renders as a green/grey activity grid, so you
+  // can SEE when each device dropped and for how long. At 60-min blocks it uses
+  // the timestamp's hour-granularity sibling dimension (created_at_time →
+  // created_at_hour) so Looker aggregates to one row per (device, hour) — a
+  // whole busy day fits. Finer blocks read the raw time dimension and bucket
+  // here (5000-row cap → `truncated` warns when a very busy window overflows).
+  async function deviceTimeline(m, hours = 24, interval = 60) {
     if (!m.rosterField) return { configured: false };
     // Looker dimension groups name every timeframe `${group}_${timeframe}` —
     // swap the picked timeframe for `_hour` (or append it when the picked field
@@ -395,28 +400,33 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // shows the error rather than silently lying.
     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
     const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
-    const h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
-    const body = { ...baseBody(m), fields: [m.rosterField, hourField], sorts: [`${hourField} desc`], limit: '5000' };
+    const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
+    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
+    const ivMs = iv * 60000;
+    const bucketField = iv === 60 ? hourField : m.timeField;
+    const body = { ...baseBody(m), fields: [m.rosterField, bucketField], sorts: [`${bucketField} desc`], limit: '5000' };
     body.filters[m.timeField] = `last ${h} hours`;
     const rows = await runScoped(m, body);
     const nowMs = Date.now();
-    const lastBucket = Math.floor(nowMs / 3600000) * 3600000; // current hour start (UTC)
-    const firstBucket = lastBucket - (h - 1) * 3600000;
-    const byDevice = new Map(); // device -> Uint-ish array of 0/1 per bucket
+    const n = Math.round((h * 60) / iv);
+    const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
+    const firstBucket = lastBucket - (n - 1) * ivMs;
+    const byDevice = new Map(); // device -> array of 0/1 per bucket
     for (const r of rows) {
       const d = String(r[m.rosterField] ?? '').trim();
-      const ts = parseTs(r[hourField]);
+      const ts = parseTs(r[bucketField]);
       if (!d || !ts) continue;
-      const idx = Math.floor((ts.getTime() - firstBucket) / 3600000);
-      if (idx < 0 || idx >= h) continue;
-      if (!byDevice.has(d)) byDevice.set(d, Array(h).fill(0));
+      const idx = Math.floor((ts.getTime() - firstBucket) / ivMs);
+      if (idx < 0 || idx >= n) continue;
+      if (!byDevice.has(d)) byDevice.set(d, Array(n).fill(0));
       byDevice.get(d)[idx] = 1;
     }
     const devices = [...byDevice.entries()].map(([device, active]) => ({ device, active }))
       .sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
     return {
-      configured: true, hours: h, hourField,
-      buckets: Array.from({ length: h }, (_, i) => new Date(firstBucket + i * 3600000).toISOString()),
+      configured: true, hours: h, intervalMin: iv, hourField, bucketField,
+      buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices,
       truncated: rows.length >= 5000,
     };
@@ -712,7 +722,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json(await deviceTimeline(m, req.query.hours));
+    res.json(await deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60));
   }));
 
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {

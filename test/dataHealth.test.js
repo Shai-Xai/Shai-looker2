@@ -425,6 +425,34 @@ test('deviceTimeline: per-device hour buckets over the window', async () => {
   assert.equal((await h.mod.deviceTimeline(timey, 12)).hourField, 'scans.created_at_hour');
 });
 
+test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interval', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  let body = null;
+  // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
+  const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0) },  // current 10-min block
+      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(95) }, // ~9 blocks back
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.intervalMin, 10);
+  assert.equal(t.buckets.length, 72); // 12h of 10-min blocks
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at']); // raw dim, no hour sibling
+  assert.equal(body.filters['scans.scanned_at'], 'last 12 hours');
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.active[71], 1);
+  assert.equal(d1.active.filter(Boolean).length, 2);
+  // Junk interval falls back to hourly; tiny blocks cap the window at 288 blocks.
+  assert.equal((await h.mod.deviceTimeline(m, 12, 7)).intervalMin, 60);
+  const capped = await h.mod.deviceTimeline(m, 48, 5);
+  assert.equal(capped.hours, 24); // 5-min blocks top out at 24h
+  assert.equal(capped.buckets.length, 288);
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
