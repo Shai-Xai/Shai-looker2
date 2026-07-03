@@ -388,8 +388,43 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // ONLINE window is offline — named, with how long it's been silent. This
   // learns the expected set from the data itself (no manual device register):
   // one scoped query over the baseline window, reduced to last-seen per device.
+  // Looker dimension groups name every timeframe `${group}_${timeframe}`.
+  const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
+
   const LAST_FIELD = 'data_health_last';
-  const rosterAggByMonitor = new Map(); // monitor id -> does the dynamic MAX read work?
+
+  // Last-seen read shared by the roster and the labels lookup: ONE aggregated
+  // row per device (+extras) via a dynamic MAX measure — based on the _raw
+  // timeframe first (custom max measures want a raw date), then the picked
+  // timeframe — else plain rows, newest first, at a high cap. What worked is
+  // remembered per monitor.
+  const lastReadModeByMonitor = new Map(); // m.id -> 'raw' | 'time' | 'rows'
+  async function latestRows(m, timeFilter, ex = [], stationExpr = '') {
+    const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
+    const cands = lastReadModeByMonitor.has(m.id) ? [lastReadModeByMonitor.get(m.id)] : ['raw', 'time', 'rows'];
+    let lastErr = null;
+    for (const cand of cands) {
+      try {
+        const b = { ...baseBody(m), limit: cand === 'rows' ? '20000' : '5000' };
+        b.filters[m.timeField] = timeFilter;
+        if (stationExpr && m.stationField) b.filters[m.stationField] = stationExpr;
+        if (cand === 'rows') {
+          b.fields = [m.rosterField, ...ex, m.timeField];
+          b.sorts = [`${m.timeField} desc`];
+        } else {
+          b.fields = [m.rosterField, ...ex, LAST_FIELD];
+          b.sorts = [`${LAST_FIELD} desc`];
+          b.dynamic_fields = JSON.stringify([{ measure: LAST_FIELD, based_on: cand === 'raw' ? `${group}_raw` : m.timeField, type: 'max' }]);
+        }
+        const rows = await runScoped(m, b);
+        const tKey = cand === 'rows' ? m.timeField : LAST_FIELD;
+        if (rows.length && !rows.some((r) => parseTs(r[tKey]))) { lastErr = new Error(`${tKey} unreadable`); continue; }
+        lastReadModeByMonitor.set(m.id, cand);
+        return { rows, tKey, aggregated: cand !== 'rows' };
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  }
 
   async function deviceRoster(m, withInfo = false) {
     if (!m.rosterField) return { configured: false };
@@ -399,27 +434,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const timeFilter = startAt
       ? `after ${startAt.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${m.rosterBaselineMin} minutes`;
-    // Prefer ONE aggregated row per device (MAX of the time dim): a raw read of
-    // a busy sales day truncates at the row cap, silently dropping idle devices
-    // — the linked/offline counts then JITTER between pulls. Falls back to the
-    // raw read when the dynamic measure can't run, and remembers which worked.
-    let rows = null; let aggRead = false;
-    if (rosterAggByMonitor.get(m.id) !== false) {
-      try {
-        const b = { ...baseBody(m), fields: [m.rosterField, LAST_FIELD], sorts: [`${LAST_FIELD} desc`], limit: '5000' };
-        b.filters[m.timeField] = timeFilter;
-        b.dynamic_fields = JSON.stringify([{ measure: LAST_FIELD, based_on: m.timeField, type: 'max' }]);
-        const got = await runScoped(m, b);
-        if (!got.length || got.some((r) => parseTs(r[LAST_FIELD]))) { rows = got; aggRead = true; }
-      } catch (e) { rows = null; void e; }
-    }
-    if (!rows) {
-      const b = { ...baseBody(m), fields: [m.rosterField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
-      b.filters[m.timeField] = timeFilter;
-      rows = await runScoped(m, b);
-    }
-    rosterAggByMonitor.set(m.id, aggRead);
-    const tKey = aggRead ? LAST_FIELD : m.timeField;
+    // Aggregated last-seen per device where Looker allows it: a raw read of a
+    // busy sales day truncates at the row cap, silently dropping idle devices
+    // — the linked/offline counts then JITTER between pulls.
+    const { rows, tKey, aggregated } = await latestRows(m, timeFilter);
     const seen = new Map(); // device -> latest Date
     for (const r of rows) {
       const d = String(r[m.rosterField] ?? '').trim();
@@ -439,7 +457,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       baselineMin: m.rosterBaselineMin, onlineMin: m.rosterOnlineMin, startAt: startAt ? startAt.toISOString() : '',
       total: devices.length, online: devices.length - offline.length,
       offline: offline.slice(0, 100),
-      truncated: !aggRead && rows.length >= 5000, // raw fallback on a busy window — idle devices may be under-counted
+      truncated: !aggregated && rows.length >= 20000, // raw fallback on a very busy window — idle devices may be under-counted
     };
   }
 
@@ -456,15 +474,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (opField) ex.push(opField);
     if (!m.rosterField || !ex.length) return null;
     try {
-      const b = { ...baseBody(m), fields: [m.rosterField, ...ex, LAST_FIELD], sorts: [`${LAST_FIELD} desc`], limit: '5000' };
-      b.filters[m.timeField] = timeFilter;
-      if (stationExpr && m.stationField) b.filters[m.stationField] = stationExpr;
-      b.dynamic_fields = JSON.stringify([{ measure: LAST_FIELD, based_on: m.timeField, type: 'max' }]);
-      const rows = await runScoped(m, b);
+      const { rows, tKey } = await latestRows(m, timeFilter, ex, stationExpr);
       const map = new Map();
       for (const r of rows) {
         const d = String(r[m.rosterField] ?? '').trim();
-        const ts = parseTs(r[LAST_FIELD]);
+        const ts = parseTs(r[tKey]);
         if (!d || !ts) continue;
         const prev = map.get(d);
         if (!prev || ts > prev.ts) map.set(d, { ts, station: m.stationField ? String(r[m.stationField] ?? '').trim() : '', operator: opField ? String(r[opField] ?? '').trim() : '' });
@@ -504,11 +518,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // here (5000-row cap → `truncated` warns when a very busy window overflows).
   async function deviceTimeline(m, hours = 24, interval = 60, station = '', withInfo = false) {
     if (!m.rosterField) return { configured: false };
-    // Looker dimension groups name every timeframe `${group}_${timeframe}` —
-    // swap the picked timeframe for `_hour` (or append it when the picked field
+    // Swap the picked timeframe for a sibling (or append when the picked field
     // is the bare group name). If the guess is wrong Looker 400s and the panel
     // shows the error rather than silently lying.
-    const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
     const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
     const hourField = `${group}_hour`;
     const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
