@@ -183,6 +183,68 @@ function RosterPanel({ monitorId }) {
   );
 }
 
+// The day timeline: rows = devices, columns = hours, green = sent data that hour,
+// grey = silent — the "see the impact through the whole day" view. A red device
+// name means it hasn't been active in the current hour.
+function TimelinePanel({ monitorId }) {
+  const [data, setData] = useState(null);
+  const [hours, setHours] = useState(24);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const load = async (h) => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch(`/api/admin/data-health/monitors/${monitorId}/timeline?hours=${h}`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      setData(d);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load is stable per monitor; refetch on monitor/window change
+  useEffect(() => { load(hours); }, [monitorId, hours]);
+  if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={() => load(hours)}>Retry</button></div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Building the day timeline from Looker…</div>;
+  if (!data.configured) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{data.reason || 'No roster field set — pick a device/operator dimension in ✏️ Edit → Device roster.'}</div>;
+  const hourLabel = (iso) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }).slice(0, 5);
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{data.devices.length} device{data.devices.length === 1 ? '' : 's'}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>each block = one hour · green = sent data · grey = silent</span>
+        <span style={{ flex: 1 }} />
+        {[12, 24, 48].map((h) => (
+          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
+        ))}
+        <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours)}>{busy ? '…' : '🔄'}</button>
+      </div>
+      {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some device-hours may be missing; try a shorter range.</div>}
+      {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : (
+        <div style={{ overflowX: 'auto' }}>
+          {/* Hour scale: a label every 3rd bucket, aligned to the 12px blocks. */}
+          <div style={{ display: 'flex', gap: 2, marginLeft: 148, marginBottom: 2 }}>
+            {data.buckets.map((b, i) => (
+              <span key={b} style={{ width: 12, flexShrink: 0, fontSize: 8.5, color: 'var(--muted)', overflow: 'visible', whiteSpace: 'nowrap' }}>{i % 3 === 0 ? hourLabel(b) : ''}</span>
+            ))}
+          </div>
+          {data.devices.map(({ device, active }) => {
+            const liveNow = active[active.length - 1] === 1;
+            return (
+              <div key={device} style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+                <span title={device} style={{ width: 140, marginRight: 6, flexShrink: 0, fontSize: 11.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: liveNow ? 'var(--text)' : STATUS_COLOR.stale }}>{device}</span>
+                {active.map((a, i) => (
+                  <span key={i} title={`${hourLabel(data.buckets[i])} — ${a ? 'active' : 'silent'}`}
+                    style={{ width: 12, height: 16, flexShrink: 0, borderRadius: 2, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Expandable history: the transition/alert feed + the raw pull log + a live peek
 // at the last 20 records off the feed (+ the device roster when configured).
 function HistoryPanel({ monitorId, rosterField }) {
@@ -194,7 +256,7 @@ function HistoryPanel({ monitorId, rosterField }) {
     <div style={{ marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         {[['events', `Activity (${hist.events.length})`], ['checks', `Pull log (${hist.checks.length})`], ['latest', '🧾 Latest 20 (live)'],
-          ...(rosterField ? [['roster', '📟 Devices (live)']] : [])].map(([k, l]) => (
+          ...(rosterField ? [['roster', '📟 Devices (live)'], ['timeline', '📊 Timeline (live)']] : [])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...ghostBtn, padding: '5px 11px', ...(tab === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}>{l}</button>
         ))}
       </div>
@@ -235,6 +297,7 @@ function HistoryPanel({ monitorId, rosterField }) {
         ) : <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No pulls yet.</div>)}
         {tab === 'latest' && <LatestRecords monitorId={monitorId} />}
         {tab === 'roster' && <RosterPanel monitorId={monitorId} />}
+        {tab === 'timeline' && <TimelinePanel monitorId={monitorId} />}
       </div>
     </div>
   );
@@ -340,7 +403,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
-    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30,
+    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '',
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -464,15 +527,20 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
           </div>
           {f.rosterField && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div>
-                  <span style={label}>Linked from (start time)</span>
-                  <input style={input} type="datetime-local" value={isoToLocalInput(f.rosterStart)}
+                  <span style={label}>Daily from (SA time)</span>
+                  <input style={input} type="time" value={f.rosterDaily || ''} onChange={(e) => set('rosterDaily', e.target.value)} />
+                </div>
+                <div>
+                  <span style={{ ...label, opacity: f.rosterDaily ? 0.45 : 1 }}>or once-off start</span>
+                  <input style={{ ...input, opacity: f.rosterDaily ? 0.45 : 1 }} type="datetime-local" disabled={!!f.rosterDaily}
+                    value={isoToLocalInput(f.rosterStart)}
                     onChange={(e) => set('rosterStart', e.target.value ? new Date(e.target.value).toISOString() : '')} />
                 </div>
                 <div>
-                  <span style={{ ...label, opacity: f.rosterStart ? 0.45 : 1 }}>or linked window (min)</span>
-                  <input style={{ ...input, opacity: f.rosterStart ? 0.45 : 1 }} type="number" min="10" disabled={!!f.rosterStart}
+                  <span style={{ ...label, opacity: (f.rosterDaily || f.rosterStart) ? 0.45 : 1 }}>or window (min)</span>
+                  <input style={{ ...input, opacity: (f.rosterDaily || f.rosterStart) ? 0.45 : 1 }} type="number" min="10" disabled={!!(f.rosterDaily || f.rosterStart)}
                     value={f.rosterBaselineMin} onChange={(e) => set('rosterBaselineMin', e.target.value)} />
                 </div>
               </div>
@@ -481,7 +549,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
                 <input style={input} type="number" min="1" value={f.rosterOnlineMin} onChange={(e) => set('rosterOnlineMin', e.target.value)} />
               </div>
               <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>
-                {f.rosterStart ? 'Roster = every device seen since the start time (your local time). Clear it to use the rolling window instead.' : 'Set a start time (e.g. doors open) to anchor the roster to the event instead of a rolling window.'}
+                {f.rosterDaily ? `Roster restarts every day at ${f.rosterDaily} (South Africa time) — the multi-day event shape.`
+                  : f.rosterStart ? 'Roster = every device seen since the once-off start time (your local time). Clear it to use the rolling window.'
+                    : 'Pick a daily time (multi-day events), a once-off start (single event day), or leave both blank for a rolling window.'}
               </span>
             </div>
           )}

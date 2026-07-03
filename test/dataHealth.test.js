@@ -382,6 +382,49 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   assert.equal(junk.rosterStart, '');
 });
 
+test('rosterAnchor: daily SAST time beats fixed start; wraps to yesterday', () => {
+  const h = mountHealth();
+  const now = Date.parse('2026-07-03T10:00:00Z'); // 12:00 SAST
+  const a = h.mod.rosterAnchor({ rosterDaily: '09:00', rosterStart: '2026-01-01T00:00:00.000Z' }, now);
+  assert.equal(a.toISOString(), '2026-07-03T07:00:00.000Z'); // today 09:00 SAST (daily wins)
+  const b = h.mod.rosterAnchor({ rosterDaily: '14:00' }, now); // today's 14:00 SAST still ahead
+  assert.equal(b.toISOString(), '2026-07-02T12:00:00.000Z'); // → since yesterday 14:00 SAST
+  assert.equal(h.mod.rosterAnchor({ rosterStart: '2026-01-01T00:00:00.000Z' }, now).toISOString(), '2026-01-01T00:00:00.000Z');
+  assert.equal(h.mod.rosterAnchor({}, now), null);
+});
+
+test('deviceTimeline: per-device hour buckets over the window', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  let body = null;
+  // Real Looker hour dims render "YYYY-MM-DD HH" (query_timezone UTC).
+  const hourStr = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(0) },   // this hour
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(180) }, // 3 hours back
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(600) }, // 10 hours back
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 24);
+  assert.equal(t.configured, true);
+  assert.equal(t.hours, 24);
+  assert.deepEqual(body.fields, ['scans.device_id', 'scans.scanned_at_hour']); // hour sibling of the time field
+  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
+  const d1 = t.devices.find((d) => d.device === 'D-1');
+  assert.equal(d1.active[23], 1);
+  assert.equal(d1.active[20], 1);
+  assert.equal(d1.active.filter(Boolean).length, 2);
+  const d2 = t.devices.find((d) => d.device === 'D-2');
+  assert.equal(d2.active[13], 1);
+  // Hour-sibling derivation follows Looker's `${group}_${timeframe}` naming.
+  const daily = makeMonitor(h, { name: 'Day level', rosterField: 'scans.device_id', timeField: 'scans.created_at_date' });
+  assert.equal((await h.mod.deviceTimeline(daily, 12)).hourField, 'scans.created_at_hour');
+  const timey = makeMonitor(h, { name: 'Timey', rosterField: 'scans.device_id', timeField: 'scans.created_at_time' });
+  assert.equal((await h.mod.deviceTimeline(timey, 12)).hourField, 'scans.created_at_hour');
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
