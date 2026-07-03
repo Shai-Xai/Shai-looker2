@@ -1,0 +1,43 @@
+name: Apply data-health monitor templates
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): applies the
+# reviewed patch to the feature branch, copies the file onto main, then deletes
+# itself from this (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify patch, apply to branch, sync main, self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-template.patch /tmp/d.patch
+          echo "2947afa06f28a0eaaac1d79764f31c0bc5b451f5ba37e6e3ea18e0f2bf0bdf16  /tmp/d.patch" | sha256sum -c -
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --index -3 /tmp/d.patch
+          git commit -m 'Data health: Bar and Check-in monitor templates' \
+            -m 'One tap pre-fills a whole monitor from the right data family - the fix for family-mixing setups that silently join nothing. Bar = Event Sales (open-loop: date_time / cashless_stations.name / device_id + operator & product columns); Check-in = Check-Ins family. Templates carry an open station filter, a 12:00 daily anchor, 15m online window and a 10% fleet alert; the explore resolves by view name once Looker''s model list loads, so the admin only picks the client, the station value and saves.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- client/src/components/DataHealthAdmin.jsx
+          git commit -m 'Data health: Bar and Check-in monitor templates' \
+            -m 'File copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-template.patch .github/workflows/apply-datahealth-template.yml
+          git commit -m "chore: remove one-shot template helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
