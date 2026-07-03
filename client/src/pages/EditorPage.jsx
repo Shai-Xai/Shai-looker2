@@ -10,6 +10,7 @@ import BackButton from '../components/BackButton.jsx';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
+import { lockFieldFor } from '../lib/tileLockFields.js';
 
 export default function EditorPage() {
   const { id, suiteId } = useParams();
@@ -540,6 +541,7 @@ function DaysBeforeSyncModal({ def, onChange, onClose }) {
             <L>Filter expression — {'{n}'} is replaced with the number</L>
             <input style={fInput} value={sync.expr || '>={n}'} onChange={(e) => set({ expr: e.target.value })} placeholder=">={n}" />
             <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>e.g. <code>{'>={n}'}</code> includes everything from N+ days out (usual YoY-to-date); or <code>{'<={n}'}</code>, or just <code>{'{n}'}</code>.</div>
+            {sync.filterName && <SyncCoverage def={def} visTiles={visTiles} filterName={sync.filterName} />}
           </>
         )}
 
@@ -553,6 +555,41 @@ function DaysBeforeSyncModal({ def, onChange, onClose }) {
 function L({ children }) {
   return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '10px 0 4px' }}>{children}</div>;
 }
+
+// Coverage check for the days-to-go alignment filter. Any data tile that does NOT
+// receive the days-before value will compare a FULL prior period against a PARTIAL
+// current one — the classic false "YoY down" (e.g. online topups showing a big drop
+// while the aligned total shows +5%). A tile receives the filter when it wires it
+// via `listenTo`, or — for a hand-added (non-Looker) filter — when its own query
+// already uses the filter's field (mirrors useTileData's apply rules). Imported
+// filters (model/explore set) reach wired tiles only, so an un-wired tile silently
+// won't align — which is exactly what we warn about here.
+function SyncCoverage({ def, visTiles, filterName }) {
+  const filt = (def.filters || []).find((f) => f.name === filterName);
+  const imported = !!(filt && (filt.model || filt.explore));
+  const missing = (visTiles || []).filter((t) => {
+    if (t.listenTo && filterName in t.listenTo) return false; // explicitly wired → aligns
+    if (imported) return true;                                // imported filter → wired-only
+    return lockFieldFor(t, filterName, def.filters) == null;  // hand-added → applies by field match
+  });
+  const label = filt?.title || filt?.name || filterName;
+  if (!missing.length) {
+    return <div style={syncOkNote}>✓ All {visTiles.length} data tile{visTiles.length === 1 ? '' : 's'} will align to days-to-go.</div>;
+  }
+  return (
+    <div style={syncWarnNote}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠︎ {missing.length} tile{missing.length > 1 ? 's' : ''} won’t shift with days-to-go</div>
+      <div style={{ marginBottom: 6 }}>
+        {missing.length > 1 ? 'These tiles don’t' : 'This tile doesn’t'} listen to “{label}”, so any YoY / period figure on {missing.length > 1 ? 'them' : 'it'} compares a <b>full</b> prior period against a <b>partial</b> current one — the usual cause of a large false YoY drop. Wire this filter on each tile (Tile → “Filters this tile listens to”):
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18 }}>
+        {missing.map((t) => <li key={t.id}>{t.title || '(untitled)'}</li>)}
+      </ul>
+    </div>
+  );
+}
+const syncOkNote = { fontSize: 12, color: 'var(--success, #1a7f37)', background: 'color-mix(in srgb, var(--success, #1a7f37) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success, #1a7f37) 30%, transparent)', borderRadius: 8, padding: '8px 11px', marginTop: 10, lineHeight: 1.45 };
+const syncWarnNote = { fontSize: 12, color: 'var(--text)', background: 'color-mix(in srgb, #d97706 12%, transparent)', border: '1px solid color-mix(in srgb, #d97706 40%, transparent)', borderRadius: 8, padding: '9px 12px', marginTop: 10, lineHeight: 1.45 };
 const fInput = { width: '100%', boxSizing: 'border-box', padding: '8px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card)', color: 'var(--text)' };
 
 function Centered({ children, error }) {
