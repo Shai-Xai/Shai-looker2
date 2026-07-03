@@ -1,8 +1,9 @@
 name: Apply data-health report visuals
 # ONE-SHOT helper (same pattern as the earlier data-health jobs): decodes the
-# reviewed patch (gzip -> base64, sha256-verified after decode), applies it to
-# the feature branch, copies the files onto main, then deletes itself from this
-# (default) branch. Safe to delete by hand if it ever lingers.
+# reviewed patch (gzip -> base64, with a 2-line splice fixing a transcription
+# slip at lines 13-14, sha256-verified after decode), applies it to the feature
+# branch, copies the files onto main, then deletes itself from this (default)
+# branch. Safe to delete by hand if it ever lingers.
 on:
   workflow_dispatch: {}
 
@@ -19,7 +20,7 @@ jobs:
       - name: Decode + verify patch, apply to branch, sync main, self-clean
         run: |
           set -euo pipefail
-          base64 -d patches/repviz.gz.b64 | gunzip > /tmp/d.patch
+          { head -12 patches/repviz.gz.b64; cat patches/repviz.fix1314; tail -n +15 patches/repviz.gz.b64; } | base64 -d | gunzip > /tmp/d.patch
           echo "e5548359df425e1c6453e67e2f6a85c43e8abf9ec8912274f746c9283ba073fc  /tmp/d.patch" | sha256sum -c -
           git config user.name "Claude"
           git config user.email "noreply@anthropic.com"
@@ -39,6 +40,6 @@ jobs:
             -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
           git push origin mwork:main
           git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
-          git rm -q --ignore-unmatch patches/repviz.gz.b64 .github/workflows/apply-datahealth-repviz.yml
+          git rm -q --ignore-unmatch patches/repviz.gz.b64 patches/repviz.fix1314 .github/workflows/apply-datahealth-repviz.yml
           git commit -m "chore: remove one-shot repviz helper"
           git push origin defclean:claude/ecstatic-thompson-vUFsS
