@@ -237,6 +237,20 @@ test('an extra explore (e.g. cashless) also stamps the reporting timezone', asyn
   assert.equal(res.queryBody.query_timezone, 'Europe/Paris');
 });
 
+test('dateRange filters the MEASURED view\'s own date, not the catalogue default (issue #28 residual)', async () => {
+  // Combined explore: catalogue dateDimension is the check-in date, but the
+  // measured view (sales) has its own date_date — "today" must land THERE, or
+  // it doesn't constrain sales rows at all (the €34.50-instead-of-€12 bug).
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_checkins.date_date', measures: [{ name: 'cashless_x_sales.revenue', label: 'Sales Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.date_date', label: 'Sales Date', type: 'date' }, { name: 'cashless_x_checkins.date_date', label: 'Check-in Date', type: 'date' }], notes: [] }] };
+  const ent = h.makeEntity('Cashless DD Co', 'CashlessDD-org');
+  const user = h.makeClient('owl-dd@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x_sales.date_date'], 'today', 'filters the measured view\'s own date');
+  assert.equal(res.queryBody.filters['cashless_x_checkins.date_date'], undefined, 'catalogue default not used when the measure has its own date');
+});
+
 test('a registered extra explore gets its own scoped, validated read tool', async () => {
   const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
   const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });

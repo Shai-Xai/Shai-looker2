@@ -1027,7 +1027,17 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         if (val == null || String(val).trim() === '') continue;
         filters[field] = String(val);
       }
-      if (args.dateRange && String(args.dateRange).trim() && cat.dateDimension) filters[cat.dateDimension] = String(args.dateRange).trim();
+      // Date-filter the MEASURED view's OWN date field when it has one. In a
+      // combined explore the catalogue-level dateDimension (e.g. the cashless
+      // access-control/check-in date) does not constrain other views' rows —
+      // issue #28's residual: "today" on bar sales matched every date. Prefer
+      // `<measureView>.date_date`, then `<measureView>.created_at_date`, then
+      // the catalogue default.
+      if (args.dateRange && String(args.dateRange).trim()) {
+        const mv = String(measure).split('.')[0];
+        const dateDim = [`${mv}.date_date`, `${mv}.created_at_date`].find((n) => dByName.has(n)) || cat.dateDimension;
+        if (dateDim) filters[dateDim] = String(args.dateRange).trim();
+      }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
       applySuiteEventLocks(body.filters, suiteId, dByName);
       const allowed = await query.applyScope(body, user, suiteId);
