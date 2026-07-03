@@ -287,6 +287,26 @@ test('latestRecords: the raw feed tail, newest first, scoped and mapped', async 
   assert.equal(body.limit, '100');
 });
 
+test('fieldValues: distinct dimension values, deduped and scoped', async () => {
+  const h = mountHealth();
+  let body = null;
+  h.setRowsFn(async (b) => {
+    body = b;
+    return [
+      { 'scans.station_name': 'Bar 1' }, { 'scans.station_name': 'Bar 1' },
+      { 'scans.station_name': 'Gate A' }, { 'scans.station_name': '' }, { 'scans.station_name': null },
+    ];
+  });
+  const vals = await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name', entityId: 'entZ', suiteId: 'sZ' });
+  assert.deepEqual(vals, ['Bar 1', 'Gate A']); // deduped, blanks dropped
+  assert.deepEqual(body.fields, ['scans.station_name']);
+  assert.equal(h.getScopedUser().role, 'client'); // entity given → scoped read
+  assert.deepEqual(h.getScopedUser().entityIds, ['entZ']);
+
+  await h.mod.fieldValues({ model: 'ticketing', view: 'scans', field: 'scans.station_name' });
+  assert.equal(h.getScopedUser().role, 'admin'); // no entity → platform read
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
