@@ -1,0 +1,22 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 3af5ccb..453db8e 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -1152,7 +1152,7 @@ const MONITOR_TEMPLATES = {
+     stationField: 'cashless_stations.name',
+     rosterField: 'cashless_open_loop_sales.device_id',
+     detailFields: ['cashless_open_loop_sales.device_id', 'event_sales_operators.handler', 'cashless_operation_sale_item.product_name'],
+-    filters: { 'cashless_combine_data.name': '', 'cashless_stations.name': '' },
++    filters: { 'cashless_combine_data.name': '', 'cashless_open_loop_sales.station_category': '', 'cashless_stations.name': '' },
+     rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
+   },
+   checkin: {
+@@ -1161,7 +1161,7 @@ const MONITOR_TEMPLATES = {
+     stationField: 'cashless_check_ins.station_name',
+     rosterField: 'cashless_check_ins.device_id',
+     detailFields: ['cashless_check_ins.device_id', 'Check_in_operators.handler', 'cashless_check_ins.station_name'],
+-    filters: { 'cashless_combine_data.name': '', 'cashless_check_ins.station_name': '' },
++    filters: { 'cashless_combine_data.name': '', 'cashless_check_ins.station_category': '', 'cashless_check_ins.station_name': '' },
+     rosterDaily: '12:00', rosterOnlineMin: 15, rosterAlertPct: 10, warnMin: 30, staleMin: 60,
+   },
+ };
