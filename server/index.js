@@ -56,12 +56,12 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Security headers (dependency-free, helmet essentials): frame-ancestors 'none'
-// (clickjacking), nosniff, Referrer-Policy, HSTS in prod. Full script-src CSP deferred.
+// Security headers (dependency-free, helmet essentials): frame-ancestors 'self' — cross-origin framing (clickjacking) stays blocked,
+// SELF-framing allowed for the admin /split view's two same-origin panes. Plus nosniff, Referrer-Policy, HSTS in prod. Full CSP deferred.
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'DENY');
-  res.set('Content-Security-Policy', "frame-ancestors 'none'");
+  res.set('X-Frame-Options', 'SAMEORIGIN');
+  res.set('Content-Security-Policy', "frame-ancestors 'self'");
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
@@ -146,7 +146,7 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -644,7 +644,7 @@ const eventopsApi = require('./eventops').mount(app, { db, auth }); // pilot: de
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
-require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) → server/dataHealth.js
+const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); // BigQuery→Looker stream monitor (Admin → 📡 Data health; client tab in Event Ops; Owl/MCP tool) → server/dataHealth.js
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing
@@ -2616,7 +2616,7 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
-const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); // AI token metering per client/feature (Admin → AI → Usage)
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); // AI token metering (Admin → AI → Usage) + per-client custom sending domains
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).

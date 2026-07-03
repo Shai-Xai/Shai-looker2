@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (Cashless "today" timezone fix + per-client reporting timezone) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (📶 Data health: client tab, AI diagnose, event report, fleet alert, Owl/MCP access) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -405,7 +405,10 @@ spend, the return, and ask the Owl which campaign is worth more budget."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
-  wording. Emails look like the client, sent from Howler's verified domain.
+  wording. Emails look like the client — sent from Howler's verified domain by
+  default, or from the client's OWN domain once verified (✅ custom sending
+  domain: set it in Admin → client → Settings or the client's Settings → Email;
+  add the DNS records, verify, done — sends fall back safely until verified).
   Every logo/icon/image upload now shows **clear spec guidance** (format, size,
   transparency) right under the picker, on both the admin and client surfaces —
   so the assets we get back are the right shape first time.
@@ -654,6 +657,28 @@ spreadsheet, and a full history of where each one went."
 entry always works as a fallback). v1 is device + station tracking; staffing, shifts and
 budgets are on the roadmap.
 
+### 📶 Data health — is your event's data flowing? 🧪
+A live monitor of the **data pipe itself**: is data from every station (check-in
+scanners, bars, vendors) actually arriving in the platform — and from **every device**?
+- **Per-station stream watch** 🧪 — minutes since the last record per station, with
+  warn/stale thresholds and alerting when a stream goes quiet.
+- **Device roster** 🧪 — how many devices are linked since doors opened, how many are
+  online, and **which ones are offline** and for how long. Optional fleet alert when a
+  set % of devices drop off.
+- **Day timeline** 🧪 — every device's activity and scan counts through the day in
+  5–60-min blocks: spot the device that died at 18:00, the flapper, the late joiner.
+- **🩺 AI Diagnose** 🧪 — one tap per station: an AI verdict with the flow numbers,
+  ranked concerns and a suggested action for each.
+- **📝 Event report** 🧪 — an AI-drafted **Data health & diagnostics report** across
+  all the event's stations — for the ops debrief, and with a neutral connectivity
+  section clean enough to **forward to the network provider**.
+- **Everywhere** — clients see it read-only in their **Event Ops → 📶 Data health**
+  tab; Howler runs the full console in Admin; and the **Owl can answer questions on
+  all of it** (in-app, WhatsApp, and Claude/ChatGPT via the MCP connector).
+
+**Pitch:** "You'll know a scanner has stopped sending data before the queue does —
+and you'll have the evidence report if it was the network."
+
 ---
 
 ## 13. Pulse API & AI-agent access (MCP)  🧪
@@ -721,6 +746,22 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
+  per station now has a read-only client tab in Event Ops (streams, device roster,
+  day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data
+  health & diagnostics report** (ops + network-provider shareable), an optional
+  fleet alert (≥ X% of devices offline), and full Owl/MCP query access
+  (`pulse_data_health`).
+- **2026-07-03** — **Reliable check-in numbers from the Owl** 🧪: the Owl now answers
+  check-in/scanning questions with the **same recipe Inventive uses** — the dedicated
+  check-in count grouped by station, keyed on the cashless data's own event field (enabled
+  automatically) — with an explicit steer never to count sales transactions at check-in
+  stations as "check-ins". Per-gate numbers now match the source reports.
+- **2026-07-03** — **Custom sending domain** ✅ (Admin → client → Settings + client Settings →
+  Email): clients can send campaigns/digests from their own domain (e.g. events@mail.brand.com).
+  Register the domain, hand the DNS records to IT, verify — until verified, sends safely use the
+  platform address. Display-name branding unchanged.
 
 - **2026-07-03** — **Cashless "today" now reads correctly** ✅ (fix): the Owl's
   data/cashless queries now resolve relative date filters ("today", "this week")
@@ -798,6 +839,12 @@ see "The continuous comms loop" above.)*
   with no extra login, always scoped to **their own organization's data**. Pilot: works for
   organizations linked to a Pulse client (Admin → AI → Organizer portal Owl); widens to all
   self-service organizers when the Howler→Pulse data integration ships.
+- **2026-07-01** — **Owl chat: download one answer's data, table or chart** 🧪: each data
+  answer already had ⬇ CSV / ⬇ Image — now the **CSV is the RAW query data** (when the preview
+  is capped at 50 rows, the download re-runs the query live and fetches **all** rows, same
+  privacy/scope gates), every **table in an answer** gets its own tiny ⬇ Table CSV, and
+  cashless/extra-explore answers now carry their **chart, CSV and "Beneath the hood"** query
+  view just like ticketing ones (they'd silently lost all three).
 - **2026-07-01** — **Owl chat: ⏹ Stop button + no more silent stalls** 🧪: while the Owl is
   working you can now **tap Stop** to cancel the answer (the server abandons the work too, so
   nothing keeps burning in the background). And long data pulls no longer look frozen — the
@@ -1187,8 +1234,9 @@ see "The continuous comms loop" above.)*
   branding. **Self-service:** clients manage it themselves in **Settings → Branding**, which is now
   split into **Account & portfolio** (their overall look) and **Events** (pick an event, brand it);
   Howler can also set it in the event (suite) detail → **Event branding**. Emails still send from
-  Howler's verified domain, so "different mailer per event" means a different look + sender display
-  name, not a different sending address.
+  Howler's verified domain by default — or the client's own verified custom domain
+  (per-client) — so "different mailer per event" means a different look + sender
+  display name; the sending address is per client, not per event.
 - **2026-06-22** — **Alerts** 🧪 (new): clients (and Howler on their behalf) can set an
   **alert on any metric** — point it at a dashboard KPI tile and Pulse watches that live
   number, firing the moment it crosses. Three types out of the box (**🎉 sold out**,

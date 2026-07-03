@@ -460,6 +460,56 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   assert.equal(capped.buckets.length, 288);
 });
 
+test('fleet alert: ≥ rosterAlertPct % of devices offline fires once, recovers once', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30, rosterAlertPct: 20 });
+  const roster = (offlineCount) => Array.from({ length: 10 }, (_, i) => (
+    { 'scans.device_id': `D-${i}`, 'scans.scanned_at': minsAgo(i < offlineCount ? 120 : 5) }
+  ));
+  let rows = roster(3); // 30% offline ≥ 20% threshold
+  h.setRowsFn(async (b) => (b.fields.includes('scans.device_id') ? rows : [feedRow('Gate B', 2)]));
+  await h.mod.check(m);
+  assert.equal(eventKinds(h, m.id).filter((k) => k === 'device_alert').length, 1);
+  assert.equal(h.opsAlerts.length, 1);
+  assert.match(h.opsAlerts[0].msg, /3 of 10 devices \(30%\)/);
+  const snap = h.mod.monitorById(m.id).rosterSnapshot;
+  assert.equal(snap.breach, true);
+  // Still breaching → no re-fire (edge-detected).
+  await h.mod.check(h.mod.monitorById(m.id));
+  assert.equal(eventKinds(h, m.id).filter((k) => k === 'device_alert').length, 1);
+  // Fleet recovers → one recovery event, breach cleared.
+  rows = roster(0);
+  await h.mod.check(h.mod.monitorById(m.id));
+  assert.equal(eventKinds(h, m.id).filter((k) => k === 'device_recovered').length, 1);
+  assert.equal(h.mod.monitorById(m.id).rosterSnapshot.breach, false);
+  // Threshold off (0) → never fires, even fully offline.
+  const off = makeMonitor(h, { name: 'No fleet alert', rosterField: 'scans.device_id', rosterAlertPct: 0 });
+  rows = roster(10);
+  await h.mod.check(off);
+  assert.equal(eventKinds(h, off.id).filter((k) => k === 'device_alert').length, 0);
+});
+
+test('healthSummary scopes by entity and suite', () => {
+  const h = mountHealth();
+  const a = makeMonitor(h, { name: 'Client A gate', entityId: 'ent-a', suiteId: 'suite-1' });
+  makeMonitor(h, { name: 'Client A wide', entityId: 'ent-a' });
+  makeMonitor(h, { name: 'Client B gate', entityId: 'ent-b' });
+  makeMonitor(h, { name: 'Platform', entityId: '' });
+  // The suite shares one DB across tests — assert on THIS test's monitors only.
+  const all = h.mod.healthSummary({});
+  assert.ok(['Client A gate', 'Client A wide', 'Client B gate', 'Platform'].every((n) => all.some((m) => m.name === n)));
+  assert.ok(Array.isArray(all[0].streams));
+  // entityIds = a caller's allowed set (drops platform-wide + other clients).
+  const mine = h.mod.healthSummary({ entityIds: ['ent-a'] });
+  assert.deepEqual(mine.map((m) => m.name).sort(), ['Client A gate', 'Client A wide']);
+  // suiteId keeps that suite's monitors PLUS the client-wide ones.
+  const forSuite = h.mod.healthSummary({ entityIds: ['ent-a'], suiteId: 'suite-1' });
+  assert.deepEqual(forSuite.map((m) => m.name).sort(), ['Client A gate', 'Client A wide']);
+  const otherSuite = h.mod.healthSummary({ entityIds: ['ent-a'], suiteId: 'suite-2' });
+  assert.deepEqual(otherSuite.map((m) => m.name), ['Client A wide']);
+  assert.equal(h.mod.healthSummary({ entityId: 'ent-b' })[0].id !== a.id, true);
+});
+
 test('check() stores a roster snapshot for collapsed cards', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
