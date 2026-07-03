@@ -90,13 +90,19 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // events. We only apply locks valid in THIS explore (core_events.* or a curated
   // dimension) so we never inject a field Looker would reject, and never touch the
   // organiser field (left to applyScope). ANY_VALUE / blank locks are skipped.
-  function applySuiteEventLocks(filters, suiteId, dims = dimByName) {
+  // `modelPinnedEvent`: the model explicitly filtered this explore's OWN event-name
+  // field (a cross-edition comparison, e.g. cashless "vs last year"). In that case the
+  // blanket core_events.* auto-lock is skipped — otherwise the CURRENT ticketing event
+  // lock would contradict the comparison filter and return empty rows. Locks on the
+  // explore's own dims still apply only when the model hasn't set them (default, not wall).
+  function applySuiteEventLocks(filters, suiteId, dims = dimByName, modelPinnedEvent = false) {
     if (!suiteId || !auth || !auth.lockedFiltersForSuite) return;
     let locks; try { locks = auth.lockedFiltersForSuite(suiteId) || {}; } catch { return; }
     for (const [key, val] of Object.entries(locks)) {
       if (val == null || val === '' || val === ' __ANY_VALUE__') continue;
       const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
       if (!field || field === ORG) continue; // organiser handled by applyScope
+      if (modelPinnedEvent && /^core_events\./.test(field) && !dims.has(field)) continue;
       if ((/^core_events\./.test(field) || dims.has(field)) && filters[field] == null) {
         filters[field] = String(val);
       }
@@ -1163,7 +1169,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         }
       }
       const body = { model: cat.model, view: cat.explore, fields: [...dimensions, ...measureList], filters, sorts: [`${measure} desc`], limit: Math.min(Math.max(Number(args.limit) || 500, 1), 5000) };
-      applySuiteEventLocks(body.filters, suiteId, dByName);
+      applySuiteEventLocks(body.filters, suiteId, dByName, filters[`${cat.explore}.name`] != null);
       const allowed = await query.applyScope(body, user, suiteId);
       if (allowed === false) return refuse('no_scope', `I can't scope ${cat.label} to a client here — this data source may not be linkable to your client, or open a client/event first.`);
       if (entityId && auth && auth.accessibleOrgFilters) {

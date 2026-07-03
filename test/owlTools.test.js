@@ -271,6 +271,29 @@ test('a registered extra explore gets its own scoped, validated read tool', asyn
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
 });
 
+test('extra explore: an explicit cross-edition event filter overrides the suite pin', async () => {
+  const ent = h.makeEntity('Ultra XE', 'Ultra Cross-Edition');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26', lockedFilters: { 'core_events.name': 'Kappa FuturFestival 2026', 'cashless_x.name': 'Kappa FuturFestival 2026' } });
+  const user = h.makeClient('owl-xe@client.test', [ent.id]);
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.name', label: 'Event Name', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  // Default (no model filter): the suite pin applies — current edition only.
+  const pinned = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user, suite.id));
+  assert.equal(pinned.ok, true);
+  assert.equal(pinned.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2026');
+  assert.equal(pinned.queryBody.filters['core_events.name'], 'Kappa FuturFestival 2026');
+  // "vs last year": the model filters the explore's OWN event-name field → its filter
+  // wins AND the contradicting core_events auto-lock is skipped (else empty rows).
+  const compare = await t.ask_cashless_x.run(
+    { measure: 'cashless_x.revenue', filters: { 'cashless_x.name': 'Kappa FuturFestival 2025,Kappa FuturFestival 2026' } },
+    ctx(user, suite.id),
+  );
+  assert.equal(compare.ok, true);
+  assert.equal(compare.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2025,Kappa FuturFestival 2026');
+  assert.equal(compare.queryBody.filters['core_events.name'], undefined, 'ticketing event auto-lock skipped');
+  assert.equal(compare.queryBody.filters[h.ORG_FIELD], 'Ultra Cross-Edition', 'organiser ceiling still forced');
+});
+
 test('exportRows (raw CSV): PII fields refused, scope forced, full row budget', async () => {
   const ent = h.makeEntity('Ultra EX', 'Ultra Exports');
   const user = h.makeClient('owl-ex@client.test', [ent.id]);
