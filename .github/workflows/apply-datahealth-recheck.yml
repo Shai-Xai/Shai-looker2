@@ -1,0 +1,42 @@
+name: Apply data-health save-recheck
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): applies the
+# reviewed patch to the feature branch, copies the file onto main, then deletes
+# itself from this (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply to feature branch, sync main, then self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-recheck.patch /tmp/d.patch
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --index -3 /tmp/d.patch
+          git commit -m 'Data health: saving a monitor takes a fresh reading immediately' \
+            -m 'An edited setting (e.g. a changed roster online window) must show on the tile straight away - create/update now run check() before responding, so the snapshot, chips and thresholds reflect the new config without waiting for the next scheduled sweep.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- server/dataHealth.js
+          git commit -m 'Data health: saving a monitor takes a fresh reading immediately' \
+            -m 'File copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-recheck.patch .github/workflows/apply-datahealth-recheck.yml
+          git commit -m "chore: remove one-shot recheck helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
