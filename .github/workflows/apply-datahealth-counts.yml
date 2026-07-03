@@ -1,0 +1,44 @@
+name: Apply data-health timeline scan counts
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): the authoring
+# session can only write through the GitHub API, so this applies the reviewed
+# patch to the feature branch, copies the resulting data-health files onto main
+# (which only drifted by an unrelated Owl commit), then deletes itself from this
+# (default) branch. Safe to delete by hand if it ever lingers.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply to feature branch, sync main, then self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-counts.patch /tmp/d.patch
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --index /tmp/d.patch
+          git commit -m 'Data health timeline: scans-per-device-per-block counts report' \
+            -m 'New Counts mode on the Timeline tab: same device x time-block grid, but each cell shows the scan count (heat-shaded), with per-device totals, per-block totals and a grand total. Scan counts prefer the explore''s native count measure, fall back to a dynamic count_distinct on the time dimension, then to row presence; the working basis is remembered per monitor and relearned when the explore changes.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- server/dataHealth.js client/src/components/DataHealthAdmin.jsx test/dataHealth.test.js
+          git commit -m 'Data health timeline: scans-per-device-per-block counts report' \
+            -m 'Counts mode for the Timeline tab: scan counts per device per 5-60 min block with totals. Files copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-counts.patch .github/workflows/apply-datahealth-counts.yml
+          git commit -m "chore: remove one-shot counts helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
