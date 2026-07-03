@@ -33,6 +33,13 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     if (body && !body.query_timezone) body.query_timezone = reportingTz.reportingTimezoneFor(db, ctx || {});
     return body;
   }
+  // Zero rows + caller-supplied filters is USUALLY a case/spelling miss — Looker
+  // string filters are exact and case-sensitive ("Bar" ≠ "bar"). Say so in the
+  // result, so the Owl checks the field's real values instead of concluding
+  // "no data" (or blaming the date filter — how issue #28's retest went wrong).
+  const emptyFilterNote = (userFilters) => ((userFilters && Object.keys(userFilters).length)
+    ? 'No rows matched. Filter values are exact and CASE-SENSITIVE ("Bar" ≠ "bar") — group by the filtered field WITHOUT the filter to see its real values, then retry with the exact value.'
+    : undefined);
   // Resolver for the createSegment act-tool's preview (count + per-channel reach).
   // Server-side only; never returns the people list to the chat. Same scope gate.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db, catalogue });
@@ -237,6 +244,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       measure,
       dimensions,
       queryBody: body, // stored in the audit ledger (tool_results)
+      ...((!Array.isArray(rows) || !rows.length) && emptyFilterNote(args.filters) ? { note: emptyFilterNote(args.filters) } : {}),
     };
   }
 
@@ -450,7 +458,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     }
     stampReportingTz(body, { user, suiteId, entityId });
     const rows = await query.runLookerQuery('/queries/run/json', body);
-    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body };
+    const emptyNote = (!Array.isArray(rows) || !rows.length) ? emptyFilterNote(args.filters) : undefined;
+    return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: target.view, queryBody: body, ...(emptyNote ? { note: emptyNote } : {}) };
   }
   const queryDashboardSchema = {
     name: 'queryDashboard',
@@ -1055,7 +1064,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
       catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
-      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body };
+      const emptyNote = (!Array.isArray(rows) || !rows.length) ? emptyFilterNote(args.filters) : undefined;
+      return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(emptyNote ? { note: emptyNote } : {}) };
     }
     const props = {
       measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}.` },
