@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (Cashless "today" timezone fix + per-client reporting timezone) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-03 (📶 Data health: client tab, AI diagnose, event report, fleet alert, Owl/MCP access) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -657,6 +657,28 @@ spreadsheet, and a full history of where each one went."
 entry always works as a fallback). v1 is device + station tracking; staffing, shifts and
 budgets are on the roadmap.
 
+### 📶 Data health — is your event's data flowing? 🧪
+A live monitor of the **data pipe itself**: is data from every station (check-in
+scanners, bars, vendors) actually arriving in the platform — and from **every device**?
+- **Per-station stream watch** 🧪 — minutes since the last record per station, with
+  warn/stale thresholds and alerting when a stream goes quiet.
+- **Device roster** 🧪 — how many devices are linked since doors opened, how many are
+  online, and **which ones are offline** and for how long. Optional fleet alert when a
+  set % of devices drop off.
+- **Day timeline** 🧪 — every device's activity and scan counts through the day in
+  5–60-min blocks: spot the device that died at 18:00, the flapper, the late joiner.
+- **🩺 AI Diagnose** 🧪 — one tap per station: an AI verdict with the flow numbers,
+  ranked concerns and a suggested action for each.
+- **📝 Event report** 🧪 — an AI-drafted **Data health & diagnostics report** across
+  all the event's stations — for the ops debrief, and with a neutral connectivity
+  section clean enough to **forward to the network provider**.
+- **Everywhere** — clients see it read-only in their **Event Ops → 📶 Data health**
+  tab; Howler runs the full console in Admin; and the **Owl can answer questions on
+  all of it** (in-app, WhatsApp, and Claude/ChatGPT via the MCP connector).
+
+**Pitch:** "You'll know a scanner has stopped sending data before the queue does —
+and you'll have the evidence report if it was the network."
+
 ---
 
 ## 13. Pulse API & AI-agent access (MCP)  🧪
@@ -725,6 +747,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
+  per station now has a read-only client tab in Event Ops (streams, device roster,
+  day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data
+  health & diagnostics report** (ops + network-provider shareable), an optional
+  fleet alert (≥ X% of devices offline), and full Owl/MCP query access
+  (`pulse_data_health`).
 - **2026-07-03** — **Reliable check-in numbers from the Owl** 🧪: the Owl now answers
   check-in/scanning questions with the **same recipe Inventive uses** — the dedicated
   check-in count grouped by station, keyed on the cashless data's own event field (enabled
