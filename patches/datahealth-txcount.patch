@@ -1,0 +1,38 @@
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 0e26515..46a9122 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -655,0 +656,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++        // Rank the candidates: transaction_count IS the per-sale counter the
++        // dashboards use; cumulative/topup/tip/customer counters count other
++        // things entirely and must never win just by sorting first.
++        const score = (n) => {
++          const f = String(n).split('.')[1] || '';
++          if (/^transaction_count$/i.test(f)) return 0;
++          if (/transaction/i.test(f)) return 1;
++          if (/cumulative|topup|tip|customer|operator|distinct|tab/i.test(f)) return 9;
++          return 5;
++        };
+@@ -658,0 +669,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++          .filter((n) => score(n) < 9)
++          .sort((a, b) => score(a) - score(b))
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 1b45f5d..b02a9f4 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -481 +481,3 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
+-  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.tx_count' }, { name: 'other.count' }] }) } });
++  // Cumulative_topups_count sorts first alphabetically — the ranking must pick
++  // transaction_count (the per-sale counter) and never query the topup one.
++  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.Cumulative_topups_count' }, { name: 'scans.transaction_count' }, { name: 'other.count' }] }) } });
+@@ -489 +491 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
+-    if (b.fields.includes('scans.tx_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.tx_count': 41 }];
++    if (b.fields.includes('scans.transaction_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.transaction_count': 41 }];
+@@ -494 +496 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
+-  assert.equal(t.devices[0].counts[11], 41); // the catalogue measure carries the real volume
++  assert.equal(t.devices[0].counts[11], 41); // the real per-sale volume
+@@ -495,0 +498 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
++  assert.ok(bodies.every((b) => !b.fields.includes('scans.Cumulative_topups_count'))); // the decoy never ran
+@@ -500 +503 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
+-  assert.ok(bodies[0].fields.includes('scans.tx_count'));
++  assert.ok(bodies[0].fields.includes('scans.transaction_count'));
