@@ -2616,7 +2616,7 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
-const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); // AI token metering per client/feature (Admin → AI → Usage)
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); // AI token metering (Admin → AI → Usage) + per-client custom sending domains
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).

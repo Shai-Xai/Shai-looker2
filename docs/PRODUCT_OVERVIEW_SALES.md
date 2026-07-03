@@ -405,7 +405,10 @@ spend, the return, and ask the Owl which campaign is worth more budget."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
-  wording. Emails look like the client, sent from Howler's verified domain.
+  wording. Emails look like the client — sent from Howler's verified domain by
+  default, or from the client's OWN domain once verified (✅ custom sending
+  domain: set it in Admin → client → Settings or the client's Settings → Email;
+  add the DNS records, verify, done — sends fall back safely until verified).
   Every logo/icon/image upload now shows **clear spec guidance** (format, size,
   transparency) right under the picker, on both the admin and client surfaces —
   so the assets we get back are the right shape first time.
@@ -721,6 +724,11 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-03** — **Custom sending domain** ✅ (Admin → client → Settings + client Settings →
+  Email): clients can send campaigns/digests from their own domain (e.g. events@mail.brand.com).
+  Register the domain, hand the DNS records to IT, verify — until verified, sends safely use the
+  platform address. Display-name branding unchanged.
 
 - **2026-07-03** — **Cashless "today" now reads correctly** ✅ (fix): the Owl's
   data/cashless queries now resolve relative date filters ("today", "this week")
@@ -1187,8 +1195,9 @@ see "The continuous comms loop" above.)*
   branding. **Self-service:** clients manage it themselves in **Settings → Branding**, which is now
   split into **Account & portfolio** (their overall look) and **Events** (pick an event, brand it);
   Howler can also set it in the event (suite) detail → **Event branding**. Emails still send from
-  Howler's verified domain, so "different mailer per event" means a different look + sender display
-  name, not a different sending address.
+  Howler's verified domain by default — or the client's own verified custom domain
+  (per-client) — so "different mailer per event" means a different look + sender
+  display name; the sending address is per client, not per event.
 - **2026-06-22** — **Alerts** 🧪 (new): clients (and Howler on their behalf) can set an
   **alert on any metric** — point it at a dashboard KPI tile and Pulse watches that live
   number, firing the moment it crosses. Three types out of the box (**🎉 sold out**,

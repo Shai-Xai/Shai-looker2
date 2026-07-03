@@ -26,6 +26,16 @@ export function ProfileProvider({ children }) {
   // Admins default to the console; clients are always in client mode. A split
   // pane boots pinned to its side regardless of the stored mode.
   const [mode, setMode] = useState(() => (isAdmin ? (PANE || localStorage.getItem(MODE_KEY) || 'console') : 'client'));
+  // The initializer above races /auth/me: on a fresh load `isAdmin` is still
+  // false, so it yields 'client' and an admin boots into their last previewed
+  // client (and a split pane ignored its pin — the right pane showed a client
+  // view instead of the console). Re-sync ONCE when the user actually loads,
+  // unless they've already switched by hand this session.
+  const touchedMode = useRef(false);
+  useEffect(() => {
+    if (!isAdmin || touchedMode.current) return;
+    setMode(PANE || localStorage.getItem(MODE_KEY) || 'console');
+  }, [isAdmin]);
   // An admin previewing a client they aren't a member of: we stash {id,name,logo}
   // so the client shell has an identity (header branding, inClientView) even though
   // the entity isn't in their linked `entities`. Server already authorises admins
@@ -64,6 +74,7 @@ export function ProfileProvider({ children }) {
       setPreviewEntity(null);
     }
     setActiveId(id);
+    touchedMode.current = true;
     setMode('client');
     refresh?.();
   }, [refresh, user]);
@@ -71,6 +82,7 @@ export function ProfileProvider({ children }) {
   const enterConsole = useCallback(() => {
     if (!PANE) { localStorage.setItem(MODE_KEY, 'console'); localStorage.removeItem(PREVIEW_KEY); }
     setPreviewEntity(null);
+    touchedMode.current = true;
     setMode('console');
     refresh?.();
   }, [refresh]);
@@ -90,6 +102,7 @@ export function ProfileProvider({ children }) {
     if (entities.some((e) => e.id === want)) {
       if (!PANE) { localStorage.setItem(KEY, want); localStorage.setItem(MODE_KEY, 'client'); }
       setActiveId(want);
+      touchedMode.current = true;
       setMode(PANE === 'console' ? 'console' : 'client');
     }
     try {
