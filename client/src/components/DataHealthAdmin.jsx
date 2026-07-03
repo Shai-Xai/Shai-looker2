@@ -112,6 +112,57 @@ function HistoryPanel({ monitorId }) {
   );
 }
 
+// Test-mode banner: while ON, every alert is emailed ONLY to the test address —
+// ops Slack and client-team notifications stay muted, so thresholds can be tuned
+// without paging anyone. (Settings PUT is called inline rather than via lib/api.js
+// so this self-contained feature doesn't touch that shared file.)
+function TestModeBanner({ testMode, testEmail, onChanged }) {
+  const [email, setEmail] = useState(testEmail || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { setEmail(testEmail || ''); }, [testEmail]);
+
+  const save = async (body) => {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/admin/data-health/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  if (!testMode) {
+    return (
+      <div style={{ ...card, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 16px' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>🔔 Alerts are <strong>live</strong> — stale alerts post to ops Slack and (for client-pinned monitors) the client’s team.</span>
+        <span style={{ flex: 1 }} />
+        <button style={ghostBtn} disabled={busy} onClick={() => save({ testMode: true })}>🧪 Back to test mode</button>
+        {err && <span style={{ fontSize: 12, color: STATUS_COLOR.stale }}>{err}</span>}
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR.warn}`, background: STATUS_BG.warn }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13.5 }}>🧪 Test mode</strong>
+        <span style={{ fontSize: 12.5 }}>All alerts are emailed <strong>only</strong> to the address below — ops Slack and client notifications are muted.</span>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+        <input style={{ ...input, width: 260, flex: '0 1 auto' }} type="email" value={email} placeholder="you@howler.co.za" onChange={(e) => setEmail(e.target.value)} />
+        <button style={ghostBtn} disabled={busy || !email.trim() || email === testEmail} onClick={() => save({ testEmail: email })}>Save address</button>
+        <span style={{ flex: 1 }} />
+        <button style={{ ...btn, background: STATUS_COLOR.fresh }} disabled={busy}
+          onClick={() => { if (window.confirm('Go live? Stale alerts will start posting to ops Slack and, for client-pinned monitors, to the client’s team.')) save({ testMode: false }); }}>
+          Go live
+        </button>
+      </div>
+      {err && <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 6 }}>{err}</div>}
+    </div>
+  );
+}
+
 function MonitorCard({ m, entities, onChanged, onEdit }) {
   const [busy, setBusy] = useState('');
   const [showHist, setShowHist] = useState(false);
@@ -363,6 +414,8 @@ export default function DataHealthAdmin() {
         logs every pull, and raises an alert when a stream goes quiet past its threshold. Reads always bypass the query cache, so
         the lag you see is the pipe’s real lag.
       </p>
+
+      {data && <TestModeBanner testMode={!!data.testMode} testEmail={data.testEmail || ''} onChanged={load} />}
 
       {data && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
