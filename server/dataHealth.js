@@ -117,6 +117,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     CREATE INDEX IF NOT EXISTS idx_dme ON data_monitor_events(monitor_id, at);
   `);
 
+  // Additive migration for DBs created before detail columns (Latest-20 extras).
+  try {
+    const cols = sql.prepare('PRAGMA table_info(data_monitors)').all().map((c) => c.name);
+    if (!cols.includes('detail_fields')) sql.exec("ALTER TABLE data_monitors ADD COLUMN detail_fields TEXT NOT NULL DEFAULT '[]'");
+  } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
+
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
 
   function rowToMonitor(r) {
@@ -124,6 +130,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return {
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
+      detailFields: parseJson(r.detail_fields, []),
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
       checkEveryMin: r.check_every_min, channels: parseJson(r.channels, ['push']),
       notifyRecovery: !!r.notify_recovery, cooldownMin: r.cooldown_min,
@@ -155,6 +162,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       view: String(b.view || '').slice(0, 120),
       timeField: String(b.timeField || '').slice(0, 200),
       stationField: String(b.stationField || '').slice(0, 200),
+      // Extra dimensions shown as columns in the 🧾 Latest-20 peek (e.g. station
+      // name, action/record type). Display-only — no effect on health evaluation.
+      detailFields: Array.isArray(b.detailFields)
+        ? [...new Set(b.detailFields.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().slice(0, 200)))].slice(0, 4)
+        : [],
       filters,
       warnMin: num(b.warnMin, 30, 1, 10080),
       staleMin: num(b.staleMin, 60, 2, 10080),
@@ -169,17 +181,17 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   function upsert(id, c, who) {
     const ts = now();
     if (id) {
-      sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?,
+      sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
-        .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField,
+        .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
-    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, filters,
+    sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
-      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.filters),
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields), JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -265,7 +277,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // identical rows, so same-station-same-second records collapse into one.
   async function latestRecords(m, limit = 20) {
     const n = Math.max(1, Math.min(100, Math.round(Number(limit) || 20)));
-    const fields = m.stationField ? [m.stationField, m.timeField] : [m.timeField];
+    // Detail columns ride along in the same query (station/action/whatever the
+    // monitor configured) — display-only extras, deduped against the core fields.
+    const extras = (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField);
+    const fields = [...(m.stationField ? [m.stationField] : []), m.timeField, ...extras];
     const rows = await runScoped(m, { ...baseBody(m), fields, sorts: [`${m.timeField} desc`], limit: String(n) });
     const nowMs = Date.now();
     return rows.map((r) => {
@@ -274,6 +289,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         at: ts ? ts.toISOString() : '',
         raw: String(r[m.timeField] ?? ''),
         station: m.stationField ? String(r[m.stationField] ?? '').trim() : '',
+        extra: Object.fromEntries(extras.map((f) => [f, r[f] == null ? '' : String(r[f])])),
         agoMin: ts ? Math.round(((nowMs - ts.getTime()) / 60000) * 10) / 10 : null,
       };
     });
@@ -531,7 +547,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField });
+    res.json({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) });
   }));
 
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {

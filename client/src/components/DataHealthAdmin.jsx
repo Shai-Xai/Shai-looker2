@@ -82,6 +82,9 @@ function LatestRecords({ monitorId }) {
   if (err) return <div style={{ fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err} <button style={{ ...ghostBtn, marginLeft: 8 }} onClick={load}>Retry</button></div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Pulling the latest records from Looker…</div>;
   const hasStation = !!data.stationField;
+  const extras = data.detailFields || [];
+  // "cashless_check_ins.record_type" → "Record Type" — good enough for a header.
+  const colName = (f) => String(f).split('.').pop().replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -95,6 +98,7 @@ function LatestRecords({ monitorId }) {
             <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
               <th style={{ padding: '4px 8px 4px 0', fontWeight: 600 }}>#</th>
               {hasStation && <th style={{ padding: '4px 8px', fontWeight: 600 }}>Station</th>}
+              {extras.map((f) => <th key={f} style={{ padding: '4px 8px', fontWeight: 600 }}>{colName(f)}</th>)}
               <th style={{ padding: '4px 8px', fontWeight: 600 }}>Record time</th>
               <th style={{ padding: '4px 8px', fontWeight: 600 }}>Age</th>
             </tr></thead>
@@ -102,6 +106,7 @@ function LatestRecords({ monitorId }) {
               <tr key={i} style={{ borderTop: '1px solid var(--hairline)' }}>
                 <td style={{ padding: '4px 8px 4px 0', color: 'var(--muted)' }}>{i + 1}</td>
                 {hasStation && <td style={{ padding: '4px 8px', fontWeight: 600 }}>{r.station || '—'}</td>}
+                {extras.map((f) => <td key={f} style={{ padding: '4px 8px' }}>{(r.extra && r.extra[f]) || '—'}</td>)}
                 <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{r.at ? fmtAt(r.at) : r.raw}</td>
                 <td style={{ padding: '4px 8px', color: r.agoMin != null && r.agoMin < 30 ? STATUS_COLOR.fresh : 'var(--muted)' }}>{r.agoMin != null ? `${fmtLag(r.agoMin)} ago` : '—'}</td>
               </tr>
@@ -242,6 +247,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [models, setModels] = useState(null);
   const [fields, setFields] = useState(null);
   const [filterRows, setFilterRows] = useState(() => Object.entries((initial && initial.filters) || {}));
+  const [detailRows, setDetailRows] = useState(() => (initial && initial.detailFields) || []);
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
   const isMobile = useIsMobile();
@@ -259,7 +265,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
 
   const save = async () => {
     setErr('');
-    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k, v]) => k && String(v).trim())) };
+    const body = { ...f, filters: Object.fromEntries(filterRows.filter(([k, v]) => k && String(v).trim())), detailFields: detailRows.filter(Boolean) };
     if (!body.name.trim()) return setErr('Give the monitor a name.');
     if (!body.model || !body.view || !body.timeField) return setErr('Pick the explore and its timestamp field.');
     setSaving(true);
@@ -320,6 +326,22 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
               </select>
             )}
           </div>
+        </div>
+      )}
+
+      {f.model && f.view && fields && (
+        <div style={{ marginTop: 12 }}>
+          <span style={label}>Extra columns in 🧾 Latest 20 (optional — e.g. station, action type)</span>
+          {detailRows.map((k, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+              <select style={{ ...input, flex: 1 }} value={k} onChange={(e) => setDetailRows((rows) => rows.map((r, j) => (j === i ? e.target.value : r)))}>
+                <option value="">— dimension —</option>
+                {(fields.dimensions || []).map((d) => <option key={d.name} value={d.name}>{d.group_label ? `${d.group_label} · ` : ''}{d.label}</option>)}
+              </select>
+              <button style={ghostBtn} onClick={() => setDetailRows((rows) => rows.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+          {detailRows.length < 4 && <button style={{ ...ghostBtn, marginBottom: 12 }} onClick={() => setDetailRows((rows) => [...rows, ''])}>+ Add column</button>}
         </div>
       )}
 
