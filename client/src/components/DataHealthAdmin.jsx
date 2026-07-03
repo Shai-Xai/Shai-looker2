@@ -190,7 +190,7 @@ function RosterPanel({ monitorId }) {
 // block, with per-device and per-block totals.
 function TimelinePanel({ monitorId }) {
   const [data, setData] = useState(null);
-  const [hours, setHours] = useState(24);
+  const [hours, setHours] = useState('start'); // 'start' = from the roster's start time; else rolling hours
   const [interval, setIntervalMin] = useState(60);
   const [mode, setMode] = useState('blocks'); // 'blocks' (green/grey grid) | 'counts' (numbers report)
   const [busy, setBusy] = useState(false);
@@ -229,8 +229,8 @@ function TimelinePanel({ monitorId }) {
           <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
         ))}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
-        {[12, 24, 48].map((h) => (
-          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{h}h</button>
+        {[['start', '▶ Start'], [12, '12h'], [24, '24h'], [48, '48h']].map(([h, l]) => (
+          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{l}</button>
         ))}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
         {[5, 10, 20, 30, 60].map((m) => (
@@ -238,7 +238,9 @@ function TimelinePanel({ monitorId }) {
         ))}
         <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours, interval)}>{busy ? '…' : '🔄'}</button>
       </div>
-      {data.hours < hours && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
+      {data.anchored && data.startAt && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>From the start time — {new Date(data.startAt).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} to now.</div>}
+      {hours === 'start' && data.anchored === false && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>No start time set on this monitor — showing the last 24h. Set "Daily from" or a once-off start in ✏️ Edit → Device roster.</div>}
+      {(data.trimmedStart || (typeof hours === 'number' && data.hours < hours)) && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>Showing the last {data.hours}h — {iv}-min blocks cap the grid; pick a bigger block for a longer window.</div>}
       {data.truncated && <div style={{ fontSize: 11.5, color: STATUS_COLOR.warn, marginBottom: 6 }}>⚠️ Very busy window — some blocks may be missing; try a shorter range or bigger blocks.</div>}
       {!data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>

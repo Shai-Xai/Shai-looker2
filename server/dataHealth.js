@@ -407,12 +407,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
     const hourField = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '_hour') : `${m.timeField}_hour`;
     const iv = TIMELINE_INTERVALS.includes(Number(interval)) ? Number(interval) : 60;
-    let h = Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
-    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
     const ivMs = iv * 60000;
+    // hours === 'start' anchors the window to the roster's start time (daily
+    // HH:MM / once-off start) — the event-day view: no dead grey hours before
+    // doors. Falls back to a rolling 24h when the monitor has no anchor.
+    const anchor = String(hours) === 'start' ? rosterAnchor(m) : null;
+    let h = anchor
+      ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
+      : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
+    h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
     const bucketField = iv === 60 ? hourField : m.timeField;
     const base = { ...baseBody(m), sorts: [`${bucketField} desc`], limit: '5000' };
-    base.filters[m.timeField] = `last ${h} hours`;
+    base.filters[m.timeField] = anchor
+      ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
+      : `last ${h} hours`;
     const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : ['native', 'distinct', 'none'];
     let rows = null; let mode = 'none'; let lastErr = null;
     for (const cand of modes) {
@@ -428,8 +436,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     countModeByMonitor.set(m.id, mode);
     const cKey = mode === 'native' ? `${m.view}.count` : CNT_FIELD;
     const nowMs = Date.now();
-    const n = Math.round((h * 60) / iv);
     const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
+    // Anchored: first block is the one containing the start time; rolling: n
+    // blocks back from now. Either way the grid stays capped at 288 blocks
+    // (anchored windows longer than that keep the most recent blocks).
+    let n = anchor
+      ? Math.floor((lastBucket - Math.floor(anchor.getTime() / ivMs) * ivMs) / ivMs) + 1
+      : Math.round((h * 60) / iv);
+    const trimmedStart = n > 288;
+    if (trimmedStart) n = 288;
     const firstBucket = lastBucket - (n - 1) * ivMs;
     const byDevice = new Map(); // device -> scan count per bucket
     for (const r of rows) {
@@ -448,7 +463,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 150);
     return {
-      configured: true, hours: h, intervalMin: iv, hourField, bucketField, countBasis: mode,
+      configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode,
+      anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
       truncated: rows.length >= 5000,
