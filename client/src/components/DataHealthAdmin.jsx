@@ -250,10 +250,10 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
   // Online vs offline for the devices IN VIEW (the picked station's summary):
   // exact last-seen lag when the labels lookup delivered it, else recent blocks.
   const onlineMin = data.onlineMin || 30;
-  const hasLag = data.devices.some((d) => d.lagMin != null);
-  const onlineN = hasLag
-    ? data.devices.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
-    : data.devices.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length;
+  // Per DEVICE: exact last-seen lag when the labels lookup delivered it, else
+  // recent activity blocks — a device missing from the lookup isn't "offline".
+  const isOn = (d) => (d.lagMin != null ? d.lagMin <= onlineMin : d.active.slice(-lookback).some((a) => a === 1));
+  const onlineN = data.devices.filter(isOn).length;
   const offlineN = data.devices.length - onlineN;
   // All-stations view groups the rows under a station header — one glance per
   // station instead of one long pile. A picked station needs no grouping.
@@ -264,9 +264,7 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
       m.get(k).push(d); return m;
     }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0]))
     : null;
-  const grpOnline = (devs) => (hasLag
-    ? devs.filter((d) => d.lagMin != null && d.lagMin <= onlineMin).length
-    : devs.filter((d) => d.active.slice(-lookback).some((a) => a === 1)).length);
+  const grpOnline = (devs) => devs.filter(isOn).length;
   const stationHeader = (grpName, devs) => (
     <>
       <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase' }}>{grpName}</span>{' '}

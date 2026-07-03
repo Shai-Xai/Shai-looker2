@@ -453,6 +453,30 @@ test('deviceTimeline: station fallback filters the whole feed by the labels map'
   assert.equal(t.devices[0].station, 'Bar One');
 });
 
+test('labels: devices the timed read lost still get a station via the combo read', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // Timed labels read: D-2 fell off the newest-first cap.
+    if (b.fields.includes('data_health_last')) return [{ 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One', data_health_last: minsAgo(2) }];
+    // The no-timestamp combo read sees every device.
+    if (b.fields.includes('scans.station_name')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One' },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two' },
+      ];
+    }
+    return [
+      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 2 },
+      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(), 'scans.count': 3 },
+    ];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 60, '', true);
+  assert.equal(t.devices.find((d) => d.device === 'D-1').station, 'Bar One');
+  assert.equal(t.devices.find((d) => d.device === 'D-2').station, 'Bar Two'); // filled by the combo read
+});
+
 test('deviceTimeline: probes the explore catalogue for a real count measure', async () => {
   const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.tx_count' }, { name: 'other.count' }] }) } });
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
