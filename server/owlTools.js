@@ -1108,7 +1108,9 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       limit: { type: 'number', description: 'Max rows (default 500).' },
     };
     if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
-    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression on ${cat.label}'s date (e.g. "last 7 days").` };
+    // Name the bound field so the model KNOWS which date this rides — and routes a
+    // different family's time question (e.g. check-in created-at) via filters instead.
+    if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression applied to ${cat.dateDimension} (e.g. "last 7 days"). To time-filter a DIFFERENT date field, put the date expression in filters under that field's name instead.` };
     // A combined explore stitches several views (families) together; not every
     // view joins to every other. Warn the model up front so it pairs a measure
     // with its own family's dimensions instead of producing a fan-out.
