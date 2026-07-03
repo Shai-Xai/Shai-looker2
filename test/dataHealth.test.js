@@ -460,6 +460,34 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   assert.equal(capped.buckets.length, 288);
 });
 
+test('deviceTimeline: hours="start" anchors the window to the roster start time', async () => {
+  const h = mountHealth();
+  // Once-off start 5 hours ago (stable regardless of wall clock, unlike a daily HH:MM).
+  const start = new Date(Date.now() - 5 * 3600000);
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterStart: start.toISOString() });
+  let body = null;
+  h.setRowsFn(async (b) => { body = b; return []; });
+  const t = await h.mod.deviceTimeline(m, 'start', 10);
+  assert.equal(t.anchored, true);
+  assert.equal(body.filters['scans.scanned_at'], `after ${start.toISOString().slice(0, 16).replace('T', ' ')}`);
+  // First block is the one containing the start time; last is the current block.
+  const first = Date.parse(t.buckets[0]);
+  assert.ok(first <= start.getTime() && start.getTime() < first + 10 * 60000);
+  const last = Date.parse(t.buckets[t.buckets.length - 1]);
+  assert.ok(last <= Date.now() && Date.now() < last + 10 * 60000);
+  // No anchor on the monitor → falls back to a rolling 24h.
+  const plain = makeMonitor(h, { name: 'No anchor', rosterField: 'scans.device_id' });
+  const f = await h.mod.deviceTimeline(plain, 'start', 60);
+  assert.equal(f.anchored, false);
+  assert.equal(f.hours, 24);
+  assert.equal(body.filters['scans.scanned_at'], 'last 24 hours');
+  // Long anchored windows keep the most recent 288 blocks and say so.
+  const old = makeMonitor(h, { name: 'Old start', rosterField: 'scans.device_id', rosterStart: new Date(Date.now() - 60 * 3600000).toISOString() });
+  const trimmed = await h.mod.deviceTimeline(old, 'start', 5);
+  assert.equal(trimmed.buckets.length, 288);
+  assert.equal(trimmed.trimmedStart, true);
+});
+
 test('deviceTimeline: falls back to a dynamic count when the view has no native count measure', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
