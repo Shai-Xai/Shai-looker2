@@ -346,6 +346,8 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterBaselineMin: 1440, rosterOnlineMin: 30 });
   let body = null;
   h.setRowsFn(async (b) => {
+    // This LookML rejects the dynamic MAX read — the raw fallback serves.
+    if (b.fields.includes('data_health_last')) throw new Error('Unknown field "data_health_last"');
     body = b;
     return [
       { 'scans.device_id': 'D-101', 'scans.scanned_at': minsAgo(2) },
@@ -380,6 +382,46 @@ test('deviceRoster: linked vs online vs offline, learned from the baseline windo
   // Junk start time is dropped at clean() — falls back to the rolling window.
   const junk = makeMonitor(h, { name: 'Junk start', rosterField: 'scans.device_id', rosterStart: 'not-a-date' });
   assert.equal(junk.rosterStart, '');
+});
+
+test('deviceRoster: aggregates last-seen per device in Looker when the MAX measure works', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const bodies = [];
+  h.setRowsFn(async (b) => {
+    bodies.push(b);
+    if (!b.fields.includes('data_health_last')) throw new Error('raw fallback should not run');
+    return [
+      { 'scans.device_id': 'D-1', data_health_last: minsAgo(3) },
+      { 'scans.device_id': 'D-2', data_health_last: minsAgo(90) }, // silent past 30m
+    ];
+  });
+  const r = await h.mod.deviceRoster(m);
+  assert.equal(r.total, 2);
+  assert.equal(r.online, 1);
+  assert.equal(r.truncated, false); // one row per device — the cap is out of reach
+  assert.deepEqual(JSON.parse(bodies[0].dynamic_fields), [{ measure: 'data_health_last', based_on: 'scans.scanned_at', type: 'max' }]);
+  // Remembered — the next pull is still a single aggregated query.
+  await h.mod.deviceRoster(m);
+  assert.equal(bodies.length, 2);
+});
+
+test('deviceTimeline: a count measure that reads 0 for every row is a soft failure', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    // Combined-explore trap: scans.count exists but counts another view — 0s.
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    if (b.fields.includes('data_health_scans')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), data_health_scans: 9 }];
+    return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr() }];
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'distinct'); // zero-only native rejected, real counts kept
+  const d1 = t.devices[0];
+  assert.equal(d1.counts[11], 9);
+  assert.equal(d1.active[11], 1);
+  assert.equal(t.grandTotal, 9);
 });
 
 test('rosterAnchor: daily SAST time beats fixed start; wraps to yesterday', () => {
