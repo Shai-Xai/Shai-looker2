@@ -1050,6 +1050,16 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
           devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
         };
       }
+      if (q === 'observed') {
+        if (!m.rosterField) return refuse('no_roster', `"${m.name}" has no device roster configured, so there's no offline log.`);
+        const ob = api.observedLog(m, api.obsSinceFor(m, args.hours || 'start'));
+        return {
+          ok: true, monitor: m.name,
+          note: 'The OBSERVED log is what Pulse itself saw at each check — a device that traded offline and synced late can NEVER repaint it. Treat it as the authoritative connectivity record; times are UTC — convert to the client\'s local time.',
+          onlineSeries: ob.ticks.map((t) => ({ atUTC: t.at.slice(11, 16), online: t.online, total: t.total })),
+          offlineWindows: ob.windows.slice(0, 80),
+        };
+      }
       if (q === 'latest') return { ok: true, monitor: m.name, records: await api.latestRecords(m, args.limit || 20) };
       return { ok: true, monitors: [hit] }; // 'stations' or anything else → that monitor's summary
     } catch (e) {
@@ -1062,7 +1072,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'latest'], description: 'What to fetch (default overview).' },
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
         monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
         hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
         intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },

@@ -10,7 +10,7 @@ const { db } = require('./helpers');
 function fakeApp() { return { get() {}, post() {}, put() {}, delete() {} }; }
 
 // Mount with a controllable Looker feed + captured deliveries.
-function mountHealth() {
+function mountHealth(over = {}) {
   const sql = db.db;
   let rows = [];                // what the next Looker pull returns
   let rowsFn = async () => rows; // body-aware override (fallback-path tests)
@@ -25,7 +25,7 @@ function mountHealth() {
   const mod = require('../server/dataHealth').mount(fakeApp(), {
     db,
     auth: { requireAdmin: (_req, _res, next) => next && next() },
-    looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
+    looker: over.looker || { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [] }) },
     runLookerQuery: async (_path, body) => rowsFn(body),
     applyScope: async (_body, user) => { scopedUser = user; return scopeOk; },
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
@@ -451,6 +451,29 @@ test('deviceTimeline: station fallback filters the whole feed by the labels map'
   assert.equal(t.grandTotal, 5); // totals recomputed for the kept devices only
   assert.equal(t.station, 'Bar One');
   assert.equal(t.devices[0].station, 'Bar One');
+});
+
+test('deviceTimeline: probes the explore catalogue for a real count measure', async () => {
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.tx_count' }, { name: 'other.count' }] }) } });
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  const bodies = [];
+  h.setRowsFn(async (b) => {
+    bodies.push(b);
+    // The guessed native measure exists but counts another view — zero-only.
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    if (b.fields.includes('scans.tx_count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.tx_count': 41 }];
+    throw new Error('unexpected read');
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countBasis, 'native');
+  assert.equal(t.devices[0].counts[11], 41); // the catalogue measure carries the real volume
+  assert.equal(t.grandTotal, 41);
+  // Remembered — the next read goes straight to the probed measure.
+  bodies.length = 0;
+  await h.mod.deviceTimeline(m, 12);
+  assert.equal(bodies.length, 1);
+  assert.ok(bodies[0].fields.includes('scans.tx_count'));
 });
 
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
