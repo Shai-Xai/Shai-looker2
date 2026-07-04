@@ -1,0 +1,46 @@
+name: apply-round4
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "b56ed85bdceb769b2d305c1513917fb2394847d349f379520bded0b63678df20  patches/round4.patch" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/round4.patch /tmp/p.patch
+          cat > /tmp/msg <<'EOF'
+          Timeline: empty counting reads fall through + a visible read path
+
+          An empty result from a counting mode is now a soft failure like
+          all-zeros (a broken join can drop every row for one measure while
+          another works) - only plain presence may accept a genuinely quiet
+          feed. When the grid still comes back empty, the response carries
+          the read path (every bucket + measure attempt and its outcome) plus
+          a sample row when rows arrived but none fit the grid; the Timeline
+          panel renders both, so an empty gate timeline now explains itself.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          EOF
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- server/dataHealth.js test/dataHealth.test.js client/src/components/DataHealthAdmin.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round4.patch .github/workflows/apply-round4.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
