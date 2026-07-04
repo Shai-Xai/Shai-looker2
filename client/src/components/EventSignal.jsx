@@ -779,6 +779,9 @@ function StationRow({ st, show, onSelect }) {
     const d = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
     return { d, area: `${d} L${xy[xy.length - 1][0].toFixed(1)} 100 L${xy[0][0].toFixed(1)} 100 Z` };
   })() : null;
+  // Over the green/red bars a white line reads best; with the bars hidden (txns is
+  // the only layer on) it sits on the card, so use the text colour (dark / light).
+  const txnStroke = (show.online || show.offline) ? '#ffffff' : 'var(--text)';
 
   const nowCol = st.closed ? 'var(--muted)' : st.nowPct >= 95 ? STATUS_COLOR.fresh : st.nowPct >= 85 ? STATUS_COLOR.warn : STATUS_COLOR.stale;
   const stripe = st.closed ? 'transparent' : st.nowPct < 90 ? STATUS_COLOR.stale : st.minPct < 95 ? STATUS_COLOR.warn : 'transparent';
@@ -806,8 +809,8 @@ function StationRow({ st, show, onSelect }) {
         })}
         {line && (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
-            <path d={line.area} fill={TXN_COL} opacity="0.12" />
-            <path d={line.d} fill="none" stroke={TXN_COL} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            <path d={line.area} fill={txnStroke} opacity="0.1" />
+            <path d={line.d} fill="none" stroke={txnStroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
           </svg>
         )}
       </div>
@@ -1194,6 +1197,7 @@ export default function SignalOps({ entityId, suiteId }) {
             <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
             <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
             {suiteId && <SignalReportPanel suiteId={suiteId} />}
+            <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓{isMobile ? ' PDF' : ''}</button>
             <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
           </>;
           return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
