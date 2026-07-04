@@ -205,6 +205,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 // ───────────────────────────────── Live tab ──────────────────────────────────
 function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
   const [data, setData] = useState(null);
+  const [kind, setKind] = useState(''); // station-type filter: '' = all
   useEffect(() => {
     let alive = true;
     setData(null);
@@ -232,9 +233,18 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
       )}
 
       <Section title="Stations">
+        {/* Station-TYPE chips — only the kinds this event actually has. */}
+        {data.stations.length > 6 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            <Chip on={!kind} onClick={() => setKind('')}>All · {data.stations.length}</Chip>
+            {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
+              <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? '' : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
+            ))}
+          </div>
+        )}
         {data.stations.length === 0 ? <Empty>No stations yet.</Empty> : (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
-            {data.stations.map((s) => (
+            {data.stations.filter((s) => !kind || s.kind === kind).map((s) => (
               <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
                 <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
                 <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
@@ -628,6 +638,7 @@ function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
   const [stations, setStations] = useState(null);
   const [form, setForm] = useState(null); // null | {id?, name, kind}
   const [q, setQ] = useState(''); // find-a-station filter (name or kind)
+  const [kf, setKf] = useState(''); // station-type chip filter: '' = all
   const load = () => api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
   useEffect(() => { setStations(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -648,11 +659,19 @@ function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <button onClick={() => setForm({ name: '', kind: 'bar' })} style={primaryBtn}>＋ Add station</button>}
       {stations.length > 6 && (
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations — name or kind…`} aria-label="Filter stations" style={{ ...input, minHeight: 40 }} />
+        <>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations — name or kind…`} aria-label="Filter stations" style={{ ...input, minHeight: 40 }} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Chip on={!kf} onClick={() => setKf('')}>All · {stations.length}</Chip>
+            {[...new Set(stations.map((s) => s.kind))].map((k) => (
+              <Chip key={k} on={kf === k} onClick={() => setKf(kf === k ? '' : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {stations.filter((s) => s.kind === k).length}</Chip>
+            ))}
+          </div>
+        </>
       )}
       {stations.length === 0 ? <Empty>No stations yet.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {stations.filter((s) => !q.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(q.trim().toLowerCase())).map((s) => (
+          {stations.filter((s) => (!kf || s.kind === kf) && (!q.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(q.trim().toLowerCase()))).map((s) => (
             <div key={s.id} style={{ ...deviceRow(false), cursor: 'default' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <span style={{ fontSize: 18 }}>{KIND_ICON[s.kind] || '📍'}</span>
