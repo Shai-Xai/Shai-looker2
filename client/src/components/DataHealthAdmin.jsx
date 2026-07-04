@@ -1630,8 +1630,8 @@ export function DataHealthOps({ entityId, suiteId }) {
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: '1 1 240px' }}>
           Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
           Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
         </p>
@@ -1649,9 +1649,6 @@ export function DataHealthOps({ entityId, suiteId }) {
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
         </div>
       ) : <>
-        <div style={{ marginBottom: 4 }}>
-          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
-        </div>
         <HealthMetrics monitors={monitors} />
         {monitors.map((m) => (
           <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />

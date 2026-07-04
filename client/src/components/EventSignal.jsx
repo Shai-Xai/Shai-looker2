@@ -97,6 +97,8 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const [robot, setRobot] = useState(true);
   const [err, setErr] = useState('');
   const [tryN, setTryN] = useState(0); // Retry bumps this — live reads can hiccup mid-event
+  const [dayTip, setDayTip] = useState(''); // tap/hover readout for the day graph (title= is desktop-only)
+  const [pulseTip, setPulseTip] = useState('');
   useEffect(() => {
     let alive = true; setT(null); setObs(null); setErr('');
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
@@ -168,15 +170,23 @@ function DeepDive({ apiBase, mid, station, unit }) {
           <div style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)' }}>Station rhythm · {unit}/h</span>
-              <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>peak <b style={{ color: 'var(--brand)' }}>{hourly[pk].v.toLocaleString('en-ZA')}</b> at {hourly[pk].label} · ~{mean.toLocaleString('en-ZA')}/h avg</span>
+              <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+                {pulseTip
+                  ? <b style={{ color: 'var(--text)' }}>{pulseTip}</b>
+                  : <>peak <b style={{ color: 'var(--brand)' }}>{hourly[pk].v.toLocaleString('en-ZA')}</b> at {hourly[pk].label} · ~{mean.toLocaleString('en-ZA')}/h avg</>}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 44, borderBottom: '1px solid var(--hairline)', marginTop: 3 }}>
-              {hourly.map((x, i) => (
-                <i key={i} title={`${x.label} · ${x.v.toLocaleString('en-ZA')}/h`} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: Math.max(2, Math.round((x.v / max) * 42)), background: i === pk ? 'var(--brand)' : STATUS_COLOR.fresh, opacity: i === pk ? 1 : 0.85 }} />
-              ))}
+              {hourly.map((x, i) => {
+                const cap = `${x.label} · ${x.v.toLocaleString('en-ZA')} ${unit}/h`;
+                return (
+                  <i key={i} title={cap} onClick={() => setPulseTip(cap)} onMouseEnter={() => setPulseTip(cap)} onMouseLeave={() => setPulseTip('')}
+                    style={{ flex: 1, borderRadius: '2px 2px 0 0', height: Math.max(2, Math.round((x.v / max) * 42)), background: i === pk ? 'var(--brand)' : STATUS_COLOR.fresh, opacity: i === pk ? 1 : 0.85, cursor: 'pointer' }} />
+                );
+              })}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-              <span>{hourly[0].label}</span><span>{hourly[hourly.length - 1].label}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', paddingTop: 2 }}>
+              {[0, 0.25, 0.5, 0.75, 1].map((f) => <span key={f}>{hourly[Math.min(hourly.length - 1, Math.round(f * (hourly.length - 1)))].label}</span>)}
             </div>
           </div>
         );
@@ -193,25 +203,33 @@ function DeepDive({ apiBase, mid, station, unit }) {
           (d.offAt || []).forEach((ti) => { const i = ti - base; if (i >= 0 && i < offN.length) offN[i] += 1; });
         });
         const H = 34;
+        const lbl = (f) => String(ticks[Math.min(ticks.length - 1, Math.round(f * (ticks.length - 1)))].at || '').slice(11, 16);
         return (
           <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 3 }}>Devices online through the day</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 3 }}>Devices online through the day</span>
+              <span style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+                {dayTip
+                  ? <b style={{ color: 'var(--text)' }}>{dayTip}</b>
+                  : <><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>online</span> · <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>offline</span> at each check — tap a bar</>}
+              </span>
+            </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, height: H }}>
               {ticks.map((k, i) => {
                 const off = Math.min(offN[i], devSet.size);
                 const on = Math.max(0, devSet.size - off);
+                const cap = `${String(k.at || '').slice(11, 16)} · ${on} online · ${off} offline`;
                 return (
-                  <span key={i} title={`${String(k.at || '').slice(11, 16)} · ${on} online · ${off} offline`} style={{ flex: '1 1 0', maxWidth: 7, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H }}>
+                  <span key={i} title={cap} onClick={() => setDayTip(cap)} onMouseEnter={() => setDayTip(cap)} onMouseLeave={() => setDayTip('')}
+                    style={{ flex: '1 1 0', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H, cursor: 'pointer' }}>
                     {off > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((off / devSet.size) * H)), background: STATUS_COLOR.stale, borderRadius: '1px 1px 0 0', opacity: 0.85 }} />}
                     {on > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((on / devSet.size) * H)), background: STATUS_COLOR.fresh, borderRadius: off ? 0 : '1px 1px 0 0' }} />}
                   </span>
                 );
               })}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-              <span>{String(ticks[0].at || '').slice(11, 16)}</span>
-              <span><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>online</span> · <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>offline</span> at each check</span>
-              <span>{String(ticks[ticks.length - 1].at || '').slice(11, 16)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--hairline)', paddingTop: 2 }}>
+              {[0, 0.25, 0.5, 0.75, 1].map((f) => <span key={f}>{lbl(f)}</span>)}
             </div>
           </div>
         );
@@ -607,8 +625,8 @@ export default function SignalOps({ entityId, suiteId }) {
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px', flexWrap: 'wrap' }}>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: '1 1 240px' }}>
           Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
         </p>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
