@@ -585,3 +585,54 @@ test('deleting a station sends its deployed devices back to the Hive', () => {
   assert.equal(after.body.device.state, 'in_stock');
   assert.equal(after.body.device.stationId, null);
 });
+
+test('device support call: pre-bound link raises a call; console acks + resolves; wrong token 403', () => {
+  const r = mount();
+  const { entity, suite, owner, admin } = seedEvent();
+  call(r['PUT /api/eventops/entities/:entityId/enabled'], { user: admin, params: { entityId: entity.id }, body: { enabled: true } });
+  const P = { suiteId: suite.id };
+  const station = call(r['POST /api/eventops/suites/:suiteId/stations'], { user: owner, params: P, body: { name: 'Bar 3', kind: 'bar' } }).body.station;
+  const staff = call(r['POST /api/eventops/suites/:suiteId/staff'], { user: owner, params: P, body: { name: 'Sam', number: '7', stationId: station.id } }).body.staff;
+  const dev = call(r['POST /api/eventops/suites/:suiteId/devices'], { user: owner, params: P, body: { label: 'Handheld 1', qrCode: 'H1' } }).body.device;
+  const kiosk = call(r['GET /api/eventops/suites/:suiteId/kiosk'], { user: owner, params: P }).body;
+  const KP = { suiteId: suite.id, token: kiosk.token };
+  // Deploy the device to the bar so the call is attributed to Bar 3.
+  call(r['POST /api/eventops/portal/:suiteId/:token/move'], { params: KP, body: { deviceId: dev.id, stationId: station.id, staffId: staff.id } });
+
+  // Wrong token → 403 (both the page read and the raise).
+  assert.equal(call(r['GET /api/eventops/portal/:suiteId/:token/call/:deviceId'], { params: { suiteId: suite.id, token: 'nope', deviceId: dev.id } }).code, 403);
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/call/:deviceId'], { params: { suiteId: suite.id, token: 'nope', deviceId: dev.id }, body: { reason: 'stock' } }).code, 403);
+
+  // The pre-bound page reads its station + device from the link (no login).
+  const info = call(r['GET /api/eventops/portal/:suiteId/:token/call/:deviceId'], { params: { ...KP, deviceId: dev.id } });
+  assert.equal(info.code, 200);
+  assert.equal(info.body.device.label, 'Handheld 1');
+  assert.equal(info.body.station.name, 'Bar 3');
+  assert.ok(info.body.reasons.some((x) => x.key === 'stock'));
+
+  // Raise a call — no login; station + device come from the link, the caller adds the rest.
+  const raised = call(r['POST /api/eventops/portal/:suiteId/:token/call/:deviceId'], { params: { ...KP, deviceId: dev.id }, body: { reason: 'stock', name: 'Sam', comment: 'Out of cups', tried: 'Checked the back' } });
+  assert.equal(raised.code, 201);
+  assert.equal(raised.body.call.reason, 'stock');
+  assert.equal(raised.body.call.stationLabel, 'Bar 3');
+  assert.equal(raised.body.call.deviceLabel, 'Handheld 1');
+  assert.equal(raised.body.call.status, 'open');
+  const callId = raised.body.call.id;
+
+  // Console: dispatch sees one open call, in test mode (🧪 default while trialling).
+  const openList = call(r['GET /api/eventops/suites/:suiteId/calls'], { user: owner, params: P, query: { status: 'open' } });
+  assert.equal(openList.body.calls.length, 1);
+  assert.equal(openList.body.calls[0].callerName, 'Sam');
+  assert.equal(openList.body.testMode, true);
+
+  // Ack with an ETA → acked; then resolve → resolved and out of the open list.
+  const acked = call(r['POST /api/eventops/suites/:suiteId/calls/:id/ack'], { user: owner, params: { ...P, id: callId }, body: { eta: '2 min' } });
+  assert.equal(acked.body.call.status, 'acked');
+  assert.equal(acked.body.call.eta, '2 min');
+  const resolved = call(r['POST /api/eventops/suites/:suiteId/calls/:id/resolve'], { user: owner, params: { ...P, id: callId }, body: { resolution: 'Runner delivered cups' } });
+  assert.equal(resolved.body.call.status, 'resolved');
+  assert.equal(call(r['GET /api/eventops/suites/:suiteId/calls'], { user: owner, params: P, query: { status: 'open' } }).body.calls.length, 0);
+
+  // Unknown device → 404.
+  assert.equal(call(r['POST /api/eventops/portal/:suiteId/:token/call/:deviceId'], { params: { ...KP, deviceId: 'nope' }, body: { reason: 'help' } }).code, 404);
+});

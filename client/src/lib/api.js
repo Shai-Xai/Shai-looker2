@@ -854,6 +854,13 @@ export const api = {
   eopPortalIssue: (suiteId, token, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eopPortalCheckpoint: (suiteId, token, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/checkpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eopPortalIssues: (suiteId, token, status = 'open') => fetch(`/api/eventops/portal/${suiteId}/${token}/issues?status=${status}`).then(json),
+  // PUBLIC device support call — the device's PRE-BOUND link (station + device baked in).
+  eopCallInfo: (suiteId, token, deviceId) => fetch(`/api/eventops/portal/${suiteId}/${token}/call/${deviceId}`).then(json),
+  eopCallRaise: (suiteId, token, deviceId, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/call/${deviceId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  // Console (authed): dispatch's live call queue.
+  eventopsCalls: (suiteId, status = 'open') => fetch(`/api/eventops/suites/${suiteId}/calls?status=${status}`).then(json),
+  eventopsAckCall: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/calls/${id}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  eventopsResolveCall: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/calls/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   eopPortalResolveIssue: (suiteId, token, id, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/issues/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsActivity: (suiteId, { limit = 200, from = '', to = '' } = {}) => fetch(`/api/eventops/suites/${suiteId}/activity?limit=${limit}${from ? `&from=${encodeURIComponent(from)}` : ''}${to ? `&to=${encodeURIComponent(to)}` : ''}`).then(json),
   eventopsCheckpoints: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/checkpoints`).then(json),

@@ -40,7 +40,7 @@ const DEVICE_TYPES = ['handheld', 'kiosk', 'radio', 'printer', 'tablet', 'other'
 // Suggested issue categories (free-text is allowed too — the UI offers these as quick picks).
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 
-function mount(app, { db, auth, push = require('./push'), messaging = null }) {
+function mount(app, { db, auth, push = require('./push'), messaging = null, mailer = null }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -208,6 +208,34 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_staff_push ON eventops_staff_push(staff_id);
+
+    -- Device support calls: a barman/vendor taps a reason on the device's PRE-BOUND
+    -- link (station + device baked into the URL, nothing to pick) and it lands with
+    -- dispatch as a live call with an ack loop. Distinct from eventops_issues (a
+    -- maintenance log) — a call is a live "come to me now". Station + device labels
+    -- are denormalised so the call survives a later device/station delete.
+    CREATE TABLE IF NOT EXISTS eventops_calls (
+      id            TEXT PRIMARY KEY,
+      entity_id     TEXT NOT NULL,
+      suite_id      TEXT NOT NULL,
+      device_id     TEXT NOT NULL DEFAULT '',
+      device_label  TEXT NOT NULL DEFAULT '',
+      station_id    TEXT NOT NULL DEFAULT '',
+      station_label TEXT NOT NULL DEFAULT '',
+      reason        TEXT NOT NULL DEFAULT 'help',
+      caller_name   TEXT NOT NULL DEFAULT '',
+      comment       TEXT NOT NULL DEFAULT '',
+      tried         TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'open',
+      created_at    TEXT NOT NULL,
+      acked_by      TEXT NOT NULL DEFAULT '',
+      acked_at      TEXT NOT NULL DEFAULT '',
+      eta           TEXT NOT NULL DEFAULT '',
+      resolved_by   TEXT NOT NULL DEFAULT '',
+      resolved_at   TEXT NOT NULL DEFAULT '',
+      resolution    TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_calls_suite ON eventops_calls(suite_id, status);
   `);
 
   // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
@@ -1036,6 +1064,112 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     sql.prepare("UPDATE eventops_issues SET status='resolved', resolution=?, resolved_by=?, resolved_at=? WHERE id=?")
       .run(resolution, `portal:${s.number || s.name}`, now(), i.id);
     res.json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(i.id)) });
+  });
+
+  // ════════════════════════════ device support calls ═══════════════════════════════
+  // A barman/vendor taps a reason on the device's PRE-BOUND link (station + device in
+  // the URL, so nothing to pick) and it lands with dispatch as a live call. The link
+  // works from any phone too, so a frozen device never blocks a call for help.
+  const CALL_REASONS = [
+    { key: 'stock', label: 'Stock', icon: '📦' },
+    { key: 'manager', label: 'Manager', icon: '🧑‍💼' },
+    { key: 'help', label: 'Help', icon: '🆘' },
+    { key: 'security', label: 'Security', icon: '🛡️' },
+    { key: 'medical', label: 'Medical', icon: '🚑' },
+  ];
+  const callReason = (k) => CALL_REASONS.find((r) => r.key === k) || CALL_REASONS[2];
+  const callTestMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
+  const callTestEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
+  const callRow = (c) => ({
+    id: c.id, suiteId: c.suite_id, deviceId: c.device_id || null, deviceLabel: c.device_label,
+    stationId: c.station_id || null, stationLabel: c.station_label, reason: c.reason,
+    reasonLabel: callReason(c.reason).label, reasonIcon: callReason(c.reason).icon,
+    callerName: c.caller_name, comment: c.comment, tried: c.tried, status: c.status,
+    createdAt: c.created_at, ackedBy: c.acked_by, ackedAt: c.acked_at || null, eta: c.eta,
+    resolvedBy: c.resolved_by, resolvedAt: c.resolved_at || null, resolution: c.resolution,
+  });
+  // Dispatch for a station's calls: alert-enabled staff posted to that station.
+  const callCrew = (suiteId, stationId) => sql.prepare('SELECT * FROM eventops_staff WHERE suite_id=?').all(suiteId)
+    .map(staffRow).filter((s) => s.alertsOn && (!stationId || s.stationIds.includes(stationId)));
+
+  function deliverCall(su, c) {
+    const rz = callReason(c.reason);
+    const where = [c.station_label || 'Hive', c.device_label].filter(Boolean).join(' · ');
+    const title = `${rz.icon} ${rz.label} — ${where}`;
+    const body = [
+      `${c.caller_name ? c.caller_name + ' at ' : ''}${where} needs ${rz.label}.`,
+      c.comment ? `Note: ${c.comment}` : '', c.tried ? `Already tried: ${c.tried}` : '',
+    ].filter(Boolean).join('\n');
+    // Test mode (default while trialling): only the test inbox hears it — never staff.
+    if (callTestMode()) {
+      const to = callTestEmail();
+      if (to && mailer?.send) mailer.send({ to, subject: `[TEST] ${title}`,
+        text: `${body}\n\n🧪 TEST MODE — dispatch (push/WhatsApp) was NOT contacted. Go live in Admin → Data health.`,
+        kind: 'notification' }).catch((e) => console.error('[eventops] call test mail failed', e.message));
+      return;
+    }
+    // Live: web-push the station's dispatch crew on the portal now.
+    const crew = callCrew(su.id, c.station_id).map((s) => s.id);
+    if (crew.length && push.isEnabled && push.isEnabled() && push.sendRaw) {
+      const rows = sql.prepare(`SELECT endpoint, p256dh, auth FROM eventops_staff_push WHERE staff_id IN (${crew.map(() => '?').join(',')})`).all(...crew);
+      if (rows.length) Promise.resolve(push.sendRaw(rows, { title, body, tag: `call-${c.id}`, url: '/event-ops' })).catch(() => {});
+    }
+  }
+
+  // PUBLIC: the pre-bound call page reads its station + device from the link (no login).
+  app.get('/api/eventops/portal/:suiteId/:token/call/:deviceId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const d = getDevice(req.params.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    res.json({ suite: { id: su.id, name: su.name }, device: deviceRow(d),
+      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS });
+  });
+  // PUBLIC: raise a call. Station + device come from the link; the caller adds a reason
+  // (+ their name, an optional note and what they've already tried).
+  app.post('/api/eventops/portal/:suiteId/:token/call/:deviceId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const d = getDevice(req.params.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    const b = req.body || {};
+    const id = uuid(); const ts = now();
+    const stationLabel = d.station_id ? stationName(d.station_id) : 'Hive';
+    sql.prepare(`INSERT INTO eventops_calls
+      (id, entity_id, suite_id, device_id, device_label, station_id, station_label, reason, caller_name, comment, tried, status, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, 'open', ?)`)
+      .run(id, su.entityId, su.id, d.id, d.label || '', d.station_id || '', stationLabel, callReason(b.reason).key,
+        str(b.name, 80).trim(), str(b.comment, 2000).trim(), str(b.tried, 2000).trim(), ts);
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(id);
+    try { deliverCall(su, c); } catch (e) { console.error('[eventops] deliverCall failed', e.message); }
+    res.status(201).json({ call: callRow(c) });
+  });
+
+  // ── console (authed): dispatch sees open calls, acknowledges (with ETA) + resolves ──
+  const actorFor = (req) => (req.user && (req.user.name || req.user.email)) || 'staff';
+  app.get('/api/eventops/suites/:suiteId/calls', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    const status = req.query.status === 'all' ? null
+      : ['open', 'acked', 'resolved'].includes(req.query.status) ? req.query.status : 'open';
+    const rows = status
+      ? sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? AND status=? ORDER BY created_at DESC').all(su.id, status)
+      : sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? ORDER BY created_at DESC').all(su.id);
+    res.json({ calls: rows.map(callRow), testMode: callTestMode() });
+  });
+  app.post('/api/eventops/suites/:suiteId/calls/:id/ack', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Call not found' });
+    if (c.status === 'resolved') return res.status(409).json({ error: 'Call already resolved' });
+    sql.prepare("UPDATE eventops_calls SET status='acked', acked_by=?, acked_at=?, eta=? WHERE id=?")
+      .run(actorFor(req), now(), str((req.body || {}).eta, 40).trim(), c.id);
+    res.json({ call: callRow(sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(c.id)) });
+  });
+  app.post('/api/eventops/suites/:suiteId/calls/:id/resolve', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Call not found' });
+    sql.prepare("UPDATE eventops_calls SET status='resolved', resolved_by=?, resolved_at=?, resolution=? WHERE id=?")
+      .run(actorFor(req), now(), str((req.body || {}).resolution, 2000).trim(), c.id);
+    res.json({ call: callRow(sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(c.id)) });
   });
 
   // ════════════════════════════ checkpoints (station inspections) ═══════════════════

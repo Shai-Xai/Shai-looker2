@@ -33,6 +33,7 @@ const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
 const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
+const EventOpsCallPage = lazy(() => import('./pages/EventOpsCallPage.jsx'));
 import Logo from './components/Logo.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
@@ -237,6 +238,16 @@ function Shell() {
     return (
       <Suspense fallback={<div style={{ minHeight: '100dvh' }} />}>
         <EventOpsPortalPage suiteId={decodeURIComponent(portal[1])} token={decodeURIComponent(portal[2])} />
+      </Suspense>
+    );
+  }
+  // PUBLIC device support-call page — pre-bound to one station + device (both in the
+  // URL). No login; works logged-in or out, and from any phone. Matched before the gate.
+  const callLink = window.location.pathname.match(/^\/eventops\/call\/([^/]+)\/([^/]+)\/([^/]+)/);
+  if (callLink) {
+    return (
+      <Suspense fallback={<div style={{ minHeight: '100dvh' }} />}>
+        <EventOpsCallPage suiteId={decodeURIComponent(callLink[1])} token={decodeURIComponent(callLink[2])} deviceId={decodeURIComponent(callLink[3])} />
       </Suspense>
     );
   }
