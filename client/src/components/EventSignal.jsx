@@ -383,16 +383,26 @@ function OwlDrawer({ entityId, suiteId, title, onClose }) {
 }
 
 // 🚨 Needs eyes — the worst stations first: stale (red) then any with dark
-// devices (amber), so the next radio call is always the top row.
+// devices (amber), so the next radio call is always the top row. Collapsed by
+// default (a one-line count) so it never eats the board.
 function NeedsEyes({ rows, onSelect }) {
+  const [open, setOpen] = useState(false);
   const bad = (rows || []).filter((s) => (s.off || 0) > 0 || s.status === 'stale')
     .sort((a, b) => ((b.status === 'stale') - (a.status === 'stale')) || ((b.off || 0) - (a.off || 0)) || ((b.lagMin || 0) - (a.lagMin || 0)))
     .slice(0, 6);
   if (!bad.length) return null;
+  const reds = bad.filter((s) => s.status === 'stale').length;
   return (
-    <div style={{ ...card, marginBottom: 10 }}>
-      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 2 }}>Needs eyes — worst first</div>
-      {bad.map((s) => (
+    <div style={{ ...card, marginBottom: 10, paddingTop: 8, paddingBottom: open ? 12 : 8 }}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 30, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', fontFamily: 'inherit', textAlign: 'left' }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)' }}>Needs eyes — worst first</span>
+        {reds > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR.stale }}>{reds} red</span>}
+        {bad.length - reds > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR.warn }}>{bad.length - reds} amber</span>}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? 'hide ▾' : 'show ▸'}</span>
+      </button>
+      {open && bad.map((s) => (
         <div key={s.monitor + s.name} role="button" tabIndex={0} onClick={() => onSelect && onSelect(s)}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.click(); }}
           style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: '1px solid var(--hairline)', cursor: 'pointer', minWidth: 0 }}>
@@ -415,9 +425,8 @@ function NeedsEyes({ rows, onSelect }) {
 // draggable strip: the playhead sits at LIVE; drag it back to replay the day
 // (readout shows that moment's online vs offline). Built from the observed
 // offline log — Pulse's own record, no live Looker cost.
-function PulseStrip({ monitors, apiBase, rows }) {
+function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
   const [logs, setLogs] = useState({}); // monitor id -> observed log
-  const [idx, setIdx] = useState(null); // null = LIVE, else bin index
   useEffect(() => {
     let alive = true;
     monitors.forEach((m) => {
@@ -431,7 +440,10 @@ function PulseStrip({ monitors, apiBase, rows }) {
   }, [monitors.map((m) => m.id).join(','), apiBase]);
   const BIN = 10 * 60000;
   const bins = new Map(); // binStartMs -> {on, off}
-  Object.values(logs).forEach((d) => {
+  // ONLY the monitors currently on the board — a filter chip must re-scope
+  // every number here, not show the whole site's darkness on a 1-station view.
+  const active = monitors.map((m) => logs[m.id]).filter(Boolean);
+  active.forEach((d) => {
     const offN = (d.ticks || []).map(() => 0);
     (d.devices || []).forEach((dev) => (dev.offAt || []).forEach((ti) => { if (offN[ti] != null) offN[ti] += 1; }));
     (d.ticks || []).forEach((k, ti) => {
@@ -444,8 +456,31 @@ function PulseStrip({ monitors, apiBase, rows }) {
     });
   });
   const keys = [...bins.keys()].sort((a, b) => a - b).slice(-96);
-  if (keys.length < 3) return null;
   const series = keys.map((b) => ({ t: new Date(b), ...bins.get(b) }));
+  // Scrub → tell the board WHICH devices were dark at that moment, grouped by
+  // station, so the whole page can time-travel (tiles, dials, flow meter).
+  useEffect(() => {
+    if (!onScrub) return;
+    if (idx == null || series.length < 3) { onScrub(null); return; }
+    const cur0 = Math.min(idx, series.length - 1);
+    const b0 = keys[cur0];
+    const offBy = new Map(); // `${monitorId}|${station}` -> dark count then
+    monitors.forEach((m) => {
+      const d = logs[m.id];
+      if (!d) return;
+      let use = -1; // the monitor's last check at/before the scrubbed bin
+      (d.ticks || []).forEach((k, ti) => { const t0 = Date.parse(k.at); if (Number.isFinite(t0) && t0 < b0 + BIN) use = ti; });
+      if (use < 0) return;
+      (d.devices || []).forEach((dev) => {
+        if (!(dev.offAt || []).includes(use)) return;
+        const key = `${m.id}|${dev.station || ''}`;
+        offBy.set(key, (offBy.get(key) || 0) + 1);
+      });
+    });
+    onScrub({ t: series[cur0].t, on: series[cur0].on, off: series[cur0].off, offBy });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- series/keys derive from logs
+  }, [idx, logs]);
+  if (keys.length < 3) return null;
   const max = Math.max(1, ...series.map((x) => x.on + x.off));
   const cur = idx == null ? series.length - 1 : Math.min(idx, series.length - 1);
   const ratePerMin = Math.round(monitors.reduce((a, m) => a + (((m.rosterSnapshot || {}).lastHourScans) || 0), 0) / 6) / 10;
@@ -493,8 +528,13 @@ function PulseStrip({ monitors, apiBase, rows }) {
         const volPct = volPrev ? Math.round(((volNow - volPrev) / volPrev) * 100) : 0;
         const offNow = series[series.length - 1].off;
         const offAgo = series[Math.max(0, series.length - 7)].off;
-        const worse = offNow > offAgo || (volPrev > 0 && volPct <= -30);
-        const better = offNow < offAgo && volPct >= -15;
+        // The verdict follows the DARKNESS direction, full stop: more devices
+        // dark than an hour ago = worse, fewer = improving. Volume is context
+        // only — a quiet spell must not flip a recovering site to "worse".
+        const worse = offNow > offAgo;
+        const better = offNow < offAgo;
+        const delta = Math.abs(offAgo - offNow);
+        const big = offAgo > 0 && delta / offAgo >= 0.4; // 40%+ of the dark came back = a BIG swing
         const vc = worse ? STATUS_COLOR.stale : better ? STATUS_COLOR.fresh : 'var(--muted)';
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
@@ -503,10 +543,10 @@ function PulseStrip({ monitors, apiBase, rows }) {
               {vol.map((v, i) => <i key={i} title={`${v.toLocaleString('en-ZA')} in 10 min`} style={{ display: 'block', width: 9, borderRadius: '1px 1px 0 0', height: Math.max(2, Math.round((v / vMax) * 20)), background: i >= 3 ? STATUS_COLOR.fresh : 'var(--hairline)' }} />)}
             </span>
             <span style={{ fontSize: 11.5, fontWeight: 800, color: vc }}>
-              {worse ? '▼ Getting worse' : better ? '▲ Improving' : '► Steady'}
+              {worse ? '▼ Getting worse' : better ? (big ? '▲ Big improvement' : '▲ Improving') : '► Steady'}
             </span>
             <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-              dark {offAgo}→{offNow} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs previous 30 min
+              dark {offAgo}→{offNow}{better ? ` · ${delta} back online` : worse ? ` · ${delta} more went dark` : ''} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs prev 30 min
             </span>
           </div>
         );
@@ -646,7 +686,10 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' (the rate river)
   const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
+  const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
+  const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
   const open = (monitors || []).filter((m) => m.status !== 'closed');
+  const backToLive = () => { setScrubIdx(null); setReplay(null); };
 
   const rows = [];
   for (const m of open) {
@@ -676,8 +719,17 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
   const shown = pick ? rows.filter((s) => s.mid === pick) : rows;
 
+  // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
+  // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
+  // Volume stays blank in the past: the observed log records connectivity.
+  const boardRows = replay ? shown.map((s) => {
+    const tot = (s.on || 0) + (s.off || 0);
+    const off = Math.min(tot, replay.offBy.get(`${s.mid}|${s.sn}`) || 0);
+    return tot ? { ...s, on: tot - off, off, status: off === 0 ? 'fresh' : off < tot ? 'warn' : 'stale', lagMin: null, txnH: null, spark: null } : s;
+  }) : shown;
+
   const zones = new Map();
-  for (const s of shown) {
+  for (const s of boardRows) {
     if (!zones.has(s.zone)) zones.set(s.zone, []);
     zones.get(s.zone).push(s);
   }
@@ -685,14 +737,14 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
     .map(([k, list]) => ({ k, list: list.sort((a, b) => a.name.localeCompare(b.name)), dev: list.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0) }))
     .sort((a, b) => b.dev - a.dev);
 
-  const sum = (k) => shown.reduce((a, s) => a + (s[k] || 0), 0);
+  const sum = (k) => boardRows.reduce((a, s) => a + (s[k] || 0), 0);
   const units = new Set(shown.map((s) => s.unit));
   const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
   const dials = [
-    ['Stations', shown.length], ['Zones', zoneList.length],
+    ['Stations', boardRows.length], ['Zones', zoneList.length],
     ['Devices on', sum('on'), STATUS_COLOR.fresh],
     ['Dark', sum('off'), sum('off') ? STATUS_COLOR.stale : undefined],
-    [`${short}/h`, sum('txnH').toLocaleString('en-ZA')],
+    ...(replay ? [] : [[`${short}/h`, sum('txnH').toLocaleString('en-ZA')]]),
   ];
 
   if (!rows.length) {
@@ -711,16 +763,16 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
         {chips.length > 1 && <>
-          <button onClick={() => { setPick(''); setSel(null); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+          <button onClick={() => { setPick(''); setSel(null); backToLive(); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
           {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); }} style={chipStyle(pick === m.id)}>
+            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); backToLive(); }} style={chipStyle(pick === m.id)}>
               {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
             </button>
           ))}
         </>}
         <span style={{ flex: 1 }} />
         <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
-        <button onClick={() => setView('rhythm')} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
+        <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
       </div>
 
       {view === 'rhythm' && (
@@ -728,9 +780,17 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'board' && <>
-      <FlowMeter rows={shown} />
-      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} />
-      <NeedsEyes rows={shown} onSelect={setSel} />
+      <FlowMeter rows={boardRows} />
+      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
+      {replay && (
+        <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
+          <b style={{ fontSize: 12.5 }}>⏪ Replay · {replay.t.toTimeString().slice(0, 5)}</b>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>the whole board shows that moment — <b style={{ color: STATUS_COLOR.fresh }}>{replay.on}</b> on · <b style={{ color: replay.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{replay.off}</b> dark</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={backToLive} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', minHeight: 30, fontFamily: 'inherit' }}>▶ Back to LIVE</button>
+        </div>
+      )}
+      <NeedsEyes rows={boardRows} onSelect={setSel} />
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {dials.map(([l, v, c]) => (
