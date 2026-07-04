@@ -13,37 +13,41 @@ jobs:
       - name: apply and push
         run: |
           set -euo pipefail
-          echo "2a487ef5f6db54e449850393204395e2b72879590bb1c338a873c6baa755048f  patches/EventSignal14.jsx" | sha256sum -c -
+          echo "02066c5f94e26e3bdae2dba2288816e12748d81a15e57e855363b3ffced9e780  patches/round14.patch" | sha256sum -c -
+          echo "ddd9601005493000c338cf6c12468ee80c43844782a07312969a759f08588c93  patches/EventSignal14.jsx" | sha256sum -c -
           git config user.name "Shai-Xai"
           git config user.email "shai.evian@howler.co.za"
+          cp patches/round14.patch /tmp/p.patch
           cp patches/EventSignal14.jsx /tmp/EventSignal.jsx
           cat > /tmp/msg <<'MSG'
-          Board: Event pulse (drag to replay) + Needs Eyes worst-first list
+          Board: Event pulse (drag to replay), Needs Eyes, 60-min trend, tidy header
 
-          Two ideas from the original site-board design land for real:
           - Event pulse: the site's online/offline at every Pulse check as a
-            draggable strip above the board. The playhead sits at LIVE (with
-            the current per-minute rate); drag it back to replay the day -
-            the readout shows that moment's online vs offline. Built
-            entirely from the observed offline log, so it costs no live
-            Looker reads.
-          - Needs Eyes: the worst stations first - stale reds, then any with
-            dark devices - each row one tap from its station modal.
+            draggable strip; playhead at LIVE with the per-minute rate, drag
+            back to replay the day. Built from the observed offline log.
+          - Needs Eyes: worst stations first (stale reds, then dark-device
+            ambers), one tap from the station modal.
+          - Last 60 min analysis in the pulse card: six site-volume bars plus
+            an Improving / Steady / Getting worse verdict comparing dark
+            devices and volume against the previous half hour.
+          - Header cleanup: one compact control row with the explainer on its
+            own line, on both the board and the client Data health tab.
 
           Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
           Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
           MSG
           sed -i 's/^          //' /tmp/msg
           git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
           cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
           git add client/src/components/EventSignal.jsx
           git commit -F /tmp/msg
           git push origin claude/looker-data-monitoring-jeo2l9
           git checkout main
-          git checkout claude/looker-data-monitoring-jeo2l9 -- client/src/components/EventSignal.jsx
+          git checkout claude/looker-data-monitoring-jeo2l9 -- client/src/components/EventSignal.jsx client/src/components/DataHealthAdmin.jsx
           git commit -F /tmp/msg
           git push origin main || { git pull --rebase origin main && git push origin main; }
           git checkout claude/ecstatic-thompson-vUFsS
-          git rm -q patches/EventSignal14.jsx .github/workflows/apply-round14.yml
+          git rm -q patches/round14.patch patches/EventSignal14.jsx .github/workflows/apply-round14.yml
           git commit -m "chore: remove one-shot apply helper"
           git push origin claude/ecstatic-thompson-vUFsS
