@@ -47,6 +47,18 @@ test('no server file exceeds its line budget (extract a module instead of growin
   assert.deepEqual(offenders, [], `\n${offenders.join('\n')}\n`);
 });
 
+test('index.js still mounts every critical disposable module (a merge must not silently drop one)', () => {
+  // Regression guard: a parallel-session merge once concatenated a new mount onto
+  // an existing line and deleted the whole `livepulse` mount with it — every Live
+  // Pulse route 404'd in prod and the data looked "lost" (it wasn't; the routes
+  // were just gone). A dropped mount is invisible in review, so assert the load-
+  // bearing modules are still wired into the composition root.
+  const src = fs.readFileSync(path.join(SERVER_DIR, 'index.js'), 'utf8');
+  const mustMount = ['alerts', 'livepulse', 'eventops', 'staffAlerts', 'os', 'digests', 'goals', 'actions', 'segments'];
+  const missing = mustMount.filter((m) => !new RegExp(`require\\('\\./${m}'\\)\\.mount`).test(src) && !new RegExp(`require\\('\\./${m}'\\).*\\.mount`).test(src));
+  assert.deepEqual(missing, [], `index.js is no longer mounting: ${missing.join(', ')} — restore the mount line`);
+});
+
 test('budgets ratchet down: no budget has slack to grow a file >150 lines', () => {
   // Guards the guard: if someone pads a budget far above the real size to dodge
   // the cap, flag it so budgets stay tight (lower them as files shrink).
