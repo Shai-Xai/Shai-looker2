@@ -984,8 +984,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             scansPerHour = Math.round(t.grandTotal / Math.max(0.25, (Date.now() - Date.parse(t.buckets[0])) / 3600000));
             const perHour = Math.max(1, Math.round(60 / t.intervalMin));
             lastHourScans = t.bucketTotals.slice(-perHour).reduce((a, b) => a + b, 0); // rolling last ~60 min
-            // Compact sparkline series for the tile: {t: 'HH:MM' UTC, n: devices sending}.
-            coverage = t.buckets.map((b, i) => ({ t: b.slice(11, 16), n: t.devices.reduce((a, d) => a + (d.active[i] ? 1 : 0), 0) })).slice(-288);
+            // Tile sparkline: {t, n: sending, tot: linked} — tot lets the tile stack offline on online.
+            coverage = t.buckets.map((b, i) => ({ t: b.slice(11, 16), n: t.devices.reduce((a, d) => a + (d.active[i] ? 1 : 0), 0), tot: t.devices.length })).slice(-288);
             // A device counts as "on" for an hour if ANY of its blocks in that
             // hour sent data — a bar selling hourly isn't down five blocks of six.
             const perH = Math.max(1, Math.round(60 / t.intervalMin));
@@ -1044,8 +1044,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // The tile day-graph prefers the OBSERVED log (never repainted by late
         // syncs); the transaction series above is the fresh-DB fallback.
         try {
-          const obs = sql.prepare('SELECT at, online FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, r.startAt || new Date(nowMs - 12 * 3600000).toISOString());
-          if (obs.length >= 3) coverage = obs.map((o) => ({ t: o.at.slice(11, 16), n: o.online })).slice(-288);
+          const obs = sql.prepare('SELECT at, online, total FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, r.startAt || new Date(nowMs - 12 * 3600000).toISOString());
+          if (obs.length >= 3) coverage = obs.map((o) => ({ t: o.at.slice(11, 16), n: o.online, tot: o.total })).slice(-288);
         } catch (e) { console.warn('[data-health] observed coverage failed', m.id, e.message); }
         // FLOW SCORE (0-100): one number for "is this station's device fleet
         // flowing" across the whole day. 60% uptime (mean share of LINKED

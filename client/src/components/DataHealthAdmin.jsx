@@ -697,15 +697,27 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             grey stubs for zero blocks, SA-time labels at the ends. */}
         {m.rosterField && (m.rosterSnapshot?.coverage?.length || 0) > 1 && (() => {
           const cov = m.rosterSnapshot.coverage;
-          const max = Math.max(1, ...cov.map((c) => c.n));
+          // Stack offline (linked-but-silent) on top of online. tot is the
+          // linked count that block; older snapshots without tot just show green.
+          const off = (c) => Math.max(0, (c.tot ?? c.n) - c.n);
+          const max = Math.max(1, ...cov.map((c) => Math.max(c.n, c.tot ?? c.n)));
+          const H = 52;
           return (
             <div style={{ flex: '0 1 320px', minWidth: 240, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Devices online through the day</div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: cov.length > 24 ? 1 : 3, height: 52 }}>
-                {cov.map((c, i) => (
-                  <span key={i} title={`${saTime(c.t)} SA — ${c.n} of ${max} devices sending`}
-                    style={{ flex: 1, maxWidth: cov.length > 24 ? 8 : 30, borderRadius: cov.length > 24 ? '1px 1px 0 0' : '3px 3px 0 0', height: c.n ? Math.max(3, Math.round((c.n / max) * 52)) : 3, background: c.n ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
-                ))}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: cov.length > 24 ? 1 : 3, height: H }}>
+                {cov.map((c, i) => {
+                  const onH = c.n ? Math.max(2, Math.round((c.n / max) * H)) : 0;
+                  const offH = off(c) ? Math.max(2, Math.round((off(c) / max) * H)) : 0;
+                  const w = cov.length > 24 ? 8 : 30; const r = cov.length > 24 ? 1 : 3;
+                  return (
+                    <span key={i} title={`${saTime(c.t)} SA — ${c.n} sending${off(c) ? ` · ${off(c)} dark` : ''}${c.tot != null ? ` of ${c.tot}` : ''}`}
+                      style={{ flex: 1, maxWidth: w, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H }}>
+                      {offH > 0 && <i style={{ display: 'block', height: offH, background: STATUS_COLOR.stale, borderRadius: `${r}px ${r}px 0 0` }} />}
+                      <i style={{ display: 'block', height: onH || (offH ? 0 : 3), background: onH ? STATUS_COLOR.fresh : 'var(--hairline)', borderRadius: offH ? 0 : `${r}px ${r}px 0 0` }} />
+                    </span>
+                  );
+                })}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', marginTop: 3 }}>
                 <span>{saTime(cov[0].t)}</span>

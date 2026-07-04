@@ -31,6 +31,18 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       opted_out   INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_staff_wa ON eventops_staff_wa(staff_id);
+    -- Per-staff alert feed for the portal: one row per crew member per firing,
+    -- with an acknowledge stamp so ops can see who's on it.
+    CREATE TABLE IF NOT EXISTS eventops_staff_alert (
+      id        TEXT PRIMARY KEY,
+      staff_id  TEXT NOT NULL,
+      suite_id  TEXT NOT NULL,
+      station   TEXT NOT NULL DEFAULT '',
+      message   TEXT NOT NULL DEFAULT '',
+      at        TEXT NOT NULL,
+      acked_at  TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_staff_alert ON eventops_staff_alert(staff_id, at);
     CREATE TABLE IF NOT EXISTS staff_alert_state (
       k      TEXT PRIMARY KEY,
       status TEXT NOT NULL,
@@ -156,6 +168,13 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       : map.id ? 'No staff assigned to this station in Event Ops.'
         : 'No Event Ops station matched — map it in Hive → Alerts.';
     log(suiteId, hs.station, 'alert', `${hs.off}/${total} dark. ${body}`, who);
+    // A per-staff feed row so each crew member sees + acknowledges it in their portal.
+    const feedMsg = `${hs.off} of ${total} devices dark — check the connection.`;
+    for (const x of crew) {
+      sql.prepare('INSERT INTO eventops_staff_alert (id, staff_id, suite_id, station, message, at) VALUES (?,?,?,?,?,?)')
+        .run(uuid(), x.id, suiteId, hs.station, feedMsg, now());
+    }
+    sql.prepare('DELETE FROM eventops_staff_alert WHERE at<?').run(new Date(Date.now() - 3 * 86400000).toISOString());
     if (testMode()) {
       const to = testEmail();
       if (to && mailer?.send) {
@@ -269,8 +288,11 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number, reachable: reachable.has(x.id), whatsapp: waReach.has(x.id) })) };
     });
     const logRows = sql.prepare('SELECT at, station, kind, message FROM staff_alert_log WHERE suite_id=? ORDER BY at DESC LIMIT 50').all(suiteId);
+    // Recent acknowledgements (who's on it) — joined to the staffer's name.
+    const acks = sql.prepare(`SELECT a.acked_at, a.station, s.name FROM eventops_staff_alert a JOIN eventops_staff s ON s.id=a.staff_id
+      WHERE a.suite_id=? AND a.acked_at!='' ORDER BY a.acked_at DESC LIMIT 20`).all(suiteId);
     const whatsappFrom = (messaging && messaging.waFrom && messaging.waConfigured && messaging.waConfigured()) ? messaging.waFrom() : '';
-    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), allOff: allOff(), whatsappFrom, stations, opsStations, log: logRows });
+    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), allOff: allOff(), whatsappFrom, stations, opsStations, log: logRows, acks });
   });
 
   app.put('/api/my/staff-alerts/settings', requireAuth, (req, res) => {
