@@ -1246,7 +1246,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
 
   async function save() {
     try {
-      const body = { name: form.name, number: form.number, role: form.role, stationIds: form.stationIds || [], canMove: !!form.canMove, canCheckpoint: !!form.canCheckpoint };
+      const body = { name: form.name, number: form.number, role: form.role, stationIds: form.stationIds || [], canMove: !!form.canMove, canCheckpoint: !!form.canCheckpoint, alertsOn: form.alertsOn !== false };
       if (form.id) await api.eventopsUpdateStaff(suiteId, form.id, body);
       else await api.eventopsCreateStaff(suiteId, body);
       setForm(null); load(); flash('Staff saved');
@@ -1273,7 +1273,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <StaffPortalCard suiteId={suiteId} flash={flash} />}
-      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [], canMove: true, canCheckpoint: false })} style={primaryBtn}>＋ Add staff</button>}
+      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [], canMove: true, canCheckpoint: false, alertsOn: true })} style={primaryBtn}>＋ Add staff</button>}
       {/* Filter staff by the station they're posted to. */}
       {stations.length > 0 && staff.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1301,7 +1301,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
                 )}
                 {canManage && (
                   <>
-                    <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint })} style={iconBtn}>✏️</button>
+                    <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint, alertsOn: s.alertsOn !== false })} style={iconBtn}>✏️</button>
                     <button onClick={() => remove(s)} style={iconBtn}>🗑️</button>
                   </>
                 )}
@@ -1338,6 +1338,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <Chip on={form.canMove !== false} onClick={() => setForm({ ...form, canMove: form.canMove === false })}>🔀 Can move devices</Chip>
                 <Chip on={!!form.canCheckpoint} onClick={() => setForm({ ...form, canCheckpoint: !form.canCheckpoint })}>✅ Can do checkpoints</Chip>
+                <Chip on={form.alertsOn !== false} onClick={() => setForm({ ...form, alertsOn: form.alertsOn === false })}>🔔 Station alerts</Chip>
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Everyone can log issues. Move &amp; Checkpoint appear in their portal only if enabled here.</div>
             </div>
