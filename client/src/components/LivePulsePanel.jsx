@@ -386,13 +386,31 @@ function BlockCard({ block: b, idx, count, dashboards, explores, signalStations 
         <input style={inp} value={b.label || ''} onChange={(e) => onPatch({ label: e.target.value })} placeholder={b.type === 'top_list' ? 'Top bars' : b.type === 'eventops' ? 'Devices' : b.type === 'signal' ? 'Signal flow' : 'Through the gates'} aria-label="Label" />
       </div>
       {b.type === 'eventops' && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>Deployed devices, open issues and lost/damaged counts from Event Ops.</div>}
-      {b.type === 'signal' && (<>
-        <select style={inp} value={b.station || ''} onChange={(e) => onPatch({ station: e.target.value })} aria-label="Station">
-          <option value="">All stations (whole event)</option>
-          {signalStations.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>% of roster devices online from the Signal board — flags when it drops below the event’s flow target.</div>
-      </>)}
+      {b.type === 'signal' && (() => {
+        // Group the picker by station category (zone), exactly as the Signal board does.
+        const zones = [...new Set((signalStations || []).map((s) => s.zone).filter(Boolean))].sort((a, c) => a.localeCompare(c));
+        const inZone = (z) => (signalStations || []).filter((s) => s.zone === z).map((s) => s.name).sort((a, c) => a.localeCompare(c, undefined, { numeric: true }));
+        const selVal = b.category ? `c:${b.category}` : b.station ? `s:${b.station}` : '';
+        const onScope = (v) => { if (!v) onPatch({ station: '', category: '' }); else if (v.startsWith('c:')) onPatch({ station: '', category: v.slice(2) }); else onPatch({ station: v.slice(2), category: '' }); };
+        const METRICS = [['flow', 'Flow %'], ['online', 'Online'], ['offline', 'Offline'], ['both', 'Both']];
+        return (<>
+          <select style={inp} value={selVal} onChange={(e) => onScope(e.target.value)} aria-label="Scope">
+            <option value="">All stations (whole event)</option>
+            {zones.map((z) => (
+              <optgroup key={z} label={z}>
+                <option value={`c:${z}`}>All {z}</option>
+                {inZone(z).map((name) => <option key={name} value={`s:${name}`}>{name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {METRICS.map(([k, lab]) => (
+              <button key={k} type="button" onClick={() => onPatch({ metric: k })} style={segBtn((b.metric || 'flow') === k)}>{lab}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>Devices online from the Signal board — the flow %, raw online/offline counts, or both. Pick the whole event, a category, or one station. Flags when flow drops below the target.</div>
+        </>);
+      })()}
 
       {b.type === 'value' && (<>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>

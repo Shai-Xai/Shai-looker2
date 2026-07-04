@@ -113,7 +113,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       type, label: String(b.label || '').slice(0, 80), icon: String(b.icon || '').slice(0, 8),
     };
     if (type === 'eventops') return out; // reads the EventOps suite summary; nothing else to configure
-    if (type === 'signal') { out.station = String(b.station || '').slice(0, 120); return out; } // '' = whole event; else one station
+    if (type === 'signal') { // scope: '' = whole event · category = one zone · station = one station
+      out.station = String(b.station || '').slice(0, 120);
+      out.category = String(b.category || '').slice(0, 120);
+      out.metric = ['flow', 'online', 'offline', 'both'].includes(b.metric) ? b.metric : 'flow';
+      return out;
+    }
     out.unit = String(b.unit || '').slice(0, 16);
     if (type === 'top_list') {
       // A top-N list reads the TABLE behind a breakdown tile (e.g. "Revenue by bar").
@@ -262,9 +267,20 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   function readSignalBlock(p, b) {
     try {
       if (typeof signalFlow !== 'function') return null;
-      const f = signalFlow(p.suiteId, b.station || '');
-      return f && f.total ? f : (f && f.stations && f.stations.length ? f : null);
+      const f = signalFlow(p.suiteId, { station: b.station || '', category: b.category || '' });
+      return f && (f.total || (f.stations && f.stations.length)) ? f : null;
     } catch (e) { console.error('[livepulse] signal read failed', p.id, b.id, e.message); return null; }
+  }
+  // One compact reading of a signal block, honouring its metric mode (flow % /
+  // online / offline / both). Shared by the message and the preview.
+  function signalText(b, f) {
+    if (!f || f.pct == null) return null;
+    const below = f.target != null && f.pct < f.target ? ` ⚠️ below target ${f.target}%` : '';
+    const m = b.metric || 'flow';
+    if (m === 'online') return `${f.on} online (of ${f.total})`;
+    if (m === 'offline') return `${f.off} offline (of ${f.total})`;
+    if (m === 'both') return `${f.on} online · ${f.off} offline · ${f.pct}%${below}`;
+    return `${f.pct}% online (${f.on}/${f.total})${below}`;
   }
 
   // ── like-for-like ("same point in time") comparison ──
@@ -348,11 +364,10 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
         continue;
       }
       if (b.type === 'signal') {
-        const f = s.flow;
-        if (!f || f.pct == null) continue;
-        const scope = b.station || (label && label !== 'Signal flow' ? '' : 'all stations');
-        const below = f.target != null && f.pct < f.target ? ` ⚠️ below target ${f.target}%` : '';
-        lines.push(`${icon} ${label || 'Signal flow'}${scope ? ` (${scope})` : ''}: ${f.pct}% online (${f.on}/${f.total})${below}`);
+        const txt = signalText(b, s.flow);
+        if (!txt) continue;
+        const scope = (s.flow && s.flow.scope) || 'all stations';
+        lines.push(`${icon} ${label || 'Signal flow'}${scope ? ` (${scope})` : ''}: ${txt}`);
         continue;
       }
       // value block
@@ -469,7 +484,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       const s = snap[b.id] || {};
       const label = b.label || b.tileName || b.measureLabel || (b.type === 'eventops' ? 'Devices' : 'Metric');
       if (b.type === 'eventops') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: !!s.ops, ops: s.ops || null };
-      if (b.type === 'signal') return { id: b.id, type: b.type, label: label === 'Metric' ? 'Signal flow' : label, icon: b.icon || '', ok: !!(s.flow && s.flow.pct != null), value: s.flow && s.flow.pct != null ? `${s.flow.pct}% (${s.flow.on}/${s.flow.total})` : null, station: b.station || '' };
+      if (b.type === 'signal') { const txt = signalText(b, s.flow); return { id: b.id, type: b.type, label: label === 'Metric' ? 'Signal flow' : label, icon: b.icon || '', ok: !!txt, value: txt, scope: (s.flow && s.flow.scope) || '' }; }
       if (b.type === 'top_list') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: (s.rows || []).length > 0, rows: (s.rows || []).map((r) => ({ name: r.name, value: fmtNum(r.value, b.unit, sym) })) };
       return { id: b.id, type: b.type, label, icon: b.icon || '', ok: s.value != null, value: s.value == null ? null : fmtNum(s.value, b.unit, sym), compare: (b.compare && s.compare != null) ? fmtNum(s.compare, b.unit, sym) : null };
     });
@@ -532,7 +547,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     let signalStations = [];
-    try { if (typeof signalFlow === 'function') signalStations = (signalFlow(req.params.suiteId).stations || []).map((s) => s.name).filter(Boolean); } catch { signalStations = []; }
+    try { if (typeof signalFlow === 'function') signalStations = (signalFlow(req.params.suiteId).stations || []).filter((s) => s.name).map((s) => ({ name: s.name, zone: s.zone })); } catch { signalStations = []; }
     res.json({
       pulses: listForSuite(req.params.suiteId).map(decorate),
       canManage: canManage(req.user, req.params.suiteId),
@@ -540,6 +555,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       whatsappAvailable: !!(messaging?.waConfigured?.()),
       eventopsAvailable: !!(eventops && typeof eventops.suiteSummary === 'function' && eventops.suiteSummary(req.params.suiteId) && (eventops.suiteSummary(req.params.suiteId).devices || {}).total),
       // The Signal-flow block is offered when the Data health board knows any station.
+      // Each station carries its zone (category) so the picker can group by category.
       signalAvailable: signalStations.length > 0,
       signalStations,
     });
