@@ -1,0 +1,13 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 7493c74..79772c6 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -1639,0 +1640 @@ export function DataHealthOps({ entityId, suiteId }) {
++          <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
+@@ -1651,4 +1652,2 @@ export function DataHealthOps({ entityId, suiteId }) {
+-        {/* The Owl's quick take and the full report, side by side (stacked on phones). */}
+-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 4 }}>
+-          <div style={{ flex: '1 1 300px', minWidth: 0 }}><Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense></div>
+-          <div style={{ flex: '1 1 300px', minWidth: 0 }}><ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" /></div>
++        <div style={{ marginBottom: 4 }}>
++          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
