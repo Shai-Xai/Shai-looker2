@@ -785,6 +785,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04 (night)** — **Signal board: Stations view + provider report** 🧪: a new
+  📶 Stations view puts every station's online/offline-through-the-day strip on one
+  screen, grouped by zone, with an average-transactions line overlaid (see throughput
+  track connectivity per station), closed stations greyed, and Online/Offline/Txns/Closed
+  layer toggles + a station filter. Plus a **shareable device-health report** — a
+  print-to-PDF page (📤 on the board) you can send to your **network / operations
+  provider**, and an **ops digest** that emails them the headline numbers + the link on a
+  schedule *and* the moment signal drops below target. Signal flow (all / per category /
+  per station) and device online/offline are also blocks you can add to a Live update.
 - **2026-07-04 (night)** — **One-tap LIVE button** ✅: pick an event's live-ticketing
   dashboard in Admin → Suites (or the setup wizard) and a red **LIVE** pill shows
   on that event's sidebar row — clients jump straight to live sales, no drill-down.
