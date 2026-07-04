@@ -12,6 +12,9 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
 const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
+const OwlSummary = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.OwlSummary })));
+const ControlKebab = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.ControlKebab })));
+const ShareMenuLazy = lazy(() => import('./ShareMenu.jsx'));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
@@ -951,8 +954,8 @@ function HealthMetrics({ monitors: allMonitors }) {
         ))}
       </div>
       {offenders.length > 0 && (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          Offline by station:{' '}
+        <div style={{ ...card, fontSize: 12, color: 'var(--muted)', marginTop: 8, padding: '9px 13px' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Offline by station</span><br />{' '}
           {offenders.map(({ name, s: sn }, i) => (
             <span key={name} title={(sn.offlineDevices || []).length ? `${name} offline: ${sn.offlineDevices.map((d) => `${d.device} (${Math.round(d.lagMin)}m)`).join(', ')}${sn.offline > sn.offlineDevices.length ? ` +${sn.offline - sn.offlineDevices.length} more` : ''}` : undefined}
               style={{ cursor: (sn.offlineDevices || []).length ? 'help' : undefined }}>
@@ -1612,6 +1615,7 @@ export default function DataHealthAdmin() {
 // picked event). Renders in BOTH consoles — the client's /event-ops page and
 // Admin → client → Event Ops (the dual-surface rule).
 export function DataHealthOps({ entityId, suiteId }) {
+  const isMobile = useIsMobile();
   const [monitors, setMonitors] = useState(null);
   const [err, setErr] = useState('');
   const [tick, setTick] = useState(0); // manual refresh bumps this
@@ -1628,14 +1632,25 @@ export function DataHealthOps({ entityId, suiteId }) {
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
-          Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
-          Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
-        </p>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
+      {/* Compact control row. Phones get ONE ⋯ menu holding Summary/Share/
+          refresh and skip the explainer; desktop keeps the inline buttons. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <span style={{ flex: 1 }} />
+        <Suspense fallback={null}>
+          {(() => {
+            const controls = <>
+              <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
+              <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+              <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+            </>;
+            return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+          })()}
+        </Suspense>
       </div>
+      {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
+        Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.
+      </p>}
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>
@@ -1644,9 +1659,6 @@ export function DataHealthOps({ entityId, suiteId }) {
         </div>
       ) : <>
         <HealthMetrics monitors={monitors} />
-        <div style={{ marginBottom: 12 }}>
-          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
-        </div>
         {monitors.map((m) => (
           <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />
         ))}

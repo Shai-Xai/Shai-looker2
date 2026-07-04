@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-04 (🎛️ Event Signal: the live site board in Event Ops) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-04 (🎛️ Event Signal: filters, robot deep dive, 🦉 summary & share, 🐝 Hive nav) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -772,6 +772,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04 (later)** — **Event Signal grows up in a day** 🧪: station family
+  filter chips (Bars / Vendors / Check-in); tap a station for a centred pop-up
+  deep dive — per-device day timeline with the 🚦 three-colour robot view
+  (online+data / offline-but-synced-later / offline+no data) and a stacked
+  online-vs-offline day graph; 🦉 Owl summary and ↗ Share on both the board and
+  the client Data health tab; gates now count real check-in scans; Event Ops nav
+  tidied into a 🐝 Hive drawer (Live, Devices, Stations, Map, Staff, Checks,
+  Issues, Activity) with Data health and the Signal board alongside.
 - **2026-07-04** — **🎛️ Event Signal — the event as a live site board** 🧪: a map-style
   view of the whole event in Event Ops: stations grouped into their real venue
   zones, every device a countable tick (green = sending, red = dark), this hour's
