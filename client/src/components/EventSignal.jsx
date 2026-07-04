@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import ShareMenu from './ShareMenu.jsx';
 
 // 🎛 Event Signal — the site board: every station a tile inside its venue zone,
 // every device a countable tick (green = sending, red = dark). Data comes from
@@ -204,6 +205,44 @@ function DeepDive({ apiBase, mid, station, unit }) {
   );
 }
 
+// One line per open monitor — the text that rides a Share (WhatsApp/Slack/email).
+export function healthShareText(monitors) {
+  return (monitors || []).filter((m) => m.status !== 'closed').map((m) => {
+    const s = m.rosterSnapshot || {};
+    return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`;
+  }).join('\n');
+}
+
+// 🦉 The Owl's quick take on the whole surface — same AI report the Data
+// health tab drafts, presented as a summary card with its own Share.
+export function OwlSummary({ entityId, suiteId, title = 'Data health' }) {
+  const [state, setState] = useState(null); // null | 'busy' | {markdown} | {error}
+  const run = () => {
+    setState('busy');
+    fetch('/api/my/data-health/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId: entityId || '', suiteId: suiteId || '' }) })
+      .then((r) => r.json()).then((d) => setState(d && d.markdown ? d : { error: (d && d.error) || 'No summary came back' }))
+      .catch((e) => setState({ error: e.message }));
+  };
+  if (!state) {
+    return <button onClick={run} style={{ ...card, cursor: 'pointer', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, padding: '9px 14px', marginBottom: 10 }}>🦉 Owl summary — what's happening right now?</button>;
+  }
+  if (state === 'busy') return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>🦉 The Owl is reading the board…</div>;
+  if (state.error) {
+    return <div style={{ ...card, fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 10 }}>⚠️ {state.error} <button onClick={run} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer', marginLeft: 6 }}>Retry</button></div>;
+  }
+  return (
+    <div style={{ ...card, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <strong style={{ fontSize: 13 }}>🦉 Owl summary</strong>
+        <span style={{ flex: 1 }} />
+        <ShareMenu variant="header" heading={`${title} · Owl summary`} text={state.markdown} />
+        <button onClick={() => setState(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 30, minHeight: 28, fontSize: 11, cursor: 'pointer' }}>✕</button>
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-wrap', maxHeight: 380, overflowY: 'auto' }}>{String(state.markdown).replace(/^#{1,3} /gm, '').replace(/\*\*/g, '')}</div>
+    </div>
+  );
+}
+
 // The board itself — presentational; give it the monitors array the page
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
@@ -370,8 +409,10 @@ export default function SignalOps({ entityId, suiteId }) {
           Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
         </p>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+        <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
       </div>
+      <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );
