@@ -951,13 +951,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         const breach = m.rosterAlertPct >= 1 && r.total >= 3 && offlinePct >= m.rosterAlertPct;
         // Scan volume for the tile: total + average per hour over the roster
         // window (hour-level timeline read — tiny aggregated result).
-        let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null, countField = null;
+        let totalScans = null, scansPerHour = null, lastHourScans = null, scansApprox = false, coverage = null, countField = null, tl = null;
         const hourlyN = []; // devices seen per HOUR — keeps the flow score stable at fine blocks
         try {
           // 10-min blocks: the tile graph shows the day at the same resolution
           // as the live timeline (hour bars hid the short dropouts).
           const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10);
           if (t.configured) {
+            tl = t;
             totalScans = t.grandTotal;
             countField = t.countField || null;
             scansApprox = t.countBasis === 'none' || !!t.truncated;
@@ -990,6 +991,33 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             if (Number.isFinite(v)) feedTotal = v;
           }
         } catch (e) { console.warn('[data-health] feed total read failed', m.id, e.message); }
+        // Per-station roll-up for the Event Signal board — devices on/off, the
+        // hour's volume and a 6-block spark per station, all from reads this
+        // check already made, so the board costs nothing to render.
+        let stations = null;
+        try {
+          if (tl && m.stationField && tl.devices.length) {
+            const a3 = rosterAnchor(m);
+            const info3 = await deviceDetailsLite(m, a3
+              ? `after ${a3.toISOString().slice(0, 16).replace('T', ' ')}`
+              : `last ${m.rosterBaselineMin} minutes`);
+            if (info3) {
+              const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
+              const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
+              const byS = new Map();
+              for (const d of tl.devices) {
+                const stn = (info3.get(d.device) || {}).station || '—';
+                if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
+                const e3 = byS.get(stn);
+                if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
+                e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
+                const s6 = d.counts.slice(-6);
+                s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
+              }
+              stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
+            }
+          }
+        } catch (e) { console.warn('[data-health] station roll-up failed', m.id, e.message); }
         // The tile day-graph reads the OBSERVED log once it has any history —
         // what Pulse saw at each check, which a late sync can never repaint.
         // The transaction-based series above stays as the fallback (fresh DB).
@@ -1013,7 +1041,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         sql.prepare('UPDATE data_monitors SET roster_snapshot=? WHERE id=?').run(JSON.stringify({
           at: ts, total: r.total, online: r.online, offline: offlineN, offlinePct, breach,
           startAt: r.startAt || '', baselineMin: r.baselineMin, onlineMin: r.onlineMin,
-          totalScans, scansPerHour, lastHourScans, scansApprox, feedTotal, coverage, flowScore, flow,
+          totalScans, scansPerHour, lastHourScans, scansApprox, feedTotal, stations, coverage, flowScore, flow,
           // WHICH devices are offline (worst first, capped) — shown on the tile
           // and in the dashboard breakdown without opening the Devices tab.
           offlineDevices: r.offline.slice(0, 15).map((d) => ({ device: d.device, lagMin: d.lagMin })),

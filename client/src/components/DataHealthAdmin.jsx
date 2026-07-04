@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -11,6 +11,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
+const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
@@ -947,6 +948,7 @@ function HealthMetrics({ monitors: allMonitors }) {
 // monitor cards — the platform overview drills down instead of a flat list.
 function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpen, reportBody }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [board, setBoard] = useState(false); // 🎛 the Event Signal site board for this group
   const openMons = monitors.filter((m) => m.status !== 'closed');
   const streams = openMons.flatMap((m) => m.streams);
   const staleN = streams.filter((s) => s.status === 'stale').length + openMons.filter((m) => m.lastError).length;
@@ -966,10 +968,21 @@ function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpe
                 : <span>no data yet</span>}
         </span>
         <span style={{ flex: 1 }} />
+        {reportBody && (
+          <button style={{ ...ghostBtn, padding: '4px 10px', ...(board ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
+            onClick={(e) => { e.stopPropagation(); setBoard((v) => !v); setOpen(true); }}>🎛️ Board</button>
+        )}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
         <div style={{ marginLeft: 14 }}>
+          {board && (
+            <div style={{ marginBottom: 10 }}>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={monitors} />
+              </Suspense>
+            </div>
+          )}
           {reportBody && <div style={{ marginBottom: 10 }}><ReportPanel url={`${ADMIN_BASE}/report`} body={reportBody} title={`Data health — ${label}`} /></div>}
           {monitors.map((m) => (
             <MonitorCard key={m.id} m={m} entities={entities} onChanged={onChanged} onEdit={onEdit} />

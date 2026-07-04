@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (📶 Data health: per-station timeline drill-down, scans vs transactions split, device labels) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-04 (🎛️ Event Signal: the live site board in Event Ops) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -75,7 +75,11 @@ longer they use Pulse, the better it gets."
   one tap, with room to add a personal note and a link back to the view.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
-  follow and view.
+  follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
+  optionally scoped to a **lifecycle phase** (e.g. the gates board on Event Day —
+  needs the event's key dates set so Pulse knows the phase); picked tiles always
+  feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
+  make a given briefing.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
@@ -205,9 +209,12 @@ ticket like a well-informed friend who's already going.
 **Pitch:** "Your website stays the story; the Owl turns it into the shop — every
 page gets a personal ticket guide that answers, recommends and sells."
 
-### Skills — autonomous specialists (first: the Ticketing Manager)  🧪
+### Skills — autonomous specialists (Ticketing Manager · Chief of Operations)  🧪
 Self-running specialists that review a client's event on a schedule and write
-grounded advice — the Owl's "push" door. The first hire is the **Ticketing
+grounded advice — the Owl's "push" door. Two hires so far: the **Chief of
+Operations 🎪** debriefs how the event day *ran* — gates & entry flow, bars &
+cashless spend, devices & stations — from whatever operational sources are
+connected, and says what to change for the next one. The **Ticketing
 Manager 🎟️**: every morning it checks the event's goals, pace and forecast,
 digs into per-tier sales for the *why*, and writes a short review (headline →
 status → flags → concrete recommendations) into the run log.
@@ -591,8 +598,26 @@ client's* numbers.
   product, literally beating. *(Desktop for now; urgent alerts already reach the phone
   via push. Momentum auto-picks key tiles today; hand-picking comes later.)*
 
+- **⚡ Live updates (event-day mini report)** 🧪 — a second tab on the Alerts page for
+  **during the event**: instead of one threshold, Pulse sends the team a **compact
+  multi-metric snapshot every 15–120 minutes while the event runs** — people through
+  the gates with the **+change since the last update** and the **pace per hour**, bar
+  revenue, a **top-3 bars/vendors** list read off any breakdown tile, and (for Event
+  Ops clients) **device health** (deployed devices + open issues). A block can also
+  show **"% of last year — by this point"**: a true **like-for-like** comparison that
+  cuts the past event to the **same day of the event at the same clock time** (fair
+  whether the event is one day or five; a "final number" mode is there too). Press
+  **Go live** when doors
+  open (or set a start/end window and it runs itself); it lands in the **inbox** (the
+  whole night in one thread) plus **app push, email, SMS** and **WhatsApp** — WhatsApp
+  reaches anyone who's messaged the Owl in the last 24h (WhatsApp's own service-window
+  rule; others are skipped, the rest still deliver). The **Owl can set one up from
+  chat** ("update me every 30 minutes on event night") with the usual confirm-before-
+  create card.
+
 **Pitch:** "Stop watching dashboards — tell Pulse the number that matters and it taps
-you on the shoulder the moment it happens, on whatever screen you're on."
+you on the shoulder the moment it happens, on whatever screen you're on. And on event
+night, it becomes your control room in your pocket — a mini report every half hour."
 *Checked every few minutes (data refreshes on the ~30-min pipeline). Coming next:
 sales-surge/stall detection, AI-written alert messages, and one-tap actions from the
 alert itself.*
@@ -747,6 +772,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04** — **🎛️ Event Signal — the event as a live site board** 🧪: a map-style
+  view of the whole event in Event Ops: stations grouped into their real venue
+  zones, every device a countable tick (green = sending, red = dark), this hour's
+  scans/transactions per station with a mini trend. Runs off the Data health
+  checks already in place — no extra load — and admins get the same board per
+  event on the Data health page. Floorplan overlay and day-replay are next.
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking
@@ -754,6 +785,13 @@ see "The continuous comms loop" above.)*
   monitors report **transactions** and check-in monitors **scans** — separate
   metrics, never summed — and closed stations keep their day totals. Roster and
   count reads are aggregation-backed so busy sales days no longer under-count.
+- **2026-07-03** — **Pinpoint the tile + record your screen when reporting** 🧪: filing a
+  bug from a dashboard now lets you say **exactly which tile** is affected (a "which tile
+  is this about?" picker listing that dashboard's tiles) — the tile flows into the ticket,
+  the AI draft, the Copy-for-Claude brief and the triage board, so nobody has to guess.
+  You can also **record your screen** (desktop) as an alternative to a screenshot — perfect
+  for intermittent or interaction bugs — alongside the existing screenshot/video upload
+  (on a phone, attach a video recorded with your camera). Mobile-first, self-service.
 - **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
   per station now has a read-only client tab in Event Ops (streams, device roster,
   day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data
