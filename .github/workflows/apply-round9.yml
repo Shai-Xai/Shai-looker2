@@ -1,0 +1,52 @@
+name: apply-round9
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "088fb1fa36ab14def673543dfa9c4754721f5f4d84de00a3095aef851b12d519  patches/round9.patch" | sha256sum -c -
+          echo "34b786f3e97e27ebccf18e491519a337462b461776907896ef035d787aa37a7a  patches/EventSignal9.jsx" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/round9.patch /tmp/p.patch
+          cp patches/EventSignal9.jsx /tmp/EventSignal.jsx
+          cat > /tmp/msg <<'MSG'
+          Owl summary + Share on Data health & board; Event Ops Hive drawer
+
+          - Both the client Data health tab and the Signal board gain a
+            one-tap Owl summary (the AI health report as a quick card, with
+            its own Share) and the standard Share menu carrying a per-station
+            status snapshot.
+          - Event Ops nav: Live becomes the Hive - Live, Devices, Stations,
+            Map, Staff, Checks, Issues and Activity fold into a sub-drawer
+            under a single Hive item; Data health and Signal board stay
+            top-level.
+          - Sales overview changelog updated.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
+          cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
+          git add client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- client/src/components/EventSignal.jsx client/src/components/DataHealthAdmin.jsx client/src/components/EventOpsConsole.jsx docs/PRODUCT_OVERVIEW_SALES.md
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round9.patch patches/EventSignal9.jsx .github/workflows/apply-round9.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS

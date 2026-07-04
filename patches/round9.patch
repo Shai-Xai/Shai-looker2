@@ -1,0 +1,60 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 369d12e..d262c20 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -14,0 +15,2 @@ const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ defa
++const OwlSummary = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.OwlSummary })));
++const ShareMenuLazy = lazy(() => import('./ShareMenu.jsx'));
+@@ -1636,0 +1639,3 @@ export function DataHealthOps({ entityId, suiteId }) {
++        <Suspense fallback={null}>
++          <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
++        </Suspense>
+@@ -1638,0 +1644 @@ export function DataHealthOps({ entityId, suiteId }) {
++      <Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense>
+diff --git a/client/src/components/EventOpsConsole.jsx b/client/src/components/EventOpsConsole.jsx
+index 5fc850c..c6971c7 100644
+--- a/client/src/components/EventOpsConsole.jsx
++++ b/client/src/components/EventOpsConsole.jsx
+@@ -26 +26,4 @@ const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Conne
+-const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity'], ['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
++// 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
++// Signal board stay top-level. Clicking Hive opens the sub-drawer.
++const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
++const TOP_TABS = [['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
+@@ -35,0 +39,2 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
++  const [hiveOpen, setHiveOpen] = useState(true); // 🐝 the sub-drawer of on-the-ground tabs
++  const inHive = HIVE_TABS.some(([t]) => t === tab);
+@@ -96 +101,16 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
+-            {TABS.map(([t, icon, label]) => (
++            <button onClick={() => { if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
++              style={isMobile ? tabBtn(inHive) : navItem(inHive)}>
++              <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{hiveOpen ? '▾' : '▸'}</span>
++            </button>
++            {hiveOpen && (
++              <div style={isMobile
++                ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
++                : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
++                {HIVE_TABS.map(([t, icon, label]) => (
++                  <button key={t} onClick={() => setTab(t)} style={{ ...(isMobile ? tabBtn(tab === t) : navItem(tab === t)), fontSize: 12.5 }}>
++                    <span style={{ fontSize: 13 }}>{icon}</span> {label}
++                  </button>
++                ))}
++              </div>
++            )}
++            {TOP_TABS.map(([t, icon, label]) => (
+diff --git a/docs/PRODUCT_OVERVIEW_SALES.md b/docs/PRODUCT_OVERVIEW_SALES.md
+index 81ab98e..65e6ad7 100644
+--- a/docs/PRODUCT_OVERVIEW_SALES.md
++++ b/docs/PRODUCT_OVERVIEW_SALES.md
+@@ -7 +7 @@
+-> **Last updated:** 2026-07-04 (🎛️ Event Signal: the live site board in Event Ops) · **Maintained:** updated as features ship (see the
++> **Last updated:** 2026-07-04 (🎛️ Event Signal: filters, robot deep dive, 🦉 summary & share, 🐝 Hive nav) · **Maintained:** updated as features ship (see the
+@@ -774,0 +775,8 @@ see "The continuous comms loop" above.)*
++- **2026-07-04 (later)** — **Event Signal grows up in a day** 🧪: station family
++  filter chips (Bars / Vendors / Check-in); tap a station for a centred pop-up
++  deep dive — per-device day timeline with the 🚦 three-colour robot view
++  (online+data / offline-but-synced-later / offline+no data) and a stacked
++  online-vs-offline day graph; 🦉 Owl summary and ↗ Share on both the board and
++  the client Data health tab; gates now count real check-in scans; Event Ops nav
++  tidied into a 🐝 Hive drawer (Live, Devices, Stations, Map, Staff, Checks,
++  Issues, Activity) with Data health and the Signal board alongside.
