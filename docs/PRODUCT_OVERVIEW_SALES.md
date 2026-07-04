@@ -772,6 +772,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04 (night)** — **Alerts reach the person on the ground** 🧪: staff can
+  now opt their own phone into station alerts straight from the public staff
+  portal (🔔 Alerts — web push, no app install, no account), and once an event is
+  live a dark station pushes the assigned crew directly, not just the manager.
+  Hive → Alerts shows a 🔔 next to reachable staff, a **Pause alerts** switch per
+  event, a settable dark **threshold**, status/name **filters**, and a storm
+  guard that folds a site-wide pipe wobble into one note. (WhatsApp session
+  channel + Ops Owl are the next phase.)
 - **2026-07-04 (evening)** — **The board learns to time-travel — and to call for help** 🧪:
   📶 Signal flow meter with a settable per-event target (default 95% of devices
   online; green/amber/red); dragging the Event pulse replays the WHOLE board at

@@ -136,10 +136,11 @@ export default function EventOpsPortalPage({ suiteId, token }) {
           <>
             <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
               <span style={badgeBig}>{staff.number || '—'}</span>
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 700 }}>{staff.name || 'Staff'}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{staff.role || 'On shift'}</div>
               </div>
+              <AlertsToggle suiteId={suiteId} token={token} staffId={staff.id} flash={flash} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
@@ -200,6 +201,77 @@ export default function EventOpsPortalPage({ suiteId, token }) {
       )}
       {toast && <div style={toastStyle}>{toast}</div>}
     </div>
+  );
+}
+
+// 🔔 Opt this phone into station alerts. Web-push, keyed by staff id via the
+// token-gated portal routes — no Pulse account. Best-effort: unsupported
+// browsers just hide the button.
+function b64ToU8(base64) {
+  const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+  const b = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b); const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function AlertsToggle({ suiteId, token, staffId, flash }) {
+  const base = `/api/eventops/portal/${encodeURIComponent(suiteId)}/${encodeURIComponent(token)}`;
+  const supported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // iPhone quirk: iOS only allows web-push from an installed (Home Screen) PWA,
+  // never a plain Safari tab. Detect that so we can guide instead of hiding.
+  const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
+  const standalone = typeof window !== 'undefined' && (window.navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState(false);
+  useEffect(() => {
+    if (!supported) return;
+    navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()).then((s) => setOn(!!s)).catch(() => {});
+  }, [supported]);
+  if (isIOS && !standalone) {
+    return (
+      <span style={{ position: 'relative', flexShrink: 0 }}>
+        <button onClick={() => setHint((v) => !v)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 999, padding: '7px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 36 }}>🔔 Alerts</button>
+        {hint && (
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 20, width: 230, padding: 12, borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 12px 32px rgba(0,0,0,0.28)', fontSize: 12.5, lineHeight: 1.35 }}>
+            To get alerts on iPhone: tap <b>Share</b> ↗ → <b>Add to Home Screen</b>, then open Pulse from that icon and tap 🔔 again.
+          </div>
+        )}
+      </span>
+    );
+  }
+  if (!supported) return null;
+  async function enable() {
+    setBusy(true);
+    try {
+      const key = await fetch(`${base}/push-key`).then((r) => r.json());
+      if (!key.enabled || !key.publicKey) throw new Error('Alerts are not available right now.');
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') throw new Error('Turn on notifications for this site in your browser settings.');
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key.publicKey) });
+      await fetch(`${base}/push`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staffId, subscription: sub.toJSON() }) });
+      setOn(true); flash?.('🔔 Alerts on for this phone');
+    } catch (e) { flash?.(e.message || 'Could not turn on alerts'); }
+    setBusy(false);
+  }
+  async function disable() {
+    setBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { await fetch(`${base}/push-off`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }); await sub.unsubscribe(); }
+      setOn(false); flash?.('Alerts off');
+    } catch { /* ignore */ }
+    setBusy(false);
+  }
+  return (
+    <button onClick={on ? disable : enable} disabled={busy}
+      title={on ? 'Alerts on for this phone — tap to turn off' : 'Get station alerts on this phone'}
+      style={{ flexShrink: 0, border: `1px solid ${on ? '#16a34a' : 'var(--hairline)'}`, background: on ? 'rgba(22,163,74,0.12)' : 'var(--card)', color: on ? '#16a34a' : 'var(--text)', borderRadius: 999, padding: '7px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 36 }}>
+      {busy ? '…' : on ? '🔔 Alerts on' : '🔔 Alerts'}
+    </button>
   );
 }
 

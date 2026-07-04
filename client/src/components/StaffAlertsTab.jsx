@@ -119,7 +119,7 @@ export default function StaffAlertsTab({ suiteId }) {
             </select>
             <span style={{ flex: '1 1 160px', fontSize: 11.5, color: s.staff.length ? 'var(--text)' : 'var(--muted)' }}>
               {s.staff.length
-                ? s.staff.map((x) => `${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
+                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
                 : s.opsStationId ? 'no staff assigned' : 'map to an Event Ops station'}
             </span>
           </div>

@@ -83,6 +83,15 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     sql.prepare('DELETE FROM staff_alert_log WHERE at<?').run(new Date(Date.now() - 30 * 86400000).toISOString());
   }
 
+  // Push straight to the crew's own phones (portal web-push, opted in on the
+  // staff portal). Live-mode only — test mode never contacts staff.
+  function sendToStaff(staffIds, payload) {
+    const ids = (staffIds || []).filter(Boolean);
+    if (!ids.length || !push.isEnabled()) return;
+    const rows = sql.prepare(`SELECT endpoint, p256dh, auth FROM eventops_staff_push WHERE staff_id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+    if (rows.length && push.sendRaw) Promise.resolve(push.sendRaw(rows, payload)).catch(() => {});
+  }
+
   function notify(suiteId, hs, crew, map) {
     const total = hs.on + hs.off;
     const who = crew.map((x) => `${x.name}${x.role ? ` (${x.role})` : ''}${x.number ? ` · ${x.number}` : ''}`).join(', ');
@@ -106,7 +115,8 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       if (admin && push.isEnabled()) Promise.resolve(push.sendToUser(admin.id, { title: `[TEST] ${title}`, body, url: '/event-ops' }, 'alerts')).catch(() => {});
     } else {
       Promise.resolve(push.sendToEntity(hs.entityId, { title, body, url: '/event-ops' }, 'alerts')).catch(() => {});
-      // phase 2/3: SMS + WhatsApp session window to the crew's numbers.
+      // phase 2: ping the crew's OWN phones (portal push); phase 3: WhatsApp.
+      sendToStaff(crew.map((x) => x.id), { title, body: `You're on ${hs.station}. ${hs.off} of ${total} devices dark — check the connection.`, url: '/event-ops', requireInteraction: true });
     }
   }
 
@@ -137,7 +147,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       for (const suiteId of suites) {
         if (paused(suiteId)) continue; // event's alerts are paused — skip the whole suite
         const opsStations = sql.prepare('SELECT id, name FROM eventops_stations WHERE suite_id=?').all(suiteId);
-        const staff = sql.prepare('SELECT name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+        const staff = sql.prepare('SELECT id, name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
         const thr = thresholdPct(suiteId) / 100;
         const fires = [];
         for (const hs of healthStations(suiteId)) {
@@ -189,12 +199,14 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     const suiteId = String(req.query.suiteId || '');
     if (!suiteId || !ownsSuite(req, suiteId)) return res.status(403).json({ error: 'Not your event' });
     const opsStations = sql.prepare('SELECT id, name, kind FROM eventops_stations WHERE suite_id=? ORDER BY name').all(suiteId);
-    const staff = sql.prepare('SELECT name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+    const staff = sql.prepare('SELECT id, name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+    // Which staff have opted into portal push (reachable on their own phone).
+    const reachable = new Set(sql.prepare('SELECT DISTINCT staff_id FROM eventops_staff_push WHERE suite_id=?').all(suiteId).map((r) => r.staff_id));
     const stations = healthStations(suiteId).map((hs) => {
       const map = resolveStation(suiteId, hs.station, opsStations);
       const crew = map.id ? staff.filter((x) => x.station_id === map.id) : [];
       const st = sql.prepare('SELECT status FROM staff_alert_state WHERE k=?').get(`${suiteId}|${hs.station}`);
-      return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number })) };
+      return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number, reachable: reachable.has(x.id) })) };
     });
     const logRows = sql.prepare('SELECT at, station, kind, message FROM staff_alert_log WHERE suite_id=? ORDER BY at DESC LIMIT 50').all(suiteId);
     res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), stations, opsStations, log: logRows });
