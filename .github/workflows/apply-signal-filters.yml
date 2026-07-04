@@ -1,0 +1,44 @@
+name: apply-signal-filters
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "9e0b9bedb40d123a184a915511950f619b35d790782fad40376198cda25e4903  patches/signal-filters.patch" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/signal-filters.patch /tmp/p.patch
+          cat > /tmp/msg <<'EOF'
+          Signal board: filter chips + station-less monitors fill their tiles
+
+          One chip per monitor (Bars / Vendors / Check-in) filters the whole
+          board - zones, tiles and dials - by station family. And a monitor
+          with no station split (e.g. one gate's check-in) now rolls all its
+          devices into a single board entry instead of waiting forever for a
+          per-station roll-up that could never run.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          EOF
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- server/dataHealth.js test/dataHealth.test.js client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/signal-filters.patch .github/workflows/apply-signal-filters.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
