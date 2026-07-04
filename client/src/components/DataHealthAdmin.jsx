@@ -1182,7 +1182,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
-    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '', rosterAlertPct: 0,
+    rosterField: '', countField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '', rosterAlertPct: 0,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -1243,7 +1243,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
       name: tpl.name, area: tpl.area,
       model: o ? o.model : '', view: o ? o.view : '', templateView: o ? '' : tpl.templateView,
       timeField: tpl.timeField || '', stationField: tpl.stationField || '', rosterField: tpl.rosterField || '',
-      rosterDaily: tpl.rosterDaily || '',
+      countField: tpl.countField || '', rosterDaily: tpl.rosterDaily || '',
       rosterOnlineMin: tpl.rosterOnlineMin ?? p.rosterOnlineMin, rosterAlertPct: tpl.rosterAlertPct ?? p.rosterAlertPct,
       warnMin: tpl.warnMin ?? p.warnMin, staleMin: tpl.staleMin ?? p.staleMin,
     }));
@@ -1332,6 +1332,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
             <FieldPicker value={f.rosterField} onChange={(v) => set('rosterField', v)}
               fields={(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || ''))} noneLabel="No roster" />
             <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the device ID or operator dimension. Anything seen in the linked window counts as connected; silence past the online window flags it offline by name.</span>
+            <div style={{ marginTop: 10 }}>
+              <span style={label}>Volume / transactions measure (optional)</span>
+              <FieldPicker value={f.countField} onChange={(v) => set('countField', v)} fields={fields.measures || []} noneLabel="Auto-detect" />
+              <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Which measure the rhythm + transaction line counts. Leave on Auto-detect unless the numbers look wrong — then pin the real per-transaction measure (e.g. …transaction_count).</span>
+            </div>
           </div>
           {f.rosterField && (
             <div>

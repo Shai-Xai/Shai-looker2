@@ -163,6 +163,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     add('roster_daily', "roster_daily TEXT NOT NULL DEFAULT ''");                    // recurring daily anchor 'HH:MM' (SAST) — beats roster_start; multi-day events
     add('roster_snapshot', "roster_snapshot TEXT NOT NULL DEFAULT ''");              // last roster counts JSON, refreshed by check() — collapsed cards read this, no live query
     add('roster_alert_pct', 'roster_alert_pct INTEGER NOT NULL DEFAULT 0');          // alert when ≥ this % of linked devices are offline (0 = off)
+    add('count_field', "count_field TEXT NOT NULL DEFAULT ''");                      // measure to count as volume (e.g. …transaction_count); blank = auto-detect
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -173,7 +174,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
-      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '',
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '', countField: r.count_field || '',
       rosterSnapshot: parseJson(r.roster_snapshot, null),
       rosterAlertPct: r.roster_alert_pct || 0,
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
@@ -214,13 +215,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       detailFields: Array.isArray(b.detailFields)
         ? [...new Set(b.detailFields.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().slice(0, 200)))].slice(0, 4)
         : [],
-      // Device roster: dimension identifying a device/operator, plus the "linked"
-      // baseline window and the "online" recency window (minutes).
+      // Device roster: the device/operator dimension; "linked" + "online" windows (minutes).
       rosterField: String(b.rosterField || '').slice(0, 200),
+      countField: String(b.countField || '').slice(0, 200), // pin the volume/transactions measure (blank = auto-detect)
       rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
       rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
-      // Fixed "linked since" anchor (UTC ISO). When set it beats the rolling window
-      // — the event-day shape: "every device seen since doors opened".
+      // Fixed "linked since" anchor (UTC ISO) — beats the rolling window (event-day shape).
       rosterStart: (b.rosterStart && !Number.isNaN(Date.parse(b.rosterStart))) ? new Date(b.rosterStart).toISOString() : '',
       // Recurring daily anchor (multi-day events): 'HH:MM' South-Africa time —
       // the roster restarts from that time each day. Beats rosterStart when set.
@@ -242,20 +242,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const ts = now();
     if (id) {
       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
-        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?, roster_alert_pct=?,
+        roster_field=?, count_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?, roster_alert_pct=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct,
+          c.rosterField, c.countField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
     sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
-      roster_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, roster_alert_pct, filters,
+      roster_field, count_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, roster_alert_pct, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
       .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct, JSON.stringify(c.filters),
+        c.rosterField, c.countField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
@@ -668,8 +668,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // "Cashless Events Count" that returns 1 per group — non-zero, so the
     // zero-check can't catch it, and it must never outrank transaction_count.
     const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
-    // A memoized mode/bucket is the FIRST choice, never the only one — it can degrade and must self-heal.
-    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
+    // Memoized mode is the first choice (self-heals); an explicit count_field override wins outright.
+    const memoModes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
+    const modes = m.countField && m.countField.includes('.') ? [m.countField, ...memoModes.filter((x) => x !== m.countField)] : memoModes;
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
@@ -1285,7 +1286,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       status: m.status, state: m.state, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError,
       warnMin: m.warnMin, staleMin: m.staleMin, checkEveryMin: m.checkEveryMin,
       stationField: m.stationField, detailFields: m.detailFields,
-      rosterField: m.rosterField, rosterAlertPct: m.rosterAlertPct, rosterSnapshot: m.rosterSnapshot,
+      rosterField: m.rosterField, rosterAlertPct: m.rosterAlertPct, rosterSnapshot: m.rosterSnapshot, countField: m.countField,
       streams: streamsFor(m.id),
     }));
   }
@@ -1487,7 +1488,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const dims = hit.data.dimensions || [];
     res.json({
       timeFields: dims.filter((d) => /date|time/i.test(d.type || '')),
-      dimensions: dims,
+      dimensions: dims, measures: hit.data.measures || [],
     });
   }));
 
