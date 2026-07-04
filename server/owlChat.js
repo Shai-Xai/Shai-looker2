@@ -240,7 +240,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -770,7 +770,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });
   });
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 
