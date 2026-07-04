@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (Report a bug: pinpoint the tile + record your screen) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-04 (🎛️ Event Signal: the live site board in Event Ops) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -772,6 +772,19 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04** — **🎛️ Event Signal — the event as a live site board** 🧪: a map-style
+  view of the whole event in Event Ops: stations grouped into their real venue
+  zones, every device a countable tick (green = sending, red = dark), this hour's
+  scans/transactions per station with a mini trend. Runs off the Data health
+  checks already in place — no extra load — and admins get the same board per
+  event on the Data health page. Floorplan overlay and day-replay are next.
+- **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
+  live day timeline now filters to one station (or groups all stations under
+  headers), every device row is labelled with its station + operator, and clicking
+  a tile's offline count opens the live offline list split by station. Bar/vendor
+  monitors report **transactions** and check-in monitors **scans** — separate
+  metrics, never summed — and closed stations keep their day totals. Roster and
+  count reads are aggregation-backed so busy sales days no longer under-count.
 - **2026-07-03** — **Pinpoint the tile + record your screen when reporting** 🧪: filing a
   bug from a dashboard now lets you say **exactly which tile** is affected (a "which tile
   is this about?" picker listing that dashboard's tiles) — the tile flows into the ticket,
