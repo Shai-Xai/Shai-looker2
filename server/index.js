@@ -498,6 +498,7 @@ require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
   runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
+  clearBriefingCache: () => briefStore.clearAll(), // admin "Clear cache" flushes briefings too (briefStore defined below; closure runs at request time)
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -1804,10 +1805,9 @@ function briefingSuites(user, entityId) {
   return { suites: list.map((s) => ({ ...s, selected: sel.has(s.id) })), selected, raw };
 }
 const briefInstructions = (user, entityId, segment) => [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites), segment ? timeDefaults()[segment] : ''].filter(Boolean).join('\n\n');
-// Build briefing facts scoped to the selected events, grouped by event (in the
-// selected order). Reuses buildFacts (and its Looker query cache).
-async function factGroups(user, entityId, selectedIds, force) {
-  const { tiles, catalogue, dropped = [], timing: factTiming } = await buildFacts(user, entityId, force, true, [], { suiteIds: selectedIds });
+// Facts scoped to the selected events, grouped by event (selected order). Always LIVE (force=true) — only reached when regenerating.
+async function factGroups(user, entityId, selectedIds) {
+  const { tiles, catalogue, dropped = [], timing: factTiming } = await buildFacts(user, entityId, true, true, [], { suiteIds: selectedIds });
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
   const map = new Map();
   for (const t of tiles) {
@@ -1828,7 +1828,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
-    const { groups, byId, factTiming } = await factGroups(user, entityId, selected, force);
+    const { groups, byId, factTiming } = await factGroups(user, entityId, selected);
     const factsMs = Date.now() - tStart;
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
@@ -1872,7 +1872,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   const { suites, selected } = briefingSuites(user, entityId);
   if (suites.length <= 1 || !selected.length) return debug ? { diag: [] } : { events: [] };
   if (debug) {
-    const { groups, dropped } = await factGroups(user, entityId, selected, true);
+    const { groups, dropped } = await factGroups(user, entityId, selected);
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
     const gById = Object.fromEntries(groups.map((g) => [g.suiteId, g]));
     // One entry per SELECTED event (even those with no facts), so an empty event's
@@ -1891,7 +1891,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
   if (briefInflight.has(key)) return briefInflight.get(key);
   const p = (async () => {
     const tStart = Date.now();
-    const { groups, byId } = await factGroups(user, entityId, selected, force);
+    const { groups, byId } = await factGroups(user, entityId, selected);
     const factsMs = Date.now() - tStart;
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
     const tLlm = Date.now();
@@ -1949,7 +1949,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
     const tStart = Date.now();
-    const { tiles, catalogue, timing: factTiming, dropped = [], focusDiag = [] } = await buildFacts(user, entityId, force, true);
+    const { tiles, catalogue, timing: factTiming, dropped = [], focusDiag = [] } = await buildFacts(user, entityId, true, true); // force live — only reached when regenerating
     const factsMs = Date.now() - tStart;
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -2115,8 +2115,8 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
     curatedPicks = curatedPicks.filter((p) => { const m = cMeta[String(p.dashboardId)]; return m && selSet.has(m.suiteId); });
   }
   const { tiles: factTiles, catalogue, dropped = [] } = (contentMode === 'curated' && (tiles || []).length)
-    ? await buildFactsFromTiles(user, entityId, curatedPicks, alignDaysBefore)
-    : await buildFacts(user, entityId, false, alignDaysBefore, priorityDashboards, multiClient ? { suiteIds: selSuiteIds } : {});
+    ? await buildFactsFromTiles(user, entityId, curatedPicks, alignDaysBefore, true) // force=true: no Refresh/warmer on a
+    : await buildFacts(user, entityId, true, alignDaysBefore, priorityDashboards, multiClient ? { suiteIds: selSuiteIds } : {}); // scheduled digest → bypass Looker cache
 
   // Saved tiles: the 📌 pinned + ⭐ followed tiles marked as mattering. Pulled in
   // on top of whatever the mode produced, so they ride along in BOTH AI-led and
@@ -2136,7 +2136,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
       followPicks = savedTileMarks(entityId, creatorId).map((m) => ({ dashboardId: m.dashboardId, tileId: m.tileId }));
     }
     if (followPicks.length) {
-      try { followedFacts = (await buildFactsFromTiles(user, entityId, followPicks, alignDaysBefore)).tiles || []; }
+      try { followedFacts = (await buildFactsFromTiles(user, entityId, followPicks, alignDaysBefore, true)).tiles || []; }
       catch (e) { console.error('[digest] followed facts failed', e.message); }
     }
   }

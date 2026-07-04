@@ -544,7 +544,7 @@ module.exports = function createBriefingEngine({ db, store, query }) {
 
   // Curated mode: fetch a specific set of tiles (by dashboard+tile id) instead of
   // the round-robin sweep buildFacts does.
-  async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = false) {
+  async function buildFactsFromTiles(user, entityId, picks, alignDaysBefore = false, force = false) {
     const { catalogue } = clientCatalogue(entityId);
     const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
     // Resolve the picks into a concrete tile list. tileId '*' = the whole
@@ -588,7 +588,9 @@ module.exports = function createBriefingEngine({ db, store, query }) {
       const body = await tileQueryBody(tile, def, user, m.suiteId, lockMap, extra);
       if (!body) { dropped.push(`${def.title} › ${tile.title || '?'} (scope blocked / unrunnable)`); continue; }
       try {
-        const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
+        // force=true (scheduled digest) sends cache=false to Looker so a send never
+        // rides Looker's own stale result cache — see runLookerQuery.
+        const data = await runLookerQuery('/queries/run/json_detail', body, undefined, force);
         if (!data?.data?.length) { dropped.push(`${def.title} › ${tile.title || '?'} (no rows for the default filters)`); continue; }
         out.push({ title: tile.title || '(untitled)', visType: tile.vis?.type, context: tile.aiContext || '', fields: data.fields, rows: data.data, pivots: data.pivots || [], filters: body.filters || {}, dashboardId: def.id, suiteId: m.suiteId, setName: m.setName, dashTitle: def.title, pinned: false });
       } catch (e) { dropped.push(`${def.title} › ${tile.title || '?'} (error: ${e.message})`); }

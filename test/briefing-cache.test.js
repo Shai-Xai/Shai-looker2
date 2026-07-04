@@ -56,6 +56,17 @@ test('warm() regenerates only active+stale briefings, dedupes per (user,entity,s
     'exactly one regen: the active + stale briefing, deduped across its overall key, user present');
 });
 
+test('clearAll() wipes memory AND persisted briefings so the next load regenerates', () => {
+  const { sql, store } = setup();
+  store.put('u1:e1:morning', { v: 1 }); // memory + disk
+  store.put('u2:e2:evening', { v: 2 });
+  assert.deepEqual(store.serve('u1:e1:morning', async () => {}), { v: 1 }, 'sanity: served from cache before the flush');
+  const wiped = store.clearAll();
+  assert.equal(wiped, 2, 'reports how many persisted briefings were dropped');
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM briefing_cache').get().n, 0, 'persisted copies gone');
+  assert.equal(store.serve('u1:e1:morning', async () => {}), null, 'nothing served from memory or disk after a full flush');
+});
+
 test('warm() prunes briefings unused for over 30 days', async () => {
   const { sql, store } = setup();
   const now = Date.now();

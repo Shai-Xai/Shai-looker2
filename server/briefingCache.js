@@ -61,6 +61,14 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
     try { sql.prepare("DELETE FROM briefing_cache WHERE key LIKE ?").run(`${prefix}%`); } catch { /* best-effort */ }
   }
   function clearMem() { mem.clear(); }
+  // Full flush (admin "Clear cache"): drop BOTH layers — memory and the persisted
+  // copies — so the next load regenerates from scratch instead of re-serving a
+  // stale disk copy. Returns how many persisted briefings were wiped.
+  function clearAll() {
+    mem.clear();
+    try { const n = sql.prepare('SELECT COUNT(*) AS n FROM briefing_cache').get().n; sql.prepare('DELETE FROM briefing_cache').run(); return n; }
+    catch { return 0; }
+  }
 
   // ── Warmer ──
   const INTERVAL = Number(process.env.BRIEFING_WARM_INTERVAL_MS) || 15 * 60 * 1000;
@@ -99,5 +107,5 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
   if (timer.unref) timer.unref();
   setTimeout(() => warm().catch(() => {}), 60 * 1000); // once, shortly after boot
 
-  return { get, save, touch, serve, put, bust, clearMem, warm, stop: () => clearInterval(timer) };
+  return { get, save, touch, serve, put, bust, clearMem, clearAll, warm, stop: () => clearInterval(timer) };
 };

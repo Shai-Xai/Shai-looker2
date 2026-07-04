@@ -14,12 +14,16 @@ const fx = require('./filterExpression'); // combined-field OR → Looker filter
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache, clearBriefingCache,
 }) {
-// Admin: hard-wipe the server's query cache (all dashboards). The client's
-// "Clear cache" refresh calls this first, then re-fetches its tiles live.
+// Admin: hard-wipe the server's caches (all dashboards). Flushes the query-result
+// cache AND the briefing cache (memory + persisted) so briefings/digests regenerate
+// from live Looker data instead of re-serving stale copies. The client's "Clear
+// cache" refresh calls this first, then re-fetches its tiles live.
 app.post('/api/admin/clear-query-cache', auth.requireAdmin, (req, res) => {
-  res.json({ cleared: clearCache ? clearCache() : 0 });
+  const cleared = clearCache ? clearCache() : 0;
+  const briefings = clearBriefingCache ? clearBriefingCache() : 0;
+  res.json({ cleared, briefings });
 });
 // Per-user, per-tile chart zoom ("show the last N points") — a PERSONAL view
 // preference stored in user_prefs so it follows the user across devices, and
