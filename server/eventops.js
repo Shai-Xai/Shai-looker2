@@ -227,6 +227,8 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
   // Per-staff capabilities in the portal: move devices (default ON), do checkpoints (default OFF).
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_move INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_checkpoint INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
+  // Station alerts for this staffer (default ON): a dark station pages them.
+  try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN alerts_on INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   // A device can be handed to a staff member (custody) instead of a station; the event log
   // records the recipient's label so past hand-offs survive a later staff delete.
   try { sql.exec("ALTER TABLE eventops_devices ADD COLUMN holder_staff_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
@@ -314,6 +316,7 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
       stationIds: stations.map((x) => x.id), stations,
       stationId: stations[0]?.id || null, stationName: stations[0]?.name || '', // legacy single fields
       canMove: s.can_move == null ? true : !!s.can_move, canCheckpoint: !!s.can_checkpoint,
+      alertsOn: s.alerts_on == null ? true : !!s.alerts_on,
       createdAt: s.created_at,
     };
   };
@@ -797,7 +800,7 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     const stationIds = [...new Set(raw.map(String).filter((id) => valid.includes(id)))];
     const bool = (v, dflt) => (v == null ? dflt : v ? 1 : 0);
     return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationIds,
-      canMove: bool(b.canMove, 1), canCheckpoint: bool(b.canCheckpoint, 0) };
+      canMove: bool(b.canMove, 1), canCheckpoint: bool(b.canCheckpoint, 0), alertsOn: bool(b.alertsOn, 1) };
   }
 
   app.post('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
@@ -805,8 +808,8 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     const c = cleanStaff(req.body || {}, su);
     if (!c.name && !c.number) return res.status(400).json({ error: 'Give the staff member a name or number.' });
     const id = uuid();
-    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, can_move, can_checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, now());
+    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, can_move, can_checkpoint, alerts_on, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, c.alertsOn, now());
     res.status(201).json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(id)) });
   });
 
@@ -816,9 +819,9 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
     const cur = staffRow(s);
     const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationIds: req.body?.stationIds ?? cur.stationIds,
-      canMove: req.body?.canMove ?? cur.canMove, canCheckpoint: req.body?.canCheckpoint ?? cur.canCheckpoint }, su);
-    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=?, can_move=?, can_checkpoint=? WHERE id=?')
-      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, s.id);
+      canMove: req.body?.canMove ?? cur.canMove, canCheckpoint: req.body?.canCheckpoint ?? cur.canCheckpoint, alertsOn: req.body?.alertsOn ?? cur.alertsOn }, su);
+    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=?, can_move=?, can_checkpoint=?, alerts_on=? WHERE id=?')
+      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, c.alertsOn, s.id);
     res.json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(s.id)) });
   });
 
@@ -948,6 +951,30 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     const su = portalSuite(req, res); if (!su) return;
     const endpoint = str(req.body?.endpoint, 800);
     if (endpoint) sql.prepare('DELETE FROM eventops_staff_push WHERE endpoint=? AND suite_id=?').run(endpoint, su.id);
+    res.json({ ok: true });
+  });
+
+  // This staffer's own station alerts (the eventops_staff_alert feed, written by
+  // server/staffAlerts.js) + an acknowledge action. Token-gated, no account.
+  const hasStaffAlert = () => { try { return !!sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='eventops_staff_alert'").get(); } catch { return false; } };
+  app.get('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ alerts: [] });
+    const alerts = sql.prepare('SELECT id, station, message, at, acked_at FROM eventops_staff_alert WHERE staff_id=? AND suite_id=? ORDER BY at DESC LIMIT 20')
+      .all(s.id, su.id).map((a) => ({ id: a.id, station: a.station, message: a.message, at: a.at, acked: !!a.acked_at }));
+    res.json({ alerts });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId/ack', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ ok: true });
+    const id = str(req.body?.alertId, 64);
+    // Ack one, or all of this staffer's unacked alerts when no id is given.
+    if (id) sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE id=? AND staff_id=? AND acked_at=''").run(now(), id, s.id);
+    else sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE staff_id=? AND suite_id=? AND acked_at=''").run(now(), s.id, su.id);
     res.json({ ok: true });
   });
 
