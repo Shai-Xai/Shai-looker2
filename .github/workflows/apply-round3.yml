@@ -1,0 +1,49 @@
+name: apply-round3
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "40f537b54db85aa8c163c79d5f95acf06027945540768ff92f8112e1562a1350  patches/round3.patch" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/round3.patch /tmp/p.patch
+          cat > /tmp/msg <<'EOF'
+          Gate scan counts, board deep dive, decluttered controls, client refresh
+
+          - Check-in monitors probe the check-ins family's real counter
+            (Attendance_Check_Ins) - the plain .count is another zero-only
+            row-counter, which left gates at 0 scans / flow 0.
+          - Tapping a station on the Signal board now pulls the day's
+            per-device timeline right into the card.
+          - Monitor card: Edit/Duplicate/Pause/Close/Delete/Log fold behind
+            one Manage button; timeline mode/window/block rows become three
+            dropdowns.
+          - Client Data health tab + Signal board: updated-at label and a
+            manual refresh button.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          EOF
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- server/dataHealth.js test/dataHealth.test.js client/src/components/EventSignal.jsx client/src/components/DataHealthAdmin.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round3.patch .github/workflows/apply-round3.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
