@@ -953,8 +953,8 @@ function HealthMetrics({ monitors: allMonitors }) {
         ))}
       </div>
       {offenders.length > 0 && (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          Offline by station:{' '}
+        <div style={{ ...card, fontSize: 12, color: 'var(--muted)', marginTop: 8, padding: '9px 13px' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Offline by station</span><br />{' '}
           {offenders.map(({ name, s: sn }, i) => (
             <span key={name} title={(sn.offlineDevices || []).length ? `${name} offline: ${sn.offlineDevices.map((d) => `${d.device} (${Math.round(d.lagMin)}m)`).join(', ')}${sn.offline > sn.offlineDevices.length ? ` +${sn.offline - sn.offlineDevices.length} more` : ''}` : undefined}
               style={{ cursor: (sn.offlineDevices || []).length ? 'help' : undefined }}>
@@ -1641,7 +1641,6 @@ export function DataHealthOps({ entityId, suiteId }) {
         </Suspense>
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
       </div>
-      <Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>
@@ -1649,10 +1648,12 @@ export function DataHealthOps({ entityId, suiteId }) {
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
         </div>
       ) : <>
-        <HealthMetrics monitors={monitors} />
-        <div style={{ marginBottom: 12 }}>
-          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
+        {/* The Owl's quick take and the full report, side by side (stacked on phones). */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 4 }}>
+          <div style={{ flex: '1 1 300px', minWidth: 0 }}><Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense></div>
+          <div style={{ flex: '1 1 300px', minWidth: 0 }}><ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" /></div>
         </div>
+        <HealthMetrics monitors={monitors} />
         {monitors.map((m) => (
           <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />
         ))}

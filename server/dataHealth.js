@@ -594,8 +594,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // Which bucket dimension worked per monitor+interval (minuteN vs raw time).
   const bucketFieldByMonitor = new Map();
 
-  // Monitors whose station-name FILTER returns nothing (broken join) — their
-  // station reads skip straight to the label-map fallback.
+  // Monitors whose station-name FILTER returns nothing (broken join) — skip to the label-map fallback.
   const stationFilterDead = new Set();
 
   // The day timeline: per device, which time blocks of the window it produced
@@ -631,9 +630,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // After minuteN, prefer the RAW timeframe: this LookML family has already
     // proven the picked _time timeframe silently drops rows in aggregate reads
     // (same disease the MAX roster read had) — _raw is the shape that works.
+    const memoB = bucketFieldByMonitor.get(bKey); const bCands = [`${group}_minute${iv}`, `${group}_raw`, m.timeField];
     const bucketCands = iv === 60 ? [hourField, `${group}_raw`]
-      : bucketFieldByMonitor.has(bKey) ? [bucketFieldByMonitor.get(bKey)]
-        : [`${group}_minute${iv}`, `${group}_raw`, m.timeField];
+      : memoB ? [memoB, ...bCands.filter((x) => x !== memoB)] : bCands;
     const timeFilter = anchor
       ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${h} hours`;
@@ -685,7 +684,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // "Cashless Events Count" that returns 1 per group — non-zero, so the
     // zero-check can't catch it, and it must never outrank transaction_count.
     const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
-    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id)] : allModes;
+    // A memoized mode/bucket is the FIRST choice, never the only one — it can degrade and must self-heal.
+    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
@@ -707,9 +707,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
-          // A bucket dim can be ACCEPTED yet come back blank on every row
-          // (created_at_minute10 on check-ins) — broken bucket, next candidate.
-          if (got.length && !got.some((r) => parseTs(r[bf]))) {
+          // A bucket dim can be ACCEPTED yet come back blank (created_at_minute10;
+          // date_minute30 partially) — half-or-more blank = broken, next candidate.
+          if (got.length && got.filter((r) => parseTs(r[bf])).length * 2 <= got.length) {
             step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
           }
           // Combined-explore trap: a count measure can exist yet count ANOTHER

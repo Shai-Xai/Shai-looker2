@@ -590,6 +590,27 @@ test('deviceTimeline: a bucket dim that returns BLANK values falls through to ra
   assert.equal(t.grandTotal, 9);
 });
 
+test('deviceTimeline: a memoized bucket that turns blank self-heals to raw', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const min10 = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
+  // First read: minute10 healthy → remembered as this monitor's 10-min bucket.
+  h.setRowsFn(async (b) => (b.fields.includes('scans.scanned_at_minute10')
+    ? [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10, 'scans.count': 3 }] : []));
+  assert.equal((await h.mod.deviceTimeline(m, 12, 10)).bucketField, 'scans.scanned_at_minute10');
+  // The shape degrades: minute10 now comes back blank — the read must fall
+  // through to raw instead of dying on the memoized single candidate.
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_minute10')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': '', 'scans.count': 3 }];
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 6 }];
+    return [];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.grandTotal, 6);
+});
+
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
