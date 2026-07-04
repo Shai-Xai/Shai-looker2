@@ -13,20 +13,23 @@ jobs:
       - name: apply and push
         run: |
           set -euo pipefail
-          echo "b56ed85bdceb769b2d305c1513917fb2394847d349f379520bded0b63678df20  patches/round4.patch" | sha256sum -c -
+          echo "d4f00f921fdd58b0279af21acf58e71c98a543d75bd9561485dc4e6e695eb499  patches/round4.patch" | sha256sum -c -
           git config user.name "Shai-Xai"
           git config user.email "shai.evian@howler.co.za"
           cp patches/round4.patch /tmp/p.patch
           cat > /tmp/msg <<'EOF'
-          Timeline: empty counting reads fall through + a visible read path
+          Timeline: bucket by _raw when minuteN is missing + a visible read path
 
-          An empty result from a counting mode is now a soft failure like
-          all-zeros (a broken join can drop every row for one measure while
-          another works) - only plain presence may accept a genuinely quiet
-          feed. When the grid still comes back empty, the response carries
-          the read path (every bucket + measure attempt and its outcome) plus
-          a sample row when rows arrived but none fit the grid; the Timeline
-          panel renders both, so an empty gate timeline now explains itself.
+          The check-ins family has no minuteN timeframes, and this LookML's
+          picked _time timeframe silently drops rows in aggregate reads (the
+          MAX-roster disease) - so gate timelines bucketed by _time came back
+          empty: 0 devices, 0 scans, flow 0. Sub-hour reads now try minuteN,
+          then _raw, then the picked dim; hourly reads fall through to _raw
+          too. An empty result from a counting mode is a soft failure like
+          all-zeros, and even plain presence only accepts an empty window on
+          the last bucket shape. When a grid still comes back empty the
+          response carries the read path plus a sample row when rows arrived
+          but none fit - the Timeline panel renders both.
 
           Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
           Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB

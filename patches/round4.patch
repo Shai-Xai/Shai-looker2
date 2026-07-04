@@ -16,35 +16,49 @@ index 178d190..369d12e 100644
 +        </div>
 +      ) : mode === 'counts' ? (
 diff --git a/server/dataHealth.js b/server/dataHealth.js
-index 227d47e..808da7d 100644
+index 227d47e..47b6020 100644
 --- a/server/dataHealth.js
 +++ b/server/dataHealth.js
-@@ -684,0 +685,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -627 +627,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const bucketCands = iv === 60 ? [hourField]
++    // After minuteN, prefer the RAW timeframe: this LookML family has already
++    // proven the picked _time timeframe silently drops rows in aggregate reads
++    // (same disease the MAX roster read had) — _raw is the shape that works.
++    const bucketCands = iv === 60 ? [hourField, `${group}_raw`]
+@@ -629 +632 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        : [`${group}_minute${iv}`, m.timeField];
++        : [`${group}_minute${iv}`, `${group}_raw`, m.timeField];
+@@ -684,0 +688,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +    const tried = []; // read-path trace — shown in the UI when the grid comes back empty
 +    const step = (bf, cand, out) => tried.push(`${String(bf).split('.').pop()} + ${String(cand).split('.').pop()} → ${out}`);
-@@ -701,0 +704,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -701,0 +707,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +          // An EMPTY result from a counting mode is just as suspect (a broken
 +          // join can drop every row) — only 'none' may accept a quiet feed.
-@@ -704 +708 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -704 +711 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 -            lastErr = new Error(`${cTry} returned 0 for every row`); continue;
 +            step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
-@@ -705,0 +710,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -705,0 +713,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +          if (cand !== 'none' && !got.length) {
 +            step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
 +          }
++          // Even plain presence only accepts an empty window on the LAST
++          // bucket shape — an earlier bucket may be the one dropping rows.
++          if (cand === 'none' && !got.length && bf !== bucketCands[bucketCands.length - 1]) {
++            step(bf, cand, 'no rows'); lastErr = new Error('no rows in window'); break;
++          }
 +          step(bf, cand, `${got.length} rows`);
-@@ -708,0 +717 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -708,0 +725 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +          step(bf, cand, String(e.message || e).slice(0, 90));
-@@ -772,0 +782,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -772,0 +790,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +      // Empty grid → say exactly what was tried (and show a sample row when
 +      // rows arrived but none survived the bucketing) — no more silent blanks.
 +      readPath: byDevice.size ? undefined : tried,
 +      sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
 diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
-index 5761447..a2ed4d7 100644
+index 5761447..9ae4b51 100644
 --- a/test/dataHealth.test.js
 +++ b/test/dataHealth.test.js
-@@ -522,0 +523,16 @@ test('deviceTimeline: check-in monitors probe the attendance counter', async ()
+@@ -522,0 +523,47 @@ test('deviceTimeline: check-in monitors probe the attendance counter', async ()
 +test('deviceTimeline: an EMPTY result from a counting mode falls through to the next', async () => {
 +  // A broken join can return zero rows for one measure while another works —
 +  // empty is as suspect as all-zeros for every mode except plain presence.
@@ -61,3 +75,42 @@ index 5761447..a2ed4d7 100644
 +  assert.equal(t.grandTotal, 12);
 +});
 +
++test('deviceTimeline: buckets by the RAW timeframe when minuteN is unknown', async () => {
++  // The check-ins family has no created_at_minute10, and the picked _time
++  // timeframe silently drops rows on this LookML — _raw is the working shape.
++  const h = mountHealth();
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
++  h.setRowsFn(async (b) => {
++    if (b.fields.includes('scans.scanned_at_minute10')) throw new Error('Unknown field \"scans.scanned_at_minute10\"');
++    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 7 }];
++    return []; // the _time bucket shape returns nothing — must never be accepted over raw
++  });
++  const t = await h.mod.deviceTimeline(m, 12, 10);
++  assert.equal(t.bucketField, 'scans.scanned_at_raw');
++  assert.equal(t.devices.length, 1);
++  assert.equal(t.grandTotal, 7);
++});
++
++test('deviceTimeline: an hour bucket that reads empty falls through to raw', async () => {
++  const h = mountHealth();
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  const rawStr = new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().replace('T', ' ').slice(0, 19);
++  h.setRowsFn(async (b) => {
++    if (b.fields.includes('scans.scanned_at_hour')) return []; // hour shape drops every row
++    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-9', 'scans.scanned_at_raw': rawStr, 'scans.count': 4 }];
++    return [];
++  });
++  const t = await h.mod.deviceTimeline(m, 12, 60);
++  assert.equal(t.bucketField, 'scans.scanned_at_raw');
++  assert.equal(t.grandTotal, 4);
++});
++
+@@ -610,3 +657,4 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
+-    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
+-    // and the raw time dim takes over.
+-    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field \"scans.scanned_at_minute10\"');
++    // No minuteN (or _raw) timeframes in this LookML — the aggregate-bucket
++    // probes 400 and the picked time dim takes over.
++    const bad = b.fields.find((f) => f.includes('_minute') || f.endsWith('_raw'));
++    if (bad) throw new Error(`Unknown field \"${bad}\"`);
