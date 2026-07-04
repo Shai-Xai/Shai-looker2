@@ -1,0 +1,117 @@
+diff --git a/client/src/components/EventOpsConsole.jsx b/client/src/components/EventOpsConsole.jsx
+index 74936ba..c0180af 100644
+--- a/client/src/components/EventOpsConsole.jsx
++++ b/client/src/components/EventOpsConsole.jsx
+@@ -208 +208 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
+-  const [kind, setKind] = useState(''); // station-type filter: '' = all
++  const [kind, setKind] = useState(null); // null = show chips only · '' = all cards · 'bar' etc = that kind
+@@ -236,9 +235,0 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
+-        {/* Station-TYPE chips — only the kinds this event actually has. */}
+-        {data.stations.length > 6 && (
+-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+-            <Chip on={!kind} onClick={() => setKind('')}>All · {data.stations.length}</Chip>
+-            {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
+-              <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? '' : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
+-            ))}
+-          </div>
+-        )}
+@@ -246,10 +237,24 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
+-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
+-            {data.stations.filter((s) => !kind || s.kind === kind).map((s) => (
+-              <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
+-                <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
+-                <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
+-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
+-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
+-              </button>
+-            ))}
+-          </div>
++          <>
++            {/* Chips first — the grid stays collapsed until you pick a type (or
++                Show all). Keeps a 60-station event from flooding the landing. */}
++            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: kind === null ? 0 : 10 }}>
++              <Chip on={kind === ''} onClick={() => setKind(kind === '' ? null : '')}>📋 Show all · {data.stations.length}</Chip>
++              {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
++                <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? null : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
++              ))}
++            </div>
++            {kind === null ? (
++              <div style={{ fontSize: 12, color: 'var(--muted)', padding: '2px 2px 0' }}>Pick a type above to see its stations, or Show all.</div>
++            ) : (
++              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
++                {data.stations.filter((s) => kind === '' || s.kind === kind).map((s) => (
++                  <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
++                    <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
++                    <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
++                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
++                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
++                  </button>
++                ))}
++              </div>
++            )}
++          </>
+diff --git a/client/src/components/StaffAlertsTab.jsx b/client/src/components/StaffAlertsTab.jsx
+index 5933971..03cfda7 100644
+--- a/client/src/components/StaffAlertsTab.jsx
++++ b/client/src/components/StaffAlertsTab.jsx
+@@ -10,0 +11,2 @@ const sel = { padding: '7px 9px', border: '1.5px solid var(--hairline)', borderR
++const chip = (on) => ({ border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, cursor: 'pointer', background: 'var(--card)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 800 : 600, padding: '5px 12px', fontSize: 12, fontFamily: 'inherit', minHeight: 30 });
++
+@@ -14,0 +17,2 @@ export default function StaffAlertsTab({ suiteId }) {
++  const [q, setQ] = useState(''); // text filter (station name)
++  const [view, setView] = useState('all'); // all | alerting | dark | unmapped | nostaff
+@@ -60,0 +65,16 @@ export default function StaffAlertsTab({ suiteId }) {
++      {/* Filters: status chips + a name search, so a 65-station board is
++          navigable — jump straight to the ones alerting or missing a crew. */}
++      {data.stations.length > 6 && (() => {
++        const alerting = data.stations.filter((s) => s.alerting).length;
++        const dark = data.stations.filter((s) => s.off > 0).length;
++        return (
++          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
++            <button onClick={() => setView('all')} style={chip(view === 'all')}>All · {data.stations.length}</button>
++            {alerting > 0 && <button onClick={() => setView('alerting')} style={chip(view === 'alerting')}>🚨 Alerting · {alerting}</button>}
++            {dark > 0 && <button onClick={() => setView('dark')} style={chip(view === 'dark')}>🟠 Has dark · {dark}</button>}
++            {unmapped > 0 && <button onClick={() => setView('unmapped')} style={chip(view === 'unmapped')}>Unmapped · {unmapped}</button>}
++            {uncrewed > 0 && <button onClick={() => setView('nostaff')} style={chip(view === 'nostaff')}>No staff · {uncrewed}</button>}
++            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Find a station…" aria-label="Find a station" style={{ ...sel, flex: '1 1 160px', minWidth: 120 }} />
++          </div>
++        );
++      })()}
+@@ -62 +82,8 @@ export default function StaffAlertsTab({ suiteId }) {
+-        {data.stations.map((s) => (
++        {data.stations.filter((s) => (
++          (!q.trim() || s.station.toLowerCase().includes(q.trim().toLowerCase()))
++          && (view === 'all'
++            || (view === 'alerting' && s.alerting)
++            || (view === 'dark' && s.off > 0)
++            || (view === 'unmapped' && !s.opsStationId)
++            || (view === 'nostaff' && s.opsStationId && !s.staff.length))
++        )).map((s) => (
+diff --git a/client/src/components/tiles/SingleValueTile.jsx b/client/src/components/tiles/SingleValueTile.jsx
+index 98a6f12..4de47ba 100644
+--- a/client/src/components/tiles/SingleValueTile.jsx
++++ b/client/src/components/tiles/SingleValueTile.jsx
+@@ -46,0 +47,4 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
++  // 📱 Phones abbreviate big figures (2,701,926.00 → 2.7M) so the number never
++  // outgrows its tile; any currency prefix survives, percentages stay exact,
++  // and desktop keeps the full figure. Tap-to-drill still shows every digit.
++  const shownValue = isMobile ? compactNumber(primaryValue, primaryCell?.value) : primaryValue;
+@@ -114 +118 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
+-        <CountUpValue text={primaryValue} />
++        <CountUpValue text={shownValue} />
+@@ -130,0 +135,15 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
++// 2,701,926.00 → 2.7M · 896,486.00 → 896K · 48,469.00 → 48.5K. Keeps a
++// currency/unit prefix ("€", "R "), leaves percentages and small numbers
++// exactly as Looker rendered them.
++function compactNumber(txt, raw) {
++  const n = Number(raw);
++  if (!Number.isFinite(n) || Math.abs(n) < 10000) return txt;
++  const s = String(txt);
++  if (s.trim().endsWith('%')) return txt;
++  const pre = (s.match(/^\s*([^0-9\-+.]*)/) || [])[1] || '';
++  const abs = Math.abs(n);
++  const one = (v) => (v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, ''));
++  const body = abs >= 1e9 ? `${one(abs / 1e9)}B` : abs >= 1e6 ? `${one(abs / 1e6)}M` : `${one(abs / 1e3)}K`;
++  return `${pre.trim()}${pre.trim() ? ' ' : ''}${n < 0 ? '-' : ''}${body}`.trim();
++}
++
