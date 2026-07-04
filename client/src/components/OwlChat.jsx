@@ -31,6 +31,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [busy, setBusy] = useState(false);
   const [threadId, setThreadId] = useState(null);
   const [dock, setDock] = useState(() => localStorage.getItem('howler_owl_dock') || 'docked');
+  const [wide, setWide] = useState(() => localStorage.getItem('howler_owl_wide') === '1'); // full-screen the panel
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('howler_owl_zoom')) || 1);
   // Scope the Owl answers for — pick a client (organiser) and optionally an event.
   const [selEntity, setSelEntity] = useState(entityId || '');
@@ -94,6 +95,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setTimeout(() => { w.focus(); w.print(); }, 350);
   };
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
+  const toggleWide = () => setWide((v) => { const n = !v; localStorage.setItem('howler_owl_wide', n ? '1' : '0'); return n; });
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
 
   // Follow the page context if it changes while open.
@@ -415,6 +417,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
         <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
         <span style={{ flex: 1 }} />
+        {!isMobile && !embed && (
+          <button onClick={toggleWide} title={wide ? 'Exit full screen' : 'Full screen'} aria-label={wide ? 'Exit full screen' : 'Full screen'} style={{ ...hdrBtn, fontSize: 15, padding: '2px 6px' }}>{wide ? '⤡' : '⤢'}</button>
+        )}
         <div style={{ position: 'relative' }}>
           <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...hdrBtn, fontSize: 18, fontWeight: 700, padding: '2px 8px', ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 8 } : null) }}>⋯</button>
           {hdrMenuOpen && (
@@ -607,7 +612,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   if (embed) return <div style={{ position: 'fixed', inset: 0 }}>{panel}</div>;
 
   if (docked) {
-    const w = sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)';
+    const w = wide ? '100vw' : (sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)');
     return (
       <div style={{ position: 'relative', flexShrink: 0, height: '100%', width: open ? w : 0, transition: 'width .28s var(--ease-spring, ease)', overflow: 'hidden' }} aria-hidden={!open}>
         <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w }}>{panel}</div>
@@ -615,7 +620,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     );
   }
 
-  const w = isMobile ? '100%' : (sidebarOpen ? 'min(800px, 96vw)' : 'min(560px, 94vw)');
+  const w = isMobile ? '100%' : (wide ? '100vw' : (sidebarOpen ? 'min(800px, 96vw)' : 'min(560px, 94vw)'));
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />

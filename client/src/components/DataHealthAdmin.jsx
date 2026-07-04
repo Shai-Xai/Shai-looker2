@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -11,6 +11,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
+const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
@@ -947,6 +948,7 @@ function HealthMetrics({ monitors: allMonitors }) {
 // monitor cards — the platform overview drills down instead of a flat list.
 function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpen, reportBody }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [board, setBoard] = useState(false); // 🎛 the Event Signal site board for this group
   const openMons = monitors.filter((m) => m.status !== 'closed');
   const streams = openMons.flatMap((m) => m.streams);
   const staleN = streams.filter((s) => s.status === 'stale').length + openMons.filter((m) => m.lastError).length;
@@ -966,10 +968,21 @@ function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpe
                 : <span>no data yet</span>}
         </span>
         <span style={{ flex: 1 }} />
+        {reportBody && (
+          <button style={{ ...ghostBtn, padding: '4px 10px', ...(board ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
+            onClick={(e) => { e.stopPropagation(); setBoard((v) => !v); setOpen(true); }}>🎛️ Board</button>
+        )}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
         <div style={{ marginLeft: 14 }}>
+          {board && (
+            <div style={{ marginBottom: 10 }}>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={monitors} />
+              </Suspense>
+            </div>
+          )}
           {reportBody && <div style={{ marginBottom: 10 }}><ReportPanel url={`${ADMIN_BASE}/report`} body={reportBody} title={`Data health — ${label}`} /></div>}
           {monitors.map((m) => (
             <MonitorCard key={m.id} m={m} entities={entities} onChanged={onChanged} onEdit={onEdit} />
@@ -1172,6 +1185,25 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const entitySuites = suites.filter((s) => s.entityId === f.entityId);
   const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 };
 
+  // Prefill from a one-tap template (the New-monitor shortcut) — resolves the
+  // explore from the loaded models, drops the template's filter/detail rows and
+  // roster/threshold defaults in, and keeps whatever client/event was picked.
+  const applyTemplate = (tpl) => {
+    const o = exploreOptions.find((x) => x.view === tpl.templateView);
+    setF((p) => ({
+      ...p,
+      name: tpl.name, area: tpl.area,
+      model: o ? o.model : '', view: o ? o.view : '', templateView: o ? '' : tpl.templateView,
+      timeField: tpl.timeField || '', stationField: tpl.stationField || '', rosterField: tpl.rosterField || '',
+      rosterDaily: tpl.rosterDaily || '',
+      rosterOnlineMin: tpl.rosterOnlineMin ?? p.rosterOnlineMin, rosterAlertPct: tpl.rosterAlertPct ?? p.rosterAlertPct,
+      warnMin: tpl.warnMin ?? p.warnMin, staleMin: tpl.staleMin ?? p.staleMin,
+    }));
+    setFilterRows(Object.entries(tpl.filters || {}));
+    setDetailRows(tpl.detailFields || []);
+    setDimValues({});
+  };
+
   const save = async () => {
     setErr('');
     // Filter rows with a dimension but no value yet are kept as "open" filters
@@ -1190,6 +1222,15 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   return (
     <div style={{ ...card, borderColor: 'var(--brand)' }}>
       <strong style={{ fontSize: 14.5, display: 'block', marginBottom: 12 }}>{initial?.id ? 'Edit monitor' : 'New stream monitor'}</strong>
+      {!initial?.id && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--hairline)' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Start from a template</span>
+          <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.bar)}>🍺 Bar</button>
+          <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.vendor)}>🧾 Vendor</button>
+          <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.checkin)}>🛂 Check-in</button>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>or fill it in below</span>
+        </div>
+      )}
       <div style={grid2}>
         <div>
           <span style={label}>Name</span>
@@ -1478,12 +1519,9 @@ export default function DataHealthAdmin() {
           </div>
           <span style={{ flex: 1 }} />
           <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
-          {editing == null && <>
-            <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>
-            <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.bar })}>🍺 Bar template</button>
-            <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.vendor })}>🧾 Vendor template</button>
-            <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.checkin })}>🛂 Check-in template</button>
-          </>}
+          {editing == null && (
+            <button style={btn} title="Create a monitor — the editor offers 🍺 Bar / 🧾 Vendor / 🛂 Check-in templates to start from" onClick={() => setEditing('new')}>+ New monitor</button>
+          )}
         </div>
       )}
 

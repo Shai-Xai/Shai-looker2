@@ -203,8 +203,14 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
                 <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', margin: '0 0 8px', fontWeight: 600 }}>⚠ Tick at least one <u>measure</u> (a number, e.g. revenue or a count) — without one the Owl can’t query this explore, so it won’t appear in chat.</p>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
-                <div><div style={colHead}>Measures ({filtered.measures.length})</div><div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{filtered.measures.map(Row)}</div></div>
-                <div><div style={colHead}>Dimensions ({filtered.dimensions.length})</div><div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>{filtered.dimensions.map(Row)}</div></div>
+                <div>
+                  <div style={colHead}>Measures ({filtered.measures.length})</div>
+                  {groupFields(filtered.measures).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                </div>
+                <div>
+                  <div style={colHead}>Dimensions ({filtered.dimensions.length})</div>
+                  {groupFields(filtered.dimensions).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                </div>
               </div>
             </>
           )}
@@ -216,3 +222,40 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
 
 const badge = (c) => ({ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em', color: c, background: `${c}1a`, padding: '1px 6px', borderRadius: 5, marginLeft: 6 });
 const colHead = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted)', margin: '0 0 6px' };
+
+// A field's category: Looker's own group_label if present, else the view prefix of
+// its name (cashless_check_ins.count → "Cashless Check Ins"). Keeps the flat list of
+// 1,000+ fields navigable — one collapsible section per category.
+function catOf(f) {
+  if (f.group && f.group.trim()) return f.group.trim();
+  const pre = (f.name || '').split('.')[0] || '';
+  const pretty = pre.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+  return pretty || 'Other';
+}
+// Bucket fields into [name, fields[]] pairs, sorted by category name.
+function groupFields(arr) {
+  const m = new Map();
+  for (const f of arr) { const c = catOf(f); if (!m.has(c)) m.set(c, []); m.get(c).push(f); }
+  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+// One collapsible category. Auto-opens while a filter is active or the group holds
+// ticked fields (so the current selection is always visible), but the admin can still
+// collapse it manually.
+function FieldGroup({ name, fields, enabled, renderRow, forceOpen }) {
+  const [override, setOverride] = useState(null); // null = auto, true/false = manual
+  const on = enabled ? fields.filter((f) => enabled.has(f.name)).length : 0;
+  const auto = forceOpen || on > 0;
+  const isOpen = override === null ? auto : override;
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, marginBottom: 6, overflow: 'hidden' }}>
+      <div onClick={() => setOverride(!isOpen)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', cursor: 'pointer', background: 'rgba(139,139,147,0.08)' }}>
+        <span style={{ fontSize: 11, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+        {on > 0 && <span style={badge('#34c759')}>{on} on</span>}
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fields.length}</span>
+      </div>
+      {isOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px' }}>{fields.map(renderRow)}</div>}
+    </div>
+  );
+}

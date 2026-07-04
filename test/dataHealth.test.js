@@ -797,6 +797,43 @@ test('check() stores the whole-feed day total with station narrowing dropped', a
   assert.equal(feedBody.filters['ev.name'], 'KFF 26'); // event scope kept
 });
 
+test('check() stores a per-station roll-up for the signal board', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.length === 1) return [{ 'scans.count': 12 }];                       // whole-feed total
+    if (b.fields.includes('data_health_latest')) return [feedRow('Gate B', 2)];      // stream read
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', data_health_last: minsAgo(2) },
+        { 'scans.device_id': 'D-2', data_health_last: minsAgo(120) },
+      ];
+    }
+    if (b.fields.includes('scans.station_name') && b.fields.includes('scans.device_id')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One' },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two' },
+      ];
+    }
+    if (b.fields.includes('scans.count')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 5 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': min10(120), 'scans.count': 7 }, // quiet 2h → off
+      ];
+    }
+    return [feedRow('Gate B', 2)];
+  });
+  await h.mod.check(m);
+  const st = h.mod.monitorById(m.id).rosterSnapshot.stations;
+  assert.ok(Array.isArray(st));
+  const one = st.find((x) => x.station === 'Bar One');
+  const two = st.find((x) => x.station === 'Bar Two');
+  assert.equal(one.on, 1); assert.equal(one.off, 0); assert.equal(one.txnH, 5);
+  assert.equal(two.on, 0); assert.equal(two.off, 1);
+  assert.equal(one.spark.length, 6);
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({

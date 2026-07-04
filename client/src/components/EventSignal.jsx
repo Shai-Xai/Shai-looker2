@@ -1,0 +1,223 @@
+import { useEffect, useState } from 'react';
+
+// 🎛 Event Signal — the site board: every station a tile inside its venue zone,
+// every device a countable tick (green = sending, red = dark). Data comes from
+// the roster snapshots the Data health checks already store, so rendering this
+// costs no Looker reads. Zones are derived from the station names themselves
+// (FUTUR BAR → FUTUR), which mirrors how venues actually name their sites.
+// Styled entirely with the app's theme tokens — light/dark follows Pulse.
+
+const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
+const unitFor = (m) => (m && (m.area === 'Bar' || m.area === 'Vendors') ? 'transactions' : 'scans');
+const fmtLag = (min) => {
+  if (min == null) return '—';
+  const m = Math.round(min);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+};
+
+// Zone from a station name: drop FOOD/RECYCLING-style prefixes, take the first
+// word; anything GATE-ish folds into one GATES zone.
+const zoneOf = (name) => {
+  const n = String(name || '').trim().toUpperCase();
+  if (!n) return '—';
+  const w = n.replace(/^(FOOD|RECYCLING|STORE|LOUNGE)\s+/, '').split(/\s+/)[0];
+  if (w.startsWith('GATE')) return 'GATES';
+  return w || '—';
+};
+
+const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: 12 };
+
+function Ticks({ on, off, dense }) {
+  const w = dense ? 4 : 7; const h = dense ? 6 : 11;
+  const cells = [];
+  for (let i = 0; i < on + off; i++) {
+    const isOn = i < on;
+    cells.push(<span key={i} style={{
+      width: w, height: h, borderRadius: 1, flexShrink: 0,
+      background: isOn ? STATUS_COLOR.fresh : 'transparent',
+      border: isOn ? 'none' : `1px solid ${STATUS_COLOR.stale}`,
+      opacity: isOn ? 0.9 : 1,
+    }} />);
+  }
+  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: dense ? 1.5 : 2, margin: '6px 0 5px' }}>{cells}</div>;
+}
+
+function Spark({ spark }) {
+  if (!spark || !spark.length) return null;
+  const max = Math.max(1, ...spark);
+  return (
+    <span style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, height: 14, marginLeft: 'auto' }}>
+      {spark.map((v, i) => (
+        <i key={i} style={{ display: 'block', width: 4, borderRadius: '1px 1px 0 0', height: Math.max(2, Math.round((v / max) * 14)), background: i === spark.length - 1 && v ? 'var(--brand)' : 'var(--hairline)' }} />
+      ))}
+    </span>
+  );
+}
+
+function StationTile({ s, selected, onSelect }) {
+  const edge = STATUS_COLOR[s.status] || 'var(--hairline)';
+  const tot = (s.on ?? 0) + (s.off ?? 0);
+  return (
+    <button onClick={() => onSelect(s)} style={{
+      position: 'relative', textAlign: 'left', minWidth: 0, cursor: 'pointer', fontFamily: 'inherit',
+      border: `1px solid ${selected ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 8,
+      background: 'var(--card)', padding: '7px 9px 7px 13px', color: 'var(--text)',
+    }}>
+      <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '8px 0 0 8px', background: edge }} />
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{s.name}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: s.status === 'stale' ? STATUS_COLOR.stale : 'var(--muted)', fontWeight: s.status === 'stale' ? 800 : 500, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{fmtLag(s.lagMin)}</span>
+      </span>
+      {s.on != null
+        ? <Ticks on={s.on} off={s.off} dense={tot > 28} />
+        : <div style={{ fontSize: 10, color: 'var(--muted)', margin: '6px 0 5px' }}>device counts arrive with the next check…</div>}
+      <span style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: s.txnH ? 'var(--text)' : 'var(--muted)' }}>
+          {s.txnH != null ? s.txnH.toLocaleString('en-ZA') : '—'}
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}> /h</span>
+        </span>
+        <Spark spark={s.spark} />
+      </span>
+    </button>
+  );
+}
+
+// The board itself — presentational; give it the monitors array the page
+// already holds (admin groups) or let SignalOps below fetch for Event Ops.
+export function SignalBoard({ monitors }) {
+  const [sel, setSel] = useState(null);
+  const open = (monitors || []).filter((m) => m.status !== 'closed');
+
+  const rows = [];
+  for (const m of open) {
+    const roll = new Map(((m.rosterSnapshot && m.rosterSnapshot.stations) || []).map((s) => [s.station, s]));
+    for (const st of m.streams || []) {
+      const name = st.station || m.name;
+      const r = roll.get(name);
+      rows.push({
+        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name,
+        on: r ? r.on : null, off: r ? r.off : 0, txnH: r ? r.txnH : null, spark: r ? r.spark : null,
+      });
+      roll.delete(name);
+    }
+    // stations the roll-up saw but the stream memory hasn't named yet
+    for (const r of roll.values()) {
+      if (r.station === '—') continue;
+      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
+    }
+  }
+
+  const zones = new Map();
+  for (const s of rows) {
+    if (!zones.has(s.zone)) zones.set(s.zone, []);
+    zones.get(s.zone).push(s);
+  }
+  const zoneList = [...zones.entries()]
+    .map(([k, list]) => ({ k, list: list.sort((a, b) => a.name.localeCompare(b.name)), dev: list.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0) }))
+    .sort((a, b) => b.dev - a.dev);
+
+  const sum = (k) => rows.reduce((a, s) => a + (s[k] || 0), 0);
+  const units = new Set(rows.map((s) => s.unit));
+  const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
+  const dials = [
+    ['Stations', rows.length], ['Zones', zoneList.length],
+    ['Devices on', sum('on'), STATUS_COLOR.fresh],
+    ['Dark', sum('off'), sum('off') ? STATUS_COLOR.stale : undefined],
+    [`${short}/h`, sum('txnH').toLocaleString('en-ZA')],
+  ];
+
+  if (!rows.length) {
+    return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>No stations yet — the board builds itself from the Data health monitors once their first checks land.</div>;
+  }
+
+  return (
+    <div>
+      {/* dials */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        {dials.map(([l, v, c]) => (
+          <div key={l} style={{ ...card, padding: '7px 13px', minWidth: 78 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+          </div>
+        ))}
+        <div style={{ ...card, padding: '7px 13px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--muted)' }}>
+          <span style={{ width: 7, height: 11, background: STATUS_COLOR.fresh, borderRadius: 1, display: 'inline-block' }} /> sending
+          <span style={{ width: 7, height: 11, border: `1px solid ${STATUS_COLOR.stale}`, borderRadius: 1, display: 'inline-block' }} /> dark — each tick is one device
+        </div>
+      </div>
+
+      {/* the site board */}
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))' }}>
+        {zoneList.map((z) => {
+          const zon = z.list.reduce((a, s) => a + (s.on || 0), 0);
+          const zoff = z.list.reduce((a, s) => a + (s.off || 0), 0);
+          const ztx = z.list.reduce((a, s) => a + (s.txnH || 0), 0);
+          return (
+            <section key={z.k} style={{ border: '1px solid var(--hairline)', borderRadius: 10, background: 'var(--card)', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--hairline)' }}>
+                <span style={{ fontSize: 11.5, fontWeight: 850, letterSpacing: 1.6, textTransform: 'uppercase' }}>{z.k}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  <b style={{ color: STATUS_COLOR.fresh }}>{zon}</b>/{zon + zoff}
+                  {zoff ? <> · <b style={{ color: STATUS_COLOR.stale }}>{zoff} dark</b></> : null}
+                  {' '}· {ztx.toLocaleString('en-ZA')}/h
+                </span>
+              </div>
+              <div style={{ display: 'grid', gap: 7, padding: 8, gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+                {z.list.map((s) => <StationTile key={s.monitor + s.name} s={s} selected={sel && sel.name === s.name && sel.monitor === s.monitor} onSelect={setSel} />)}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      {/* selected station */}
+      {sel && (
+        <div style={{ ...card, marginTop: 10, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}` }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 14 }}>{sel.name}</strong>
+            <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{sel.zone}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>monitor: {sel.monitor}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setSel(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 9px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
+            <span><b style={{ color: STATUS_COLOR.fresh }}>{sel.on ?? '—'}</b> sending</span>
+            <span><b style={{ color: sel.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{sel.off ?? 0}</b> dark</span>
+            <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
+            <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+            For the deep dive — 🩺 Diagnose, the day timeline and the offline log — open this station's monitor in the 📶 Data health tab.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Event Ops wrapper: fetches this event's monitors (entity-scoped, read only)
+// and keeps the board fresh on the same cadence as the health tab.
+export default function SignalOps({ entityId, suiteId }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch(`/api/my/data-health?entityId=${encodeURIComponent(entityId || '')}&suiteId=${encodeURIComponent(suiteId || '')}`)
+      .then((r) => r.json()).then((d) => { if (alive) { setData(d); setErr(''); } })
+      .catch((e) => { if (alive) setErr(e.message); });
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [entityId, suiteId]);
+  if (err) return <div style={{ ...card, fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err}</div>;
+  if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 10px' }}>
+        Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
+      </p>
+      <SignalBoard monitors={data.monitors || []} />
+    </div>
+  );
+}
