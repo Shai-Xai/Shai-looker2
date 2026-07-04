@@ -1,0 +1,44 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index e4d4c2b..857911e 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -1174,0 +1175,19 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
++  // Prefill from a one-tap template (the New-monitor shortcut) — resolves the
++  // explore from the loaded models, drops the template's filter/detail rows and
++  // roster/threshold defaults in, and keeps whatever client/event was picked.
++  const applyTemplate = (tpl) => {
++    const o = exploreOptions.find((x) => x.view === tpl.templateView);
++    setF((p) => ({
++      ...p,
++      name: tpl.name, area: tpl.area,
++      model: o ? o.model : '', view: o ? o.view : '', templateView: o ? '' : tpl.templateView,
++      timeField: tpl.timeField || '', stationField: tpl.stationField || '', rosterField: tpl.rosterField || '',
++      rosterDaily: tpl.rosterDaily || '',
++      rosterOnlineMin: tpl.rosterOnlineMin ?? p.rosterOnlineMin, rosterAlertPct: tpl.rosterAlertPct ?? p.rosterAlertPct,
++      warnMin: tpl.warnMin ?? p.warnMin, staleMin: tpl.staleMin ?? p.staleMin,
++    }));
++    setFilterRows(Object.entries(tpl.filters || {}));
++    setDetailRows(tpl.detailFields || []);
++    setDimValues({});
++  };
++
+@@ -1192,0 +1212,9 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
++      {!initial?.id && (
++        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--hairline)' }}>
++          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Start from a template</span>
++          <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.bar)}>🍺 Bar</button>
++          <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.vendor)}>🧾 Vendor</button>
++          <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.checkin)}>🛂 Check-in</button>
++          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>or fill it in below</span>
++        </div>
++      )}
+@@ -1481,6 +1509,3 @@ export default function DataHealthAdmin() {
+-          {editing == null && <>
+-            <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>
+-            <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.bar })}>🍺 Bar template</button>
+-            <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.vendor })}>🧾 Vendor template</button>
+-            <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.checkin })}>🛂 Check-in template</button>
+-          </>}
++          {editing == null && (
++            <button style={btn} title="Create a monitor — the editor offers 🍺 Bar / 🧾 Vendor / 🛂 Check-in templates to start from" onClick={() => setEditing('new')}>+ New monitor</button>
++          )}
