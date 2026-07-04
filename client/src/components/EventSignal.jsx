@@ -651,33 +651,56 @@ function RhythmView({ monitors, apiBase, rows, onSelect }) {
 // The board itself — presentational; give it the monitors array the page
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
 // 📶 Signal flow meter — the one-glance answer to "are we flowing?".
-// We accept 5% of devices dark at any moment, so target flow = 95% online.
 // Score = the AVERAGE of each station's own online share (every station
 // counts equally — one dark gate can't hide behind fifty healthy bars).
-// Green at/above target · amber within 5 points below · red under that.
-const FLOW_TARGET = 95, FLOW_AMBER = 90;
+// The target is YOURS to set (⚙ · default 95% = we accept 5% dark): green
+// at/above target · amber within 5 points below · red under that. Saved on
+// this device (localStorage), so ops phones and the wall screen can differ.
+const FLOW_BAND = 5, FLOW_KEY = 'pulse.flowTargetPct';
 function FlowMeter({ rows }) {
+  const [target, setTarget] = useState(() => { const v = Number(localStorage.getItem(FLOW_KEY)); return v >= 50 && v <= 100 ? v : 95; });
+  const [edit, setEdit] = useState(false);
+  const save = (v) => {
+    const n = Math.max(50, Math.min(100, Math.round(Number(v) || 95)));
+    setTarget(n); setEdit(false);
+    try { localStorage.setItem(FLOW_KEY, String(n)); } catch { /* storage unavailable — keep for this session */ }
+  };
   const st = (rows || []).filter((s) => (s.on || 0) + (s.off || 0) > 0);
   if (!st.length) return null;
   const flow = st.reduce((a, s) => a + (s.on || 0) / ((s.on || 0) + (s.off || 0)), 0) / st.length * 100;
   const dark = st.reduce((a, s) => a + (s.off || 0), 0);
   const total = st.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0);
-  const color = flow >= FLOW_TARGET ? STATUS_COLOR.fresh : flow >= FLOW_AMBER ? STATUS_COLOR.warn : STATUS_COLOR.stale;
-  const word = flow >= FLOW_TARGET ? 'Flowing' : flow >= FLOW_AMBER ? 'Choppy' : 'Blocked';
+  const color = flow >= target ? STATUS_COLOR.fresh : flow >= target - FLOW_BAND ? STATUS_COLOR.warn : STATUS_COLOR.stale;
+  const word = flow >= target ? 'Flowing' : flow >= target - FLOW_BAND ? 'Choppy' : 'Blocked';
   return (
     <div style={{ ...card, padding: '9px 13px', marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>Signal flow</span>
         <span style={{ fontSize: 19, fontWeight: 850, fontVariantNumeric: 'tabular-nums', color }}>{flow.toFixed(1)}%</span>
         <span style={{ fontSize: 11.5, fontWeight: 800, color }}>● {word}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>target ≥{FLOW_TARGET}% · {dark ? `${dark} of ${total} devices dark` : 'no devices dark'}</span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+          {edit ? (
+            <>
+              target ≥ <input type="number" min={50} max={100} defaultValue={target} autoFocus aria-label="Flow target %"
+                onKeyDown={(e) => { if (e.key === 'Enter') save(e.currentTarget.value); }}
+                onBlur={(e) => save(e.currentTarget.value)}
+                style={{ width: 54, padding: '3px 6px', border: '1px solid var(--hairline)', borderRadius: 6, background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit' }} /> %
+            </>
+          ) : (
+            <>
+              target ≥{target}% · {dark ? `${dark} of ${total} devices dark` : 'no devices dark'}
+              <button onClick={() => setEdit(true)} title="Set the flow target" aria-label="Set the flow target"
+                style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, minWidth: 26, minHeight: 24, cursor: 'pointer', fontSize: 12, padding: 0 }}>⚙</button>
+            </>
+          )}
+        </span>
       </div>
-      {/* the meter: fill vs the 95% target tick */}
+      {/* the meter: fill vs the target tick */}
       <div style={{ position: 'relative', height: 10, borderRadius: 6, background: 'var(--hairline)', marginTop: 7, overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, width: `${Math.max(2, Math.min(100, flow))}%`, background: color, borderRadius: 6, transition: 'width 300ms' }} />
-        <div title={`target ${FLOW_TARGET}%`} style={{ position: 'absolute', top: -1, bottom: -1, left: `${FLOW_TARGET}%`, width: 2, background: 'var(--text)', opacity: 0.55 }} />
+        <div title={`target ${target}%`} style={{ position: 'absolute', top: -1, bottom: -1, left: `${target}%`, width: 2, background: 'var(--text)', opacity: 0.55 }} />
       </div>
-      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>average online share across {st.length} stations · we allow {100 - FLOW_TARGET}% dark before it counts against flow</div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>average online share across {st.length} stations · we allow {100 - target}% dark before it counts against flow · amber down to {target - FLOW_BAND}%</div>
     </div>
   );
 }
