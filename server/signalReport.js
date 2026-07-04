@@ -89,8 +89,9 @@ function mount(app, { db, auth, mailer = null, dataHealth = null, signalFlow = n
       for (const [sn, offSets] of byStation) {
         const total = offSets.length;
         const series = ticks.map((k, i) => { let off = 0; for (const s of offSets) if (s.has(base + i)) off += 1; return { off, on: Math.max(0, total - off) }; });
-        let closeIdx = -1;
-        if (closedMon) { for (let i = 0; i < series.length; i++) if (total && series[i].on / total >= 0.7) closeIdx = i; series.forEach((c, i) => { c.closed = i > closeIdx; }); }
+        // Grey only the trailing run where the station is FULLY dark — a single dead
+        // device isn't "closed"; the station is still trading on its other devices.
+        if (closedMon) { let last = -1; for (let i = 0; i < series.length; i++) if (series[i].on > 0) last = i; series.forEach((c, i) => { c.closed = i > last; }); }
         const openCk = series.filter((c) => !c.closed);
         const nowC = series[series.length - 1] || { on: 0, off: 0 };
         const name = sn || m.name;
