@@ -24,6 +24,10 @@ export default function LivePulsePanel({ suites }) {
 
   const toggleLive = (p) => api.setLivePulseLive(p.id, !p.live).then(() => loadSuite(p.suiteId)).catch((e) => window.alert(e.message));
   const toggleStatus = (p) => api.setLivePulseStatus(p.id, p.status === 'paused' ? 'active' : 'paused').then(() => loadSuite(p.suiteId)).catch((e) => window.alert(e.message));
+  // Duplicate = open the editor prefilled from the source with no id (same pattern as
+  // DigestManager). Go-live state + time window are deliberately NOT copied, so a copy
+  // can never start sending the moment it's created.
+  const duplicate = (p) => setEditor({ suiteId: p.suiteId, pulse: { ...p, id: '', name: `${p.name} (copy)`, live: false, windowStart: '', windowEnd: '' } });
 
   if (!rows.length) return <div style={empty}>No events yet. Once you have an event, set up its live updates here.</div>;
 
@@ -49,6 +53,7 @@ export default function LivePulsePanel({ suites }) {
                 {pulses.map((p) => (
                   <PulseRow key={p.id} pulse={p} canManage={canManage}
                     onEdit={() => setEditor({ suiteId: suite.id, pulse: p })}
+                    onDuplicate={() => duplicate(p)}
                     onToggleLive={() => toggleLive(p)} onToggleStatus={() => toggleStatus(p)} />
                 ))}
               </div>
@@ -76,7 +81,7 @@ export default function LivePulsePanel({ suites }) {
 
 // One live update as a row: name, live/paused chip, the setup in a sentence, and the
 // Go live / Stop switch (the organiser's manual override on the night).
-function PulseRow({ pulse: p, canManage, onEdit, onToggleLive, onToggleStatus }) {
+function PulseRow({ pulse: p, canManage, onEdit, onDuplicate, onToggleLive, onToggleStatus }) {
   const chip = p.status === 'paused' ? { label: 'Paused', bg: 'rgba(128,128,128,0.15)', fg: 'var(--muted)' }
     : p.liveNow ? { label: '● Live', bg: 'rgba(220,38,38,0.12)', fg: 'var(--error, #dc2626)' }
       : (p.windowStart ? { label: 'Scheduled', bg: 'rgba(10,132,255,0.12)', fg: 'var(--brand)' } : { label: 'Idle', bg: 'rgba(128,128,128,0.12)', fg: 'var(--muted)' });
@@ -107,6 +112,9 @@ function PulseRow({ pulse: p, canManage, onEdit, onToggleLive, onToggleStatus })
           {p.status === 'paused' ? '▶' : '⏸'}
         </button>
       )}
+      {canManage && (
+        <button onClick={onDuplicate} style={iconBtn} title="Duplicate this live update" aria-label="Duplicate">⧉</button>
+      )}
     </div>
   );
 }
@@ -117,7 +125,9 @@ const nid = () => Math.random().toString(36).slice(2, 10);
 
 function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, caps, onClose, onSaved }) {
   const isMobile = useIsMobile();
-  const editing = !!pulse;
+  const editing = !!(pulse && pulse.id); // a pulse WITHOUT an id = duplicating (prefilled create)
+  const duplicating = !!(pulse && !pulse.id);
+  const [targetSuiteId, setTargetSuiteId] = useState(suiteId); // duplicating can retarget another event
   const [name, setName] = useState(pulse?.name || 'Event live update');
   const [cadenceMin, setCadenceMin] = useState(pulse?.cadenceMin || 30);
   const [windowStart, setWindowStart] = useState(toLocalInput(pulse?.windowStart));
@@ -175,7 +185,7 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
     setBusy(true); setErr('');
     try {
       if (editing) await api.updateLivePulse(pulse.id, body());
-      else await api.createLivePulse(suiteId, body());
+      else await api.createLivePulse(duplicating ? targetSuiteId : suiteId, body());
       onSaved?.(); onClose();
     } catch (e) { setErr(e.message || 'Could not save.'); } finally { setBusy(false); }
   };
@@ -194,9 +204,21 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
       <div style={{ ...sheet, maxWidth: isMobile ? '100%' : 520 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
           <span style={{ fontSize: 20 }}>⚡</span>
-          <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? 'Edit live update' : 'New live update'}{suiteName ? <span style={{ fontWeight: 600, color: 'var(--muted)', fontSize: 13 }}> · {suiteName}</span> : null}</h2>
+          <h2 style={{ fontSize: 17, fontWeight: 800, flex: 1 }}>{editing ? 'Edit live update' : duplicating ? 'Duplicate live update' : 'New live update'}{suiteName ? <span style={{ fontWeight: 600, color: 'var(--muted)', fontSize: 13 }}> · {suiteName}</span> : null}</h2>
           <button onClick={onClose} style={xBtn} aria-label="Close">✕</button>
         </div>
+
+        {duplicating && otherSuites.length > 0 && (
+          <Field label="Copy into which event?" hint="Everything below is copied from the original. The time window and Go-live switch aren’t — set those on the copy when you’re ready.">
+            <select style={inp} value={targetSuiteId} onChange={(e) => setTargetSuiteId(e.target.value)}>
+              <option value={suiteId}>{suiteName || 'This event'}</option>
+              {otherSuites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
+        {duplicating && !otherSuites.length && (
+          <div style={{ ...hintTxt, marginTop: 0, marginBottom: 12 }}>Everything below is copied from the original. The time window and Go-live switch aren’t — set those on the copy when you’re ready.</div>
+        )}
 
         <Field label="Name">
           <input style={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="Event live update" />
@@ -274,7 +296,7 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           {editing && <button onClick={del} style={btnDelGhost} title="Delete" aria-label="Delete">🗑</button>}
           {editing && <button onClick={sendNow} disabled={busy} style={btnGhost}>Send now</button>}
-          <button onClick={save} disabled={busy} style={btnPrimary}>{busy ? 'Saving…' : editing ? 'Save' : 'Create live update'}</button>
+          <button onClick={save} disabled={busy} style={btnPrimary}>{busy ? 'Saving…' : editing ? 'Save' : duplicating ? 'Create copy' : 'Create live update'}</button>
         </div>
       </div>
     </div>
