@@ -1015,9 +1015,16 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
     ...(replay ? [] : [[`${short}/h`, sum('txnH').toLocaleString('en-ZA')]]),
   ];
 
-  if (!rows.length) {
+  // A closed event still deserves the board — you replay/analyse the day after it
+  // ends. Only bail when there's genuinely nothing (no live stations AND no closed
+  // monitors to look back at). When every station is closed, the live Board/Rhythm
+  // are empty, so fall back to the 📶 Stations view (which reads closed monitors too).
+  const anyClosed = (monitors || []).some((m) => m.status === 'closed');
+  if (!rows.length && !anyClosed) {
     return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>No stations yet — the board builds itself from the Data health monitors once their first checks land.</div>;
   }
+  const anyOpen = open.length > 0;
+  const vw = anyOpen ? view : 'stations';
 
   const chipStyle = (act) => ({
     border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, cursor: 'pointer',
@@ -1039,20 +1046,26 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           ))}
         </>}
         <span style={{ flex: 1 }} />
-        <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
-        <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
-        <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
+        {anyOpen && <button onClick={() => setView('board')} style={chipStyle(vw === 'board')}>🎛️ Board</button>}
+        {anyOpen && <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(vw === 'rhythm')}>📈 Rhythm</button>}
+        <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(vw === 'stations')}>📶 Stations</button>
       </div>
 
-      {view === 'rhythm' && (
+      {!anyOpen && (
+        <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
+          Every station for this event is <b>closed</b> — the live board is empty. Here's the day per station for analysis; tap any station to replay its device timeline.
+        </div>
+      )}
+
+      {vw === 'rhythm' && (
         <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
       )}
 
-      {view === 'stations' && (
+      {vw === 'stations' && (
         <StationDayView monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
       )}
 
-      {view === 'board' && <>
+      {vw === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
       <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
       {replay && (
