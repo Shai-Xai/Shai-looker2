@@ -217,12 +217,29 @@ function b64ToU8(base64) {
 function AlertsToggle({ suiteId, token, staffId, flash }) {
   const base = `/api/eventops/portal/${encodeURIComponent(suiteId)}/${encodeURIComponent(token)}`;
   const supported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  // iPhone quirk: iOS only allows web-push from an installed (Home Screen) PWA,
+  // never a plain Safari tab. Detect that so we can guide instead of hiding.
+  const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
+  const standalone = typeof window !== 'undefined' && (window.navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
   const [on, setOn] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState(false);
   useEffect(() => {
     if (!supported) return;
     navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()).then((s) => setOn(!!s)).catch(() => {});
   }, [supported]);
+  if (isIOS && !standalone) {
+    return (
+      <span style={{ position: 'relative', flexShrink: 0 }}>
+        <button onClick={() => setHint((v) => !v)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 999, padding: '7px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 36 }}>🔔 Alerts</button>
+        {hint && (
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 20, width: 230, padding: 12, borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 12px 32px rgba(0,0,0,0.28)', fontSize: 12.5, lineHeight: 1.35 }}>
+            To get alerts on iPhone: tap <b>Share</b> ↗ → <b>Add to Home Screen</b>, then open Pulse from that icon and tap 🔔 again.
+          </div>
+        )}
+      </span>
+    );
+  }
   if (!supported) return null;
   async function enable() {
     setBusy(true);
