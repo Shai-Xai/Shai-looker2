@@ -280,6 +280,28 @@ export function OwlSummary({ entityId, suiteId, title = 'Data health' }) {
   );
 }
 
+// ⋯ page-actions menu — on phones the header folds Summary/Share/refresh into
+// this one button so the control row never crowds the screen. The children are
+// the SAME components the desktop row renders; the menu stays mounted while
+// their own drawers/popovers are open (tap the backdrop to dismiss).
+export function ControlKebab({ children, label = 'Page actions' }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
+      <button onClick={() => setOpen((v) => !v)} title={label} aria-label={label}
+        style={{ border: '1px solid var(--hairline)', background: open ? 'var(--hover, rgba(127,127,127,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 17, fontWeight: 800, lineHeight: 1 }}>⋯</button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 940 }} />
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 941, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 8, padding: 10, borderRadius: 12, border: '1px solid var(--hairline)', background: 'var(--card)', boxShadow: '0 12px 32px rgba(0,0,0,0.3)', minWidth: 170 }}>
+            {children}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 const OWL_W = 420; // keep in sync with the dashboard drawer's reflow width
 function OwlDrawer({ entityId, suiteId, title, onClose }) {
   const isMobile = useIsMobile();
@@ -588,6 +610,38 @@ function RhythmView({ monitors, apiBase, rows, onSelect }) {
 
 // The board itself — presentational; give it the monitors array the page
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
+// 📶 Signal flow meter — the one-glance answer to "are we flowing?".
+// We accept 5% of devices dark at any moment, so target flow = 95% online.
+// Score = the AVERAGE of each station's own online share (every station
+// counts equally — one dark gate can't hide behind fifty healthy bars).
+// Green at/above target · amber within 5 points below · red under that.
+const FLOW_TARGET = 95, FLOW_AMBER = 90;
+function FlowMeter({ rows }) {
+  const st = (rows || []).filter((s) => (s.on || 0) + (s.off || 0) > 0);
+  if (!st.length) return null;
+  const flow = st.reduce((a, s) => a + (s.on || 0) / ((s.on || 0) + (s.off || 0)), 0) / st.length * 100;
+  const dark = st.reduce((a, s) => a + (s.off || 0), 0);
+  const total = st.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0);
+  const color = flow >= FLOW_TARGET ? STATUS_COLOR.fresh : flow >= FLOW_AMBER ? STATUS_COLOR.warn : STATUS_COLOR.stale;
+  const word = flow >= FLOW_TARGET ? 'Flowing' : flow >= FLOW_AMBER ? 'Choppy' : 'Blocked';
+  return (
+    <div style={{ ...card, padding: '9px 13px', marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>Signal flow</span>
+        <span style={{ fontSize: 19, fontWeight: 850, fontVariantNumeric: 'tabular-nums', color }}>{flow.toFixed(1)}%</span>
+        <span style={{ fontSize: 11.5, fontWeight: 800, color }}>● {word}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>target ≥{FLOW_TARGET}% · {dark ? `${dark} of ${total} devices dark` : 'no devices dark'}</span>
+      </div>
+      {/* the meter: fill vs the 95% target tick */}
+      <div style={{ position: 'relative', height: 10, borderRadius: 6, background: 'var(--hairline)', marginTop: 7, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, width: `${Math.max(2, Math.min(100, flow))}%`, background: color, borderRadius: 6, transition: 'width 300ms' }} />
+        <div title={`target ${FLOW_TARGET}%`} style={{ position: 'absolute', top: -1, bottom: -1, left: `${FLOW_TARGET}%`, width: 2, background: 'var(--text)', opacity: 0.55 }} />
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>average online share across {st.length} stations · we allow {100 - FLOW_TARGET}% dark before it counts against flow</div>
+    </div>
+  );
+}
+
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' (the rate river)
@@ -674,6 +728,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'board' && <>
+      <FlowMeter rows={shown} />
       <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} />
       <NeedsEyes rows={shown} onSelect={setSel} />
       {/* dials */}
@@ -743,6 +798,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 // Event Ops wrapper: fetches this event's monitors (entity-scoped, read only)
 // and keeps the board fresh on the same cadence as the health tab.
 export default function SignalOps({ entityId, suiteId }) {
+  const isMobile = useIsMobile();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [tick, setTick] = useState(0); // manual refresh bumps this
@@ -760,18 +816,23 @@ export default function SignalOps({ entityId, suiteId }) {
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
   return (
     <div>
-      {/* One compact control row; the explainer gets its own full-width line
-          below — no more mid-wrap soup on phones. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 6px' }}>
+      {/* Compact control row. Phones get ONE ⋯ menu holding Summary/Share/
+          refresh and skip the explainer; desktop keeps the inline buttons. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
         <span style={{ flex: 1 }} />
-        <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
-        <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄</button>
+        {(() => {
+          const controls = <>
+            <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
+            <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
+            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+          </>;
+          return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+        })()}
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
+      {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
         Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
-      </p>
+      </p>}
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );

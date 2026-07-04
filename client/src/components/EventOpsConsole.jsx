@@ -119,12 +119,14 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
               </button>
             ))}
           </div>
-          {canManage && suiteId && (
+          {/* Scan + Move are Hive (device-ops) tools — keep them off the
+              read-only Data health / Signal board tabs on every screen. */}
+          {canManage && suiteId && inHive && (
             <button onClick={() => setScan({ for: 'move' })} style={navScan} aria-label="Scan a device">
               <span style={{ fontSize: 18 }}>📷</span> Scan
             </button>
           )}
-          {canManage && suiteId && (
+          {canManage && suiteId && inHive && (
             <button onClick={() => setMoveFlow(true)} style={navMove} aria-label="Move devices">
               <span style={{ fontSize: 18 }}>🔀</span> Move devices
             </button>

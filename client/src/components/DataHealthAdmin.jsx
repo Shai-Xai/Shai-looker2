@@ -13,6 +13,7 @@ const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
 const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
 const OwlSummary = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.OwlSummary })));
+const ControlKebab = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.ControlKebab })));
 const ShareMenuLazy = lazy(() => import('./ShareMenu.jsx'));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
@@ -1614,6 +1615,7 @@ export default function DataHealthAdmin() {
 // picked event). Renders in BOTH consoles — the client's /event-ops page and
 // Admin → client → Event Ops (the dual-surface rule).
 export function DataHealthOps({ entityId, suiteId }) {
+  const isMobile = useIsMobile();
   const [monitors, setMonitors] = useState(null);
   const [err, setErr] = useState('');
   const [tick, setTick] = useState(0); // manual refresh bumps this
@@ -1630,19 +1632,25 @@ export function DataHealthOps({ entityId, suiteId }) {
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
   return (
     <div>
-      {/* One compact control row; the explainer gets its own full-width line. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 6px' }}>
+      {/* Compact control row. Phones get ONE ⋯ menu holding Summary/Share/
+          refresh and skip the explainer; desktop keeps the inline buttons. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
         <span style={{ flex: 1 }} />
         <Suspense fallback={null}>
-          <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
-          <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+          {(() => {
+            const controls = <>
+              <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
+              <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+              <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+            </>;
+            return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+          })()}
         </Suspense>
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄</button>
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
+      {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
         Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.
-      </p>
+      </p>}
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>
