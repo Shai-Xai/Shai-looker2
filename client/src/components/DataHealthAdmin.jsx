@@ -12,6 +12,8 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
 const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
+const OwlSummary = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.OwlSummary })));
+const ShareMenuLazy = lazy(() => import('./ShareMenu.jsx'));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
@@ -1634,8 +1636,12 @@ export function DataHealthOps({ entityId, suiteId }) {
           Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
         </p>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+        <Suspense fallback={null}>
+          <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+        </Suspense>
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
       </div>
+      <Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>

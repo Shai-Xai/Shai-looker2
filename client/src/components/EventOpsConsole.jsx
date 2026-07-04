@@ -23,7 +23,10 @@ const STATION_KINDS = ['bar', 'gate', 'booth', 'topup', 'vendor', 'other'];
 const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', vendor: '🍔', other: '📍' };
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
-const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity'], ['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
+// 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
+// Signal board stay top-level. Clicking Hive opens the sub-drawer.
+const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+const TOP_TABS = [['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
 // Quick-pick resolutions (staff can also type a custom comment).
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 
@@ -33,6 +36,8 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [suiteId, setSuiteId] = useState('');
   const [canManage, setCanManage] = useState(false);
   const [tab, setTab] = useState('live');
+  const [hiveOpen, setHiveOpen] = useState(true); // 🐝 the sub-drawer of on-the-ground tabs
+  const inHive = HIVE_TABS.some(([t]) => t === tab);
   const [scan, setScan] = useState(null);        // null | { for: 'move' }
   const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
   const [actionDevice, setActionDevice] = useState(null); // device shown in the action sheet
@@ -93,7 +98,22 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: 10, width: '100%' } : { display: 'flex', flexDirection: 'column', gap: 8, position: 'sticky', top: 8, width: 170, flexShrink: 0 }}>
           <div style={isMobile ? mobileTabs : leftNav}>
-            {TABS.map(([t, icon, label]) => (
+            <button onClick={() => { if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
+              style={isMobile ? tabBtn(inHive) : navItem(inHive)}>
+              <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{hiveOpen ? '▾' : '▸'}</span>
+            </button>
+            {hiveOpen && (
+              <div style={isMobile
+                ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
+                : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
+                {HIVE_TABS.map(([t, icon, label]) => (
+                  <button key={t} onClick={() => setTab(t)} style={{ ...(isMobile ? tabBtn(tab === t) : navItem(tab === t)), fontSize: 12.5 }}>
+                    <span style={{ fontSize: 13 }}>{icon}</span> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {TOP_TABS.map(([t, icon, label]) => (
               <button key={t} onClick={() => setTab(t)} style={isMobile ? tabBtn(tab === t) : navItem(tab === t)}>
                 <span style={{ fontSize: 15 }}>{icon}</span> {label}
               </button>
