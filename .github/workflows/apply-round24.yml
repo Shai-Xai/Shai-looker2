@@ -1,0 +1,46 @@
+name: apply-round24
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 24 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "18763d0acf3c876164d7c9d74ffc00a7d2b4efc67f23ffc270bcbc99aa6234bb  patches/round24.patch" | sha256sum -c -
+          cp patches/round24.patch /tmp/round24.patch
+          cat > /tmp/msg <<'MSG'
+          Pause alerts per event
+
+          A Pause button on Hive -> Alerts silences all station alerts for the event
+          (stored per suite; the tick skips a paused suite entirely) with a clear
+          paused banner and one-tap Resume. Pause/resume are written to the alert
+          log. Threshold and pause share the settings route.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/staffAlerts.js client/src/components/StaffAlertsTab.jsx test/staffAlerts.test.js"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round24.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round24.patch .github/workflows/apply-round24.yml
+          git commit -m "chore: clean round24 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
