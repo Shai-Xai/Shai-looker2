@@ -1,0 +1,46 @@
+name: apply-round28
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 28 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "43e29c8138631370f3609d05bb1a05d9cd0ec4c9d918784edb81e33337a77153  patches/round28.patch" | sha256sum -c -
+          cp patches/round28.patch /tmp/round28.patch
+          cat > /tmp/msg <<'MSG'
+          Per-staff Station alerts toggle (on by default)
+
+          Staff setup gains a Station alerts chip (default on). When a staffer
+          turns it off they're excluded from the dark-station crew - the tick's
+          crew query filters to alerts_on. Stored on eventops_staff via the same
+          ALTER-column pattern as canMove/canCheckpoint.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/eventops.js server/staffAlerts.js client/src/components/EventOpsConsole.jsx"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round28.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round28.patch .github/workflows/apply-round28.yml
+          git commit -m "chore: clean round28 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
