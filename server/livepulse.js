@@ -29,10 +29,10 @@ const crypto = require('crypto');
 
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const CHANNELS = ['push', 'email', 'sms', 'whatsapp']; // inbox is always-on (the canonical record)
-const BLOCK_TYPES = ['value', 'top_list', 'eventops'];
+const BLOCK_TYPES = ['value', 'top_list', 'eventops', 'signal'];
 const MAX_BLOCKS = 8;
 
-function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops, push }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops, push, signalFlow }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -113,6 +113,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       type, label: String(b.label || '').slice(0, 80), icon: String(b.icon || '').slice(0, 8),
     };
     if (type === 'eventops') return out; // reads the EventOps suite summary; nothing else to configure
+    if (type === 'signal') { out.station = String(b.station || '').slice(0, 120); return out; } // '' = whole event; else one station
     out.unit = String(b.unit || '').slice(0, 16);
     if (type === 'top_list') {
       // A top-N list reads the TABLE behind a breakdown tile (e.g. "Revenue by bar").
@@ -255,6 +256,16 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       return { deployed: s.devices.deployed, total: s.devices.total, lost: s.devices.lost, damaged: s.devices.damaged, openIssues: s.openIssues };
     } catch { return null; }
   }
+  // Signal flow off the Data health board: % of roster devices online, overall or
+  // for one station. `b.station` blank = the whole event. Computed live (never a
+  // stored snapshot) so it's the same number the flow meter shows.
+  function readSignalBlock(p, b) {
+    try {
+      if (typeof signalFlow !== 'function') return null;
+      const f = signalFlow(p.suiteId, b.station || '');
+      return f && f.total ? f : (f && f.stations && f.stations.length ? f : null);
+    } catch (e) { console.error('[livepulse] signal read failed', p.id, b.id, e.message); return null; }
+  }
 
   // ── like-for-like ("same point in time") comparison ──
   // Mid-event, "% of last year's FINAL" answers the wrong question — organisers want
@@ -296,6 +307,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     const snap = {};
     for (const b of p.blocks || []) {
       if (b.type === 'eventops') { snap[b.id] = { ops: readEventOpsBlock(p) }; continue; }
+      if (b.type === 'signal') { snap[b.id] = { flow: readSignalBlock(p, b) }; continue; }
       if (b.type === 'top_list') { snap[b.id] = { rows: await readTopListBlock(p, b) }; continue; }
       const cur = { value: await readValueBlock(p, b, p.suiteId) };
       if (b.compare && p.compareSuiteId) {
@@ -309,7 +321,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   }
 
   // ── the wording: one compact, phone-first text block ──
-  const BLOCK_ICON = { value: '📊', top_list: '🏆', eventops: '🎛' };
+  const BLOCK_ICON = { value: '📊', top_list: '🏆', eventops: '🎛', signal: '📶' };
   function composeMessage(p, snap, prevRun) {
     const sym = moneySymFor(p);
     const prev = prevRun ? parseJson(prevRun.values_json, {}) : {};
@@ -333,6 +345,14 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       if (b.type === 'top_list') {
         if (!(s.rows || []).length) continue;
         lines.push(`${icon} ${label}: ${s.rows.map((r) => `${r.name} ${fmtNum(r.value, b.unit, sym)}`).join(' · ')}`);
+        continue;
+      }
+      if (b.type === 'signal') {
+        const f = s.flow;
+        if (!f || f.pct == null) continue;
+        const scope = b.station || (label && label !== 'Signal flow' ? '' : 'all stations');
+        const below = f.target != null && f.pct < f.target ? ` ⚠️ below target ${f.target}%` : '';
+        lines.push(`${icon} ${label || 'Signal flow'}${scope ? ` (${scope})` : ''}: ${f.pct}% online (${f.on}/${f.total})${below}`);
         continue;
       }
       // value block
@@ -449,6 +469,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       const s = snap[b.id] || {};
       const label = b.label || b.tileName || b.measureLabel || (b.type === 'eventops' ? 'Devices' : 'Metric');
       if (b.type === 'eventops') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: !!s.ops, ops: s.ops || null };
+      if (b.type === 'signal') return { id: b.id, type: b.type, label: label === 'Metric' ? 'Signal flow' : label, icon: b.icon || '', ok: !!(s.flow && s.flow.pct != null), value: s.flow && s.flow.pct != null ? `${s.flow.pct}% (${s.flow.on}/${s.flow.total})` : null, station: b.station || '' };
       if (b.type === 'top_list') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: (s.rows || []).length > 0, rows: (s.rows || []).map((r) => ({ name: r.name, value: fmtNum(r.value, b.unit, sym) })) };
       return { id: b.id, type: b.type, label, icon: b.icon || '', ok: s.value != null, value: s.value == null ? null : fmtNum(s.value, b.unit, sym), compare: (b.compare && s.compare != null) ? fmtNum(s.compare, b.unit, sym) : null };
     });
@@ -510,12 +531,17 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    let signalStations = [];
+    try { if (typeof signalFlow === 'function') signalStations = (signalFlow(req.params.suiteId).stations || []).map((s) => s.name).filter(Boolean); } catch { signalStations = []; }
     res.json({
       pulses: listForSuite(req.params.suiteId).map(decorate),
       canManage: canManage(req.user, req.params.suiteId),
       smsAvailable: !!(messaging?.status?.() || {}).configured,
       whatsappAvailable: !!(messaging?.waConfigured?.()),
       eventopsAvailable: !!(eventops && typeof eventops.suiteSummary === 'function' && eventops.suiteSummary(req.params.suiteId) && (eventops.suiteSummary(req.params.suiteId).devices || {}).total),
+      // The Signal-flow block is offered when the Data health board knows any station.
+      signalAvailable: signalStations.length > 0,
+      signalStations,
     });
   });
 

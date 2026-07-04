@@ -92,6 +92,21 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     return out;
   }
 
+  // Signal flow for a suite: the % of roster devices online, overall and per
+  // station (the same number the Signal board's flow meter shows). `station`
+  // narrows to one; blank = the whole event. Reused by Live Pulse's signal block
+  // and the scheduled ops digest. `target` is the per-event flow target (default 95).
+  const flowTarget = (sid) => { const v = Number(db.getSetting('data_health_flow_target_' + (sid || 'all'), '')); return v >= 50 && v <= 100 ? v : 95; };
+  function signalFlow(suiteId, station = '') {
+    const hs = healthStations(suiteId);
+    const pct = (on, off) => (on + off ? Math.round((on / (on + off)) * 100) : null);
+    const stations = hs.map((s) => ({ name: s.station, on: s.on, off: s.off, total: s.on + s.off, pct: pct(s.on, s.off) }));
+    const pick = station ? stations.filter((s) => norm(s.name) === norm(station)) : stations;
+    const on = pick.reduce((a, s) => a + s.on, 0);
+    const off = pick.reduce((a, s) => a + s.off, 0);
+    return { station: station || null, on, off, total: on + off, pct: pct(on, off), target: flowTarget(suiteId), stations };
+  }
+
   // The bridge: a manual mapping wins (even an explicit '' = unmapped);
   // otherwise match by normalised name — exact first, then containment.
   function resolveStation(suiteId, healthStation, opsStations) {
@@ -335,7 +350,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     res.json({ ok: true });
   });
 
-  return { tick, healthStations, resolveStation, staffInbound };
+  return { tick, healthStations, signalFlow, resolveStation, staffInbound };
 }
 
 module.exports = { mount, norm };
