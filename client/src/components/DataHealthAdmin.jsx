@@ -393,7 +393,17 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
                   </div>
                 );
               })()
-      ) : !data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+      ) : !data.devices.length ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          No device activity in this window.
+          {data.sample && <div style={{ marginTop: 6, color: STATUS_COLOR.warn }}>⚠️ Looker returned {data.sample.rows} row{data.sample.rows === 1 ? '' : 's'} but none fit the grid — sample: device “{data.sample.device}”, bucket “{data.sample.bucket}”. Screenshot this for support.</div>}
+          {Array.isArray(data.readPath) && data.readPath.length > 0 && (
+            <div style={{ marginTop: 6, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10.5, lineHeight: 1.7 }}>
+              {data.readPath.map((s, i) => <div key={i}>{s}</div>)}
+            </div>
+          )}
+        </div>
+      ) : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse' }}>
             <thead>
