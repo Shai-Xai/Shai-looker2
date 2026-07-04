@@ -26,7 +26,7 @@
 //     monitor runs unscoped as a synthetic admin. Fail closed either way.
 
 const crypto = require('crypto');
-const { asyncHandler } = require('./http');
+const { asyncHandler, HttpError } = require('./http');
 
 const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's name
 const CNT_FIELD = 'data_health_scans';  // the dynamic scan-count measure's name (timeline fallback)
@@ -735,7 +735,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       }
       if (rows) break;
     }
-    if (!rows) throw lastErr;
+    // Total failure → a client-safe error with the REAL reason and the tail of
+    // the read path (a generic 500 turned one transient Looker hiccup into a
+    // three-round guessing game once already).
+    if (!rows) throw new HttpError(502, `Live timeline read failed — ${String((lastErr && lastErr.message) || lastErr || 'no read succeeded').slice(0, 160)} · tried: ${tried.slice(-3).join(' · ') || 'nothing'}`);
     if (iv !== 60) bucketFieldByMonitor.set(bKey, bucketField);
     if (mode !== 'none') countModeByMonitor.set(m.id, mode); else countModeByMonitor.delete(m.id);
     const cKey = mode === 'none' ? CNT_FIELD : fieldFor(mode);
