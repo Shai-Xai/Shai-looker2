@@ -207,10 +207,9 @@ addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's tic
 //     applied to one dashboard within this suite, on top of the suite-wide locks.
 addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
-// Per-tile lock overrides for THIS suite (one client): { tileId: { filterName:
-// value } } — forces a single tile's filter to a value for this client, on top
-// of the dashboard/suite locks. Applied to that tile's query only.
+// Per-tile lock overrides for THIS suite: { tileId: { filterName: value } } forces one tile's filter, atop the dashboard/suite locks.
 addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('suites', 'live_dashboard_id', "TEXT NOT NULL DEFAULT ''"); // sidebar LIVE button → live-ticketing dashboard
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -1201,7 +1200,7 @@ function setIdsForSuites(suiteIds) {
   return map;
 }
 function rowToSuite(r, setIds) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', liveDashboardId: r.live_dashboard_id || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() {
   const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
@@ -1239,7 +1238,8 @@ function updateSuite(id, patch) {
   const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
   const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
   const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, id);
+  const liveDash = patch.liveDashboardId !== undefined ? String(patch.liveDashboardId || '') : (cur.live_dashboard_id || ''); // sidebar LIVE button target
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=?, live_dashboard_id=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, liveDash, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }

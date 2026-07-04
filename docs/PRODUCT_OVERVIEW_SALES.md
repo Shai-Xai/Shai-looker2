@@ -68,6 +68,12 @@ longer they use Pulse, the better it gets."
 - **Live dashboards** — KPIs, tables and charts built on the client's real
   ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
   (no clunky Looker embeds). Drill-through into detail.
+- **One-tap LIVE button** ✅ — set any dashboard as an event's "live" report and a
+  red **LIVE** button appears right on that event's sidebar row, jumping straight
+  to live ticket sales with no drill-down. Great for event day. Configured per
+  event in Admin → the client's Suites (also in the setup wizard).
+- **Double-tap a chart to full-screen it** ✅ (mobile) — and carousels give charts
+  a proper full-width, readable card on phones.
 - **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
   mean in plain English, and answers follow-up questions, grounded in that data.
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
@@ -771,6 +777,13 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-04 (night)** — **One-tap LIVE button** ✅: pick an event's live-ticketing
+  dashboard in Admin → Suites (or the setup wizard) and a red **LIVE** pill shows
+  on that event's sidebar row — clients jump straight to live sales, no drill-down.
+  Also: **double-tap a chart to full-screen** it on mobile, carousels give charts a
+  readable full-width card on phones, and setting up a **live update** now shows the
+  actual numbers each block pulls (+ a "send to me" phone preview) before you go live.
 
 - **2026-07-04 (night)** — **Alerts reach the person on the ground** 🧪: staff can
   now opt their own phone into station alerts straight from the public staff

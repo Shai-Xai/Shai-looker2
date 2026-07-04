@@ -318,11 +318,14 @@ export default function ClientLayout() {
           const suiteOpen = searching || !!openSuites[su.id];
           return (
             <div key={su.id} style={{ marginBottom: 2 }}>
-              <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
-                <Caret open={suiteOpen} />
-                <Ico v={su.icon} size={22} />
-                <span style={ellip}>{su.name}</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button className="nav-row" style={{ ...rowBtn, fontWeight: 600, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                  <Caret open={suiteOpen} />
+                  <Ico v={su.icon} size={22} />
+                  <span style={ellip}>{su.name}</span>
+                </button>
+                {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+              </div>
               <div className={`collapsey${suiteOpen ? ' open' : ''}`}>
                 <div className="collapsey-inner" style={{ marginTop: 1 }}>
                   {sets === undefined ? (
@@ -540,11 +543,17 @@ export default function ClientLayout() {
                 return (
                   <div key={su.id}>
                     {!single && (
-                      <button className="nav-row" style={mRowSuite} onClick={() => toggleSuite(su.id)}>
-                        <Caret open={suiteOpen} />
-                        <Ico v={su.icon} size={22} />
-                        <span style={ellip}>{su.name}</span>
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button className="nav-row" style={{ ...mRowSuite, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                          <Caret open={suiteOpen} />
+                          <Ico v={su.icon} size={22} />
+                          <span style={ellip}>{su.name}</span>
+                        </button>
+                        {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+                      </div>
+                    )}
+                    {single && su.liveDashboardId && (
+                      <div style={{ padding: '0 12px 6px' }}><LiveBtn wide onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} /></div>
                     )}
                     {suiteOpen && (
                       sets === undefined ? (
@@ -874,6 +883,22 @@ function Ico({ v, size = 16 }) {
 }
 function Caret({ open, small }) {
   return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
+}
+// One-tap jump to the suite's designated "live" (ticket-sales) dashboard — a
+// small red pill on the event's row so no drill-down is needed. `wide` fills the
+// row on single-suite mobile (where the suite header itself is hidden).
+function LiveBtn({ onClick, title, wide }) {
+  return (
+    <button onClick={onClick} title={title} aria-label={title} style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
+      width: wide ? '100%' : undefined, border: 'none', cursor: 'pointer',
+      background: 'var(--error, #dc2626)', color: '#fff', borderRadius: 980,
+      padding: '4px 10px', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 0 rgba(255,255,255,0.7)', animation: 'howlerPulse 1.6s ease-out infinite' }} />
+      LIVE
+    </button>
+  );
 }
 
 const sidebarShell = { width: 264, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 };

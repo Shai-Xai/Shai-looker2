@@ -162,6 +162,10 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
 @keyframes pop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.14); } 100% { transform: scale(1); opacity: 1; } }
 .pop { animation: pop .34s var(--ease-spring) both; }
 
+/* Live pulse dot (the sidebar LIVE button) — a soft expanding ring. */
+@keyframes howlerPulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.65); } 70% { box-shadow: 0 0 0 5px rgba(255,255,255,0); } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); } }
+@media (prefers-reduced-motion: reduce) { @keyframes howlerPulse { from {} to {} } }
+
 /* Indeterminate progress bar (e.g. resolving a segment's live count — Looker
    returns the result in one shot, so this signals "working", not a real %). */
 @keyframes indet-slide { 0% { left: -45%; } 100% { left: 100%; } }
