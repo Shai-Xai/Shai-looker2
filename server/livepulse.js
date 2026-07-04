@@ -32,7 +32,7 @@ const CHANNELS = ['push', 'email', 'sms', 'whatsapp']; // inbox is always-on (th
 const BLOCK_TYPES = ['value', 'top_list', 'eventops'];
 const MAX_BLOCKS = 8;
 
-function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops, push }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -435,6 +435,39 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     return { message, channels, snapshot: snap };
   }
 
+  // ── Preview (setup-time verification) ────────────────────────────────────────
+  // Resolve every block's CURRENT number for a DRAFT config without sending or
+  // saving — so the editor can show "is this pulling the right number?" as you
+  // build. Incomplete blocks (no tile/measure picked yet) are dropped by clean().
+  async function previewDraft(draft, { entityId, suiteId, user }) {
+    const c = clean(draft || {}, entityId, suiteId);
+    const p = { id: 'preview', ...c, entityId, suiteId, createdBy: (user && user.email) || 'preview' };
+    const snap = await buildSnapshot(p);
+    const message = composeMessage(p, snap, null); // no "since last" baseline in a preview
+    const sym = moneySymFor(p);
+    const blocks = (p.blocks || []).map((b) => {
+      const s = snap[b.id] || {};
+      const label = b.label || b.tileName || b.measureLabel || (b.type === 'eventops' ? 'Devices' : 'Metric');
+      if (b.type === 'eventops') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: !!s.ops, ops: s.ops || null };
+      if (b.type === 'top_list') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: (s.rows || []).length > 0, rows: (s.rows || []).map((r) => ({ name: r.name, value: fmtNum(r.value, b.unit, sym) })) };
+      return { id: b.id, type: b.type, label, icon: b.icon || '', ok: s.value != null, value: s.value == null ? null : fmtNum(s.value, b.unit, sym), compare: (b.compare && s.compare != null) ? fmtNum(s.compare, b.unit, sym) : null };
+    });
+    return { message, blocks };
+  }
+  // "Send to me" — deliver the preview to the CURRENT user only (their push +
+  // their own email), never the configured recipient list, so setup can be
+  // verified on the phone without pinging the team.
+  async function sendPreviewToMe(draft, { entityId, suiteId, user }) {
+    const { message, blocks } = await previewDraft(draft, { entityId, suiteId, user });
+    const su = db.getSuite(suiteId);
+    const title = `⚡ Preview — ${su ? su.name : 'live update'}`;
+    const link = `${mailer?.baseUrl ? mailer.baseUrl() : ''}/alerts?tab=live`;
+    const delivered = [];
+    try { if (push?.sendToUser && await push.sendToUser(user.id, { title, body: message, url: link })) delivered.push('push'); } catch (e) { console.error('[livepulse] preview push failed', e.message); }
+    try { if (mailer?.send && user.email) { await mailer.send({ to: user.email, subject: title, text: `${message}\n\n${link}`, kind: 'other', entity: entityId }); delivered.push('email'); } } catch (e) { console.error('[livepulse] preview email failed', e.message); }
+    return { message, blocks, delivered };
+  }
+
   // A pulse is "live" when the manual switch is on OR the clock is inside its window.
   function isLiveNow(p, at = now()) {
     if (p.live) return true;
@@ -550,6 +583,27 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Live preview of the numbers a DRAFT would show (no send, no save) — the editor
+  // calls this to verify each block pulls the right figure while you set it up.
+  app.post('/api/livepulse/suites/:suiteId/preview', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    const su = db.getSuite(req.params.suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found' });
+    if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    try { res.json(await previewDraft(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user })); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Send the preview to ME (the current user) only — a phone check before going live.
+  app.post('/api/livepulse/suites/:suiteId/preview-send', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    const su = db.getSuite(req.params.suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found' });
+    if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    try { const r = await sendPreviewToMe(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user }); res.json({ ok: true, ...r }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/livepulse/:id/runs', auth.requireAuth, (req, res) => {
     if (!enabled()) return off(res);
     const p = pulseById(req.params.id);
@@ -577,7 +631,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   }
 
   console.log('[livepulse] mounted', enabled() ? '(enabled)' : '(disabled — set livepulse_enabled=1)');
-  return { sendUpdate, tick, listForSuite, pulseById, runsFor, isLiveNow, composeMessage, createLivePulse: createLivePulseFor };
+  return { sendUpdate, tick, listForSuite, pulseById, runsFor, isLiveNow, composeMessage, previewDraft, sendPreviewToMe, createLivePulse: createLivePulseFor };
 }
 
 // Option lists exported so the Owl's createLiveUpdate act-tool builds its schema FROM

@@ -150,6 +150,8 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [testResult, setTestResult] = useState(null);
+  const [preview, setPreview] = useState(null);      // { message, blocks } — live "what it's pulling now"
+  const [previewSent, setPreviewSent] = useState(null); // channels the send-to-me landed on
 
   // Tile + metric catalogues (shared with the alert editor's endpoints).
   const [cat, setCat] = useState(null);
@@ -202,6 +204,18 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
     setBusy(true); setErr(''); setTestResult(null);
     try { const r = await api.testLivePulse(pulse.id); setTestResult(r); }
     catch (e) { setErr(e.message || 'Send failed.'); } finally { setBusy(false); }
+  };
+  // The event this preview reads from (a duplicate can be retargeted before save).
+  const activeSuiteId = duplicating ? targetSuiteId : suiteId;
+  const runPreview = async () => {
+    setBusy(true); setErr(''); setPreviewSent(null);
+    try { setPreview(await api.previewLivePulse(activeSuiteId, body())); }
+    catch (e) { setErr(e.message || 'Couldn’t read the numbers.'); } finally { setBusy(false); }
+  };
+  const sendToMe = async () => {
+    setBusy(true); setErr('');
+    try { const r = await api.sendLivePulsePreview(activeSuiteId, body()); setPreview({ message: r.message, blocks: r.blocks }); setPreviewSent(r.delivered || []); }
+    catch (e) { setErr(e.message || 'Couldn’t send the preview.'); } finally { setBusy(false); }
   };
 
   return (
@@ -290,6 +304,44 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
           </div>
         </Field>
 
+        {/* Live preview: verify each block is pulling the right number BEFORE going
+            live, and optionally push the whole message to your own phone. */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: preview ? 8 : 4 }}>
+          <button onClick={runPreview} disabled={busy} style={btnGhost}>{busy && !previewSent ? 'Reading…' : '🔍 Preview numbers'}</button>
+          <button onClick={sendToMe} disabled={busy} style={btnGhost} title="Send this preview to you only (not the recipient list)">📲 Send to me</button>
+        </div>
+        {preview && (
+          <div style={previewBox}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', marginBottom: 6 }}>LIVE PREVIEW — WHAT IT’S PULLING RIGHT NOW</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {(preview.blocks || []).map((b) => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5 }}>
+                  <span style={{ flex: 1, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.icon} {b.label}</span>
+                  <span style={{ fontWeight: 700, textAlign: 'right', color: b.ok ? 'var(--text)' : 'var(--error, #dc2626)' }}>
+                    {b.type === 'eventops'
+                      ? (b.ok ? `${b.ops.deployed}/${b.ops.total} devices` : 'no data')
+                      : b.type === 'top_list'
+                        ? (b.ok ? b.rows.map((r) => `${r.name} ${r.value}`).join(' · ') : 'no rows')
+                        : (b.value != null ? b.value : 'no data')}
+                    {b.compare ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · vs {b.compare}</span> : null}
+                  </span>
+                </div>
+              ))}
+              {!(preview.blocks || []).length && <div style={{ fontSize: 12, color: 'var(--muted)' }}>No configured blocks yet — pick a tile or metric for a block above, then preview.</div>}
+            </div>
+            {previewSent && (
+              <div style={{ fontSize: 11.5, color: previewSent.length ? 'var(--brand)' : 'var(--muted)', fontWeight: 700, marginTop: 8 }}>
+                {previewSent.length ? `📲 Sent to you — ${previewSent.join(' + ')}` : 'Nothing to send to — turn on app notifications, or check your account email is set.'}
+              </div>
+            )}
+            {preview.message && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>See the full message that would send</summary>
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.5, marginTop: 6 }}>{preview.message}</div>
+              </details>
+            )}
+          </div>
+        )}
         {testResult && (
           <div style={previewBox}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', marginBottom: 5 }}>SENT — THIS IS WHAT LANDED</div>

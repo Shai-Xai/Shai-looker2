@@ -821,6 +821,9 @@ export const api = {
   setLivePulseStatus: (id, status) => fetch(`/api/livepulse/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   setLivePulseLive: (id, live) => fetch(`/api/livepulse/${id}/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ live }) }).then(json),
   testLivePulse: (id) => fetch(`/api/livepulse/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  // Live preview of a draft's numbers (no send/save) + send-to-me preview.
+  previewLivePulse: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  sendLivePulsePreview: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}/preview-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   livePulseRuns: (id) => fetch(`/api/livepulse/${id}/runs`).then(json),
 
   // Status notices — human-authored platform incidents. Admin authors + updates +

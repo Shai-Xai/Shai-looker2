@@ -247,3 +247,45 @@ test('the comparison event must belong to the same client (cross-tenant compare 
   assert.equal(r.ok, true);
   assert.equal(r.pulse.compareSuiteId, '', 'another client\'s event can never be the comparison');
 });
+
+test('previewDraft resolves each block\'s current number without sending or saving', async () => {
+  const h = mountLivePulse();
+  h.setValue(4213);
+  const ent = makeEntity('Preview Co', 'Prev Org');
+  const su = db.createSuite({ entityId: ent.id, name: 'Prev Fest' });
+  const draft = { name: 'Gate watch', blocks: [
+    { id: 'g', type: 'value', source: 'tile', dashboardId: 'd', tileId: 't', label: 'Through the gates', unit: '' },
+    { id: 'x', type: 'value', source: 'tile', label: 'Not configured yet' }, // dropped by clean()
+  ] };
+  const before = db.db.prepare('SELECT COUNT(*) c FROM live_pulses').get().c;
+  const r = await h.mod.previewDraft(draft, { entityId: ent.id, suiteId: su.id, user: { id: 'u1', email: 'me@test' } });
+  assert.equal(db.db.prepare('SELECT COUNT(*) c FROM live_pulses').get().c, before, 'preview never writes a pulse row');
+  const gate = r.blocks.find((b) => b.id === 'g');
+  assert.ok(gate && gate.ok && num('4,213').test(gate.value), 'the configured block shows its live number');
+  assert.ok(!r.blocks.some((b) => b.id === 'x'), 'an unconfigured block is not previewed');
+  assert.ok(num('4,213').test(r.message), 'the composed message carries the number too');
+});
+
+test('sendPreviewToMe delivers to the current user only (their push + own email), never recipients', async () => {
+  const pushed = [];
+  const mailed = [];
+  const mod = require('../server/livepulse').mount(fakeApp(), {
+    db, auth,
+    resolveTileValue: async () => 999,
+    resolveCustomMetric: async () => 999,
+    resolveTileRows: async () => null,
+    os: { announce: () => ({ id: 't' }) },
+    mailer: { baseUrl: () => 'https://pulse.test', send: async (m) => { mailed.push(m); } },
+    messaging: { sendSms: async () => {}, sendWhatsapp: async () => {}, status: () => ({ configured: true }), waConfigured: () => true },
+    push: { sendToUser: async (uid, payload) => { pushed.push({ uid, payload }); return 1; } },
+  });
+  const ent = makeEntity('SendMe Co', 'SendMe Org');
+  const su = db.createSuite({ entityId: ent.id, name: 'SendMe Fest' });
+  const draft = { name: 'x', channels: ['push', 'sms'], smsRecipients: ['+27820000000'],
+    blocks: [{ id: 'b', type: 'value', source: 'tile', dashboardId: 'd', tileId: 't', label: 'Revenue', unit: 'ZAR' }] };
+  const r = await mod.sendPreviewToMe(draft, { entityId: ent.id, suiteId: su.id, user: { id: 'u7', email: 'me@test' } });
+  assert.deepEqual(r.delivered.sort(), ['email', 'push']);
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0].uid, 'u7', 'push went to the current user only');
+  assert.equal(mailed[0].to, 'me@test', 'email went to the current user\'s own address');
+});
