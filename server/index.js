@@ -147,7 +147,7 @@ let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by th
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
 const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
 // Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
@@ -636,11 +636,11 @@ async function metricFilterValues({ model, view, field, user, suiteId, entitySco
 
 const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack });
 
-// ── Status notices: human-authored platform incidents (vs alerts, which watch data) → server/notices.js
+// ── Status notices: human-authored platform incidents → server/notices.js ────────
+// Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
-const eventopsApi = require('./eventops').mount(app, { db, auth }); // pilot: device/station logistics, per-client opt-in → server/eventops.js
-const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi }); // Live Pulse: recurring event-day multi-metric updates (the Alerts page's "Live updates" tab) → server/livepulse.js
+const eventopsApi = require('./eventops').mount(app, { db, auth }); require('./staffAlerts').mount(app, { db, auth, mailer, push }); // device/station logistics + 🚨 staff alerts phase 1 (🧪, dark station → assigned crew) → server/eventops.js, server/staffAlerts.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
@@ -962,7 +962,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
 
   // Built-in (code) layers — read-only.
   const builtins = {
-    systemPrompts: insights.promptRegistry(), skillDefaults: require('./skills').defaultsAudit(db), // per-skill platform playbooks (override || built-in seed)
+    systemPrompts: insights.promptRegistry(),
     roleLenses: Object.entries(ROLE_LENSES).map(([key, v]) => ({ key, label: v.label, focus: v.focus })),
     phaseDefaults: PHASES.map((p) => ({ key: p.key, label: p.label, text: pd[p.key] || '', overridden: !!(savedPhase[p.key] || '').trim() })),
     timeDefaults: TIMES.map((t) => ({ key: t.key, label: t.label, text: td[t.key] || '', overridden: !!(savedTime[t.key] || '').trim() })),
@@ -1949,7 +1949,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
     const tStart = Date.now();
-    const { tiles, catalogue, timing: factTiming, dropped = [], focusDiag = [] } = await buildFacts(user, entityId, force, true);
+    const { tiles, catalogue, timing: factTiming } = await buildFacts(user, entityId, force, true);
     const factsMs = Date.now() - tStart;
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1971,8 +1971,8 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     console.log(`[briefing-timing] single entity=${entityId} force=${!!force} total=${totalMs}ms facts=${factsMs}ms goalsWait=${goalsWaitMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
-    const out = { // _focus/_dropped: admin-only diagnose — why each focus pick did/didn't feed (see ClientHome)
-      available: true, ...(user.role === 'admin' ? { _focus: focusDiag, _dropped: dropped } : {}),
+    const out = {
+      available: true,
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
       bullets: (raw.bullets || []).slice(0, 4)
