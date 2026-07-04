@@ -1,0 +1,184 @@
+diff --git a/client/src/components/EventSignal.jsx b/client/src/components/EventSignal.jsx
+index 46979c9..ea497b8 100644
+--- a/client/src/components/EventSignal.jsx
++++ b/client/src/components/EventSignal.jsx
+@@ -386 +386,2 @@ function OwlDrawer({ entityId, suiteId, title, onClose }) {
+-// devices (amber), so the next radio call is always the top row.
++// devices (amber), so the next radio call is always the top row. Collapsed by
++// default (a one-line count) so it never eats the board.
+@@ -387,0 +389 @@ function NeedsEyes({ rows, onSelect }) {
++  const [open, setOpen] = useState(false);
+@@ -391,0 +394 @@ function NeedsEyes({ rows, onSelect }) {
++  const reds = bad.filter((s) => s.status === 'stale').length;
+@@ -393,3 +396,10 @@ function NeedsEyes({ rows, onSelect }) {
+-    <div style={{ ...card, marginBottom: 10 }}>
+-      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 2 }}>Needs eyes — worst first</div>
+-      {bad.map((s) => (
++    <div style={{ ...card, marginBottom: 10, paddingTop: 8, paddingBottom: open ? 12 : 8 }}>
++      <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
++        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 30, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', fontFamily: 'inherit', textAlign: 'left' }}>
++        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)' }}>Needs eyes — worst first</span>
++        {reds > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR.stale }}>{reds} red</span>}
++        {bad.length - reds > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR.warn }}>{bad.length - reds} amber</span>}
++        <span style={{ flex: 1 }} />
++        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? 'hide ▾' : 'show ▸'}</span>
++      </button>
++      {open && bad.map((s) => (
+@@ -418 +428 @@ function NeedsEyes({ rows, onSelect }) {
+-function PulseStrip({ monitors, apiBase, rows }) {
++function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
+@@ -420 +429,0 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-  const [idx, setIdx] = useState(null); // null = LIVE, else bin index
+@@ -434 +443,4 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-  Object.values(logs).forEach((d) => {
++  // ONLY the monitors currently on the board — a filter chip must re-scope
++  // every number here, not show the whole site's darkness on a 1-station view.
++  const active = monitors.map((m) => logs[m.id]).filter(Boolean);
++  active.forEach((d) => {
+@@ -447 +458,0 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-  if (keys.length < 3) return null;
+@@ -448,0 +460,24 @@ function PulseStrip({ monitors, apiBase, rows }) {
++  // Scrub → tell the board WHICH devices were dark at that moment, grouped by
++  // station, so the whole page can time-travel (tiles, dials, flow meter).
++  useEffect(() => {
++    if (!onScrub) return;
++    if (idx == null || series.length < 3) { onScrub(null); return; }
++    const cur0 = Math.min(idx, series.length - 1);
++    const b0 = keys[cur0];
++    const offBy = new Map(); // `${monitorId}|${station}` -> dark count then
++    monitors.forEach((m) => {
++      const d = logs[m.id];
++      if (!d) return;
++      let use = -1; // the monitor's last check at/before the scrubbed bin
++      (d.ticks || []).forEach((k, ti) => { const t0 = Date.parse(k.at); if (Number.isFinite(t0) && t0 < b0 + BIN) use = ti; });
++      if (use < 0) return;
++      (d.devices || []).forEach((dev) => {
++        if (!(dev.offAt || []).includes(use)) return;
++        const key = `${m.id}|${dev.station || ''}`;
++        offBy.set(key, (offBy.get(key) || 0) + 1);
++      });
++    });
++    onScrub({ t: series[cur0].t, on: series[cur0].on, off: series[cur0].off, offBy });
++    // eslint-disable-next-line react-hooks/exhaustive-deps -- series/keys derive from logs
++  }, [idx, logs]);
++  if (keys.length < 3) return null;
+@@ -496,2 +531,7 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-        const worse = offNow > offAgo || (volPrev > 0 && volPct <= -30);
+-        const better = offNow < offAgo && volPct >= -15;
++        // The verdict follows the DARKNESS direction, full stop: more devices
++        // dark than an hour ago = worse, fewer = improving. Volume is context
++        // only — a quiet spell must not flip a recovering site to "worse".
++        const worse = offNow > offAgo;
++        const better = offNow < offAgo;
++        const delta = Math.abs(offAgo - offNow);
++        const big = offAgo > 0 && delta / offAgo >= 0.4; // 40%+ of the dark came back = a BIG swing
+@@ -506 +546 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-              {worse ? '▼ Getting worse' : better ? '▲ Improving' : '► Steady'}
++              {worse ? '▼ Getting worse' : better ? (big ? '▲ Big improvement' : '▲ Improving') : '► Steady'}
+@@ -509 +549 @@ function PulseStrip({ monitors, apiBase, rows }) {
+-              dark {offAgo}→{offNow} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs previous 30 min
++              dark {offAgo}→{offNow}{better ? ` · ${delta} back online` : worse ? ` · ${delta} more went dark` : ''} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs prev 30 min
+@@ -648,0 +689,2 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
++  const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
++  const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
+@@ -649,0 +692 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
++  const backToLive = () => { setScrubIdx(null); setReplay(null); };
+@@ -678,0 +722,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
++  // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
++  // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
++  // Volume stays blank in the past: the observed log records connectivity.
++  const boardRows = replay ? shown.map((s) => {
++    const tot = (s.on || 0) + (s.off || 0);
++    const off = Math.min(tot, replay.offBy.get(`${s.mid}|${s.sn}`) || 0);
++    return tot ? { ...s, on: tot - off, off, status: off === 0 ? 'fresh' : off < tot ? 'warn' : 'stale', lagMin: null, txnH: null, spark: null } : s;
++  }) : shown;
++
+@@ -680 +732 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-  for (const s of shown) {
++  for (const s of boardRows) {
+@@ -688 +740 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-  const sum = (k) => shown.reduce((a, s) => a + (s[k] || 0), 0);
++  const sum = (k) => boardRows.reduce((a, s) => a + (s[k] || 0), 0);
+@@ -692 +744 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-    ['Stations', shown.length], ['Zones', zoneList.length],
++    ['Stations', boardRows.length], ['Zones', zoneList.length],
+@@ -695 +747 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-    [`${short}/h`, sum('txnH').toLocaleString('en-ZA')],
++    ...(replay ? [] : [[`${short}/h`, sum('txnH').toLocaleString('en-ZA')]]),
+@@ -714 +766 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-          <button onClick={() => { setPick(''); setSel(null); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
++          <button onClick={() => { setPick(''); setSel(null); backToLive(); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+@@ -716 +768 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); }} style={chipStyle(pick === m.id)}>
++            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); backToLive(); }} style={chipStyle(pick === m.id)}>
+@@ -723 +775 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-        <button onClick={() => setView('rhythm')} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
++        <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
+@@ -731,3 +783,11 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+-      <FlowMeter rows={shown} />
+-      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} />
+-      <NeedsEyes rows={shown} onSelect={setSel} />
++      <FlowMeter rows={boardRows} />
++      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
++      {replay && (
++        <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
++          <b style={{ fontSize: 12.5 }}>⏪ Replay · {replay.t.toTimeString().slice(0, 5)}</b>
++          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>the whole board shows that moment — <b style={{ color: STATUS_COLOR.fresh }}>{replay.on}</b> on · <b style={{ color: replay.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{replay.off}</b> dark</span>
++          <span style={{ flex: 1 }} />
++          <button onClick={backToLive} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', minHeight: 30, fontFamily: 'inherit' }}>▶ Back to LIVE</button>
++        </div>
++      )}
++      <NeedsEyes rows={boardRows} onSelect={setSel} />
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index c5b341c..de5869b 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -541,4 +541,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-  // ── the OBSERVED offline log ─────────────────────────────────────────────
+-  // Every check writes down what Pulse SAW: who was offline at that moment.
+-  // Unlike the transaction timeline, a device that kept trading offline and
+-  // synced late can NEVER repaint this — it is the connectivity record.
++  // ── the OBSERVED offline log: what Pulse SAW at each check. A late-syncing
++  // device can never repaint this — it is the connectivity record. ──────────
+@@ -548 +546 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        .run(m.id, at, r.total, r.online, JSON.stringify(r.offline.map((d) => d.device)));
++        .run(m.id, at, r.total, r.online, JSON.stringify(r.offline.map((d) => (d.station ? { n: d.device, s: d.station } : d.device))));
+@@ -558,2 +556,5 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    const byDevice = new Map(); // device -> tick indexes it was offline at
+-    ticks.forEach((tk, i) => { for (const d of tk.offline) { if (!byDevice.has(d)) byDevice.set(d, []); byDevice.get(d).push(i); } });
++    const byDevice = new Map(), stationOf = new Map(); // device -> offline tick idxs · device -> station
++    ticks.forEach((tk, i) => {
++      tk.offline = tk.offline.map((d) => { if (typeof d === 'string') return d; if (d.s) stationOf.set(d.n, d.s); return d.n; });
++      for (const d of tk.offline) { if (!byDevice.has(d)) byDevice.set(d, []); byDevice.get(d).push(i); }
++    });
+@@ -575 +576 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-      devices: [...byDevice.entries()].map(([device, idx]) => ({ device, offAt: idx })).sort((a, b) => b.offAt.length - a.offAt.length).slice(0, 200),
++      devices: [...byDevice.entries()].map(([device, idx]) => ({ device, station: stationOf.get(device) || '', offAt: idx })).sort((a, b) => b.offAt.length - a.offAt.length).slice(0, 200),
+@@ -975,6 +976,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-    // Refresh the roster snapshot alongside the pull so collapsed cards can show
+-    // linked/online/offline counts without a live Looker query per render. A
+-    // roster failure never fails the check — the stream reading already landed.
+-    // The same read powers the FLEET alert: when ≥ rosterAlertPct % of linked
+-    // devices are offline, alert once on the crossing (edge-detected via the
+-    // breach flag remembered in the snapshot), sharing the monitor's cooldown.
++    // Refresh the roster snapshot alongside the pull (collapsed cards render it
++    // with no live Looker read); a roster failure never fails the check. The
++    // same read powers the FLEET alert: ≥ rosterAlertPct % of linked devices
++    // offline alerts once on the crossing (breach flag), sharing the cooldown.
+@@ -984 +982,0 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        recordObservation(m, r, ts); // the connectivity record — see observedLog()
+@@ -1032,4 +1030,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        // Per-station roll-up for the Event Signal board — devices on/off, the
+-        // hour's volume and a 6-block spark per station, all from reads this
+-        // check already made, so the board costs nothing to render.
+-        let stations = null;
++        // Per-station roll-up for the Event Signal board — on/off, hour volume
++        // and a 6-block spark per station, all from reads already made.
++        let stations = null, info3 = null;
+@@ -1039 +1036 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-            const info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
++            info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
+@@ -1058,0 +1056,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++        // The connectivity record — station labels ride along for board replay.
++        if (info3) labelDevices(r.offline, info3);
++        recordObservation(m, r, ts);
