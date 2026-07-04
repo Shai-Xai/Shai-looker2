@@ -823,6 +823,7 @@ function StationDayView({ monitors, apiBase, onSelect }) {
   const [logs, setLogs] = useState({});
   const [tl, setTl] = useState({}); // mid -> { buckets:[iso], byStation:{name:counts[]} } — ONE timeline read per monitor
   const [q, setQ] = useState('');
+  const [typeF, setTypeF] = useState(''); // station-type filter ('' = all): Bars / Vendors / Check-in…
   const [show, setShow] = useState({ online: true, offline: true, txn: true, closed: true });
   const toggle = (k) => setShow((s) => ({ ...s, [k]: !s[k] }));
   useEffect(() => {
@@ -872,9 +873,10 @@ function StationDayView({ monitors, apiBase, onSelect }) {
       const total = devs.length;
       const offSets = devs.map((dev) => new Set(dev.offAt || []));
       const series = ticks.map((k, i) => { let off = 0; for (const s of offSets) if (s.has(base + i)) off += 1; return { at: k.at, off, on: Math.max(0, total - off) }; });
-      // Closed monitor: grey everything after its LAST healthy check (the wind-down).
-      let closeIdx = -1;
-      if (closedMon) { for (let i = 0; i < series.length; i++) if (total && series[i].on / total >= 0.7) closeIdx = i; series.forEach((c, i) => { c.closed = i > closeIdx; }); }
+      // Closed monitor: grey only the trailing run where the station is FULLY dark
+      // (no device sending). A single dead device isn't "closed" — the station is
+      // still trading on its other devices, so it stays green/red, not grey.
+      if (closedMon) { let last = -1; for (let i = 0; i < series.length; i++) if (series[i].on > 0) last = i; series.forEach((c, i) => { c.closed = i > last; }); }
       const openCk = series.filter((c) => !c.closed);
       const nowC = series[series.length - 1] || { on: 0, off: 0 };
       const nowPct = total ? Math.round((nowC.on / total) * 100) : 0;
@@ -885,15 +887,20 @@ function StationDayView({ monitors, apiBase, onSelect }) {
       const txnPts = (mtl && mtl.byStation[sn]) ? mtl.buckets.map((b, i) => ({ at: Date.parse(b), v: mtl.byStation[sn][i] || 0 })).filter((x) => Number.isFinite(x.at)) : null;
       stations.push({
         mid: m.id, station: sn, name, zone: zoneOf(name), total, series, closed: isClosed, nowPct, minPct, txnPts,
-        unit: unitFor(m), t0: Date.parse(ticks[0].at), tN: Date.parse(ticks[ticks.length - 1].at),
+        type: m.area || m.name || 'Other', unit: unitFor(m), t0: Date.parse(ticks[0].at), tN: Date.parse(ticks[ticks.length - 1].at),
         pick: { mid: m.id, sn, name, zone: zoneOf(name), monitor: m.name, unit: unitFor(m), on: nowC.on, off: nowC.off, txnH: null, lagMin: null, status },
       });
     }
   }
 
   const loading = monitors.some((m) => !logs[m.id]);
+  // Station types (bars / vendors / check-in…) — from each monitor's area — as a
+  // first-level filter, then the name box narrows within it.
+  const types = [...new Set(stations.map((s) => s.type))].filter(Boolean).sort();
+  const typeIcon = (t) => (/bar/i.test(t) ? '🍺' : /vendor|food/i.test(t) ? '🧾' : /check|gate/i.test(t) ? '🎟️' : '📍');
   const ql = q.trim().toLowerCase();
   let shown = stations;
+  if (typeF) shown = shown.filter((s) => s.type === typeF);
   if (ql) shown = shown.filter((s) => s.name.toLowerCase().includes(ql) || s.zone.toLowerCase().includes(ql));
   if (!show.closed) shown = shown.filter((s) => !s.closed);
 
@@ -921,10 +928,20 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     </button>
   );
 
+  const typeChip = (active, label, onClick, icon) => (
+    <button onClick={onClick} style={{ border: `1px solid ${active ? 'var(--brand)' : 'var(--hairline)'}`, background: active ? 'rgba(var(--brand-rgb,10,132,255),0.08)' : 'var(--card)', color: active ? 'var(--brand)' : 'var(--text)', fontWeight: active ? 800 : 600, borderRadius: 999, padding: '5px 11px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>{icon ? `${icon} ` : ''}{label}</button>
+  );
+
   return (
     <div style={{ '--sv-l': '150px', '--sv-r': '74px' }}>
+      {types.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {typeChip(!typeF, `All · ${stations.length}`, () => setTypeF(''))}
+          {types.map((t) => typeChip(typeF === t, `${t} · ${stations.filter((s) => s.type === t).length}`, () => setTypeF(t), typeIcon(t)))}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter stations…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by station name…"
           style={{ flex: '1 1 160px', minWidth: 130, padding: '7px 11px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
         {legendChip('online', 'Online', STATUS_COLOR.fresh)}
         {legendChip('offline', 'Offline', STATUS_COLOR.stale)}
