@@ -701,6 +701,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
+          // A bucket dim can be silently ACCEPTED yet come back blank on every
+          // row (created_at_minute10 on the check-ins family — no 400, just
+          // null buckets). The bucket shape is broken, not the measure: jump
+          // straight to the next bucket candidate.
+          if (got.length && !got.some((r) => parseTs(r[bf]))) {
+            step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
+          }
           // Combined-explore trap: a count measure can exist yet count ANOTHER
           // view's rows — every returned row then reads 0. Rows prove activity,
           // so a zero-only count is a soft failure: try the next counting mode.
