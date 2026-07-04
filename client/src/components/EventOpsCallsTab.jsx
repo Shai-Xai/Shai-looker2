@@ -54,7 +54,10 @@ export default function CallsTab({ suiteId, canManage }) {
           : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10 }}>
               <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>Open each device’s link on that device and add it to the home screen — it’s pre-set to that station + device.</div>
-              {devices.map((d) => {
+              {[...devices].sort((a, b) =>
+                (a.stationName || 'Hive').localeCompare(b.stationName || 'Hive', undefined, { sensitivity: 'base' })
+                || String(a.label || a.serialNumber || '').localeCompare(String(b.label || b.serialNumber || ''), undefined, { numeric: true, sensitivity: 'base' })
+              ).map((d) => {
                 const url = `${window.location.origin}/eventops/call/${suiteId}/${token}/${d.id}`;
                 return (
                   <div key={d.id} style={linkRow}>

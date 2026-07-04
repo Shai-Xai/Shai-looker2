@@ -150,6 +150,8 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [testResult, setTestResult] = useState(null);
+  const [preview, setPreview] = useState(null);      // { message, blocks } — live "what it's pulling now"
+  const [previewSent, setPreviewSent] = useState(null); // channels the send-to-me landed on
 
   // Tile + metric catalogues (shared with the alert editor's endpoints).
   const [cat, setCat] = useState(null);
@@ -171,9 +173,11 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
   });
   const addBlock = (type) => setBlocks((bs) => [...bs, type === 'eventops'
     ? { id: nid(), type, label: 'Devices', icon: '🎛' }
-    : type === 'top_list'
-      ? { id: nid(), type, label: 'Top bars', icon: '🏆', topN: 3, unit: 'ZAR' }
-      : { id: nid(), type: 'value', source: 'tile', label: '', icon: '', unit: '', showDelta: true, showRate: false, compare: false }]);
+    : type === 'signal'
+      ? { id: nid(), type, label: 'Signal flow', icon: '📶', station: '' }
+      : type === 'top_list'
+        ? { id: nid(), type, label: 'Top bars', icon: '🏆', topN: 3, unit: 'ZAR' }
+        : { id: nid(), type: 'value', source: 'tile', label: '', icon: '', unit: '', showDelta: true, showRate: false, compare: false }]);
 
   const anyCompare = blocks.some((b) => b.type === 'value' && b.compare);
   const phones = (s) => s.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
@@ -202,6 +206,18 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
     setBusy(true); setErr(''); setTestResult(null);
     try { const r = await api.testLivePulse(pulse.id); setTestResult(r); }
     catch (e) { setErr(e.message || 'Send failed.'); } finally { setBusy(false); }
+  };
+  // The event this preview reads from (a duplicate can be retargeted before save).
+  const activeSuiteId = duplicating ? targetSuiteId : suiteId;
+  const runPreview = async () => {
+    setBusy(true); setErr(''); setPreviewSent(null);
+    try { setPreview(await api.previewLivePulse(activeSuiteId, body())); }
+    catch (e) { setErr(e.message || 'Couldn’t read the numbers.'); } finally { setBusy(false); }
+  };
+  const sendToMe = async () => {
+    setBusy(true); setErr('');
+    try { const r = await api.sendLivePulsePreview(activeSuiteId, body()); setPreview({ message: r.message, blocks: r.blocks }); setPreviewSent(r.delivered || []); }
+    catch (e) { setErr(e.message || 'Couldn’t send the preview.'); } finally { setBusy(false); }
   };
 
   return (
@@ -248,7 +264,7 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {blocks.map((b, i) => (
               <BlockCard key={b.id} block={b} idx={i} count={blocks.length}
-                dashboards={dashboards} explores={explores} eventopsAvailable={!!caps.eventopsAvailable}
+                dashboards={dashboards} explores={explores} eventopsAvailable={!!caps.eventopsAvailable} signalStations={caps.signalStations || []}
                 onPatch={(patch) => patchBlock(b.id, patch)} onRemove={() => removeBlock(b.id)} onMove={(dir) => moveBlock(b.id, dir)} />
             ))}
           </div>
@@ -257,6 +273,9 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
             <button type="button" onClick={() => addBlock('top_list')} style={addChip}>＋ Top 3 list</button>
             {caps.eventopsAvailable && !blocks.some((b) => b.type === 'eventops') && (
               <button type="button" onClick={() => addBlock('eventops')} style={addChip}>＋ Device health</button>
+            )}
+            {caps.signalAvailable && (
+              <button type="button" onClick={() => addBlock('signal')} style={addChip}>＋ Signal flow</button>
             )}
           </div>
         </Field>
@@ -290,6 +309,44 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
           </div>
         </Field>
 
+        {/* Live preview: verify each block is pulling the right number BEFORE going
+            live, and optionally push the whole message to your own phone. */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: preview ? 8 : 4 }}>
+          <button onClick={runPreview} disabled={busy} style={btnGhost}>{busy && !previewSent ? 'Reading…' : '🔍 Preview numbers'}</button>
+          <button onClick={sendToMe} disabled={busy} style={btnGhost} title="Send this preview to you only (not the recipient list)">📲 Send to me</button>
+        </div>
+        {preview && (
+          <div style={previewBox}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', marginBottom: 6 }}>LIVE PREVIEW — WHAT IT’S PULLING RIGHT NOW</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {(preview.blocks || []).map((b) => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5 }}>
+                  <span style={{ flex: 1, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.icon} {b.label}</span>
+                  <span style={{ fontWeight: 700, textAlign: 'right', color: b.ok ? 'var(--text)' : 'var(--error, #dc2626)' }}>
+                    {b.type === 'eventops'
+                      ? (b.ok ? `${b.ops.deployed}/${b.ops.total} devices` : 'no data')
+                      : b.type === 'top_list'
+                        ? (b.ok ? b.rows.map((r) => `${r.name} ${r.value}`).join(' · ') : 'no rows')
+                        : (b.value != null ? b.value : 'no data')}
+                    {b.compare ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · vs {b.compare}</span> : null}
+                  </span>
+                </div>
+              ))}
+              {!(preview.blocks || []).length && <div style={{ fontSize: 12, color: 'var(--muted)' }}>No configured blocks yet — pick a tile or metric for a block above, then preview.</div>}
+            </div>
+            {previewSent && (
+              <div style={{ fontSize: 11.5, color: previewSent.length ? 'var(--brand)' : 'var(--muted)', fontWeight: 700, marginTop: 8 }}>
+                {previewSent.length ? `📲 Sent to you — ${previewSent.join(' + ')}` : 'Nothing to send to — turn on app notifications, or check your account email is set.'}
+              </div>
+            )}
+            {preview.message && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>See the full message that would send</summary>
+                <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.5, marginTop: 6 }}>{preview.message}</div>
+              </details>
+            )}
+          </div>
+        )}
         {testResult && (
           <div style={previewBox}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', marginBottom: 5 }}>SENT — THIS IS WHAT LANDED</div>
@@ -310,11 +367,11 @@ function LivePulseEditor({ suiteId, suiteName, entityId, otherSuites, pulse, cap
 
 // One block of the update. Type decides the picker: a KPI tile / built metric for a
 // number, any table-style tile for a top-3 list, nothing for device health.
-function BlockCard({ block: b, idx, count, dashboards, explores, onPatch, onRemove, onMove }) {
+function BlockCard({ block: b, idx, count, dashboards, explores, signalStations = [], onPatch, onRemove, onMove }) {
   const isKpi = (t) => { const v = t.visType || ''; return v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge'); };
   const tilesFor = (dId, kpiOnly) => (dashboards.find((d) => d.dashboardId === dId)?.tiles || []).filter((t) => (kpiOnly ? isKpi(t) : !isKpi(t)));
   const curExplore = explores.find((x) => x.model === b.model && x.view === b.view);
-  const typeName = b.type === 'top_list' ? 'Top list' : b.type === 'eventops' ? 'Device health' : 'Number';
+  const typeName = b.type === 'top_list' ? 'Top list' : b.type === 'eventops' ? 'Device health' : b.type === 'signal' ? 'Signal flow' : 'Number';
   return (
     <div style={blockBox}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -326,9 +383,16 @@ function BlockCard({ block: b, idx, count, dashboards, explores, onPatch, onRemo
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: b.type === 'eventops' ? 0 : 8 }}>
         <input style={{ ...inp, width: 64, flexShrink: 0, textAlign: 'center' }} value={b.icon || ''} onChange={(e) => onPatch({ icon: e.target.value })} placeholder="🎟️" aria-label="Emoji" />
-        <input style={inp} value={b.label || ''} onChange={(e) => onPatch({ label: e.target.value })} placeholder={b.type === 'top_list' ? 'Top bars' : b.type === 'eventops' ? 'Devices' : 'Through the gates'} aria-label="Label" />
+        <input style={inp} value={b.label || ''} onChange={(e) => onPatch({ label: e.target.value })} placeholder={b.type === 'top_list' ? 'Top bars' : b.type === 'eventops' ? 'Devices' : b.type === 'signal' ? 'Signal flow' : 'Through the gates'} aria-label="Label" />
       </div>
       {b.type === 'eventops' && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>Deployed devices, open issues and lost/damaged counts from Event Ops.</div>}
+      {b.type === 'signal' && (<>
+        <select style={inp} value={b.station || ''} onChange={(e) => onPatch({ station: e.target.value })} aria-label="Station">
+          <option value="">All stations (whole event)</option>
+          {signalStations.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>% of roster devices online from the Signal board — flags when it drops below the event’s flow target.</div>
+      </>)}
 
       {b.type === 'value' && (<>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
