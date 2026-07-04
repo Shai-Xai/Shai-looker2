@@ -627,6 +627,7 @@ function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }
 function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
   const [stations, setStations] = useState(null);
   const [form, setForm] = useState(null); // null | {id?, name, kind}
+  const [q, setQ] = useState(''); // find-a-station filter (name or kind)
   const load = () => api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
   useEffect(() => { setStations(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -646,9 +647,12 @@ function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <button onClick={() => setForm({ name: '', kind: 'bar' })} style={primaryBtn}>＋ Add station</button>}
+      {stations.length > 6 && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations — name or kind…`} aria-label="Filter stations" style={{ ...input, minHeight: 40 }} />
+      )}
       {stations.length === 0 ? <Empty>No stations yet.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {stations.map((s) => (
+          {stations.filter((s) => !q.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(q.trim().toLowerCase())).map((s) => (
             <div key={s.id} style={{ ...deviceRow(false), cursor: 'default' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <span style={{ fontSize: 18 }}>{KIND_ICON[s.kind] || '📍'}</span>
@@ -1210,6 +1214,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
   const [devices, setDevices] = useState([]);
   const [stationFilter, setStationFilter] = useState('all'); // all | unassigned | stationId
   const [form, setForm] = useState(null); // null | { id?, name, number, role, stationIds:[] }
+  const [stq, setStq] = useState(''); // filter for the assigned-stations chip picker
   const [heldFor, setHeldFor] = useState(null); // staff whose held devices are being viewed
   const load = () => api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => setStaff([]));
   useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1282,7 +1287,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
         </div>
       )}
       {form && (
-        <Modal title={form.id ? 'Edit staff' : 'Add staff'} onClose={() => setForm(null)}>
+        <Modal title={form.id ? 'Edit staff' : 'Add staff'} onClose={() => { setForm(null); setStq(''); }}>
           <div style={fieldCol}>
             <div style={{ display: 'flex', gap: 8 }}>
               <Field label="Staff number"><input style={input} value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} placeholder="e.g. 101" /></Field>
@@ -1291,9 +1296,14 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
             <Field label="Role (optional)"><input style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="e.g. Liaison, Warehouse" /></Field>
             <div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Assigned stations (optional — pick any)</div>
+              {/* Long station lists get a filter; picked chips ALWAYS stay
+                  visible so a filtered view can still unpick them. */}
+              {stations.length > 8 && (
+                <input value={stq} onChange={(e) => setStq(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations…`} aria-label="Filter stations" style={{ ...input, minHeight: 38, marginBottom: 6 }} />
+              )}
               {stations.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No stations yet.</div> : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {stations.map((s) => (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                  {stations.filter((s) => form.stationIds.includes(s.id) || !stq.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(stq.trim().toLowerCase())).map((s) => (
                     <Chip key={s.id} on={form.stationIds.includes(s.id)} onClick={() => toggleStation(s.id)}>{KIND_ICON[s.kind] || '📍'} {s.name}</Chip>
                   ))}
                 </div>

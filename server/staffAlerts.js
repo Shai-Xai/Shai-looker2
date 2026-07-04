@@ -39,6 +39,9 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
   const now = () => new Date().toISOString();
   const uuid = () => require('crypto').randomUUID();
   const enabled = () => db.getSetting('staff_alerts_enabled', '1') !== '0';
+  // Per-event dark threshold (% of a station's devices dark before its crew is
+  // paged). Settable on Hive → Alerts; recovery is half the threshold.
+  const thresholdPct = (sid) => { const v = Number(db.getSetting('staff_alerts_threshold_' + (sid || 'all'), '')); return v >= 10 && v <= 100 ? v : 50; };
   const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
   const testEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
   const parse = (s, f) => { try { return JSON.parse(s) ?? f; } catch { return f; } };
@@ -110,7 +113,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
   const STORM_N = 4;
   function siteNotify(suiteId, entityId, fires) {
     const list = fires.slice(0, 8).map((h) => `${h.station} ${h.off}/${h.on + h.off} dark`).join(' · ');
-    const title = `📡 ${fires.length} stations went half-dark together — likely the data pipe, not staff`;
+    const title = `📡 ${fires.length} stations went dark together — likely the data pipe, not staff`;
     const body = `${list}${fires.length > 8 ? ` +${fires.length - 8} more` : ''}. When one pipe stalls every station looks dark at once — check the cashless/data sync before dispatching anyone.`;
     log(suiteId, '(site-wide)', 'site', `${fires.length} stations crossed together. ${body}`, '');
     if (testMode()) {
@@ -121,8 +124,9 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     }
   }
 
-  // The rule (phase 1): HALF the station's devices dark → alert; back under a
-  // QUARTER → recovered. Edge-detected per suite+station, 15-min re-fire cooldown.
+  // The rule (phase 1): the event's THRESHOLD share of a station's devices dark
+  // → alert; back under half the threshold → recovered. Edge-detected per
+  // suite+station, 15-min re-fire cooldown.
   function tick() {
     if (!enabled()) return;
     try {
@@ -130,6 +134,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       for (const suiteId of suites) {
         const opsStations = sql.prepare('SELECT id, name FROM eventops_stations WHERE suite_id=?').all(suiteId);
         const staff = sql.prepare('SELECT name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+        const thr = thresholdPct(suiteId) / 100;
         const fires = [];
         for (const hs of healthStations(suiteId)) {
           const total = hs.on + hs.off;
@@ -138,11 +143,11 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
           const k = `${suiteId}|${hs.station}`;
           const st = sql.prepare('SELECT status, at FROM staff_alert_state WHERE k=?').get(k);
           const alerting = st && st.status === 'alerting';
-          if (!alerting && share >= 0.5) {
+          if (!alerting && share >= thr) {
             if (st && Date.now() - Date.parse(st.at) < 15 * 60000) continue;
             fires.push(hs);
             sql.prepare('INSERT INTO staff_alert_state (k, status, at) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET status=excluded.status, at=excluded.at').run(k, 'alerting', now());
-          } else if (alerting && share <= 0.25) {
+          } else if (alerting && share <= thr / 2) {
             sql.prepare('UPDATE staff_alert_state SET status=?, at=? WHERE k=?').run('ok', now(), k);
             log(suiteId, hs.station, 'recovered', `${hs.on}/${total} devices back online`, '');
           }
@@ -188,7 +193,19 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number })) };
     });
     const logRows = sql.prepare('SELECT at, station, kind, message FROM staff_alert_log WHERE suite_id=? ORDER BY at DESC LIMIT 50').all(suiteId);
-    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', stations, opsStations, log: logRows });
+    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), stations, opsStations, log: logRows });
+  });
+
+  app.put('/api/my/staff-alerts/settings', requireAuth, (req, res) => {
+    if (!enabled()) return off404(res);
+    const b = req.body || {};
+    const suiteId = String(b.suiteId || '').slice(0, 64);
+    const pct = Math.round(Number(b.thresholdPct));
+    if (!suiteId) return res.status(400).json({ error: 'suiteId required' });
+    if (!(pct >= 10 && pct <= 100)) return res.status(400).json({ error: 'Threshold must be between 10 and 100%' });
+    if (!ownsSuite(req, suiteId)) return res.status(403).json({ error: 'Not your event' });
+    db.setSetting('staff_alerts_threshold_' + suiteId, String(pct));
+    res.json({ thresholdPct: pct });
   });
 
   app.put('/api/my/staff-alerts/bridge', requireAuth, (req, res) => {
