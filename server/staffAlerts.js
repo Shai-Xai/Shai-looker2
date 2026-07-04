@@ -42,6 +42,9 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
   // Per-event dark threshold (% of a station's devices dark before its crew is
   // paged). Settable on Hive → Alerts; recovery is half the threshold.
   const thresholdPct = (sid) => { const v = Number(db.getSetting('staff_alerts_threshold_' + (sid || 'all'), '')); return v >= 10 && v <= 100 ? v : 50; };
+  // Per-event pause — silences the tick for this suite without disabling the
+  // whole feature. Toggled on Hive → Alerts (e.g. during a known pipe wobble).
+  const paused = (sid) => db.getSetting('staff_alerts_paused_' + (sid || 'all'), '0') === '1';
   const testMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
   const testEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
   const parse = (s, f) => { try { return JSON.parse(s) ?? f; } catch { return f; } };
@@ -132,6 +135,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     try {
       const suites = [...new Set(sql.prepare('SELECT DISTINCT suite_id FROM eventops_staff').all().map((r) => r.suite_id))];
       for (const suiteId of suites) {
+        if (paused(suiteId)) continue; // event's alerts are paused — skip the whole suite
         const opsStations = sql.prepare('SELECT id, name FROM eventops_stations WHERE suite_id=?').all(suiteId);
         const staff = sql.prepare('SELECT name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
         const thr = thresholdPct(suiteId) / 100;
@@ -193,19 +197,27 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number })) };
     });
     const logRows = sql.prepare('SELECT at, station, kind, message FROM staff_alert_log WHERE suite_id=? ORDER BY at DESC LIMIT 50').all(suiteId);
-    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), stations, opsStations, log: logRows });
+    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), stations, opsStations, log: logRows });
   });
 
   app.put('/api/my/staff-alerts/settings', requireAuth, (req, res) => {
     if (!enabled()) return off404(res);
     const b = req.body || {};
     const suiteId = String(b.suiteId || '').slice(0, 64);
-    const pct = Math.round(Number(b.thresholdPct));
     if (!suiteId) return res.status(400).json({ error: 'suiteId required' });
-    if (!(pct >= 10 && pct <= 100)) return res.status(400).json({ error: 'Threshold must be between 10 and 100%' });
     if (!ownsSuite(req, suiteId)) return res.status(403).json({ error: 'Not your event' });
-    db.setSetting('staff_alerts_threshold_' + suiteId, String(pct));
-    res.json({ thresholdPct: pct });
+    // Pause toggle and threshold can arrive together or apart.
+    if (typeof b.paused === 'boolean') {
+      db.setSetting('staff_alerts_paused_' + suiteId, b.paused ? '1' : '0');
+      if (b.paused) log(suiteId, '(all)', 'paused', 'Alerts paused for this event.', '');
+      else log(suiteId, '(all)', 'resumed', 'Alerts resumed for this event.', '');
+    }
+    if (b.thresholdPct != null) {
+      const pct = Math.round(Number(b.thresholdPct));
+      if (!(pct >= 10 && pct <= 100)) return res.status(400).json({ error: 'Threshold must be between 10 and 100%' });
+      db.setSetting('staff_alerts_threshold_' + suiteId, String(pct));
+    }
+    res.json({ thresholdPct: thresholdPct(suiteId), paused: paused(suiteId) });
   });
 
   app.put('/api/my/staff-alerts/bridge', requireAuth, (req, res) => {

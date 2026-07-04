@@ -38,6 +38,12 @@ export default function StaffAlertsTab({ suiteId }) {
       body: JSON.stringify({ suiteId, thresholdPct: n }),
     }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
   };
+  const setPaused = (p) => {
+    fetch('/api/my/staff-alerts/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suiteId, paused: p }),
+    }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
+  };
 
   if (err) return <div style={{ ...card, fontSize: 12.5, color: '#dc2626' }}>⚠️ {err}</div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Loading staff alerts…</div>;
@@ -48,6 +54,18 @@ export default function StaffAlertsTab({ suiteId }) {
       {data.testMode && (
         <div style={{ ...card, borderLeft: '4px solid #d97706', fontSize: 12, marginBottom: 10 }}>
           🧪 <b>Test mode</b> — station alerts email {data.testEmail} only; assigned staff are listed but never contacted. Go live in Admin → Data health.
+        </div>
+      )}
+      {/* Pause switch — a big honest banner when paused, a quiet button when live. */}
+      {data.paused ? (
+        <div style={{ ...card, borderLeft: '4px solid #6b7280', background: 'var(--hover, rgba(127,127,127,0.08))', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <span style={{ fontSize: 12.5 }}>⏸️ <b>Alerts paused</b> — no station alerts will be sent for this event until you resume.</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => setPaused(false)} style={{ border: 'none', background: '#16a34a', color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', minHeight: 34 }}>▶ Resume alerts</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button onClick={() => setPaused(true)} title="Stop sending station alerts for this event" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 32 }}>⏸️ Pause alerts</button>
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 10px', fontSize: 12, color: 'var(--muted)' }}>
