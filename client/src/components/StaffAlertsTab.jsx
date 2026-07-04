@@ -44,6 +44,12 @@ export default function StaffAlertsTab({ suiteId }) {
       body: JSON.stringify({ suiteId, paused: p }),
     }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
   };
+  const setAllOff = (p) => {
+    fetch('/api/my/staff-alerts/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suiteId, allOff: p }),
+    }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
+  };
 
   if (err) return <div style={{ ...card, fontSize: 12.5, color: '#dc2626' }}>⚠️ {err}</div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Loading staff alerts…</div>;
@@ -54,6 +60,18 @@ export default function StaffAlertsTab({ suiteId }) {
       {data.testMode && (
         <div style={{ ...card, borderLeft: '4px solid #d97706', fontSize: 12, marginBottom: 10 }}>
           🧪 <b>Test mode</b> — station alerts email {data.testEmail} only; assigned staff are listed but never contacted. Go live in Admin → Data health.
+        </div>
+      )}
+      {/* Master OFF — kills every event's ops alerts. Distinct from per-event pause. */}
+      {data.allOff ? (
+        <div style={{ ...card, borderLeft: '4px solid #dc2626', background: 'rgba(220,38,38,0.08)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <span style={{ fontSize: 12.5 }}>🛑 <b>All ops alerts are OFF</b> — nothing will send for any event until you switch them back on.</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => setAllOff(false)} style={{ border: 'none', background: '#16a34a', color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', minHeight: 34 }}>▶ Switch alerts on</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button onClick={() => { if (confirm('Switch OFF ops alerts for EVERY event? Nothing will send until you turn them back on.')) setAllOff(true); }} title="Master switch — stop all ops alerts everywhere" style={{ border: '1px solid #dc2626', background: 'var(--card)', color: '#dc2626', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 32 }}>🛑 Switch off all ops alerts</button>
         </div>
       )}
       {/* Pause switch — a big honest banner when paused, a quiet button when live. */}
@@ -80,6 +98,11 @@ export default function StaffAlertsTab({ suiteId }) {
         {unmapped ? <b style={{ color: '#dc2626' }}>{unmapped} station{unmapped > 1 ? 's' : ''} unmapped</b> : null}
         {uncrewed ? <b style={{ color: '#d97706' }}>{uncrewed} mapped but no staff assigned</b> : null}
       </div>
+      {data.whatsappFrom && (
+        <div style={{ ...card, borderLeft: '4px solid #25D366', fontSize: 12, marginBottom: 10 }}>
+          💬 <b>Staff WhatsApp:</b> {data.whatsappFrom} — staff message this number once to switch alerts on (opens WhatsApp’s 24h window; they don’t reach the Owl). 🔔 = push on this phone · 💬 = WhatsApp reachable.
+        </div>
+      )}
       {/* Filters: status chips + a name search, so a 65-station board is
           navigable — jump straight to the ones alerting or missing a crew. */}
       {data.stations.length > 6 && (() => {
@@ -119,7 +142,7 @@ export default function StaffAlertsTab({ suiteId }) {
             </select>
             <span style={{ flex: '1 1 160px', fontSize: 11.5, color: s.staff.length ? 'var(--text)' : 'var(--muted)' }}>
               {s.staff.length
-                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
+                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.whatsapp ? '💬 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
                 : s.opsStationId ? 'no staff assigned' : 'map to an Event Ops station'}
             </span>
           </div>

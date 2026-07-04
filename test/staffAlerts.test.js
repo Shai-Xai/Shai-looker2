@@ -13,6 +13,7 @@ function mountAlerts() {
   const testEmails = [];
   const pushes = [];
   const rawSends = [];
+  const waSends = [];
   const auth = { requireAuth: (_req, _res, next) => next && next(), requireAdmin: (_req, _res, next) => next && next() };
   // The bridge reads the REAL eventops_* and data_monitors tables — mount those
   // modules (stubbed deps) so their schemas exist, exactly as in production.
@@ -28,8 +29,9 @@ function mountAlerts() {
     db, auth,
     mailer: { send: async (m) => { testEmails.push(m); return { ok: true }; } },
     push: { isEnabled: () => true, sendToUser: async (u, p) => { pushes.push({ u, p }); return 1; }, sendToEntity: async (e, p) => { pushes.push({ e, p }); return 1; }, sendRaw: async (rows) => { rawSends.push(rows); return rows.length; }, vapidPublicKey: () => 'k' },
+    messaging: { normaliseMsisdn: (n) => String(n || '').replace(/[^\d]/g, ''), sendWhatsapp: async (m) => { waSends.push(m); return { ok: true }; }, waFrom: () => '27110001111', waConfigured: () => true },
   });
-  return { mod, sql, testEmails, pushes, rawSends };
+  return { mod, sql, testEmails, pushes, rawSends, waSends };
 }
 
 // Seed one suite: an ops station + a staffer at it, and a monitor whose
@@ -38,6 +40,7 @@ function seed(h, { on, off, health = 'FUTUR BAR', ops = 'Futur Bar' }) {
   const sql = h.sql;
   sql.prepare('DELETE FROM eventops_stations').run(); sql.prepare('DELETE FROM eventops_staff').run();
   sql.prepare('DELETE FROM data_monitors').run(); sql.prepare('DELETE FROM staff_alert_state').run(); sql.prepare('DELETE FROM staff_alert_log').run();
+  sql.prepare('DELETE FROM eventops_staff_push').run(); sql.prepare('DELETE FROM eventops_staff_wa').run();
   sql.prepare("INSERT INTO eventops_stations (id, entity_id, suite_id, name, kind, created_at) VALUES ('st1','ent1','su1',?, 'bar', '2026-01-01')").run(ops);
   sql.prepare("INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, created_at) VALUES ('sf1','ent1','su1','Thabo','+2782','bars','st1','2026-01-01')").run();
   sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields, warn_min, stale_min, check_every_min, cooldown_min, status, state, filters, roster_snapshot, created_at, updated_at)
@@ -95,6 +98,42 @@ test('after go-live, a subscribed crew member is pushed on their own phone', () 
   // sendRaw receives the subscription rows; assert one carried our endpoint.
   assert.ok(h.rawSends.some((rows) => rows.some((r) => r.endpoint === 'https://push/ep')));
   db.setSetting('data_health_test_mode', '1');
+});
+
+test('staffInbound captures a known staff number (kept off the Owl) and ignores others', async () => {
+  const h = mountAlerts();
+  seed(h, { on: 4, off: 0 }); // staffer Thabo, number +2782, at su1
+  // A message from Thabo's number → intercepted (returns true), captured, replied.
+  const handled = await h.mod.staffInbound('+2782', 'hi');
+  assert.equal(handled, true);
+  assert.equal(h.waSends.length, 1);
+  assert.match(h.waSends[0].text, /station alerts on WhatsApp/);
+  const row = h.sql.prepare("SELECT * FROM eventops_staff_wa WHERE staff_id='sf1'").get();
+  assert.ok(row && row.msisdn === '2782');
+  // An unknown number → NOT handled (falls through to the Owl).
+  const other = await h.mod.staffInbound('+9999', 'hello');
+  assert.equal(other, false);
+});
+
+test('after go-live, a WhatsApp-window staffer gets the alert on WhatsApp', () => {
+  const h = mountAlerts();
+  seed(h, { on: 2, off: 2 });
+  db.setSetting('data_health_test_mode', '0');
+  h.sql.prepare("INSERT INTO eventops_staff_wa (msisdn, staff_id, suite_id, last_in_at, last_msg, opted_out) VALUES ('2782','sf1','su1',?, 'hi', 0)").run(new Date().toISOString());
+  h.mod.tick();
+  assert.ok(h.waSends.some((m) => m.to === '2782' && /devices dark/.test(m.text)));
+  db.setSetting('data_health_test_mode', '1');
+});
+
+test('the master all-off switch silences every event', () => {
+  const h = mountAlerts();
+  seed(h, { on: 2, off: 2 });
+  db.setSetting('staff_alerts_all_off', '1');
+  h.mod.tick();
+  assert.equal(h.testEmails.length, 0);
+  db.setSetting('staff_alerts_all_off', '0');
+  h.mod.tick();
+  assert.equal(h.testEmails.length, 1);
 });
 
 test('a paused event fires nothing until resumed', () => {

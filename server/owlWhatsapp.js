@@ -54,7 +54,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
+function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound = null }) {
   const owlMemory = require('./owlMemory'); // memoryNote + rememberFact tool (durable client memory)
   const sql = db.db;
   sql.exec(`
@@ -423,6 +423,15 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   }
 
   async function handleInbound(msisdn, rawText) {
+    // Staff-alerts intercept: a message from a known Event Ops staff number is
+    // captured for ops and answered simply — it must NEVER reach the client
+    // Owl. Fully guarded: any non-staff number (or an error) falls straight
+    // through to the normal Owl flow below.
+    const staffInbound = getStaffInbound && getStaffInbound();
+    if (staffInbound) {
+      try { if (await staffInbound(msisdn, rawText)) { logEvent(msisdn, 'staff-alert', 'captured (kept off the Owl)'); return; } }
+      catch (e) { console.error('[owlWhatsapp] staffInbound failed', e && e.message); }
+    }
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
