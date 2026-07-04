@@ -87,12 +87,16 @@ function StationTile({ s, selected, onSelect }) {
 // live into the card — who's sending, who's dark, and when each device worked.
 function DeepDive({ apiBase, mid, station, unit }) {
   const [t, setT] = useState(null);
+  const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
+  const [robot, setRobot] = useState(true);
   const [err, setErr] = useState('');
   useEffect(() => {
-    let alive = true; setT(null); setErr('');
+    let alive = true; setT(null); setObs(null); setErr('');
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
       .then((r) => r.json()).then((d) => { if (alive) { if (d && d.devices) setT(d); else setErr((d && d.error) || 'No timeline'); } })
       .catch((e) => { if (alive) setErr(e.message); });
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
+      .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
     return () => { alive = false; };
   }, [apiBase, mid, station]);
   if (err) return <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>⚠️ {err}</div>;
@@ -100,11 +104,40 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const isOn = (d) => (d.lagMin != null ? d.lagMin <= (t.onlineMin || 15) : (d.active || []).slice(-2).some(Boolean));
   const devs = [...(t.devices || [])].sort((a, b) => (isOn(a) - isOn(b)) || String(a.device).localeCompare(String(b.device)));
   const tot = (d) => (d.counts || []).reduce((x, y) => x + y, 0);
+  // 🚦 Robot view: fuse the blocks with the OBSERVED log — per block: online +
+  // data (green), seen OFFLINE at a check yet data synced later (amber),
+  // offline + no data (red), online but quiet (grey). Same language as the
+  // Combined mode in Data health; a late sync can never repaint the red.
+  let offMap = null;
+  if (robot && obs && obs.configured && (t.buckets || []).length) {
+    const first = Date.parse(t.buckets[0]);
+    const ivMs = (t.intervalMin || 30) * 60000;
+    const n = t.buckets.length;
+    const tickB = (obs.ticks || []).map((k) => Math.floor((Date.parse(k.at) - first) / ivMs));
+    offMap = new Map((obs.devices || []).map((d) => [d.device, new Set((d.offAt || []).map((ti) => tickB[ti]).filter((b) => b >= 0 && b < n))]));
+  }
+  const cellBg = (dev, a, i) => {
+    const off = !!(offMap && offMap.get(dev) && offMap.get(dev).has(i));
+    if (a && off) return STATUS_COLOR.warn;
+    if (a) return STATUS_COLOR.fresh;
+    if (off) return STATUS_COLOR.stale;
+    return 'var(--hairline)';
+  };
+  const chip = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, color: act ? 'var(--brand)' : 'var(--muted)', background: 'var(--card)', borderRadius: 999, padding: '2px 9px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' });
   return (
     <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
-        Today per device — each block 30 min from the start, <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = sent data</span>, grey = silent. Dark devices listed first.
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 180 }}>
+          Today per device — each block 30 min from the start.{' '}
+          {offMap
+            ? <><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = online + data</span> · <span style={{ color: STATUS_COLOR.warn, fontWeight: 700 }}>amber = offline at a check, data synced later</span> · <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>red = offline + no data</span> · grey = quiet.</>
+            : <><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = sent data</span>, grey = silent.</>}
+          {' '}Dark devices listed first.
+        </span>
+        <button style={chip(!robot)} onClick={() => setRobot(false)}>🟩 Blocks</button>
+        <button style={chip(robot)} onClick={() => setRobot(true)}>🚦 Robot</button>
       </div>
+      {robot && obs && !obs.configured && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 6 }}>No observed checks in this window yet — amber/red appear once Pulse's own offline log has coverage.</div>}
       <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {devs.map((d) => (
           <div key={d.device} style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11.5 }}>
@@ -113,7 +146,7 @@ function DeepDive({ apiBase, mid, station, unit }) {
             {d.operator ? <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '20%' }}>{d.operator}</span> : null}
             <span style={{ display: 'flex', gap: 1, flexShrink: 1, minWidth: 0, overflow: 'hidden' }}>
               {(d.active || []).map((a, i) => (
-                <i key={i} style={{ width: 4, height: 10, borderRadius: 1, flexShrink: 0, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
+                <i key={i} style={{ width: 4, height: 10, borderRadius: 1, flexShrink: 0, background: cellBg(d.device, a, i) }} />
               ))}
             </span>
             <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', fontWeight: 700, flexShrink: 0 }}>{tot(d).toLocaleString('en-ZA')}</span>
@@ -244,23 +277,25 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         })}
       </div>
 
-      {/* selected station */}
+      {/* selected station — a sheet-style modal over the board (tap outside to close) */}
       {sel && (
-        <div style={{ ...card, marginTop: 10, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}` }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-            <strong style={{ fontSize: 14 }}>{sel.name}</strong>
-            <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{sel.zone}</span>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>monitor: {sel.monitor}</span>
-            <span style={{ flex: 1 }} />
-            <button onClick={() => setSel(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 9px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+        <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 10 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}`, width: '100%', maxWidth: 780, maxHeight: '85vh', overflowY: 'auto', borderRadius: 14, boxShadow: '0 18px 48px rgba(0,0,0,0.35)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 14 }}>{sel.name}</strong>
+              <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{sel.zone}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>monitor: {sel.monitor}</span>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setSel(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 34, minHeight: 30, fontSize: 12, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
+              <span><b style={{ color: STATUS_COLOR.fresh }}>{sel.on ?? '—'}</b> sending</span>
+              <span><b style={{ color: sel.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{sel.off ?? 0}</b> dark</span>
+              <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
+              <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
+            </div>
+            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
           </div>
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
-            <span><b style={{ color: STATUS_COLOR.fresh }}>{sel.on ?? '—'}</b> sending</span>
-            <span><b style={{ color: sel.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{sel.off ?? 0}</b> dark</span>
-            <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
-            <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
-          </div>
-          <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
         </div>
       )}
     </div>
