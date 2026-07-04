@@ -1637,6 +1637,7 @@ export function DataHealthOps({ entityId, suiteId }) {
         </p>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
         <Suspense fallback={null}>
+          <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
           <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
         </Suspense>
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
@@ -1648,10 +1649,8 @@ export function DataHealthOps({ entityId, suiteId }) {
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
         </div>
       ) : <>
-        {/* The Owl's quick take and the full report, side by side (stacked on phones). */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start', marginBottom: 4 }}>
-          <div style={{ flex: '1 1 300px', minWidth: 0 }}><Suspense fallback={null}><OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" /></Suspense></div>
-          <div style={{ flex: '1 1 300px', minWidth: 0 }}><ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" /></div>
+        <div style={{ marginBottom: 4 }}>
+          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
         </div>
         <HealthMetrics monitors={monitors} />
         {monitors.map((m) => (
