@@ -538,14 +538,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     }
   };
 
-  // ── the OBSERVED offline log ─────────────────────────────────────────────
-  // Every check writes down what Pulse SAW: who was offline at that moment.
-  // Unlike the transaction timeline, a device that kept trading offline and
-  // synced late can NEVER repaint this — it is the connectivity record.
+  // ── the OBSERVED offline log: what Pulse SAW at each check. A late-syncing
+  // device can never repaint this — it is the connectivity record. ──────────
   function recordObservation(m, r, at) {
     try {
       sql.prepare('INSERT INTO data_monitor_obs (monitor_id, at, total, online, offline_names) VALUES (?,?,?,?,?)')
-        .run(m.id, at, r.total, r.online, JSON.stringify(r.offline.map((d) => d.device)));
+        .run(m.id, at, r.total, r.online, JSON.stringify(r.offline.map((d) => (d.station ? { n: d.device, s: d.station } : d.device))));
       sql.prepare('DELETE FROM data_monitor_obs WHERE monitor_id=? AND at<?').run(m.id, new Date(Date.now() - 14 * 86400000).toISOString());
     } catch (e) { console.warn('[data-health] observation write failed', m.id, e.message); }
   }
@@ -555,8 +553,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   function observedLog(m, sinceIso) {
     const rows = sql.prepare('SELECT at, total, online, offline_names FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, sinceIso);
     const ticks = rows.map((r) => ({ at: r.at, total: r.total, online: r.online, offline: parseJson(r.offline_names, []) })).slice(-288);
-    const byDevice = new Map(); // device -> tick indexes it was offline at
-    ticks.forEach((tk, i) => { for (const d of tk.offline) { if (!byDevice.has(d)) byDevice.set(d, []); byDevice.get(d).push(i); } });
+    const byDevice = new Map(), stationOf = new Map(); // device -> offline tick idxs · device -> station
+    ticks.forEach((tk, i) => {
+      tk.offline = tk.offline.map((d) => { if (typeof d === 'string') return d; if (d.s) stationOf.set(d.n, d.s); return d.n; });
+      for (const d of tk.offline) { if (!byDevice.has(d)) byDevice.set(d, []); byDevice.get(d).push(i); }
+    });
     const windows = [];
     for (const [device, idx] of byDevice) {
       let s0 = idx[0];
@@ -572,7 +573,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return {
       configured: ticks.length > 0,
       ticks: ticks.map((t) => ({ at: t.at, online: t.online, total: t.total })),
-      devices: [...byDevice.entries()].map(([device, idx]) => ({ device, offAt: idx })).sort((a, b) => b.offAt.length - a.offAt.length).slice(0, 200),
+      devices: [...byDevice.entries()].map(([device, idx]) => ({ device, station: stationOf.get(device) || '', offAt: idx })).sort((a, b) => b.offAt.length - a.offAt.length).slice(0, 200),
       windows: windows.slice(0, 150),
     };
   }
@@ -972,16 +973,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 
     sql.prepare("UPDATE data_monitors SET last_checked_at=?, last_error='', state=? WHERE id=?").run(ts, state, m.id);
 
-    // Refresh the roster snapshot alongside the pull so collapsed cards can show
-    // linked/online/offline counts without a live Looker query per render. A
-    // roster failure never fails the check — the stream reading already landed.
-    // The same read powers the FLEET alert: when ≥ rosterAlertPct % of linked
-    // devices are offline, alert once on the crossing (edge-detected via the
-    // breach flag remembered in the snapshot), sharing the monitor's cooldown.
+    // Refresh the roster snapshot alongside the pull (collapsed cards render it
+    // with no live Looker read); a roster failure never fails the check. The
+    // same read powers the FLEET alert: ≥ rosterAlertPct % of linked devices
+    // offline alerts once on the crossing (breach flag), sharing the cooldown.
     if (m.rosterField) {
       try {
         const r = await deviceRoster(m);
-        recordObservation(m, r, ts); // the connectivity record — see observedLog()
         const offlineN = r.total - r.online;
         const offlinePct = r.total ? Math.round((offlineN / r.total) * 100) : 0;
         const wasBreach = !!(m.rosterSnapshot && m.rosterSnapshot.breach);
@@ -1029,14 +1027,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             if (Number.isFinite(v)) feedTotal = v;
           }
         } catch (e) { console.warn('[data-health] feed total read failed', m.id, e.message); }
-        // Per-station roll-up for the Event Signal board — devices on/off, the
-        // hour's volume and a 6-block spark per station, all from reads this
-        // check already made, so the board costs nothing to render.
-        let stations = null;
+        // Per-station roll-up for the Event Signal board — on/off, hour volume
+        // and a 6-block spark per station, all from reads already made.
+        let stations = null, info3 = null;
         try {
           if (tl && tl.devices.length) {
             const a3 = rosterAnchor(m);
-            const info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
+            info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
               ? `after ${a3.toISOString().slice(0, 16).replace('T', ' ')}`
               : `last ${m.rosterBaselineMin} minutes`);
             const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
@@ -1056,6 +1053,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
           }
         } catch (e) { console.warn('[data-health] station roll-up failed', m.id, e.message); }
+        // The connectivity record — station labels ride along for board replay.
+        if (info3) labelDevices(r.offline, info3);
+        recordObservation(m, r, ts);
         // The tile day-graph reads the OBSERVED log once it has any history —
         // what Pulse saw at each check, which a late sync can never repaint.
         // The transaction-based series above stays as the fallback (fresh DB).
