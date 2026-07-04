@@ -670,7 +670,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
     // Memoized mode is the first choice (self-heals); an explicit count_field override wins outright.
     const memoModes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
-    const modes = m.countField && m.countField.includes('.') ? [m.countField, ...memoModes.filter((x) => x !== m.countField)] : memoModes;
+    const pinnedMeasure = m.countField && m.countField.includes('.') ? m.countField : null; const modes = pinnedMeasure ? [pinnedMeasure] : memoModes; // pinned measure is STICKY — only mode tried, never swapped off
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
@@ -702,12 +702,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           // so a zero-only count is a soft failure: try the next counting mode.
           // An EMPTY counting result is as suspect as all-zeros ('none' may accept a quiet feed).
           const cTry = fieldFor(cand);
-          if (cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
+          if (!pinnedMeasure && cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
             step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
           }
           // Station filter + empty = the known broken join — go to the fallback.
           if (!got.length && st) { step(bf, cand, 'no rows (station filter)'); rows = got; mode = cand; bucketField = bf; break; }
-          if (cand !== 'none' && !got.length) {
+          if (!pinnedMeasure && cand !== 'none' && !got.length) {
             step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
           }
           // Even plain presence only accepts an empty window on the LAST
