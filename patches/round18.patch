@@ -78,7 +78,7 @@ index 05f6891..e29e9d0 100644
 -      <FlowMeter rows={boardRows} />
 +      <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
 diff --git a/server/dataHealth.js b/server/dataHealth.js
-index de5869b..b0578f2 100644
+index de5869b..5deaff6 100644
 --- a/server/dataHealth.js
 +++ b/server/dataHealth.js
 @@ -2,5 +2,4 @@
@@ -132,7 +132,7 @@ index de5869b..b0578f2 100644
 +  // window is linked; any of those silent through the ONLINE window is offline
 +  // — named, with how long. The expected set is learned from the data itself
 +  // (one scoped read, reduced to last-seen per device; no manual register).
-@@ -601,7 +590,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+@@ -601,7 +590,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 -  // The day timeline: per device, which time blocks of the window it produced
 -  // data AND how many scans landed in each — rows × buckets the UI renders as a
 -  // green/grey activity grid or a per-block counts report. At 60-min blocks it
@@ -142,8 +142,7 @@ index de5869b..b0578f2 100644
 -  // here (5000-row cap → `truncated` warns when a very busy window overflows).
 +  // The day timeline: per device, which blocks produced data and how many
 +  // scans landed in each — the UI's activity grid. 60-min blocks use the hour
-+  // sibling dimension (one row per device+hour — a whole day fits); finer
-+  // blocks read raw time and bucket here (5000-row cap → `truncated`).
++  // sibling dimension; finer blocks bucket raw time (5000-row cap → `truncated`).
 @@ -646,6 +632,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 -    // Count-measure candidates, in order: the TIME FIELD's own view's count
 -    // (right on combined explores, where m.view is the explore name and the
@@ -155,6 +154,25 @@ index de5869b..b0578f2 100644
 +    // on combined explores), the explore-name guess, a dynamic count_distinct,
 +    // then plain row presence. The working mode is remembered — but 'none'
 +    // never is, so a transient error can't poison a monitor's counts forever.
+@@ -1039 +1022,4 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-            const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
++            // On/off follows the ROSTER's lag truth (aggregated read — no row
++            // cap): a timeline crop / stalled ingest must not paint a trading
++            // fleet dark (all-bars-looked-dead, 2026-07-04).
++            const offNames = new Set(r.offline.map((x) => x.device));
+@@ -1043,2 +1029 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-              // Station-less monitors (e.g. one gate's check-in) lump into a
+-              // single '' entry the board joins back to the monitor's own tile.
++              // Station-less monitors lump into one '' entry (the monitor's own tile).
+@@ -1048 +1033 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-              if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
++              if (offNames.has(d.device)) e3.off += 1; else e3.on += 1;
+@@ -1059,3 +1044,2 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-        // The tile day-graph reads the OBSERVED log once it has any history —
+-        // what Pulse saw at each check, which a late sync can never repaint.
+-        // The transaction-based series above stays as the fallback (fresh DB).
++        // The tile day-graph prefers the OBSERVED log (never repainted by late
++        // syncs); the transaction series above is the fresh-DB fallback.
 @@ -1426,0 +1411,16 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 +  // ONE flow target per event — the board's ⚙ saves here so every screen
 +  // agrees on what "flowing" means (admins and the owning client can set it).
