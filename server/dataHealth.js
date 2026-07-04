@@ -1,29 +1,20 @@
 // ─── Data health: the BigQuery → Looker stream monitor ──────────────────────────
-// SELF-CONTAINED, DISPOSABLE MODULE. Owns the `data_monitors`, `data_monitor_streams`,
-// `data_monitor_checks` and `data_monitor_events` tables and all /api/admin/data-health
-// routes. Mounted from index.js with one line + injected deps. Kill switch: settings
-// key `data_health_enabled` ('0' disables the tick + 404s the routes). To remove the
-// feature: delete this file + that line, then drop the data_monitor* tables.
+// SELF-CONTAINED, DISPOSABLE MODULE. Owns the data_monitor* tables and every
+// /api/(admin|my)/data-health route; mounted from index.js with one line.
+// Kill switch: settings key `data_health_enabled` ('0' = no tick, routes 404).
+// To remove: delete this file + that line, then drop the data_monitor* tables.
 //
-// WHAT it measures: Pulse reads everything through Looker, which reflects BigQuery,
-// which reflects Howler's stations on the ground (check-in scanners, bars, vendors).
-// A monitor asks Looker for the latest record timestamp on an explore — optionally
-// split by a station dimension — on a cadence, ALWAYS bypassing the query cache
-// (measuring freshness through a cache would lie). The lag between that timestamp and
-// now is the end-to-end health of the whole pipe: station → Howler → BigQuery → Looker.
+// WHAT it measures: a monitor asks Looker (ALWAYS cache-bypassed — freshness
+// through a cache would lie) for the latest record timestamp on an explore,
+// optionally split by a station dimension. That lag is the end-to-end health
+// of the pipe: station → Howler → BigQuery → Looker.
 //
-// The hard parts (the real deliverable):
-//   • per-station memory — a station that DISAPPEARS from the query result (rows
-//     age out of the filter window, device dies mid-event) keeps being evaluated
-//     from the last timestamp we ever saw for it, so silence is what raises the
-//     alarm — exactly the failure this exists to catch;
-//   • edge-detection — alert on the fresh→stale TRANSITION, never every tick, with
-//     a per-monitor cooldown so a flapping feed can't spam phones during an event;
-//   • recovery notice — one "data is flowing again" message when the last stale
-//     stream comes back, closing the loop;
-//   • scoped reads — a monitor pinned to a client runs as a synthetic CLIENT user
-//     so applyScope enforces the per-tenant boundary; an unpinned (platform)
-//     monitor runs unscoped as a synthetic admin. Fail closed either way.
+// The hard parts: per-station MEMORY (a station that disappears from results
+// keeps being judged from the last timestamp we ever saw — silence raises the
+// alarm); EDGE-DETECTION (alert on the fresh→stale transition with a cooldown,
+// never every tick); one RECOVERY notice when the last stale stream returns;
+// SCOPED reads (client-pinned monitors run as a synthetic client user through
+// applyScope, platform monitors as a synthetic admin — fail closed).
 
 const crypto = require('crypto');
 const { asyncHandler, HttpError } = require('./http');
@@ -391,12 +382,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     });
   }
 
-  // The device roster: "expected vs actual". Every device/operator seen within
-  // the BASELINE window counts as linked; any of those not seen within the
-  // ONLINE window is offline — named, with how long it's been silent. This
-  // learns the expected set from the data itself (no manual device register):
-  // one scoped query over the baseline window, reduced to last-seen per device.
-  // Looker dimension groups name every timeframe `${group}_${timeframe}`.
+  // The device roster: "expected vs actual". Every device seen in the BASELINE
+  // window is linked; any of those silent through the ONLINE window is offline
+  // — named, with how long. The expected set is learned from the data itself
+  // (one scoped read, reduced to last-seen per device; no manual register).
   const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
 
   const LAST_FIELD = 'data_health_last';
@@ -598,13 +587,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // Monitors whose station-name FILTER returns nothing (broken join) — skip to the label-map fallback.
   const stationFilterDead = new Set();
 
-  // The day timeline: per device, which time blocks of the window it produced
-  // data AND how many scans landed in each — rows × buckets the UI renders as a
-  // green/grey activity grid or a per-block counts report. At 60-min blocks it
-  // uses the timestamp's hour-granularity sibling dimension (created_at_time →
-  // created_at_hour) so Looker aggregates to one row per (device, hour) — a
-  // whole busy day fits. Finer blocks read the raw time dimension and bucket
-  // here (5000-row cap → `truncated` warns when a very busy window overflows).
+  // The day timeline: per device, which blocks produced data and how many
+  // scans landed in each — the UI's activity grid. 60-min blocks use the hour
+  // sibling dimension; finer blocks bucket raw time (5000-row cap → `truncated`).
   async function deviceTimeline(m, hours = 24, interval = 60, station = '', withInfo = false) {
     if (!m.rosterField) return { configured: false };
     // Swap the picked timeframe for a sibling (or append when the picked field
@@ -643,12 +628,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // (comma = OR, % and _ = wildcards, leading - = NOT).
     const st = String(station || '').trim();
     const stExpr = /[,%_^"]|^-/.test(st) ? `"${st.replace(/"/g, '')}"` : st;
-    // Count-measure candidates, in order: the TIME FIELD's own view's count
-    // (right on combined explores, where m.view is the explore name and the
-    // real measure is e.g. cashless_check_ins.count), then the explore-name
-    // guess, then a dynamic count_distinct, then plain row presence. The
-    // working mode is remembered — but 'none' never is, so a transient Looker
-    // error can't poison a monitor into inflating/deflating counts forever.
+    // Count-measure candidates in order: the TIME FIELD's view's count (right
+    // on combined explores), the explore-name guess, a dynamic count_distinct,
+    // then plain row presence. The working mode is remembered — but 'none'
+    // never is, so a transient error can't poison a monitor's counts forever.
     const nativeField = `${String(m.timeField).split('.')[0]}.count`;
     const viewField = `${m.view}.count`;
     // When nothing is memoized yet, also ask the explore for ITS OWN count-ish
@@ -1036,16 +1019,18 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
             info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
               ? `after ${a3.toISOString().slice(0, 16).replace('T', ' ')}`
               : `last ${m.rosterBaselineMin} minutes`);
-            const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
+            // On/off follows the ROSTER's lag truth (aggregated read — no row
+            // cap): a timeline crop / stalled ingest must not paint a trading
+            // fleet dark (all-bars-looked-dead, 2026-07-04).
+            const offNames = new Set(r.offline.map((x) => x.device));
             const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
             const byS = new Map();
             for (const d of tl.devices) {
-              // Station-less monitors (e.g. one gate's check-in) lump into a
-              // single '' entry the board joins back to the monitor's own tile.
+              // Station-less monitors lump into one '' entry (the monitor's own tile).
               const stn = info3 ? ((info3.get(d.device) || {}).station || '—') : '';
               if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
               const e3 = byS.get(stn);
-              if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
+              if (offNames.has(d.device)) e3.off += 1; else e3.on += 1;
               e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
               const s6 = d.counts.slice(-6);
               s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
@@ -1056,9 +1041,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // The connectivity record — station labels ride along for board replay.
         if (info3) labelDevices(r.offline, info3);
         recordObservation(m, r, ts);
-        // The tile day-graph reads the OBSERVED log once it has any history —
-        // what Pulse saw at each check, which a late sync can never repaint.
-        // The transaction-based series above stays as the fallback (fresh DB).
+        // The tile day-graph prefers the OBSERVED log (never repainted by late
+        // syncs); the transaction series above is the fresh-DB fallback.
         try {
           const obs = sql.prepare('SELECT at, online FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, r.startAt || new Date(nowMs - 12 * 3600000).toISOString());
           if (obs.length >= 3) coverage = obs.map((o) => ({ t: o.at.slice(11, 16), n: o.online })).slice(-288);
@@ -1423,6 +1407,22 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const monitors = healthSummary({ entityIds: isAdmin ? null : mine, entityId, suiteId: String(req.query.suiteId || '') })
       .filter((m) => m.entityId); // entity-pinned only — platform monitors are internal
     res.json({ monitors });
+  });
+  // ONE flow target per event — the board's ⚙ saves here so every screen
+  // agrees on what "flowing" means (admins and the owning client can set it).
+  const flowTarget = (sid) => { const v = Number(db.getSetting('data_health_flow_target_' + (sid || 'all'), '')); return v >= 50 && v <= 100 ? v : 95; };
+  app.get('/api/my/data-health/flow-target', requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    res.json({ flowTargetPct: flowTarget(String(req.query.suiteId || '')) });
+  });
+  app.put('/api/my/data-health/flow-target', requireAuth, (req, res) => {
+    if (!enabled()) return off(res);
+    const b = req.body || {}; const sid = String(b.suiteId || '').slice(0, 64); const pct = Math.round(Number(b.pct));
+    if (!(pct >= 50 && pct <= 100)) return res.status(400).json({ error: 'Target must be between 50 and 100%' });
+    const isAdmin = req.user && req.user.role === 'admin';
+    if (!isAdmin && !healthSummary({ entityIds: (req.user && req.user.entityIds) || [], suiteId: sid }).some((x) => x.entityId)) return res.status(403).json({ error: 'Not your event' });
+    db.setSetting('data_health_flow_target_' + (sid || 'all'), String(pct));
+    res.json({ flowTargetPct: pct });
   });
   const MY_READS = {
     latest: async (req, m) => ({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) }),

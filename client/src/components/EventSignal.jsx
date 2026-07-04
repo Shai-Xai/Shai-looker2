@@ -427,6 +427,7 @@ function NeedsEyes({ rows, onSelect }) {
 // offline log — Pulse's own record, no live Looker cost.
 function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
   const [logs, setLogs] = useState({}); // monitor id -> observed log
+  const [journal, setJournal] = useState(false); // 30-min status journal open?
   useEffect(() => {
     let alive = true;
     monitors.forEach((m) => {
@@ -548,6 +549,51 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
             <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
               dark {offAgo}→{offNow}{better ? ` · ${delta} back online` : worse ? ` · ${delta} more went dark` : ''} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs prev 30 min
             </span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setJournal((v) => !v)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '3px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 26 }}>
+              journal {journal ? '▾' : '▸'}
+            </button>
+          </div>
+        );
+      })()}
+      {/* 30-min status journal — window by window: who came back, who went
+          dark, and the verdict, newest first (from the same observed logs). */}
+      {journal && (() => {
+        const W = 30 * 60000;
+        const bounds = [];
+        for (let b = Math.floor((keys[keys.length - 1] + BIN) / W) * W; b >= keys[0] - W && bounds.length < 10; b -= W) bounds.unshift(b);
+        if (bounds.length < 2) return null;
+        const darkSetAt = (b) => {
+          const s = new Set();
+          monitors.forEach((m) => {
+            const d = logs[m.id];
+            if (!d) return;
+            let use = -1;
+            (d.ticks || []).forEach((k, ti) => { const t0 = Date.parse(k.at); if (Number.isFinite(t0) && t0 <= b) use = ti; });
+            if (use < 0) return;
+            (d.devices || []).forEach((dev) => { if ((dev.offAt || []).includes(use)) s.add(`${m.id}|${dev.device}`); });
+          });
+          return s;
+        };
+        const sets = bounds.map(darkSetAt);
+        const lines = [];
+        for (let i = sets.length - 1; i >= 1; i--) {
+          let back = 0, went = 0;
+          sets[i].forEach((k) => { if (!sets[i - 1].has(k)) went += 1; });
+          sets[i - 1].forEach((k) => { if (!sets[i].has(k)) back += 1; });
+          lines.push({ t: new Date(bounds[i]), a: sets[i - 1].size, b: sets[i].size, back, went });
+        }
+        return (
+          <div style={{ marginTop: 6, borderTop: '1px solid var(--hairline)', paddingTop: 6, maxHeight: 170, overflowY: 'auto' }}>
+            {lines.map((r) => (
+              <div key={+r.t} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 10.5, fontVariantNumeric: 'tabular-nums', color: 'var(--muted)', padding: '2.5px 0' }}>
+                <b style={{ color: 'var(--text)', flexShrink: 0 }}>{hhmm(r.t)}</b>
+                <span style={{ fontWeight: 800, flexShrink: 0, color: r.b < r.a ? STATUS_COLOR.fresh : r.b > r.a ? STATUS_COLOR.stale : 'var(--muted)' }}>
+                  {r.b < r.a ? '▲ better' : r.b > r.a ? '▼ worse' : '► steady'}
+                </span>
+                <span>{r.back} came back · {r.went} went dark · dark {r.a}→{r.b}</span>
+              </div>
+            ))}
           </div>
         );
       })()}
@@ -653,17 +699,24 @@ function RhythmView({ monitors, apiBase, rows, onSelect }) {
 // 📶 Signal flow meter — the one-glance answer to "are we flowing?".
 // Score = the AVERAGE of each station's own online share (every station
 // counts equally — one dark gate can't hide behind fifty healthy bars).
-// The target is YOURS to set (⚙ · default 95% = we accept 5% dark): green
-// at/above target · amber within 5 points below · red under that. Saved on
-// this device (localStorage), so ops phones and the wall screen can differ.
-const FLOW_BAND = 5, FLOW_KEY = 'pulse.flowTargetPct';
-function FlowMeter({ rows }) {
-  const [target, setTarget] = useState(() => { const v = Number(localStorage.getItem(FLOW_KEY)); return v >= 50 && v <= 100 ? v : 95; });
+// The target is settable (⚙ · default 95% = we accept 5% dark) and saved in
+// Pulse per EVENT — one number for everyone, every phone and wall screen the
+// same: green at/above target · amber within 5 points below · red under that.
+const FLOW_BAND = 5;
+function FlowMeter({ rows, suiteId }) {
+  const [target, setTarget] = useState(95);
   const [edit, setEdit] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/my/data-health/flow-target?suiteId=${encodeURIComponent(suiteId || '')}`)
+      .then((r) => r.json()).then((d) => { if (alive && d && d.flowTargetPct) setTarget(d.flowTargetPct); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [suiteId]);
   const save = (v) => {
     const n = Math.max(50, Math.min(100, Math.round(Number(v) || 95)));
     setTarget(n); setEdit(false);
-    try { localStorage.setItem(FLOW_KEY, String(n)); } catch { /* storage unavailable — keep for this session */ }
+    fetch('/api/my/data-health/flow-target', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId: suiteId || '', pct: n }) }).catch(() => {});
   };
   const st = (rows || []).filter((s) => (s.on || 0) + (s.off || 0) > 0);
   if (!st.length) return null;
@@ -803,7 +856,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'board' && <>
-      <FlowMeter rows={boardRows} />
+      <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
       <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
       {replay && (
         <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
