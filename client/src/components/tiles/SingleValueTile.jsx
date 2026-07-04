@@ -44,10 +44,13 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const pivots = data.pivots || [];
   const primaryCell = resolvePivotCell(rows[0][primaryField.name], pivots);
   const primaryValue = cellText(primaryCell);
-  // 📱 Phones abbreviate big figures (2,701,926.00 → 2.7M) so the number never
-  // outgrows its tile; any currency prefix survives, percentages stay exact,
-  // and desktop keeps the full figure. Tap-to-drill still shows every digit.
-  const shownValue = isMobile ? compactNumber(primaryValue, primaryCell?.value) : primaryValue;
+  // Big figures don't need cents: ≥1000 drops the decimals everywhere
+  // (1,882,360.00 → 1,882,360); small numbers (36.50, 3.1 — averages) and
+  // percentages keep their precision. 📱 Phones additionally abbreviate
+  // (2,701,926 → 2.7M) so the number never outgrows its tile; any currency
+  // prefix survives. Tap-to-drill still shows every digit.
+  const plainValue = stripBigDecimals(primaryValue, primaryCell?.value);
+  const shownValue = isMobile ? compactNumber(plainValue, primaryCell?.value) : plainValue;
 
   // Comparison against a second measure, when present and not disabled.
   const compField = measures[1] || null;
@@ -130,6 +133,16 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
       )}
     </div>
   );
+}
+
+// 1,882,360.00 → 1,882,360. Only for values ≥1000 (where cents are noise);
+// smaller numbers and percentages keep Looker's rendered precision.
+function stripBigDecimals(txt, raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.abs(n) < 1000) return txt;
+  const s = String(txt);
+  if (s.trim().endsWith('%')) return txt;
+  return s.replace(/\.\d+(?=\s*[^\d]*$)/, '');
 }
 
 // 2,701,926.00 → 2.7M · 896,486.00 → 896K · 48,469.00 → 48.5K. Keeps a
