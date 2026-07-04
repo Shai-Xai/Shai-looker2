@@ -33,15 +33,23 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   // their fixed wrapping size. EXCEPT: a card whose width was hand-set with the
   // drag handle (t.cw) is RIGID — it keeps its width (up to the full row) and the
   // row scrolls, so a chart CAN be made wider than its equal-share slot.
-  const cardSizeStyle = (w, custom) => {
+  const cardSizeStyle = (w, custom, kpi) => {
     if (isGrid) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: cardH };
     if (isMobile) {
-      // Fit 4 KPI cards across the phone width; a 5th+ scrolls into view.
-      const basis = `calc((100% - ${3 * GAP}px) / 4)`;
+      // KPI number cards fit 4 across the phone (a 5th+ scrolls into view);
+      // charts/tables would be unreadable at that size, so they get a
+      // near-full-width card each — swipe between them.
+      const basis = kpi ? `calc((100% - ${3 * GAP}px) / 4)` : '82vw';
       return { flex: `0 0 ${basis}`, width: basis, height: '100%', scrollSnapAlign: 'start' };
     }
     if (custom) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: '100%' };
     return { flex: `1 1 ${w}px`, minWidth: Math.min(w, 150), height: '100%' };
+  };
+  // "KPI-shaped" = a single number (or text) card — happy tiny. Anything with
+  // axes needs real width on a phone.
+  const isKpiTile = (t) => {
+    const v = t.vis?.type || '';
+    return t.type === 'text' || v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge');
   };
   // A brand insertion bar on the card we'd drop before (or the row's end).
   const dropAccent = (tid, isLast) => {
@@ -166,7 +174,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                   key={t.id}
                   onDragOver={onCardDragOver(i)}
                   onDragEnd={() => { setDropBefore(null); setDragOver(false); }}
-                  style={{ ...cardSizeStyle(w, !!t.cw), position: 'relative', borderRadius: 8, boxShadow: dropAccent(t.id, i === tiles.length - 1) }}
+                  style={{ ...cardSizeStyle(w, !!t.cw, isKpiTile(t)), position: 'relative', borderRadius: 8, boxShadow: dropAccent(t.id, i === tiles.length - 1) }}
                 >
                   <TileFrame
                     tile={t}
