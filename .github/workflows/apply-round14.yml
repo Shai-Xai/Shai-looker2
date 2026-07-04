@@ -1,0 +1,49 @@
+name: apply-round14
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "2a487ef5f6db54e449850393204395e2b72879590bb1c338a873c6baa755048f  patches/EventSignal14.jsx" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/EventSignal14.jsx /tmp/EventSignal.jsx
+          cat > /tmp/msg <<'MSG'
+          Board: Event pulse (drag to replay) + Needs Eyes worst-first list
+
+          Two ideas from the original site-board design land for real:
+          - Event pulse: the site's online/offline at every Pulse check as a
+            draggable strip above the board. The playhead sits at LIVE (with
+            the current per-minute rate); drag it back to replay the day -
+            the readout shows that moment's online vs offline. Built
+            entirely from the observed offline log, so it costs no live
+            Looker reads.
+          - Needs Eyes: the worst stations first - stale reds, then any with
+            dark devices - each row one tap from its station modal.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
+          git add client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/EventSignal14.jsx .github/workflows/apply-round14.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
