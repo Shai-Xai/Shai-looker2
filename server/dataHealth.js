@@ -661,11 +661,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           if (/^transaction_count$/i.test(f)) return 0;
           if (/transaction/i.test(f)) return 1;
           if (/cumulative|topup|tip|customer|operator|distinct|tab/i.test(f)) return 9;
+          // The check-ins family's real per-scan counter (Attendance_Check_Ins)
+          // — its plain .count is another zero-only row-counter on this explore.
+          if (/attendance|check_?in/i.test(f)) return 2;
           return 5;
         };
         probed = (ef.measures || [])
           .map((x) => (x && x.name) || x)
-          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count/i.test(n))
+          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count|check_?in|attendance/i.test(n))
           .filter((n) => score(n) < 9)
           .sort((a, b) => score(a) - score(b))
           .slice(0, 3);

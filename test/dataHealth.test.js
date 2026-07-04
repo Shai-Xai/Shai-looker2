@@ -504,6 +504,22 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
   assert.ok(bodies[0].fields.includes('scans.transaction_count'));
 });
 
+test('deviceTimeline: check-in monitors probe the attendance counter', async () => {
+  // The check-ins family has no transaction_count — its per-scan counter is
+  // Attendance_Check_Ins, and the plain .count is another zero-only row-counter.
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.count' }, { name: 'scans.Attendance_Check_Ins' }] }) } });
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.Attendance_Check_Ins')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.Attendance_Check_Ins': 87 }];
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    throw new Error('unexpected read');
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countField, 'scans.Attendance_Check_Ins');
+  assert.equal(t.grandTotal, 87);
+});
+
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
