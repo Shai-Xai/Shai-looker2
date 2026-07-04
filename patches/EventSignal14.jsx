@@ -393,7 +393,7 @@ function NeedsEyes({ rows, onSelect }) {
 // draggable strip: the playhead sits at LIVE; drag it back to replay the day
 // (readout shows that moment's online vs offline). Built from the observed
 // offline log — Pulse's own record, no live Looker cost.
-function PulseStrip({ monitors, apiBase }) {
+function PulseStrip({ monitors, apiBase, rows }) {
   const [logs, setLogs] = useState({}); // monitor id -> observed log
   const [idx, setIdx] = useState(null); // null = LIVE, else bin index
   useEffect(() => {
@@ -458,6 +458,37 @@ function PulseStrip({ monitors, apiBase }) {
           )}
         </span>
       </div>
+      {/* Last 60 min — is it improving or getting worse? Volume bars from the
+          stations' 10-min sparks; darkness compared with an hour ago. */}
+      {(() => {
+        const vol = [0, 0, 0, 0, 0, 0];
+        (rows || []).forEach((s) => (s.spark || []).forEach((v, i) => { vol[i] += v || 0; }));
+        const volTot = vol.reduce((a, b) => a + b, 0);
+        if (!volTot && series.length < 7) return null;
+        const vMax = Math.max(1, ...vol);
+        const half = (a) => a.reduce((x, y) => x + y, 0);
+        const volNow = half(vol.slice(3)); const volPrev = half(vol.slice(0, 3));
+        const volPct = volPrev ? Math.round(((volNow - volPrev) / volPrev) * 100) : 0;
+        const offNow = series[series.length - 1].off;
+        const offAgo = series[Math.max(0, series.length - 7)].off;
+        const worse = offNow > offAgo || (volPrev > 0 && volPct <= -30);
+        const better = offNow < offAgo && volPct >= -15;
+        const vc = worse ? STATUS_COLOR.stale : better ? STATUS_COLOR.fresh : 'var(--muted)';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', flexShrink: 0 }}>Last 60 min</span>
+            <span style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 20 }}>
+              {vol.map((v, i) => <i key={i} title={`${v.toLocaleString('en-ZA')} in 10 min`} style={{ display: 'block', width: 9, borderRadius: '1px 1px 0 0', height: Math.max(2, Math.round((v / vMax) * 20)), background: i >= 3 ? STATUS_COLOR.fresh : 'var(--hairline)' }} />)}
+            </span>
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: vc }}>
+              {worse ? '▼ Getting worse' : better ? '▲ Improving' : '► Steady'}
+            </span>
+            <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+              dark {offAgo}→{offNow} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs previous 30 min
+            </span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -643,7 +674,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'board' && <>
-      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} />
+      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} />
       <NeedsEyes rows={shown} onSelect={setSel} />
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -729,15 +760,18 @@ export default function SignalOps({ entityId, suiteId }) {
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px', flexWrap: 'wrap' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: '1 1 240px' }}>
-          Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
-        </p>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+      {/* One compact control row; the explainer gets its own full-width line
+          below — no more mid-wrap soup on phones. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 6px' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <span style={{ flex: 1 }} />
         <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
         <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄</button>
       </div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
+        Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
+      </p>
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );
