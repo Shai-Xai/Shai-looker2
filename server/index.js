@@ -640,7 +640,7 @@ const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, reso
 // Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
-const eventopsApi = require('./eventops').mount(app, { db, auth }); require('./staffAlerts').mount(app, { db, auth, mailer, push }); // device/station logistics + 🚨 staff alerts phase 1 (🧪, dark station → assigned crew) → server/eventops.js, server/staffAlerts.js
+const eventopsApi = require('./eventops').mount(app, { db, auth, push }); require('./staffAlerts').mount(app, { db, auth, mailer, push }); // device/station logistics + 🚨 staff alerts phase 1 (🧪, dark station → assigned crew) → server/eventops.js, server/staffAlerts.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });

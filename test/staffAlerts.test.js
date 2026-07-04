@@ -12,6 +12,7 @@ function mountAlerts() {
   const sql = db.db;
   const testEmails = [];
   const pushes = [];
+  const rawSends = [];
   const auth = { requireAuth: (_req, _res, next) => next && next(), requireAdmin: (_req, _res, next) => next && next() };
   // The bridge reads the REAL eventops_* and data_monitors tables — mount those
   // modules (stubbed deps) so their schemas exist, exactly as in production.
@@ -26,9 +27,9 @@ function mountAlerts() {
   const mod = require('../server/staffAlerts').mount(fakeApp(), {
     db, auth,
     mailer: { send: async (m) => { testEmails.push(m); return { ok: true }; } },
-    push: { isEnabled: () => true, sendToUser: async (u, p) => { pushes.push({ u, p }); return 1; }, sendToEntity: async (e, p) => { pushes.push({ e, p }); return 1; } },
+    push: { isEnabled: () => true, sendToUser: async (u, p) => { pushes.push({ u, p }); return 1; }, sendToEntity: async (e, p) => { pushes.push({ e, p }); return 1; }, sendRaw: async (rows) => { rawSends.push(rows); return rows.length; }, vapidPublicKey: () => 'k' },
   });
-  return { mod, sql, testEmails, pushes };
+  return { mod, sql, testEmails, pushes, rawSends };
 }
 
 // Seed one suite: an ops station + a staffer at it, and a monitor whose
@@ -82,6 +83,18 @@ test('storm guard: many stations crossing together send ONE site-wide note', () 
   assert.equal(h.testEmails.length, 1);
   assert.match(h.testEmails[0].subject, /5 stations went dark together/);
   assert.match(h.testEmails[0].text, /BAR 1 2\/4 dark/);
+});
+
+test('after go-live, a subscribed crew member is pushed on their own phone', () => {
+  const h = mountAlerts();
+  seed(h, { on: 2, off: 2 });
+  db.setSetting('data_health_test_mode', '0'); // go live
+  // The eventops_staff_push table is created by eventops.mount in the harness.
+  h.sql.prepare("INSERT INTO eventops_staff_push (staff_id, suite_id, endpoint, p256dh, auth, created_at) VALUES ('sf1','su1','https://push/ep','p','a','2026-01-01')").run();
+  h.mod.tick();
+  // sendRaw receives the subscription rows; assert one carried our endpoint.
+  assert.ok(h.rawSends.some((rows) => rows.some((r) => r.endpoint === 'https://push/ep')));
+  db.setSetting('data_health_test_mode', '1');
 });
 
 test('a paused event fires nothing until resumed', () => {
