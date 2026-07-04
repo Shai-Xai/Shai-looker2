@@ -13,14 +13,14 @@ jobs:
       - name: apply and push
         run: |
           set -euo pipefail
-          echo "2ed47fadce1e38ba92d12ccab60b1daddac6bcec669ad23e93243e26d695f41d  patches/round13.patch" | sha256sum -c -
+          echo "bc53a4838aca1578590fb8449a47e28129d7f94a022f6a25e2bf04b90213f6e0  patches/round13.patch" | sha256sum -c -
           echo "9534e44f7f3742f462208356ac3fa8c1c6578760b54f5d05ef16274bda5941da  patches/EventSignal13.jsx" | sha256sum -c -
           git config user.name "Shai-Xai"
           git config user.email "shai.evian@howler.co.za"
           cp patches/round13.patch /tmp/p.patch
           cp patches/EventSignal13.jsx /tmp/EventSignal.jsx
           cat > /tmp/msg <<'MSG'
-          Mobile polish: 3-button landing, full-width modal charts, tap readouts
+          Mobile polish, full-width modal charts, tap readouts; drop duplicate report button
 
           - The Hive sub-drawer starts closed, so Event Ops lands on just
             Hive, Data health and Signal board.
@@ -29,8 +29,9 @@ jobs:
             column.
           - The modal's day graph and pulse line stretch the full width with
             five hour stamps across the axis, and tapping (or hovering) any
-            bar pins its readout - time plus online/offline or rate - in the
-            chart header.
+            bar pins its readout in the chart header.
+          - The client tab's Draft health report button is gone - the Owl
+            Summary drawer runs the same report with Share built in.
 
           Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
           Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
