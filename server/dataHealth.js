@@ -1299,23 +1299,23 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       recentEvents: sql.prepare('SELECT station, at, kind, lag_min, message FROM data_monitor_events WHERE monitor_id=? ORDER BY at DESC LIMIT 20').all(m.id),
     };
     if (m.rosterField) {
-      try { const r = await deviceRoster(m, true); p.roster = { ...r, offline: r.offline.slice(0, 40) }; }
-      catch (e) { p.rosterError = String(e.message || e).slice(0, 200); }
-      try {
-        const t = await deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10, '', true);
-        if (t.configured) {
-          p.timeline = {
-            intervalMin: t.intervalMin, startAt: t.startAt || '', countBasis: t.countBasis,
-            window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1], blocks: t.buckets.length },
-            totalScans: t.grandTotal, scansPerBlockAllDevices: t.bucketTotals,
-            // Per-block coverage — the "where were the problems" series: for each
-            // time block, how many devices sent data. Times are UTC HH:MM.
-            coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
-            devicesSeen: t.devices.length,
-            devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
-          };
-        }
-      } catch (e) { p.timelineError = String(e.message || e).slice(0, 200); }
+      // Roster + timeline are independent Looker reads — fire them together so the
+      // report waits one round-trip, not two (per-source errors still captured).
+      const rosterP = deviceRoster(m, true).catch((e) => { p.rosterError = String(e.message || e).slice(0, 200); return null; });
+      const tlP = deviceTimeline(m, rosterAnchor(m) ? 'start' : 12, 10, '', true).catch((e) => { p.timelineError = String(e.message || e).slice(0, 200); return null; });
+      const [r, t] = await Promise.all([rosterP, tlP]);
+      if (r) p.roster = { ...r, offline: r.offline.slice(0, 40) };
+      if (t && t.configured) {
+        p.timeline = {
+          intervalMin: t.intervalMin, startAt: t.startAt || '', countBasis: t.countBasis,
+          window: { from: t.buckets[0], to: t.buckets[t.buckets.length - 1], blocks: t.buckets.length },
+          totalScans: t.grandTotal, scansPerBlockAllDevices: t.bucketTotals,
+          // Per-block coverage: for each time block, how many devices sent (UTC HH:MM).
+          coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          devicesSeen: t.devices.length,
+          devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
+        };
+      }
       // What Pulse ITSELF saw at check time — never repainted by late syncs.
       const ob = observedLog(m, obsSinceFor(m, 'start'));
       if (ob.configured) p.observedOfflineWindows = ob.windows.slice(0, 100);
@@ -1347,8 +1347,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   }
   async function eventReport({ entityId = '', suiteId = '' }) {
     const list = healthSummary({ entityId, suiteId }).filter((s) => s.entityId).slice(0, 12);
-    const stations = [];
-    for (const s of list) stations.push({ station: s.name, area: s.area, unit: s.unit, detail: await diagnosticsPayload(monitorById(s.id)) });
+    const stations = await Promise.all(list.map(async (s) => ({ station: s.name, area: s.area, unit: s.unit, detail: await diagnosticsPayload(monitorById(s.id)) })));
     const suite = suiteId && db.getSuite ? db.getSuite(suiteId) : null;
     const entity = entityId && db.getEntity ? db.getEntity(entityId) : null;
     const payload = { generatedAt: now(), event: suite ? suite.name : '', client: entity ? entity.name : '', stations };
