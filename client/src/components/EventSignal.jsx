@@ -90,6 +90,7 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
   const [robot, setRobot] = useState(true);
   const [err, setErr] = useState('');
+  const [tryN, setTryN] = useState(0); // Retry bumps this — live reads can hiccup mid-event
   useEffect(() => {
     let alive = true; setT(null); setObs(null); setErr('');
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
@@ -98,8 +99,15 @@ function DeepDive({ apiBase, mid, station, unit }) {
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
       .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
     return () => { alive = false; };
-  }, [apiBase, mid, station]);
-  if (err) return <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>⚠️ {err}</div>;
+  }, [apiBase, mid, station, tryN]);
+  if (err) {
+    return (
+      <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>
+        ⚠️ {err}{' '}
+        <button onClick={() => setTryN((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer', marginLeft: 6 }}>Retry</button>
+      </div>
+    );
+  }
   if (!t) return <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Pulling the day's device timeline…</div>;
   const isOn = (d) => (d.lagMin != null ? d.lagMin <= (t.onlineMin || 15) : (d.active || []).slice(-2).some(Boolean));
   const devs = [...(t.devices || [])].sort((a, b) => (isOn(a) - isOn(b)) || String(a.device).localeCompare(String(b.device)));
@@ -138,6 +146,41 @@ function DeepDive({ apiBase, mid, station, unit }) {
         <button style={chip(robot)} onClick={() => setRobot(true)}>🚦 Robot</button>
       </div>
       {robot && obs && !obs.configured && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 6 }}>No observed checks in this window yet — amber/red appear once Pulse's own offline log has coverage.</div>}
+      {/* Stacked day graph — online (green) vs offline (red) at every Pulse
+          check, scoped to THIS station's devices via the observed log. */}
+      {obs && obs.configured && (obs.ticks || []).length >= 3 && devs.length > 0 && (() => {
+        const devSet = new Set(devs.map((d) => d.device));
+        const ticks = (obs.ticks || []).slice(-96);
+        const base = (obs.ticks || []).length - ticks.length;
+        const offN = ticks.map(() => 0);
+        (obs.devices || []).forEach((d) => {
+          if (!devSet.has(d.device)) return;
+          (d.offAt || []).forEach((ti) => { const i = ti - base; if (i >= 0 && i < offN.length) offN[i] += 1; });
+        });
+        const H = 34;
+        return (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 3 }}>Devices online through the day</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, height: H }}>
+              {ticks.map((k, i) => {
+                const off = Math.min(offN[i], devSet.size);
+                const on = Math.max(0, devSet.size - off);
+                return (
+                  <span key={i} title={`${String(k.at || '').slice(11, 16)} · ${on} online · ${off} offline`} style={{ flex: '1 1 0', maxWidth: 7, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H }}>
+                    {off > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((off / devSet.size) * H)), background: STATUS_COLOR.stale, borderRadius: '1px 1px 0 0', opacity: 0.85 }} />}
+                    {on > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((on / devSet.size) * H)), background: STATUS_COLOR.fresh, borderRadius: off ? 0 : '1px 1px 0 0' }} />}
+                  </span>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+              <span>{String(ticks[0].at || '').slice(11, 16)}</span>
+              <span><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>online</span> · <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>offline</span> at each check</span>
+              <span>{String(ticks[ticks.length - 1].at || '').slice(11, 16)}</span>
+            </div>
+          </div>
+        );
+      })()}
       <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
         {devs.map((d) => (
           <div key={d.device} style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11.5 }}>
@@ -279,7 +322,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 
       {/* selected station — a sheet-style modal over the board (tap outside to close) */}
       {sel && (
-        <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 10 }}>
+        <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 10 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}`, width: '100%', maxWidth: 780, maxHeight: '85vh', overflowY: 'auto', borderRadius: 14, boxShadow: '0 18px 48px rgba(0,0,0,0.35)' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <strong style={{ fontSize: 14 }}>{sel.name}</strong>

@@ -26,7 +26,7 @@
 //     monitor runs unscoped as a synthetic admin. Fail closed either way.
 
 const crypto = require('crypto');
-const { asyncHandler } = require('./http');
+const { asyncHandler, HttpError } = require('./http');
 
 const MAX_FIELD = 'data_health_latest'; // the dynamic max(timestamp) measure's name
 const CNT_FIELD = 'data_health_scans';  // the dynamic scan-count measure's name (timeline fallback)
@@ -594,6 +594,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   // Which bucket dimension worked per monitor+interval (minuteN vs raw time).
   const bucketFieldByMonitor = new Map();
 
+  // Monitors whose station-name FILTER returns nothing (broken join) — their
+  // station reads skip straight to the label-map fallback.
+  const stationFilterDead = new Set();
+
   // The day timeline: per device, which time blocks of the window it produced
   // data AND how many scans landed in each — rows × buckets the UI renders as a
   // green/grey activity grid or a per-block counts report. At 60-min blocks it
@@ -687,7 +691,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
     const tried = []; // read-path trace — shown in the UI when the grid comes back empty
     const step = (bf, cand, out) => tried.push(`${String(bf).split('.').pop()} + ${String(cand).split('.').pop()} → ${out}`);
-    for (const bf of bucketCands) {
+    // A known-dead station FILTER skips the doomed direct read entirely.
+    if (st && stationFilterDead.has(m.id)) rows = [];
+    for (const bf of rows ? [] : bucketCands) {
       for (const cand of modes) {
         const body = { ...baseBody(m), sorts: [`${bf} desc`], limit: '20000', fields: [m.rosterField, bf] };
         body.filters[m.timeField] = timeFilter;
@@ -701,22 +707,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
-          // A bucket dim can be silently ACCEPTED yet come back blank on every
-          // row (created_at_minute10 on the check-ins family — no 400, just
-          // null buckets). The bucket shape is broken, not the measure: jump
-          // straight to the next bucket candidate.
+          // A bucket dim can be ACCEPTED yet come back blank on every row
+          // (created_at_minute10 on check-ins) — broken bucket, next candidate.
           if (got.length && !got.some((r) => parseTs(r[bf]))) {
             step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
           }
           // Combined-explore trap: a count measure can exist yet count ANOTHER
           // view's rows — every returned row then reads 0. Rows prove activity,
           // so a zero-only count is a soft failure: try the next counting mode.
-          // An EMPTY result from a counting mode is just as suspect (a broken
-          // join can drop every row) — only 'none' may accept a quiet feed.
+          // An EMPTY counting result is as suspect as all-zeros ('none' may accept a quiet feed).
           const cTry = fieldFor(cand);
           if (cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
             step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
           }
+          // Station filter + empty = the known broken join — go to the fallback.
+          if (!got.length && st) { step(bf, cand, 'no rows (station filter)'); rows = got; mode = cand; bucketField = bf; break; }
           if (cand !== 'none' && !got.length) {
             step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
           }
@@ -735,7 +740,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       }
       if (rows) break;
     }
-    if (!rows) throw lastErr;
+    // Total failure → a client-safe error with the REAL reason + read-path tail.
+    if (!rows) throw new HttpError(502, `Live timeline read failed — ${String((lastErr && lastErr.message) || lastErr || 'no read succeeded').slice(0, 160)} · tried: ${tried.slice(-3).join(' · ') || 'nothing'}`);
     if (iv !== 60) bucketFieldByMonitor.set(bKey, bucketField);
     if (mode !== 'none') countModeByMonitor.set(m.id, mode); else countModeByMonitor.delete(m.id);
     const cKey = mode === 'none' ? CNT_FIELD : fieldFor(mode);
@@ -777,6 +783,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         const whole = await deviceTimeline(m, hours, interval, '', false);
         const keep = whole.devices.filter((d) => (info.get(d.device) || {}).station === st);
         if (keep.length) {
+          stationFilterDead.add(m.id); // remember: skip the doomed direct read next time
           labelDevices(keep, info);
           const totals = Array(whole.buckets.length).fill(0);
           for (const d of keep) d.counts.forEach((c, i) => { totals[i] += c; });
@@ -794,8 +801,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
-      // Empty grid → say exactly what was tried (and show a sample row when
-      // rows arrived but none survived the bucketing) — no more silent blanks.
+      // Empty grid → say what was tried (+ a sample row when rows arrived but
+      // none survived the bucketing) — no more silent blanks.
       readPath: byDevice.size ? undefined : tried,
       sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
@@ -1189,6 +1196,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (c.model !== m.model || c.view !== m.view || c.timeField !== m.timeField || c.stationField !== m.stationField) {
       sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=?').run(m.id);
       maxMeasureUnsupported.delete(m.id);
+      stationFilterDead.delete(m.id);
       countModeByMonitor.delete(m.id); // re-learn the scan-count measure on the new explore
     }
     // The stored roster counts belong to the old roster setup — drop them; the
