@@ -891,11 +891,11 @@ function LiveBtn({ onClick, title, wide }) {
   return (
     <button onClick={onClick} title={title} aria-label={title} style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
-      width: wide ? '100%' : undefined, border: 'none', cursor: 'pointer',
-      background: 'var(--error, #dc2626)', color: '#fff', borderRadius: 980,
-      padding: '4px 10px', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em',
+      width: wide ? '100%' : undefined, cursor: 'pointer',
+      background: 'transparent', color: 'var(--success)', border: '1.5px solid var(--success)', borderRadius: 980,
+      padding: '3px 10px', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em',
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 0 rgba(255,255,255,0.7)', animation: 'howlerPulse 1.6s ease-out infinite' }} />
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', '--live-ring': 'color-mix(in srgb, var(--success) 55%, transparent)', animation: 'howlerPulse 1.6s ease-out infinite' }} />
       LIVE
     </button>
   );
