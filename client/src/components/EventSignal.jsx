@@ -849,12 +849,17 @@ function StationDayView({ monitors, apiBase, onSelect }) {
         .then((r) => r.json()).then((d) => {
           if (!alive) return;
           const buckets = (d && d.buckets) || [];
-          const byStation = {};
-          if (buckets.length) (d.devices || []).forEach((dev) => {
-            const s = dev.station || '';
-            if (!byStation[s]) byStation[s] = buckets.map(() => 0);
-            (dev.counts || []).forEach((c, i) => { if (byStation[s][i] != null) byStation[s][i] += (c || 0); });
-          });
+          // A big fleet (e.g. bars) truncates the per-device read, so summing dev.counts loses the early
+          // hours. The server sends stationTotals (a non-truncated per-station line) when that happens — prefer it.
+          let byStation = (d && d.stationTotals && Object.keys(d.stationTotals).length) ? d.stationTotals : null;
+          if (!byStation) {
+            byStation = {};
+            if (buckets.length) (d.devices || []).forEach((dev) => {
+              const s = dev.station || '';
+              if (!byStation[s]) byStation[s] = buckets.map(() => 0);
+              (dev.counts || []).forEach((c, i) => { if (byStation[s][i] != null) byStation[s][i] += (c || 0); });
+            });
+          }
           setTl((p) => ({ ...p, [m.id]: { buckets, byStation } }));
         }).catch(() => { if (alive) setTl((p) => ({ ...p, [m.id]: { buckets: [], byStation: {} } })); });
     });

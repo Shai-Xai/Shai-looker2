@@ -390,11 +390,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 
   const LAST_FIELD = 'data_health_last';
 
-  // Last-seen read shared by the roster and the labels lookup: ONE aggregated
-  // row per device (+extras) via a dynamic MAX measure — based on the _raw
-  // timeframe first (custom max measures want a raw date), then the picked
-  // timeframe — else plain rows, newest first, at a high cap. What worked is
-  // remembered per monitor.
+  // Last-seen read shared by the roster and the labels lookup: ONE aggregated row per device (+extras)
+  // via a dynamic MAX measure — _raw timeframe first (custom max measures want a raw date), then the
+  // picked timeframe — else plain rows, newest first, at a high cap. What worked is remembered per monitor.
   const lastReadModeByMonitor = new Map(); // m.id -> 'raw' | 'time' | 'rows'
   async function latestRows(m, timeFilter, ex = [], stationExpr = '') {
     const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
@@ -607,11 +605,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
       : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
     h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
-    // Sub-hour blocks first try the matching minuteN sibling dimension so
-    // Looker aggregates to one row per (device, block) — a busy bar day stops
-    // overflowing the row cap instead of returning one row per scan. LookML
-    // without that timeframe 400s → raw-time fallback; whichever works is
-    // remembered per monitor+interval.
+    // Sub-hour blocks first try the matching minuteN sibling dimension so Looker aggregates to one row
+    // per (device, block) — a busy bar day stops overflowing the row cap instead of one row per scan.
+    // LookML without that timeframe 400s → raw-time fallback; whichever works is remembered per monitor+interval.
     const bKey = `${m.id}:${iv}`;
     // After minuteN, prefer the RAW timeframe: this LookML family has already
     // proven the picked _time timeframe silently drops rows in aggregate reads
@@ -749,15 +745,21 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
-    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows, so the count line reads zero for early
-    // hours on big fleets (300+ bar devices over a multi-day event). Re-read the count grouped by bucket ONLY (no device fan-out, never capped) for an exact line.
+    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows → the count line reads zero for early hours on big fleets (300+ bar devices, multi-day). Re-read grouped by bucket (+station when not filtered to one) — no device fan-out, never capped — for an exact line the Stations view can split.
+    let stationTotals = null;
     if (rows.length >= 20000 && mode !== 'none' && !String(mode).startsWith('distinct')) {
       try {
-        const ab = { ...baseBody(m), fields: [bucketField, cKey], sorts: [`${bucketField} desc`], limit: '10000' };
+        const grp = !st && m.stationField ? [bucketField, m.stationField] : [bucketField];
+        const ab = { ...baseBody(m), fields: [...grp, cKey], sorts: [`${bucketField} desc`], limit: '50000' };
         ab.filters[m.timeField] = timeFilter; if (st && m.stationField) ab.filters[m.stationField] = stExpr;
-        const agg = await runScoped(m, ab); const fresh = Array(n).fill(0); let any = false;
-        for (const r of agg) { const ts = parseTs(r[bucketField]); if (!ts) continue; const idx = Math.floor((ts.getTime() - firstBucket) / ivMs); if (idx < 0 || idx >= n) continue; const c = Number(r[cKey]); if (Number.isFinite(c)) { fresh[idx] += c; any = true; } }
-        if (any) for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i];
+        const agg = await runScoped(m, ab); const fresh = Array(n).fill(0); const perSt = {}; let any = false;
+        for (const r of agg) {
+          const ts = parseTs(r[bucketField]); if (!ts) continue;
+          const idx = Math.floor((ts.getTime() - firstBucket) / ivMs); if (idx < 0 || idx >= n) continue;
+          const c = Number(r[cKey]); if (!Number.isFinite(c)) continue; fresh[idx] += c; any = true;
+          if (!st && m.stationField) { const sn = String(r[m.stationField] ?? '').trim() || '—'; (perSt[sn] || (perSt[sn] = Array(n).fill(0)))[idx] += c; }
+        }
+        if (any) { for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i]; if (!st && m.stationField) stationTotals = perSt; }
       } catch (e) { /* keep the device-derived totals */ }
     }
     // Some explore joins return NOTHING when the station filter rides the count read (the join drops
@@ -791,17 +793,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       readPath: byDevice.size ? undefined : tried,
       sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
-      devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
+      devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0), stationTotals,
       truncated: rows.length >= 20000,
     };
   }
 
-  // Distinct values of a dimension (scoped) — feeds the editor's linked filter
-  // dropdowns so users pick a real station/event/type instead of typing blind.
+  // Distinct values of a dimension (scoped) — feeds the editor's linked filter dropdowns so users pick a real station/event/type instead of typing blind.
   async function fieldValues({ model, view, field, entityId, suiteId, filters }) {
     const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
-    // The editor's OTHER filters constrain the value list — with an event
-    // filter set, the station dropdown offers only THAT event's stations.
+    // The editor's OTHER filters constrain the value list — an event filter set means the station dropdown offers only THAT event's stations.
     const extra = {};
     if (filters && typeof filters === 'object' && !Array.isArray(filters)) {
       for (const [k, v] of Object.entries(filters).slice(0, 10)) {
@@ -842,10 +842,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       .run(uuid(), monitorId, station || '', now(), kind, lagMin == null ? null : Math.round(lagMin * 10) / 10, String(message || '').slice(0, 500));
   }
 
-  // Fan out: internal ops Slack ALWAYS (this is first and foremost a Howler health
-  // tool); plus the client's inbox/push/email/Slack via the OS spine when the
-  // monitor is pinned to an entity and has channels ticked. In TEST MODE both are
-  // muted and the alert is emailed only to the test address. Returns where the
+  // Fan out: internal ops Slack ALWAYS (first and foremost a Howler health tool); plus the client's
+  // inbox/push/email/Slack via the OS spine when the monitor is pinned to an entity and has channels
+  // ticked. In TEST MODE both are muted and the alert is emailed only to the test address. Returns where the
   // alert actually went, so the event history stays truthful.
   function deliver(m, title, body) {
     if (testMode()) {
