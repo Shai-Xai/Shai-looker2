@@ -92,6 +92,38 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     return out;
   }
 
+  // Signal flow for a suite: the % of roster devices online, overall and per
+  // station (the same number the Signal board's flow meter shows). `station`
+  // narrows to one; blank = the whole event. Reused by Live Pulse's signal block
+  // and the scheduled ops digest. `target` is the per-event flow target (default 95).
+  const flowTarget = (sid) => { const v = Number(db.getSetting('data_health_flow_target_' + (sid || 'all'), '')); return v >= 50 && v <= 100 ? v : 95; };
+  // Zone (station "category") from a station name — the SAME rule the Signal board
+  // groups by: drop a FOOD/RECYCLING/STORE/LOUNGE prefix, take the first word, and
+  // fold anything GATE-ish into one GATES zone. Kept in sync with EventSignal.zoneOf.
+  const zoneOf = (name) => {
+    const n = String(name || '').trim().toUpperCase();
+    if (!n) return '—';
+    const w = n.replace(/^(FOOD|RECYCLING|STORE|LOUNGE)\s+/, '').split(/\s+/)[0];
+    return w.startsWith('GATE') ? 'GATES' : (w || '—');
+  };
+  // Signal flow for a suite: % of roster devices online + raw on/off counts, for the
+  // whole event, one zone (category) or one station. `opts` = a station string (back
+  // -compat) or { station, category }. Returns the aggregate for the chosen scope plus
+  // every station tagged with its zone (so the picker can group by category).
+  function signalFlow(suiteId, opts = {}) {
+    const station = typeof opts === 'string' ? opts : (opts && opts.station) || '';
+    const category = (opts && typeof opts === 'object' && opts.category) || '';
+    const hs = healthStations(suiteId);
+    const pct = (on, off) => (on + off ? Math.round((on / (on + off)) * 100) : null);
+    const stations = hs.map((s) => ({ name: s.station, zone: zoneOf(s.station), on: s.on, off: s.off, total: s.on + s.off, pct: pct(s.on, s.off) }));
+    let pick = stations, scope = '';
+    if (station) { pick = stations.filter((s) => norm(s.name) === norm(station)); scope = station; }
+    else if (category) { pick = stations.filter((s) => s.zone === category); scope = category; }
+    const on = pick.reduce((a, s) => a + s.on, 0);
+    const off = pick.reduce((a, s) => a + s.off, 0);
+    return { scope, station: station || null, category: category || null, on, off, total: on + off, pct: pct(on, off), target: flowTarget(suiteId), stations };
+  }
+
   // The bridge: a manual mapping wins (even an explicit '' = unmapped);
   // otherwise match by normalised name — exact first, then containment.
   function resolveStation(suiteId, healthStation, opsStations) {
@@ -335,7 +367,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     res.json({ ok: true });
   });
 
-  return { tick, healthStations, resolveStation, staffInbound };
+  return { tick, healthStations, signalFlow, resolveStation, staffInbound };
 }
 
 module.exports = { mount, norm };

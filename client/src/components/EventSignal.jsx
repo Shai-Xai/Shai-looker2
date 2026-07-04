@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
 import AiMark from './AiMark.jsx';
@@ -758,9 +758,200 @@ function FlowMeter({ rows, suiteId }) {
   );
 }
 
+// 📶 Stations view — every station's day in one scannable row: the online/offline
+// strip (from Pulse's observed log — no live Looker cost) plus a LAZILY-loaded
+// average-transactions line, so throughput can be read against connectivity per
+// station. Grouped by zone; a closed monitor's wind-down goes grey (not a fault);
+// online / offline / transactions / closed are each a toggle you can hide.
+const TXN_COL = '#8b7cf6';
+const CLOSED_COL = 'rgba(150,160,175,0.6)';
+
+// One station row. Its transaction line loads only when the row scrolls into
+// view (IntersectionObserver) — the bars paint instantly, the line fills in.
+function StationRow({ apiBase, st, show, onSelect }) {
+  const ref = useRef(null);
+  const [pts, setPts] = useState(null);
+  useEffect(() => {
+    if (!ref.current || pts || !st.total || !show.txn) return undefined;
+    let alive = true;
+    const io = new IntersectionObserver((es) => {
+      if (!es.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      fetch(`${apiBase}/monitors/${encodeURIComponent(st.mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(st.station)}`)
+        .then((r) => r.json()).then((d) => {
+          if (!alive) return;
+          const p = ((d && d.buckets) || []).map((b, i) => ({ at: Date.parse(b), v: (d.devices || []).reduce((a, dev) => a + ((dev.counts || [])[i] || 0), 0) })).filter((x) => Number.isFinite(x.at));
+          setPts(p);
+        }).catch(() => { if (alive) setPts([]); });
+    }, { rootMargin: '150px' });
+    io.observe(ref.current);
+    return () => { alive = false; io.disconnect(); };
+  }, [apiBase, st.mid, st.station, st.total, show.txn, pts]);
+
+  const H = 32, span = Math.max(1, st.tN - st.t0);
+  const line = (show.txn && pts && pts.length > 1) ? (() => {
+    const max = Math.max(...pts.map((p) => p.v), 0.0001);
+    const xy = pts.map((p) => [((p.at - st.t0) / span) * 100, 100 - (p.v / max) * 82 - 9]);
+    const d = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+    return { d, area: `${d} L${xy[xy.length - 1][0].toFixed(1)} 100 L${xy[0][0].toFixed(1)} 100 Z` };
+  })() : null;
+
+  const nowCol = st.closed ? 'var(--muted)' : st.nowPct >= 95 ? STATUS_COLOR.fresh : st.nowPct >= 85 ? STATUS_COLOR.warn : STATUS_COLOR.stale;
+  const stripe = st.closed ? 'transparent' : st.nowPct < 90 ? STATUS_COLOR.stale : st.minPct < 95 ? STATUS_COLOR.warn : 'transparent';
+
+  return (
+    <div ref={ref} role="button" tabIndex={0} onClick={() => onSelect && onSelect(st.pick)}
+      onKeyDown={(e) => { if (e.key === 'Enter') onSelect && onSelect(st.pick); }}
+      style={{ display: 'grid', gridTemplateColumns: 'var(--sv-l) 1fr var(--sv-r)', gap: 10, alignItems: 'center', padding: '7px 10px', borderTop: '1px solid var(--hairline)', boxShadow: stripe !== 'transparent' ? `inset 3px 0 0 ${stripe}` : 'none', cursor: 'pointer' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {st.name}{st.closed && <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: 0.3, textTransform: 'uppercase', background: CLOSED_COL, color: 'var(--card)', borderRadius: 4, padding: '1px 5px', marginLeft: 6, verticalAlign: 'middle' }}>Closed</span>}
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{st.total} device{st.total === 1 ? '' : 's'}</div>
+      </div>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 1, height: H }}>
+        {st.series.map((c, i) => {
+          const onPct = st.total ? (c.on / st.total) * 100 : 0;
+          if (c.closed) return <span key={i} style={{ flex: 1, minWidth: 1.5, display: 'block', height: H, background: CLOSED_COL, borderRadius: '1.5px 1.5px 0 0', opacity: 0.5 }} />;
+          return (
+            <span key={i} style={{ flex: 1, minWidth: 1.5, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H }}>
+              {show.offline && c.off > 0 && <i style={{ display: 'block', height: `${100 - onPct}%`, background: STATUS_COLOR.stale, borderRadius: '1.5px 1.5px 0 0' }} />}
+              {show.online && <i style={{ display: 'block', height: `${onPct}%`, background: STATUS_COLOR.fresh, borderRadius: (show.offline && c.off) ? 0 : '1.5px 1.5px 0 0' }} />}
+            </span>
+          );
+        })}
+        {line && (
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
+            <path d={line.area} fill={TXN_COL} opacity="0.12" />
+            <path d={line.d} fill="none" stroke={TXN_COL} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+          </svg>
+        )}
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: nowCol, fontVariantNumeric: 'tabular-nums' }}>{st.closed ? 'Closed' : st.nowPct + '%'}</div>
+        <div style={{ fontSize: 10, color: 'var(--muted)' }}>low {st.minPct}%</div>
+      </div>
+    </div>
+  );
+}
+
+function StationDayView({ monitors, apiBase, onSelect }) {
+  const [logs, setLogs] = useState({});
+  const [q, setQ] = useState('');
+  const [show, setShow] = useState({ online: true, offline: true, txn: true, closed: true });
+  const toggle = (k) => setShow((s) => ({ ...s, [k]: !s[k] }));
+  useEffect(() => {
+    let alive = true;
+    monitors.forEach((m) => {
+      if (logs[m.id]) return;
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+        .then((r) => r.json()).then((d) => { if (alive && d) setLogs((p) => ({ ...p, [m.id]: d })); }).catch(() => {});
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
+  }, [monitors.map((m) => m.id).join(','), apiBase]);
+
+  const stations = [];
+  for (const m of monitors) {
+    const d = logs[m.id];
+    if (!d || !d.configured || !(d.ticks || []).length) continue;
+    const ticks = (d.ticks || []).slice(-120);
+    const base = (d.ticks || []).length - ticks.length;
+    const byStation = new Map();
+    (d.devices || []).forEach((dev) => { const s = dev.station || ''; if (!byStation.has(s)) byStation.set(s, []); byStation.get(s).push(dev); });
+    const closedMon = m.status === 'closed';
+    for (const [sn, devs] of byStation) {
+      const total = devs.length;
+      const offSets = devs.map((dev) => new Set(dev.offAt || []));
+      const series = ticks.map((k, i) => { let off = 0; for (const s of offSets) if (s.has(base + i)) off += 1; return { at: k.at, off, on: Math.max(0, total - off) }; });
+      // Closed monitor: grey everything after its LAST healthy check (the wind-down).
+      let closeIdx = -1;
+      if (closedMon) { for (let i = 0; i < series.length; i++) if (total && series[i].on / total >= 0.7) closeIdx = i; series.forEach((c, i) => { c.closed = i > closeIdx; }); }
+      const openCk = series.filter((c) => !c.closed);
+      const nowC = series[series.length - 1] || { on: 0, off: 0 };
+      const nowPct = total ? Math.round((nowC.on / total) * 100) : 0;
+      const minPct = openCk.length ? Math.round(Math.min(...openCk.map((c) => c.on / total)) * 100) : 100;
+      const name = sn || m.name;
+      const isClosed = closedMon && !!nowC.closed;
+      const status = isClosed ? 'stale' : nowPct >= 95 ? 'fresh' : nowPct >= 85 ? 'warn' : 'stale';
+      stations.push({
+        mid: m.id, station: sn, name, zone: zoneOf(name), total, series, closed: isClosed, nowPct, minPct,
+        unit: unitFor(m), t0: Date.parse(ticks[0].at), tN: Date.parse(ticks[ticks.length - 1].at),
+        pick: { mid: m.id, sn, name, zone: zoneOf(name), monitor: m.name, unit: unitFor(m), on: nowC.on, off: nowC.off, txnH: null, lagMin: null, status },
+      });
+    }
+  }
+
+  const loading = monitors.some((m) => !logs[m.id]);
+  const ql = q.trim().toLowerCase();
+  let shown = stations;
+  if (ql) shown = shown.filter((s) => s.name.toLowerCase().includes(ql) || s.zone.toLowerCase().includes(ql));
+  if (!show.closed) shown = shown.filter((s) => !s.closed);
+
+  const zones = new Map();
+  for (const s of shown) { if (!zones.has(s.zone)) zones.set(s.zone, []); zones.get(s.zone).push(s); }
+  const zoneList = [...zones.entries()].map(([k, list]) => {
+    list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const openS = list.filter((s) => !s.closed);
+    const on = openS.reduce((a, s) => a + (s.series[s.series.length - 1] || {}).on || 0, 0);
+    const tot = openS.reduce((a, s) => a + s.total, 0);
+    return { k, list, pct: tot ? Math.round((on / tot) * 100) : null, dev: list.reduce((a, s) => a + s.total, 0) };
+  }).sort((a, b) => b.dev - a.dev);
+
+  const allT = stations.filter((s) => Number.isFinite(s.t0));
+  const t0 = allT.length ? Math.min(...allT.map((s) => s.t0)) : 0;
+  const tN = allT.length ? Math.max(...allT.map((s) => s.tN)) : 0;
+  const timeLbl = (f) => (t0 && tN ? new Date(t0 + (tN - t0) * f).toTimeString().slice(0, 5) : '');
+
+  const legendChip = (k, label, col) => (
+    <button onClick={() => toggle(k)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${show[k] ? 'var(--hairline)' : 'transparent'}`, background: show[k] ? 'var(--card)' : 'transparent', color: show[k] ? 'var(--text)' : 'var(--muted)', borderRadius: 999, padding: '3px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', opacity: show[k] ? 1 : 0.5, textDecoration: show[k] ? 'none' : 'line-through' }}>
+      {k === 'txn'
+        ? <svg width="15" height="9" style={{ display: 'block' }}><path d="M0 7 L5 4 L9 6 L15 1" fill="none" stroke={col} strokeWidth="1.6" /></svg>
+        : <span style={{ width: 10, height: 10, borderRadius: 3, background: col, display: 'inline-block' }} />}
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ '--sv-l': '150px', '--sv-r': '74px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter stations…"
+          style={{ flex: '1 1 160px', minWidth: 130, padding: '7px 11px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
+        {legendChip('online', 'Online', STATUS_COLOR.fresh)}
+        {legendChip('offline', 'Offline', STATUS_COLOR.stale)}
+        {legendChip('txn', 'Avg txns', TXN_COL)}
+        {legendChip('closed', 'Closed', CLOSED_COL)}
+      </div>
+      {loading && !stations.length && <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Reading each station's day…</div>}
+      {!loading && !stations.length && <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>No observed checks yet — the strips appear once Pulse's offline log has coverage.</div>}
+      {!!shown.length && (
+        <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'var(--sv-l) 1fr var(--sv-r)', gap: 10, padding: '9px 10px 6px', borderBottom: '1px solid var(--hairline)' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)' }}>Station</span>
+            <span style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+              {[0, 0.33, 0.66, 1].map((f) => <span key={f}>{timeLbl(f)}</span>)}
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', textAlign: 'right' }}>Now</span>
+          </div>
+          {zoneList.map((z) => (
+            <div key={z.k}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'var(--sv-l) 1fr var(--sv-r)', gap: 10, alignItems: 'center', padding: '9px 10px 4px' }}>
+                <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase' }}>{z.k}</span>
+                <span style={{ height: 1, background: 'var(--hairline)' }} />
+                <span style={{ fontSize: 10.5, fontWeight: 700, textAlign: 'right', color: 'var(--muted)' }}>{z.pct == null ? 'closed' : z.pct + '%'}</span>
+              </div>
+              {z.list.map((st) => <StationRow key={st.mid + '|' + st.station} apiBase={apiBase} st={st} show={show} onSelect={onSelect} />)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
-  const [view, setView] = useState('board'); // 'board' | 'rhythm' (the rate river)
+  const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
   const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -849,10 +1040,15 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         <span style={{ flex: 1 }} />
         <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
         <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
+        <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
       </div>
 
       {view === 'rhythm' && (
         <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
+      )}
+
+      {view === 'stations' && (
+        <StationDayView monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
       )}
 
       {view === 'board' && <>

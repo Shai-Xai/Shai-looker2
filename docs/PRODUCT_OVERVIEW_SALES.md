@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-04 (🎛️ Event Signal: flow meter, drag-to-replay, journal · 🚨 staff alerts phase 1) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-04 (📣 Event Ops device support calls · 🎛️ Event Signal: flow meter, drag-to-replay, journal · 🚨 staff alerts phase 1) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -675,6 +675,13 @@ WhatsApp thread with one phone-first console.
 - **Liaison checks & issues** 🧪 — scan a device, log an issue from a quick list
   (damaged, battery, connectivity…) and record **how it was resolved**. Open issues
   surface on the live overview.
+- **Device support calls** 🧪 — the person at a bar/booth taps **one button on the
+  device's saved link** (Stock · Manager · Help · Security · Medical) and it lands with
+  dispatch as a live **call** — pre-tagged with **which station and which device**, so
+  they never pick where they are. No app to install; the link works from any phone, so a
+  frozen device never blocks a call for help. Dispatch **acknowledges (with an ETA)** and
+  **resolves** from the Hive → **Calls** queue. Ships in test mode (calls reach your test
+  inbox only) until you go live.
 - **Live overview** 🧪 — device counts by state, per-station counts, open issues and a
   recent-activity feed — the "where is everything right now" board.
 - **Dual-surface + per-client pilot** — Howler staff run it in **Admin → a client →
@@ -784,7 +791,13 @@ see "The continuous comms loop" above.)*
   Also: **double-tap a chart to full-screen** it on mobile, carousels give charts a
   readable full-width card on phones, and setting up a **live update** now shows the
   actual numbers each block pulls (+ a "send to me" phone preview) before you go live.
-
+- **2026-07-04 (night)** — **Device support calls** 🧪 (Event Ops §12): the person at a
+  bar/booth taps one button on the device's saved link (Stock · Manager · Help · Security
+  · Medical) and it reaches dispatch as a live call, **pre-tagged with the station and
+  device** so nothing is filled in but the reason (+ their name, an optional note, and
+  what they've already tried). No app install; the link works from any phone, so a frozen
+  device never blocks a call. Dispatch acknowledges (ETA) + resolves from the new Hive →
+  **Calls** queue. Test mode until go-live (calls reach the test inbox only).
 - **2026-07-04 (night)** — **Alerts reach the person on the ground** 🧪: staff can
   now opt their own phone into station alerts straight from the public staff
   portal (🔔 Alerts — web push, no app install, no account), and once an event is
