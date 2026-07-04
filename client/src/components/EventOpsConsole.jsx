@@ -36,7 +36,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [suiteId, setSuiteId] = useState('');
   const [canManage, setCanManage] = useState(false);
   const [tab, setTab] = useState('live');
-  const [hiveOpen, setHiveOpen] = useState(true); // 🐝 the sub-drawer of on-the-ground tabs
+  const [hiveOpen, setHiveOpen] = useState(false); // 🐝 sub-drawer closed until tapped — the landing stays 3 buttons
   const inHive = HIVE_TABS.some(([t]) => t === tab);
   const [scan, setScan] = useState(null);        // null | { for: 'move' }
   const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
