@@ -567,6 +567,29 @@ test('deviceTimeline: an hour bucket that reads empty falls through to raw', asy
   assert.equal(t.grandTotal, 4);
 });
 
+test('deviceTimeline: a bucket dim that returns BLANK values falls through to raw', async () => {
+  // Looker can accept a minuteN timeframe without a 400 yet return null for
+  // it on every row (created_at_minute10 on the check-ins family) — the
+  // bucket shape is broken, not the measure: the read must move to raw.
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_minute10')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': '', 'scans.count': 9 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': null, 'scans.count': 8 },
+      ];
+    }
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 9 }];
+    return [];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.devices.length, 1);
+  assert.equal(t.grandTotal, 9);
+});
+
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
@@ -618,10 +641,11 @@ test('deviceTimeline: per-device hour buckets over the window', async () => {
   const hourStr = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
   h.setRowsFn(async (b) => {
     body = b;
+    const bf = b.fields[1]; // Looker echoes whichever bucket dim was requested
     return [
-      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(0), 'scans.count': 42 },   // this hour
-      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(180), 'scans.count': 7 },  // 3 hours back
-      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(600), 'scans.count': 3 },  // 10 hours back
+      { 'scans.device_id': 'D-1', [bf]: hourStr(0), 'scans.count': 42 },   // this hour
+      { 'scans.device_id': 'D-1', [bf]: hourStr(180), 'scans.count': 7 },  // 3 hours back
+      { 'scans.device_id': 'D-2', [bf]: hourStr(600), 'scans.count': 3 },  // 10 hours back
     ];
   });
   const t = await h.mod.deviceTimeline(m, 24);
@@ -659,9 +683,10 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
     const bad = b.fields.find((f) => f.includes('_minute') || f.endsWith('_raw'));
     if (bad) throw new Error(`Unknown field "${bad}"`);
     body = b;
+    const bf = b.fields[1]; // Looker echoes whichever bucket dim was requested
     return [
-      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0), 'scans.count': 2 },  // current 10-min block
-      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(95), 'scans.count': 5 }, // ~9 blocks back
+      { 'scans.device_id': 'D-1', [bf]: tsStr(0), 'scans.count': 2 },  // current 10-min block
+      { 'scans.device_id': 'D-1', [bf]: tsStr(95), 'scans.count': 5 }, // ~9 blocks back
     ];
   });
   const t = await h.mod.deviceTimeline(m, 12, 10);
