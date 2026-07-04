@@ -1,0 +1,47 @@
+name: Apply event signal board
+# ONE-SHOT helper (same pattern as the earlier data-health jobs): verifies the
+# patch AND the new-component payload, applies both to the feature branch,
+# copies the files onto main, then deletes itself from this (default) branch.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify, apply to branch, sync main, self-clean
+        run: |
+          set -euo pipefail
+          cp patches/datahealth-signal.patch /tmp/d.patch
+          cp patches/EventSignal.jsx /tmp/EventSignal.jsx
+          echo "486d6bacda5223ee7b82cf27797f507ba98458f0e9b86c4687fe8eedfa5eb7e9  /tmp/d.patch" | sha256sum -c -
+          echo "18d7f29041ada77deedc5958f5e5c3111b01e00dfb152ed1c5454bb88b4c2af0  /tmp/EventSignal.jsx" | sha256sum -c -
+          git config user.name "Claude"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin claude/looker-data-monitoring-jeo2l9 main
+          git checkout -B work origin/claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/d.patch
+          cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
+          git add client/src/components/EventSignal.jsx
+          git commit -m 'Event Signal: the event as a live site board (phase one)' \
+            -m 'Each check now rolls its timeline read up per station (devices on/off, the hour volume, a 6-block spark -- no extra Looker reads) and stores it on the snapshot. A new SignalBoard renders the event as a schematic site plan: stations grouped into venue zones derived from their names, every device a countable tick (green sending / red dark), per-station volume with a mini trend, dials on top and a tap-open station detail. Ships as a Signal board tab in Event Ops (read-only client) and a per-group Board toggle on the admin Data health page. Styled with the app theme tokens, so it follows Pulse light/dark. Floorplan overlay and obs-log day-replay are phase two. Sales overview updated (merged with main copy).' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin work:claude/looker-data-monitoring-jeo2l9
+          git checkout -B mwork origin/main
+          git checkout work -- client/src/components/DataHealthAdmin.jsx client/src/components/EventOpsConsole.jsx client/src/components/EventSignal.jsx docs/PRODUCT_OVERVIEW_SALES.md server/dataHealth.js test/dataHealth.test.js
+          git commit -m 'Event Signal: the event as a live site board (phase one)' \
+            -m 'Files copied verbatim from the feature branch.' \
+            -m 'Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>' \
+            -m 'Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB'
+          git push origin mwork:main
+          git checkout -B defclean origin/claude/ecstatic-thompson-vUFsS
+          git rm -q --ignore-unmatch patches/datahealth-signal.patch patches/EventSignal.jsx .github/workflows/apply-datahealth-signal.yml
+          git commit -m "chore: remove one-shot signal helper"
+          git push origin defclean:claude/ecstatic-thompson-vUFsS
