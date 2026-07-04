@@ -1,0 +1,55 @@
+name: apply-round27
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 27 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "ea4df29ca24f1ca9a34caa248daace4174bb2af341e53eb6402b6702c9435ece  patches/round27.patch" | sha256sum -c -
+          cp patches/round27.patch /tmp/round27.patch
+          cat > /tmp/msg <<'MSG'
+          WhatsApp staff channel (phase 3): show the number, capture inbound, keep off the Owl
+
+          Reuses the existing Clickatell WhatsApp channel:
+          - The staff portal + Hive -> Alerts show the Howler WhatsApp number with a
+            wa.me deep link; a staffer messages it once to open WhatsApp's 24h
+            free-form window and switch alerts on.
+          - staffAlerts.staffInbound intercepts a message from a known staff number
+            BEFORE the client Owl runs (defensively guarded, threaded late-bound
+            through owlChat -> owlWhatsapp): it captures the message for ops, records
+            the 24h window, replies with a plain confirmation, and returns - staff
+            never reach the Owl. STOP opts out. Any non-staff number falls straight
+            through to the Owl unchanged.
+          - Live alerts also go out on WhatsApp to crew with an open window
+            (free-form is only allowed inside 24h). Hive -> Alerts shows a bell for
+            push reach and a speech bubble for WhatsApp reach.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/staffAlerts.js server/owlWhatsapp.js server/owlChat.js server/eventops.js server/index.js client/src/pages/EventOpsPortalPage.jsx client/src/components/StaffAlertsTab.jsx test/staffAlerts.test.js"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round27.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round27.patch .github/workflows/apply-round27.yml
+          git commit -m "chore: clean round27 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
