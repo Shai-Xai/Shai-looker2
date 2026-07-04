@@ -1,0 +1,48 @@
+name: apply-round20
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 20 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "99ccb969b39cb02fe4989bf20e07af18e72f8776bb619e8ce82355eb26b9bcea  patches/round20.patch" | sha256sum -c -
+          cp patches/round20.patch /tmp/round20.patch
+          cat > /tmp/msg <<'MSG'
+          Staff alerts storm guard: many stations crossing at once = ONE site-wide note
+
+          The first tick after deploy met a half-dark board and sent one test email
+          per station - an inbox flood. When 4+ stations cross the dark threshold in
+          the same tick it is the pipe, not the people: send a single combined
+          "likely the data pipe" note (max one per 15 min per event) instead of
+          paging every station's crew. Individual station alerts still fire when
+          only a few cross.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/staffAlerts.js test/staffAlerts.test.js"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round20.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round20.patch .github/workflows/apply-round20.yml
+          git commit -m "chore: clean round20 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
