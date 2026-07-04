@@ -1452,6 +1452,7 @@ export default function DataHealthAdmin() {
   const [entities, setEntities] = useState([]);
   const [suites, setSuites] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | monitor
+  const [view, setView] = useState('overview'); // 'overview' | 'board' — the two main faces
   const [err, setErr] = useState('');
   const timerRef = useRef(null);
 
@@ -1488,8 +1489,37 @@ export default function DataHealthAdmin() {
   }
   const platformDot = staleN ? 'stale' : warnN ? 'warn' : allStreams.length ? 'fresh' : undefined;
 
+  const segBtn = (act) => ({
+    flex: 1, minHeight: 44, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 13.5, fontWeight: 800, border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`,
+    background: act ? 'var(--brand)' : 'var(--card)', color: act ? '#fff' : 'var(--text)',
+  });
+
   return (
     <div>
+      {/* the two main faces of Data health: the monitor overview and the live site board */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button style={segBtn(view === 'overview')} onClick={() => setView('overview')}>📡 Overview</button>
+        <button style={segBtn(view === 'board')} onClick={() => setView('board')}>🎛️ Board</button>
+      </div>
+
+      {view === 'board' ? (
+        !data ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
+          : !monitors.length ? (
+            <div style={card}>
+              <strong style={{ fontSize: 14 }}>Nothing on the board yet</strong>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Create monitors in the Overview and the board builds itself from their checks.</p>
+            </div>
+          ) : groups.map((g) => (
+            <section key={g.key} style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 850, letterSpacing: 0.3, margin: '0 0 8px' }}>{g.label}</h3>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={g.monitors} />
+              </Suspense>
+            </section>
+          ))
+      ) : (
+        <>
       <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
         Watches the <strong>stream of data flowing into Looker from BigQuery / Howler</strong> — the pipe every dashboard reads.
         Each monitor pulls the latest record timestamp on an explore (optionally per station: check-in scanners, bars, vendors),
@@ -1549,6 +1579,8 @@ export default function DataHealthAdmin() {
             reportBody={g.entityId ? { entityId: g.entityId, suiteId: g.suiteId || '' } : null}
             onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+        </>
+      )}
     </div>
   );
 }
