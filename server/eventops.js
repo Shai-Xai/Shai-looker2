@@ -40,7 +40,7 @@ const DEVICE_TYPES = ['handheld', 'kiosk', 'radio', 'printer', 'tablet', 'other'
 // Suggested issue categories (free-text is allowed too — the UI offers these as quick picks).
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 
-function mount(app, { db, auth }) {
+function mount(app, { db, auth, push = require('./push') }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -196,6 +196,18 @@ function mount(app, { db, auth }) {
       at              TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_cplogs_suite ON eventops_checkpoint_logs(suite_id, at);
+
+    -- Web-push subscriptions for portal staff (no Pulse account — keyed by staff id).
+    -- Powers staff alerts phase 2: a dark station pings the person standing at it.
+    CREATE TABLE IF NOT EXISTS eventops_staff_push (
+      staff_id   TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      endpoint   TEXT NOT NULL PRIMARY KEY,
+      p256dh     TEXT NOT NULL,
+      auth       TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_staff_push ON eventops_staff_push(staff_id);
   `);
 
   // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
@@ -910,6 +922,31 @@ function mount(app, { db, auth }) {
     }).filter(Boolean);
     const total = sql.prepare('SELECT COUNT(*) c FROM eventops_devices WHERE suite_id=?').get(su.id).c;
     res.json({ staff: portalStaffRow(s), stations, eventTotals: { devices: total } });
+  });
+
+  // Push (staff alerts phase 2): the VAPID key + this staffer's subscription,
+  // so a dark station can ping the person on the ground. Token-gated, no account.
+  app.get('/api/eventops/portal/:suiteId/:token/push-key', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    res.json({ enabled: push.isEnabled(), publicKey: push.isEnabled() ? push.vapidPublicKey() : '' });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/push', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, str(req.body?.staffId, 64));
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    const sub = req.body?.subscription || {};
+    const endpoint = str(sub.endpoint, 800); const keys = sub.keys || {};
+    if (!endpoint || !keys.p256dh || !keys.auth) return res.status(400).json({ error: 'Bad subscription' });
+    sql.prepare(`INSERT INTO eventops_staff_push (staff_id, suite_id, endpoint, p256dh, auth, created_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(endpoint) DO UPDATE SET staff_id=excluded.staff_id, suite_id=excluded.suite_id, p256dh=excluded.p256dh, auth=excluded.auth`)
+      .run(s.id, su.id, endpoint, str(keys.p256dh, 300), str(keys.auth, 300), now());
+    res.json({ ok: true });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/push-off', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const endpoint = str(req.body?.endpoint, 800);
+    if (endpoint) sql.prepare('DELETE FROM eventops_staff_push WHERE endpoint=? AND suite_id=?').run(endpoint, su.id);
+    res.json({ ok: true });
   });
 
   // Scan a code → resolve the device (same matching as the console).
