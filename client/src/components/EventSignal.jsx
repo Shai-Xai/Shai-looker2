@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
+import SignalReportPanel from './SignalReportPanel.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -1157,6 +1158,7 @@ export default function SignalOps({ entityId, suiteId }) {
           const controls = <>
             <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
             <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
+            {suiteId && <SignalReportPanel suiteId={suiteId} />}
             <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
           </>;
           return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
