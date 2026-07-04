@@ -1,0 +1,47 @@
+name: apply-round15
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 15 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "5fcfd5bb520a0b082ff47f0e1a9126b31a858927d7870c231d6f0e37e314bd9a  patches/round15.patch" | sha256sum -c -
+          cp patches/round15.patch /tmp/round15.patch
+          cat > /tmp/msg <<'MSG'
+          Signal flow meter; phone headers fold into one menu; Scan/Move are Hive-only
+
+          - FlowMeter on the board: average per-station online share vs the 95%
+            target (5% dark is acceptable) - green at/above, amber within 5 points
+            below, red under that; meter bar with target tick.
+          - On phones, Data health & Signal board headers collapse Summary/Share/
+            refresh into a single page-actions menu and drop the explainer line.
+          - Scan and Move devices buttons only render inside the Hive tabs.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="client/src/components/DataHealthAdmin.jsx client/src/components/EventOpsConsole.jsx client/src/components/EventSignal.jsx"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round15.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round15.patch .github/workflows/apply-round15.yml
+          git commit -m "chore: clean round15 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
