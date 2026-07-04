@@ -240,7 +240,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getLivePulseApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -302,23 +302,13 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   const SCOPE_LABEL = { 'core_organisers.name': 'organiser', 'core_events.name': 'event' };
   const fieldLabel = (f) => SCOPE_LABEL[f] || dimLabel.get(f) || String(f).split('.').pop().replace(/_/g, ' ');
   function sourcesFromTrail(trail) {
-    // ask_* = the admin-registered extra explores (e.g. cashless) — they cite, chart
-    // and export exactly like askData. Their labels come from the LIVE catalogue's
-    // extras (not the primary label maps, which only know ticketing fields).
-    const extras = (getOwlTools().catalogue || {}).extras || [];
-    const extraByView = new Map(extras.map((x) => [x.explore, x]));
     const data = (trail || [])
-      .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard' || t.name.startsWith('ask_')) && t.result && t.result.ok)
+      .filter((t) => (t.name === 'askData' || t.name === 'queryDashboard') && t.result && t.result.ok)
       .map((t) => {
         const qb = t.result.queryBody || {};
         const m = t.input.measure;
         const dims = t.input.dimensions || [];
         const rows = t.result.rows || [];
-        const ex = t.name.startsWith('ask_') ? extraByView.get(t.result.explore || qb.view) : null;
-        const exM = new Map(ex ? ex.measures.map((x) => [x.name, x.label]) : []);
-        const exD = new Map(ex ? ex.dimensions.map((x) => [x.name, x]) : []);
-        const mLbl = (f) => exM.get(f) || measLabel.get(f) || null;
-        const dLbl = (f) => (exD.get(f) || {}).label || dimLabel.get(f) || null;
         // Single scalar answer (one row, no group-by) → surface the value on the chip.
         let value = null;
         if (rows.length === 1 && !dims.length && rows[0][m] != null) value = rows[0][m];
@@ -326,18 +316,18 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
         // citation can show the data — not just the query — like a spreadsheet.
         const fields = qb.fields || [...dims, m];
         return {
-          measure: mLbl(m) || m,
+          measure: measLabel.get(m) || m,
           value,
           count: t.result.count,
-          dimensions: dims.map((d) => dLbl(d) || d),
-          filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: dLbl(f) || fieldLabel(f), value: String(v) })),
-          explore: ex ? ex.label : (cat.label || qb.view || ''),
-          columns: fields.map((f) => ({ field: f, label: mLbl(f) || dLbl(f) || fieldLabel(f), kind: (exM.has(f) || measLabel.has(f)) ? 'measure' : 'dimension' })),
+          dimensions: dims.map((d) => dimLabel.get(d) || d),
+          filters: Object.entries(qb.filters || {}).map(([f, v]) => ({ label: fieldLabel(f), value: String(v) })),
+          explore: cat.label || qb.view || '',
+          columns: fields.map((f) => ({ field: f, label: measLabel.get(f) || dimLabel.get(f) || fieldLabel(f), kind: measLabel.has(f) ? 'measure' : 'dimension' })),
           rows: rows.slice(0, 50),
           queryBody: qb, // the live Looker query — used when pinning the chart to a dashboard
           // Auto-chart hint: a breakdown (>=1 dimension, >1 row) charts; a date
           // dimension → line, otherwise → bar. A single scalar stays text.
-          chartType: (dims.length >= 1 && rows.length > 1) ? (dims.some((d) => (ex ? (exD.get(d) || {}).type : dimType.get(d)) === 'date') ? 'line' : 'bar') : null,
+          chartType: (dims.length >= 1 && rows.length > 1) ? (dimType.get(dims[0]) === 'date' ? 'line' : 'bar') : null,
         };
       });
     // getDashboard answers carry no Looker query of their own, but the model read the
@@ -407,19 +397,6 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
       `Today's date is ${today} and the current time is about ${String(hourSa).padStart(2, '0')}:00 (SAST, UTC+2). For "upcoming"/"future"/"past"/"this year" questions, compare against today — e.g. filter Event Date (core_events.start_date) with a Looker date expression such as "after ${today}" for future events or "before ${today}" for past ones. (Event Date is the date of the event; Purchased Date is when a ticket was bought.) For a "today so far vs yesterday (to the same time)" comparison, use ${hourSa} as the cut-off hour (filter Purchased Hour of Day to "0 to ${hourSa}") so both days are trimmed to the same window.`,
     ];
     if (scopeLabel) parts.push(`All data in this conversation is scoped to: ${scopeLabel}. Make clear in your answer which client/event the numbers are for — lead your answer with "For ${scopeLabel}:" (or naturally name it). Never imply the figures cover other clients or events.`);
-    // A selected event pins queries via the suite's locked filters — surface them so
-    // the Owl KNOWS the pin is a default it may override for cross-edition questions
-    // ("vs last year"), using the suite's own Comparison event value(s). The organiser
-    // scope stays forced either way, so overriding can never leave this client.
-    if (su) {
-      try {
-        const locks = auth.lockedFiltersForSuite ? (auth.lockedFiltersForSuite(suiteId) || {}) : {};
-        const evLocks = Object.entries(locks).filter(([k, v]) => /event/i.test(k) && v != null && String(v).trim() !== '' && v !== ' __ANY_VALUE__');
-        if (evLocks.length) {
-          parts.push(`SELECTED-EVENT LOCKS (defaults, not walls): queries are pinned to this event by: ${evLocks.map(([k, v]) => `${k} = "${v}"`).join('; ')}. For a CROSS-EDITION question ("vs last year", "all editions", "compare to 2025"), OVERRIDE the pin by setting your OWN filter on the matching event-name field — ticketing: core_events.name; an extra data source (e.g. cashless): its own event-name field — using the Comparison value(s) above (a comma-separated value means several events; you can also GROUP BY the event-name field to split editions apart). If no Comparison lock is listed and the user wants other editions, say they can switch the event picker to "All events".`);
-        }
-      } catch { /* locks unavailable — the pin still applies mechanically */ }
-    }
     // Surface the curated catalogue's field meanings + rules to the model — it only
     // sees raw field names in the tool enum otherwise, so labels/synonyms/notes
     // (e.g. the add-on split rule) must be passed in here.
@@ -545,22 +522,6 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   function logToolStop(threadId, trail) {
     try { insMsg.run(crypto.randomUUID(), threadId, 'owl', '⏹ Stopped before finishing.', JSON.stringify(trail || []), now()); } catch { /* best-effort */ }
   }
-
-  // POST /api/owl/export-rows — the ⬇ CSV "full data" path. Citation rows in the chat
-  // stream are capped at 50; this re-runs the citation's query LIVE (up to 5000 rows)
-  // so the download holds the complete result. Scope + PII gates re-applied server-side
-  // in owlTools.exportRows — the round-tripped queryBody is never trusted.
-  app.post('/api/owl/export-rows', auth.requireAuth, async (req, res) => {
-    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { queryBody, suiteId, entityId } = req.body || {};
-    if (suiteId && req.user.role !== 'admin' && auth.canAccessSuite && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
-    try {
-      const fn = getOwlTools().exportRows;
-      const r = fn ? await fn(queryBody, { user: req.user, suiteId: suiteId || undefined, entityId: entityId || undefined }) : { ok: false, message: 'Export unavailable.' };
-      if (!r.ok) return res.status(400).json({ error: r.message || 'Could not export the data.' });
-      res.json({ rows: r.rows, count: r.count });
-    } catch (e) { res.status(500).json({ error: 'Could not export the data.' }); }
-  });
 
   // GET /api/owl/capabilities — the slash-command palette, derived from the tool
   // registry (each read tool's `menu`). Sourced here so it can never drift from what
@@ -702,23 +663,6 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     res.status(201).json({ ok: true, alert: { id: r.alert.id, name: r.alert.name }, url: actionViewPath('createAlert') });
   });
 
-  // POST /api/owl/act/create-live-update — the user tapping "Set it up" on the card
-  // the createLiveUpdate tool produced. Same draft→confirm shape as create-alert;
-  // permission is re-checked inside livepulse.createLivePulse (alerts.manage).
-  app.post('/api/owl/act/create-live-update', auth.requireAuth, (req, res) => {
-    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
-    const { suiteId, draft } = req.body || {};
-    if (!suiteId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'suiteId and draft are required.' });
-    const su = db.getSuite(suiteId);
-    if (!su) return res.status(404).json({ error: 'Event not found.' });
-    if (req.user.role !== 'admin' && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed.' });
-    const lpApi = typeof getLivePulseApi === 'function' ? getLivePulseApi() : null;
-    if (!lpApi || !lpApi.createLivePulse) return res.status(503).json({ error: 'Live updates aren\'t available right now.' });
-    const r = lpApi.createLivePulse({ suiteId, draft, user: req.user, via: 'owl' });
-    if (!r.ok) return res.status(400).json({ error: r.error || 'Could not set up the live update.' });
-    res.status(201).json({ ok: true, pulse: { id: r.pulse.id, name: r.pulse.name }, url: actionViewPath('createLiveUpdate') });
-  });
-
   // POST /api/owl/act/submit-report — the user tapping "File it" on the card the
   // draftReport tool produced. Files a product ticket via the tickets module's
   // createTicket (the SAME path as the report widget), tagged source='owl'. The
@@ -826,7 +770,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });
   });
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

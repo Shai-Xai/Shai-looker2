@@ -143,6 +143,19 @@ export default function EventOpsPortalPage({ suiteId, token }) {
               <AlertsToggle suiteId={suiteId} token={token} staffId={staff.id} flash={flash} />
             </div>
 
+            {info.whatsappFrom && (
+              <a href={`https://wa.me/${info.whatsappFrom.replace(/[^\d]/g, '')}?text=${encodeURIComponent(`ALERTS ${staff.number || ''}`.trim())}`}
+                target="_blank" rel="noopener noreferrer"
+                style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, textDecoration: 'none', color: 'inherit', borderLeft: '4px solid #25D366' }}>
+                <span style={{ fontSize: 22 }}>💬</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Get alerts on WhatsApp</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tap to message <b>{info.whatsappFrom}</b> once — that switches on station alerts here. (We only send alerts; it isn’t a chat line.)</div>
+                </div>
+                <span style={{ fontSize: 13, color: '#25D366', fontWeight: 800, flexShrink: 0 }}>Open ›</span>
+              </a>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
               <button onClick={() => setScanning(true)} style={{ ...bigBtn, fontSize: 17, padding: '15px' }}>⚠️ Log an issue</button>
               {staff.canMove !== false && (

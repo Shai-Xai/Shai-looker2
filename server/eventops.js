@@ -40,7 +40,7 @@ const DEVICE_TYPES = ['handheld', 'kiosk', 'radio', 'printer', 'tablet', 'other'
 // Suggested issue categories (free-text is allowed too — the UI offers these as quick picks).
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 
-function mount(app, { db, auth, push = require('./push') }) {
+function mount(app, { db, auth, push = require('./push'), messaging = null }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -891,6 +891,8 @@ function mount(app, { db, auth, push = require('./push') }) {
       issueCategories: issueCategories(su).map(issueCategoryRow),
       // Roster (name + number only) so a staffer can hand a device to a colleague.
       staff: sql.prepare('SELECT id, name, number FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(su.id),
+      // Howler WhatsApp number (if configured) so staff can open the alert channel.
+      whatsappFrom: (messaging && messaging.waFrom && messaging.waConfigured && messaging.waConfigured()) ? messaging.waFrom() : '',
     });
   });
 
