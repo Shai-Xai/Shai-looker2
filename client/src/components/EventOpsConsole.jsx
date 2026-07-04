@@ -205,7 +205,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 // ───────────────────────────────── Live tab ──────────────────────────────────
 function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
   const [data, setData] = useState(null);
-  const [kind, setKind] = useState(''); // station-type filter: '' = all
+  const [kind, setKind] = useState(null); // null = show chips only · '' = all cards · 'bar' etc = that kind
   useEffect(() => {
     let alive = true;
     setData(null);
@@ -233,26 +233,31 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
       )}
 
       <Section title="Stations">
-        {/* Station-TYPE chips — only the kinds this event actually has. */}
-        {data.stations.length > 6 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-            <Chip on={!kind} onClick={() => setKind('')}>All · {data.stations.length}</Chip>
-            {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
-              <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? '' : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
-            ))}
-          </div>
-        )}
         {data.stations.length === 0 ? <Empty>No stations yet.</Empty> : (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
-            {data.stations.filter((s) => !kind || s.kind === kind).map((s) => (
-              <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
-                <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
-                <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
-              </button>
-            ))}
-          </div>
+          <>
+            {/* Chips first — the grid stays collapsed until you pick a type (or
+                Show all). Keeps a 60-station event from flooding the landing. */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: kind === null ? 0 : 10 }}>
+              <Chip on={kind === ''} onClick={() => setKind(kind === '' ? null : '')}>📋 Show all · {data.stations.length}</Chip>
+              {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
+                <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? null : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
+              ))}
+            </div>
+            {kind === null ? (
+              <div style={{ fontSize: 12, color: 'var(--muted)', padding: '2px 2px 0' }}>Pick a type above to see its stations, or Show all.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
+                {data.stations.filter((s) => kind === '' || s.kind === kind).map((s) => (
+                  <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
+                    <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
+                    <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </Section>
 
