@@ -206,7 +206,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       for (const suiteId of suites) {
         if (paused(suiteId)) continue; // event's alerts are paused — skip the whole suite
         const opsStations = sql.prepare('SELECT id, name FROM eventops_stations WHERE suite_id=?').all(suiteId);
-        const staff = sql.prepare('SELECT id, name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+        const staff = sql.prepare('SELECT id, name, number, role, station_id FROM eventops_staff WHERE suite_id=? AND (alerts_on IS NULL OR alerts_on=1)').all(suiteId);
         const thr = thresholdPct(suiteId) / 100;
         const fires = [];
         for (const hs of healthStations(suiteId)) {
