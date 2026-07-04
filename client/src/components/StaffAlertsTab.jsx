@@ -8,10 +8,14 @@ import { useEffect, useState } from 'react';
 const card = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: 12 };
 const sel = { padding: '7px 9px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 12.5, background: 'var(--card)', color: 'var(--text)', fontFamily: 'inherit', maxWidth: '100%', minHeight: 36 };
 
+const chip = (on) => ({ border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, cursor: 'pointer', background: 'var(--card)', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 800 : 600, padding: '5px 12px', fontSize: 12, fontFamily: 'inherit', minHeight: 30 });
+
 export default function StaffAlertsTab({ suiteId }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [tick, setTick] = useState(0);
+  const [q, setQ] = useState(''); // text filter (station name)
+  const [view, setView] = useState('all'); // all | alerting | dark | unmapped | nostaff
   useEffect(() => {
     let alive = true;
     fetch(`/api/my/staff-alerts?suiteId=${encodeURIComponent(suiteId || '')}`)
@@ -58,8 +62,31 @@ export default function StaffAlertsTab({ suiteId }) {
         {unmapped ? <b style={{ color: '#dc2626' }}>{unmapped} station{unmapped > 1 ? 's' : ''} unmapped</b> : null}
         {uncrewed ? <b style={{ color: '#d97706' }}>{uncrewed} mapped but no staff assigned</b> : null}
       </div>
+      {/* Filters: status chips + a name search, so a 65-station board is
+          navigable — jump straight to the ones alerting or missing a crew. */}
+      {data.stations.length > 6 && (() => {
+        const alerting = data.stations.filter((s) => s.alerting).length;
+        const dark = data.stations.filter((s) => s.off > 0).length;
+        return (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+            <button onClick={() => setView('all')} style={chip(view === 'all')}>All · {data.stations.length}</button>
+            {alerting > 0 && <button onClick={() => setView('alerting')} style={chip(view === 'alerting')}>🚨 Alerting · {alerting}</button>}
+            {dark > 0 && <button onClick={() => setView('dark')} style={chip(view === 'dark')}>🟠 Has dark · {dark}</button>}
+            {unmapped > 0 && <button onClick={() => setView('unmapped')} style={chip(view === 'unmapped')}>Unmapped · {unmapped}</button>}
+            {uncrewed > 0 && <button onClick={() => setView('nostaff')} style={chip(view === 'nostaff')}>No staff · {uncrewed}</button>}
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Find a station…" aria-label="Find a station" style={{ ...sel, flex: '1 1 160px', minWidth: 120 }} />
+          </div>
+        );
+      })()}
       <div style={{ display: 'grid', gap: 8 }}>
-        {data.stations.map((s) => (
+        {data.stations.filter((s) => (
+          (!q.trim() || s.station.toLowerCase().includes(q.trim().toLowerCase()))
+          && (view === 'all'
+            || (view === 'alerting' && s.alerting)
+            || (view === 'dark' && s.off > 0)
+            || (view === 'unmapped' && !s.opsStationId)
+            || (view === 'nostaff' && s.opsStationId && !s.staff.length))
+        )).map((s) => (
           <div key={s.station} style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderLeft: `4px solid ${s.alerting ? '#dc2626' : s.off ? '#d97706' : '#16a34a'}`, padding: '9px 12px' }}>
             <span style={{ minWidth: 0, flex: '1 1 170px' }}>
               <span style={{ display: 'block', fontSize: 13, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.station}</span>
