@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
+import SignalReportPanel from './SignalReportPanel.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -766,28 +767,11 @@ function FlowMeter({ rows, suiteId }) {
 const TXN_COL = '#8b7cf6';
 const CLOSED_COL = 'rgba(150,160,175,0.6)';
 
-// One station row. Its transaction line loads only when the row scrolls into
-// view (IntersectionObserver) — the bars paint instantly, the line fills in.
-function StationRow({ apiBase, st, show, onSelect }) {
-  const ref = useRef(null);
-  const [pts, setPts] = useState(null);
-  useEffect(() => {
-    if (!ref.current || pts || !st.total || !show.txn) return undefined;
-    let alive = true;
-    const io = new IntersectionObserver((es) => {
-      if (!es.some((e) => e.isIntersecting)) return;
-      io.disconnect();
-      fetch(`${apiBase}/monitors/${encodeURIComponent(st.mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(st.station)}`)
-        .then((r) => r.json()).then((d) => {
-          if (!alive) return;
-          const p = ((d && d.buckets) || []).map((b, i) => ({ at: Date.parse(b), v: (d.devices || []).reduce((a, dev) => a + ((dev.counts || [])[i] || 0), 0) })).filter((x) => Number.isFinite(x.at));
-          setPts(p);
-        }).catch(() => { if (alive) setPts([]); });
-    }, { rootMargin: '150px' });
-    io.observe(ref.current);
-    return () => { alive = false; io.disconnect(); };
-  }, [apiBase, st.mid, st.station, st.total, show.txn, pts]);
-
+// One station row. The transaction line (st.txnPts) is derived from its monitor's
+// timeline — fetched ONCE per monitor by the parent, not per station — so a big
+// site doesn't fire dozens of live Looker reads at once.
+function StationRow({ st, show, onSelect }) {
+  const pts = st.txnPts;
   const H = 32, span = Math.max(1, st.tN - st.t0);
   const line = (show.txn && pts && pts.length > 1) ? (() => {
     const max = Math.max(...pts.map((p) => p.v), 0.0001);
@@ -800,7 +784,7 @@ function StationRow({ apiBase, st, show, onSelect }) {
   const stripe = st.closed ? 'transparent' : st.nowPct < 90 ? STATUS_COLOR.stale : st.minPct < 95 ? STATUS_COLOR.warn : 'transparent';
 
   return (
-    <div ref={ref} role="button" tabIndex={0} onClick={() => onSelect && onSelect(st.pick)}
+    <div role="button" tabIndex={0} onClick={() => onSelect && onSelect(st.pick)}
       onKeyDown={(e) => { if (e.key === 'Enter') onSelect && onSelect(st.pick); }}
       style={{ display: 'grid', gridTemplateColumns: 'var(--sv-l) 1fr var(--sv-r)', gap: 10, alignItems: 'center', padding: '7px 10px', borderTop: '1px solid var(--hairline)', boxShadow: stripe !== 'transparent' ? `inset 3px 0 0 ${stripe}` : 'none', cursor: 'pointer' }}>
       <div style={{ minWidth: 0 }}>
@@ -837,7 +821,9 @@ function StationRow({ apiBase, st, show, onSelect }) {
 
 function StationDayView({ monitors, apiBase, onSelect }) {
   const [logs, setLogs] = useState({});
+  const [tl, setTl] = useState({}); // mid -> { buckets:[iso], byStation:{name:counts[]} } — ONE timeline read per monitor
   const [q, setQ] = useState('');
+  const [typeF, setTypeF] = useState(''); // station-type filter ('' = all): Bars / Vendors / Check-in…
   const [show, setShow] = useState({ online: true, offline: true, txn: true, closed: true });
   const toggle = (k) => setShow((s) => ({ ...s, [k]: !s[k] }));
   useEffect(() => {
@@ -846,6 +832,28 @@ function StationDayView({ monitors, apiBase, onSelect }) {
       if (logs[m.id]) return;
       fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
         .then((r) => r.json()).then((d) => { if (alive && d) setLogs((p) => ({ ...p, [m.id]: d })); }).catch(() => {});
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
+  }, [monitors.map((m) => m.id).join(','), apiBase]);
+  // Transaction lines: one timeline read per MONITOR (it carries every device's
+  // per-station counts), summed to per-station totals — not one read per station.
+  useEffect(() => {
+    let alive = true;
+    monitors.forEach((m) => {
+      if (tl[m.id]) return;
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=30`)
+        .then((r) => r.json()).then((d) => {
+          if (!alive) return;
+          const buckets = (d && d.buckets) || [];
+          const byStation = {};
+          if (buckets.length) (d.devices || []).forEach((dev) => {
+            const s = dev.station || '';
+            if (!byStation[s]) byStation[s] = buckets.map(() => 0);
+            (dev.counts || []).forEach((c, i) => { if (byStation[s][i] != null) byStation[s][i] += (c || 0); });
+          });
+          setTl((p) => ({ ...p, [m.id]: { buckets, byStation } }));
+        }).catch(() => { if (alive) setTl((p) => ({ ...p, [m.id]: { buckets: [], byStation: {} } })); });
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
@@ -860,13 +868,15 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     const byStation = new Map();
     (d.devices || []).forEach((dev) => { const s = dev.station || ''; if (!byStation.has(s)) byStation.set(s, []); byStation.get(s).push(dev); });
     const closedMon = m.status === 'closed';
+    const mtl = tl[m.id]; // this monitor's timeline (buckets + per-station counts), if loaded
     for (const [sn, devs] of byStation) {
       const total = devs.length;
       const offSets = devs.map((dev) => new Set(dev.offAt || []));
       const series = ticks.map((k, i) => { let off = 0; for (const s of offSets) if (s.has(base + i)) off += 1; return { at: k.at, off, on: Math.max(0, total - off) }; });
-      // Closed monitor: grey everything after its LAST healthy check (the wind-down).
-      let closeIdx = -1;
-      if (closedMon) { for (let i = 0; i < series.length; i++) if (total && series[i].on / total >= 0.7) closeIdx = i; series.forEach((c, i) => { c.closed = i > closeIdx; }); }
+      // Closed monitor: grey only the trailing run where the station is FULLY dark
+      // (no device sending). A single dead device isn't "closed" — the station is
+      // still trading on its other devices, so it stays green/red, not grey.
+      if (closedMon) { let last = -1; for (let i = 0; i < series.length; i++) if (series[i].on > 0) last = i; series.forEach((c, i) => { c.closed = i > last; }); }
       const openCk = series.filter((c) => !c.closed);
       const nowC = series[series.length - 1] || { on: 0, off: 0 };
       const nowPct = total ? Math.round((nowC.on / total) * 100) : 0;
@@ -874,17 +884,23 @@ function StationDayView({ monitors, apiBase, onSelect }) {
       const name = sn || m.name;
       const isClosed = closedMon && !!nowC.closed;
       const status = isClosed ? 'stale' : nowPct >= 95 ? 'fresh' : nowPct >= 85 ? 'warn' : 'stale';
+      const txnPts = (mtl && mtl.byStation[sn]) ? mtl.buckets.map((b, i) => ({ at: Date.parse(b), v: mtl.byStation[sn][i] || 0 })).filter((x) => Number.isFinite(x.at)) : null;
       stations.push({
-        mid: m.id, station: sn, name, zone: zoneOf(name), total, series, closed: isClosed, nowPct, minPct,
-        unit: unitFor(m), t0: Date.parse(ticks[0].at), tN: Date.parse(ticks[ticks.length - 1].at),
+        mid: m.id, station: sn, name, zone: zoneOf(name), total, series, closed: isClosed, nowPct, minPct, txnPts,
+        type: m.area || m.name || 'Other', unit: unitFor(m), t0: Date.parse(ticks[0].at), tN: Date.parse(ticks[ticks.length - 1].at),
         pick: { mid: m.id, sn, name, zone: zoneOf(name), monitor: m.name, unit: unitFor(m), on: nowC.on, off: nowC.off, txnH: null, lagMin: null, status },
       });
     }
   }
 
   const loading = monitors.some((m) => !logs[m.id]);
+  // Station types (bars / vendors / check-in…) — from each monitor's area — as a
+  // first-level filter, then the name box narrows within it.
+  const types = [...new Set(stations.map((s) => s.type))].filter(Boolean).sort();
+  const typeIcon = (t) => (/bar/i.test(t) ? '🍺' : /vendor|food/i.test(t) ? '🧾' : /check|gate/i.test(t) ? '🎟️' : '📍');
   const ql = q.trim().toLowerCase();
   let shown = stations;
+  if (typeF) shown = shown.filter((s) => s.type === typeF);
   if (ql) shown = shown.filter((s) => s.name.toLowerCase().includes(ql) || s.zone.toLowerCase().includes(ql));
   if (!show.closed) shown = shown.filter((s) => !s.closed);
 
@@ -912,10 +928,20 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     </button>
   );
 
+  const typeChip = (active, label, onClick, icon) => (
+    <button onClick={onClick} style={{ border: `1px solid ${active ? 'var(--brand)' : 'var(--hairline)'}`, background: active ? 'rgba(var(--brand-rgb,10,132,255),0.08)' : 'var(--card)', color: active ? 'var(--brand)' : 'var(--text)', fontWeight: active ? 800 : 600, borderRadius: 999, padding: '5px 11px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>{icon ? `${icon} ` : ''}{label}</button>
+  );
+
   return (
     <div style={{ '--sv-l': '150px', '--sv-r': '74px' }}>
+      {types.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          {typeChip(!typeF, `All · ${stations.length}`, () => setTypeF(''))}
+          {types.map((t) => typeChip(typeF === t, `${t} · ${stations.filter((s) => s.type === t).length}`, () => setTypeF(t), typeIcon(t)))}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter stations…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by station name…"
           style={{ flex: '1 1 160px', minWidth: 130, padding: '7px 11px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, fontFamily: 'inherit', outline: 'none' }} />
         {legendChip('online', 'Online', STATUS_COLOR.fresh)}
         {legendChip('offline', 'Offline', STATUS_COLOR.stale)}
@@ -940,7 +966,7 @@ function StationDayView({ monitors, apiBase, onSelect }) {
                 <span style={{ height: 1, background: 'var(--hairline)' }} />
                 <span style={{ fontSize: 10.5, fontWeight: 700, textAlign: 'right', color: 'var(--muted)' }}>{z.pct == null ? 'closed' : z.pct + '%'}</span>
               </div>
-              {z.list.map((st) => <StationRow key={st.mid + '|' + st.station} apiBase={apiBase} st={st} show={show} onSelect={onSelect} />)}
+              {z.list.map((st) => <StationRow key={st.mid + '|' + st.station} st={st} show={show} onSelect={onSelect} />)}
             </div>
           ))}
         </div>
@@ -955,7 +981,11 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
-  const open = (monitors || []).filter((m) => m.status !== 'closed');
+  const openMons = (monitors || []).filter((m) => m.status !== 'closed');
+  // A fully-closed event still deserves the board — fall back to ALL monitors so the
+  // Board and Rhythm views show the final/historical state instead of disappearing.
+  const open = openMons.length ? openMons : (monitors || []);
+  const allClosed = !openMons.length && (monitors || []).length > 0;
   const backToLive = () => { setScrubIdx(null); setReplay(null); };
 
   const rows = [];
@@ -1042,6 +1072,12 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
         <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
       </div>
+
+      {allClosed && (
+        <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
+          This event is <b>closed</b> — you're looking at its final state and full day. Board and Rhythm show the closing snapshot; <b>📶 Stations</b> is the best view to replay each station's day.
+        </div>
+      )}
 
       {view === 'rhythm' && (
         <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
@@ -1157,6 +1193,7 @@ export default function SignalOps({ entityId, suiteId }) {
           const controls = <>
             <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
             <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
+            {suiteId && <SignalReportPanel suiteId={suiteId} />}
             <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
           </>;
           return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
