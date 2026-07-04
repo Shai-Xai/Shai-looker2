@@ -664,9 +664,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           .slice(0, 3);
       } catch (e) { void e; }
     }
-    // Catalogue measures FIRST: the explore-name guess can be a measure like
-    // "Cashless Events Count" that returns 1 per group — non-zero, so the
-    // zero-check can't catch it, and it must never outrank transaction_count.
+    // Catalogue measures FIRST: an explore-name guess like "Cashless Events Count" returns 1 per group (non-zero, so the zero-check can't catch it) and must never outrank transaction_count.
     const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
     // Memoized mode is the first choice (self-heals); an explicit count_field override wins outright.
     const memoModes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
@@ -692,15 +690,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
-          // A bucket dim can be ACCEPTED yet come back blank (created_at_minute10;
-          // date_minute30 partially) — half-or-more blank = broken, next candidate.
+          // A bucket dim can be ACCEPTED yet come back blank — half-or-more blank = broken, next candidate.
           if (got.length && got.filter((r) => parseTs(r[bf])).length * 2 <= got.length) {
             step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
           }
-          // Combined-explore trap: a count measure can exist yet count ANOTHER
-          // view's rows — every returned row then reads 0. Rows prove activity,
-          // so a zero-only count is a soft failure: try the next counting mode.
-          // An EMPTY counting result is as suspect as all-zeros ('none' may accept a quiet feed).
+          // Combined-explore trap: a count measure can count ANOTHER view's rows → every row reads 0.
+          // Rows prove activity, so a zero-only (or empty) count is a soft failure: try the next mode.
           const cTry = fieldFor(cand);
           if (!pinnedMeasure && cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
             step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
@@ -710,8 +705,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           if (!pinnedMeasure && cand !== 'none' && !got.length) {
             step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
           }
-          // Even plain presence only accepts an empty window on the LAST
-          // bucket shape — an earlier bucket may be the one dropping rows.
+          // Even plain presence only accepts an empty window on the LAST bucket shape — an earlier bucket may be dropping rows.
           if (cand === 'none' && !got.length && bf !== bucketCands[bucketCands.length - 1]) {
             step(bf, cand, 'no rows'); lastErr = new Error('no rows in window'); break;
           }
@@ -732,9 +726,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const cKey = mode === 'none' ? CNT_FIELD : fieldFor(mode);
     const nowMs = Date.now();
     const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
-    // Anchored: first block is the one containing the start time; rolling: n
-    // blocks back from now. Either way the grid stays capped at 288 blocks
-    // (anchored windows longer than that keep the most recent blocks).
+    // Anchored: first block contains the start time; rolling: n blocks back from now. Capped at 288 blocks (longer anchored windows keep the most recent).
     let n = anchor
       ? Math.floor((lastBucket - Math.floor(anchor.getTime() / ivMs) * ivMs) / ivMs) + 1
       : Math.round((h * 60) / iv);
@@ -757,11 +749,20 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
-    // Some explore join paths return NOTHING when the station filter rides the
-    // count read (the join that resolves the station drops the sales rows).
-    // Fall back: read the whole feed and keep the devices whose latest station
-    // — from the labels lookup, which joins the same pair successfully — is
-    // the one asked for.
+    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows, so the count line reads zero for early
+    // hours on big fleets (300+ bar devices over a multi-day event). Re-read the count grouped by bucket ONLY (no device fan-out, never capped) for an exact line.
+    if (rows.length >= 20000 && mode !== 'none' && !String(mode).startsWith('distinct')) {
+      try {
+        const ab = { ...baseBody(m), fields: [bucketField, cKey], sorts: [`${bucketField} desc`], limit: '10000' };
+        ab.filters[m.timeField] = timeFilter; if (st && m.stationField) ab.filters[m.stationField] = stExpr;
+        const agg = await runScoped(m, ab); const fresh = Array(n).fill(0); let any = false;
+        for (const r of agg) { const ts = parseTs(r[bucketField]); if (!ts) continue; const idx = Math.floor((ts.getTime() - firstBucket) / ivMs); if (idx < 0 || idx >= n) continue; const c = Number(r[cKey]); if (Number.isFinite(c)) { fresh[idx] += c; any = true; } }
+        if (any) for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i];
+      } catch (e) { /* keep the device-derived totals */ }
+    }
+    // Some explore joins return NOTHING when the station filter rides the count read (the join drops
+    // the sales rows). Fall back: read the whole feed, keep devices whose latest station (from the
+    // labels lookup, which joins the same pair successfully) is the one asked for.
     if (st && !devices.length) {
       const info = await deviceDetails(m, timeFilter);
       if (info && [...info.values()].some((v) => v.station === st)) {
@@ -786,8 +787,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
-      // Empty grid → say what was tried (+ a sample row when rows arrived but
-      // none survived the bucketing) — no more silent blanks.
+      // Empty grid → say what was tried (+ a sample row when rows arrived but none bucketed) — no silent blanks.
       readPath: byDevice.size ? undefined : tried,
       sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
