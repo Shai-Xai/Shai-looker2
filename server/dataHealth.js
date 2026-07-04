@@ -996,26 +996,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // check already made, so the board costs nothing to render.
         let stations = null;
         try {
-          if (tl && m.stationField && tl.devices.length) {
+          if (tl && tl.devices.length) {
             const a3 = rosterAnchor(m);
-            const info3 = await deviceDetailsLite(m, a3
+            const info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
               ? `after ${a3.toISOString().slice(0, 16).replace('T', ' ')}`
               : `last ${m.rosterBaselineMin} minutes`);
-            if (info3) {
-              const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
-              const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
-              const byS = new Map();
-              for (const d of tl.devices) {
-                const stn = (info3.get(d.device) || {}).station || '—';
-                if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
-                const e3 = byS.get(stn);
-                if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
-                e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
-                const s6 = d.counts.slice(-6);
-                s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
-              }
-              stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
+            const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
+            const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
+            const byS = new Map();
+            for (const d of tl.devices) {
+              // Station-less monitors (e.g. one gate's check-in) lump into a
+              // single '' entry the board joins back to the monitor's own tile.
+              const stn = info3 ? ((info3.get(d.device) || {}).station || '—') : '';
+              if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
+              const e3 = byS.get(stn);
+              if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
+              e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
+              const s6 = d.counts.slice(-6);
+              s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
             }
+            stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
           }
         } catch (e) { console.warn('[data-health] station roll-up failed', m.id, e.message); }
         // The tile day-graph reads the OBSERVED log once it has any history —
