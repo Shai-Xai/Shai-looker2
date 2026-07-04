@@ -1,0 +1,63 @@
+name: apply-round19
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 19 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          sha256sum -c - <<'SUMS'
+          df8f3efa7dabeb706fc319728c76a07d10e314d7632267df359fd0bba80aa819  patches/round19.patch
+          bf7943c9cb4f0fa0efb91e47797ab41d7dd3536362982167744f356e894f5af3  patches/staffAlerts19.js
+          8536b399d25f83f2308d2ea704801a32f3bae3434c460349d97f78357153f778  patches/StaffAlertsTab19.jsx
+          d908237e8b8b982b0d6ce8859fc4d181d6301eb1c7a9fe97567a856314201226  patches/staffAlerts.test19.js
+          SUMS
+          mkdir -p /tmp/p && cp patches/round19.patch patches/staffAlerts19.js patches/StaffAlertsTab19.jsx patches/staffAlerts.test19.js /tmp/p/
+          cat > /tmp/msg <<'MSG'
+          Staff alerts phase 1 (test mode): dark station -> alert the assigned crew
+
+          - server/staffAlerts.js (self-contained, disposable): bridges data-health
+            board stations to Event Ops stations (auto name-match + manual
+            override), watches monitor snapshots every minute, and when half a
+            station's devices go dark (2+ devices, edge-detected, 15-min cooldown)
+            notifies - in test mode ONLY the test email hears it, with the
+            would-be staff recipients listed; live mode pushes to the client team.
+            Recovery logged under a quarter dark. /api/my/staff-alerts GET + bridge
+            PUT serve clients and admins (entity-scoped).
+          - Hive gains an Alerts tab: mapping table (auto/manual/none per station,
+            crew shown), test-mode banner, 30-day alert log.
+          - test/staffAlerts.test.js: name-match, edge-detection + crew naming,
+            manual override, 1-device floor.
+          - Sales overview changelog updated.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/staffAlerts.js server/index.js client/src/components/StaffAlertsTab.jsx client/src/components/EventOpsConsole.jsx test/staffAlerts.test.js docs/PRODUCT_OVERVIEW_SALES.md"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/p/round19.patch
+          cp /tmp/p/staffAlerts19.js server/staffAlerts.js
+          cp /tmp/p/StaffAlertsTab19.jsx client/src/components/StaffAlertsTab.jsx
+          cp /tmp/p/staffAlerts.test19.js test/staffAlerts.test.js
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round19.patch patches/staffAlerts19.js patches/StaffAlertsTab19.jsx patches/staffAlerts.test19.js .github/workflows/apply-round19.yml
+          git commit -m "chore: clean round19 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
