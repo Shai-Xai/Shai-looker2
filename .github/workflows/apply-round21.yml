@@ -1,0 +1,49 @@
+name: apply-round21
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 21 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          echo "e62fb9ad39cd15d3da12bcb0617f55ffea38dad1e8f8ec3c237f927af032833e  patches/round21.patch" | sha256sum -c -
+          cp patches/round21.patch /tmp/round21.patch
+          cat > /tmp/msg <<'MSG'
+          Settable alert threshold on Hive->Alerts; station filters in Stations + staff picker
+
+          - The staff-alert dark threshold is now a per-event setting edited right
+            on the Alerts tab (10-100%, default 50; recovery at half of it) via
+            PUT /api/my/staff-alerts/settings.
+          - Hive -> Stations gets a filter box (name or kind) once the list passes
+            six; the Edit-staff assigned-stations picker gets the same filter with
+            picked chips always visible, and the chip area scrolls instead of
+            swallowing the modal.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/staffAlerts.js client/src/components/StaffAlertsTab.jsx client/src/components/EventOpsConsole.jsx test/staffAlerts.test.js"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/round21.patch
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round21.patch .github/workflows/apply-round21.yml
+          git commit -m "chore: clean round21 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
