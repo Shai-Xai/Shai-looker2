@@ -360,6 +360,139 @@ function OwlDrawer({ entityId, suiteId, title, onClose }) {
   return createPortal(node, document.body);
 }
 
+// 🚨 Needs eyes — the worst stations first: stale (red) then any with dark
+// devices (amber), so the next radio call is always the top row.
+function NeedsEyes({ rows, onSelect }) {
+  const bad = (rows || []).filter((s) => (s.off || 0) > 0 || s.status === 'stale')
+    .sort((a, b) => ((b.status === 'stale') - (a.status === 'stale')) || ((b.off || 0) - (a.off || 0)) || ((b.lagMin || 0) - (a.lagMin || 0)))
+    .slice(0, 6);
+  if (!bad.length) return null;
+  return (
+    <div style={{ ...card, marginBottom: 10 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 2 }}>Needs eyes — worst first</div>
+      {bad.map((s) => (
+        <div key={s.monitor + s.name} role="button" tabIndex={0} onClick={() => onSelect && onSelect(s)}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.click(); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: '1px solid var(--hairline)', cursor: 'pointer', minWidth: 0 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, flexShrink: 0, background: s.status === 'stale' ? STATUS_COLOR.stale : STATUS_COLOR.warn }} />
+          <span style={{ minWidth: 0, flex: 1 }}>
+            <span style={{ display: 'block', fontSize: 12.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)' }}>{s.zone}</span>
+          </span>
+          <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+            <span style={{ display: 'block', fontSize: 12 }}><b style={{ color: STATUS_COLOR.stale }}>{s.off} dark</b> · {s.on ?? '—'}/{(s.on || 0) + (s.off || 0)}</span>
+            <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{fmtLag(s.lagMin)}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 💓 Event pulse — the site's online/offline at every Pulse check, as a
+// draggable strip: the playhead sits at LIVE; drag it back to replay the day
+// (readout shows that moment's online vs offline). Built from the observed
+// offline log — Pulse's own record, no live Looker cost.
+function PulseStrip({ monitors, apiBase, rows }) {
+  const [logs, setLogs] = useState({}); // monitor id -> observed log
+  const [idx, setIdx] = useState(null); // null = LIVE, else bin index
+  useEffect(() => {
+    let alive = true;
+    monitors.forEach((m) => {
+      if (logs[m.id]) return;
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+        .then((r) => r.json()).then((d) => { if (alive && d && d.configured) setLogs((p) => ({ ...p, [m.id]: d })); })
+        .catch(() => {});
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
+  }, [monitors.map((m) => m.id).join(','), apiBase]);
+  const BIN = 10 * 60000;
+  const bins = new Map(); // binStartMs -> {on, off}
+  Object.values(logs).forEach((d) => {
+    const offN = (d.ticks || []).map(() => 0);
+    (d.devices || []).forEach((dev) => (dev.offAt || []).forEach((ti) => { if (offN[ti] != null) offN[ti] += 1; }));
+    (d.ticks || []).forEach((k, ti) => {
+      const b = Math.floor(Date.parse(k.at) / BIN) * BIN;
+      if (!Number.isFinite(b)) return;
+      if (!bins.has(b)) bins.set(b, { on: 0, off: 0 });
+      const e = bins.get(b);
+      e.off += offN[ti];
+      e.on += k.online != null ? k.online : Math.max(0, (k.total || 0) - offN[ti]);
+    });
+  });
+  const keys = [...bins.keys()].sort((a, b) => a - b).slice(-96);
+  if (keys.length < 3) return null;
+  const series = keys.map((b) => ({ t: new Date(b), ...bins.get(b) }));
+  const max = Math.max(1, ...series.map((x) => x.on + x.off));
+  const cur = idx == null ? series.length - 1 : Math.min(idx, series.length - 1);
+  const ratePerMin = Math.round(monitors.reduce((a, m) => a + (((m.rosterSnapshot || {}).lastHourScans) || 0), 0) / 6) / 10;
+  const H = 30;
+  const hhmm = (d) => d.toTimeString().slice(0, 5);
+  return (
+    <div style={{ ...card, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', flexShrink: 0 }}>Event pulse · drag to replay</span>
+        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1.5, height: H }}>
+            {series.map((x, i) => (
+              <span key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H, opacity: i === cur ? 1 : 0.75 }}>
+                {x.off > 0 && <i style={{ display: 'block', height: Math.max(1, Math.round((x.off / max) * (H - 2))), background: STATUS_COLOR.stale, borderRadius: '1px 1px 0 0' }} />}
+                <i style={{ display: 'block', height: Math.max(2, Math.round((x.on / max) * (H - 2))), background: i === cur ? STATUS_COLOR.fresh : 'var(--hairline)', borderRadius: x.off ? 0 : '1px 1px 0 0' }} />
+              </span>
+            ))}
+          </div>
+          <span style={{ position: 'absolute', top: -3, bottom: -3, left: `${(cur / Math.max(1, series.length - 1)) * 100}%`, width: 2, background: 'var(--brand)', borderRadius: 2, pointerEvents: 'none' }} />
+          <input type="range" min={0} max={series.length - 1} value={cur} aria-label="Replay the day"
+            onChange={(e) => { const v = Number(e.target.value); setIdx(v >= series.length - 1 ? null : v); }}
+            style={{ position: 'absolute', inset: '-8px 0', width: '100%', opacity: 0, cursor: 'ew-resize', touchAction: 'none' }} />
+        </div>
+        <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', border: '1px solid var(--hairline)', borderRadius: 8, padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {idx == null ? (
+            <><span style={{ width: 7, height: 7, borderRadius: 4, background: STATUS_COLOR.fresh, display: 'inline-block' }} /> LIVE · {ratePerMin.toLocaleString('en-ZA')}/min</>
+          ) : (
+            <>
+              ⏪ {hhmm(series[cur].t)} · <b style={{ color: STATUS_COLOR.fresh }}>{series[cur].on}</b> on · <b style={{ color: series[cur].off ? STATUS_COLOR.stale : 'var(--muted)' }}>{series[cur].off}</b> off
+              <button onClick={() => setIdx(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '1px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}>LIVE</button>
+            </>
+          )}
+        </span>
+      </div>
+      {/* Last 60 min — is it improving or getting worse? Volume bars from the
+          stations' 10-min sparks; darkness compared with an hour ago. */}
+      {(() => {
+        const vol = [0, 0, 0, 0, 0, 0];
+        (rows || []).forEach((s) => (s.spark || []).forEach((v, i) => { vol[i] += v || 0; }));
+        const volTot = vol.reduce((a, b) => a + b, 0);
+        if (!volTot && series.length < 7) return null;
+        const vMax = Math.max(1, ...vol);
+        const half = (a) => a.reduce((x, y) => x + y, 0);
+        const volNow = half(vol.slice(3)); const volPrev = half(vol.slice(0, 3));
+        const volPct = volPrev ? Math.round(((volNow - volPrev) / volPrev) * 100) : 0;
+        const offNow = series[series.length - 1].off;
+        const offAgo = series[Math.max(0, series.length - 7)].off;
+        const worse = offNow > offAgo || (volPrev > 0 && volPct <= -30);
+        const better = offNow < offAgo && volPct >= -15;
+        const vc = worse ? STATUS_COLOR.stale : better ? STATUS_COLOR.fresh : 'var(--muted)';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--hairline)' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', flexShrink: 0 }}>Last 60 min</span>
+            <span style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 20 }}>
+              {vol.map((v, i) => <i key={i} title={`${v.toLocaleString('en-ZA')} in 10 min`} style={{ display: 'block', width: 9, borderRadius: '1px 1px 0 0', height: Math.max(2, Math.round((v / vMax) * 20)), background: i >= 3 ? STATUS_COLOR.fresh : 'var(--hairline)' }} />)}
+            </span>
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: vc }}>
+              {worse ? '▼ Getting worse' : better ? '▲ Improving' : '► Steady'}
+            </span>
+            <span style={{ fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+              dark {offAgo}→{offNow} · volume {volPct >= 0 ? '+' : ''}{volPct}% vs previous 30 min
+            </span>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
 // 📈 The Rate river — every station's pace on one shared clock: one row per
 // station, one cell per hour, colour depth = how busy (green = transactions,
 // blue = scans), the day's avg/h on the right. The site's stacked total sits
@@ -541,6 +674,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'board' && <>
+      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} />
+      <NeedsEyes rows={shown} onSelect={setSel} />
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {dials.map(([l, v, c]) => (
@@ -625,15 +760,18 @@ export default function SignalOps({ entityId, suiteId }) {
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px', flexWrap: 'wrap' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: '1 1 240px' }}>
-          Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
-        </p>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+      {/* One compact control row; the explainer gets its own full-width line
+          below — no more mid-wrap soup on phones. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 6px' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <span style={{ flex: 1 }} />
         <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
         <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄</button>
       </div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
+        Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
+      </p>
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );

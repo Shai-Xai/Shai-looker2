@@ -1630,18 +1630,19 @@ export function DataHealthOps({ entityId, suiteId }) {
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px', flexWrap: 'wrap' }}>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: '1 1 240px' }}>
-          Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
-          Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
-        </p>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+      {/* One compact control row; the explainer gets its own full-width line. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 6px' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <span style={{ flex: 1 }} />
         <Suspense fallback={null}>
           <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
           <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
         </Suspense>
-        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄</button>
       </div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
+        Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.
+      </p>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>
