@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-04 (🎛️ Event Signal: filters, robot deep dive, 🦉 summary & share, 🐝 Hive nav) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-04 (🎛️ Event Signal: flow meter, drag-to-replay, journal · 🚨 staff alerts phase 1) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -772,6 +772,18 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-04 (evening)** — **The board learns to time-travel — and to call for help** 🧪:
+  📶 Signal flow meter with a settable per-event target (default 95% of devices
+  online; green/amber/red); dragging the Event pulse replays the WHOLE board at
+  that moment (tiles, zones, dials); a 30-min status journal (who came back, who
+  went dark, window by window); the last-60-min verdict now follows the dark
+  count (150→51 dark reads "Big improvement"); station on/off follows the device
+  roster's lag truth so a data-pipe stall can no longer paint a trading site
+  black; and 🚨 **staff alerts phase 1**: Hive → Alerts bridges board stations to
+  Event Ops stations (auto name-match + manual mapping) and, when half a
+  station's devices go dark, alerts the staff assigned to it — 🧪 test-mode only
+  (emails the test address with the would-be recipients; staff aren't contacted
+  until Go live). Push/SMS/WhatsApp escalation is the next phase.
 - **2026-07-04 (later)** — **Event Signal grows up in a day** 🧪: station family
   filter chips (Bars / Vendors / Check-in); tap a station for a centred pop-up
   deep dive — per-device day timeline with the 🚦 three-colour robot view
