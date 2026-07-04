@@ -149,6 +149,19 @@ export default function StaffAlertsTab({ suiteId }) {
         ))}
         {!data.stations.length && <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>No board stations yet — they appear once Data health monitors have run for this event.</div>}
       </div>
+      {data.acks && data.acks.length > 0 && (
+        <div style={{ ...card, borderLeft: '4px solid #16a34a', marginTop: 12 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Acknowledged — who's on it</div>
+          {data.acks.map((a, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 11.5, padding: '3px 0', borderTop: i ? '1px solid var(--hairline)' : 'none', color: 'var(--muted)' }}>
+              <b style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{new Date(a.acked_at).toTimeString().slice(0, 5)}</b>
+              <span>✓</span>
+              <b style={{ color: '#16a34a' }}>{a.name}</b>
+              <span>is on {a.station}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {data.log.length > 0 && (
         <div style={{ ...card, marginTop: 12 }}>
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Alert log</div>

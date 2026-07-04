@@ -156,6 +156,8 @@ export default function EventOpsPortalPage({ suiteId, token }) {
               </a>
             )}
 
+            <MyAlerts suiteId={suiteId} token={token} staffId={staff.id} flash={flash} />
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
               <button onClick={() => setScanning(true)} style={{ ...bigBtn, fontSize: 17, padding: '15px' }}>⚠️ Log an issue</button>
               {staff.canMove !== false && (
@@ -285,6 +287,47 @@ function AlertsToggle({ suiteId, token, staffId, flash }) {
       style={{ flexShrink: 0, border: `1px solid ${on ? '#16a34a' : 'var(--hairline)'}`, background: on ? 'rgba(22,163,74,0.12)' : 'var(--card)', color: on ? '#16a34a' : 'var(--text)', borderRadius: 999, padding: '7px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 36 }}>
       {busy ? '…' : on ? '🔔 Alerts on' : '🔔 Alerts'}
     </button>
+  );
+}
+
+// 🚨 A staffer's own station alerts, newest first, with one-tap acknowledge so
+// ops can see who's on it. Polls every 60s; token-gated portal routes.
+function MyAlerts({ suiteId, token, staffId, flash }) {
+  const base = `/api/eventops/portal/${encodeURIComponent(suiteId)}/${encodeURIComponent(token)}/my-alerts/${encodeURIComponent(staffId)}`;
+  const [alerts, setAlerts] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const load = () => fetch(base).then((r) => r.json()).then((d) => setAlerts(d.alerts || [])).catch(() => {});
+  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [suiteId, token, staffId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ack = async (alertId) => {
+    setBusy(true);
+    try { await fetch(`${base}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertId }) }); flash?.('Acknowledged ✓'); await load(); }
+    catch { /* ignore */ }
+    setBusy(false);
+  };
+  if (!alerts.length) return null;
+  const unacked = alerts.filter((a) => !a.acked);
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${unacked.length ? '#dc2626' : '#16a34a'}`, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontWeight: 800, fontSize: 14 }}>🚨 My station alerts</span>
+        {unacked.length > 0 && <span style={{ fontSize: 11.5, fontWeight: 800, color: '#dc2626' }}>{unacked.length} new</span>}
+        <span style={{ flex: 1 }} />
+        {unacked.length > 1 && <button onClick={() => ack('')} disabled={busy} style={{ border: '1px solid var(--border, #ddd)', background: 'transparent', color: 'inherit', borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Ack all</button>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {alerts.slice(0, 8).map((a) => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: a.acked ? 0.55 : 1 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.station}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted, #888)' }}>{a.message} · {new Date(a.at).toTimeString().slice(0, 5)}</div>
+            </div>
+            {a.acked
+              ? <span style={{ fontSize: 12, fontWeight: 800, color: '#16a34a', flexShrink: 0 }}>✓ On it</span>
+              : <button onClick={() => ack(a.id)} disabled={busy} style={{ border: 'none', background: '#dc2626', color: '#fff', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0 }}>I'm on it</button>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -954,6 +954,30 @@ function mount(app, { db, auth, push = require('./push'), messaging = null }) {
     res.json({ ok: true });
   });
 
+  // This staffer's own station alerts (the eventops_staff_alert feed, written by
+  // server/staffAlerts.js) + an acknowledge action. Token-gated, no account.
+  const hasStaffAlert = () => { try { return !!sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='eventops_staff_alert'").get(); } catch { return false; } };
+  app.get('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ alerts: [] });
+    const alerts = sql.prepare('SELECT id, station, message, at, acked_at FROM eventops_staff_alert WHERE staff_id=? AND suite_id=? ORDER BY at DESC LIMIT 20')
+      .all(s.id, su.id).map((a) => ({ id: a.id, station: a.station, message: a.message, at: a.at, acked: !!a.acked_at }));
+    res.json({ alerts });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId/ack', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ ok: true });
+    const id = str(req.body?.alertId, 64);
+    // Ack one, or all of this staffer's unacked alerts when no id is given.
+    if (id) sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE id=? AND staff_id=? AND acked_at=''").run(now(), id, s.id);
+    else sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE staff_id=? AND suite_id=? AND acked_at=''").run(now(), s.id, su.id);
+    res.json({ ok: true });
+  });
+
   // Scan a code → resolve the device (same matching as the console).
   app.post('/api/eventops/portal/:suiteId/:token/scan', (req, res) => {
     const su = portalSuite(req, res); if (!su) return;

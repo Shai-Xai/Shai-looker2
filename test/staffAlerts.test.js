@@ -40,7 +40,7 @@ function seed(h, { on, off, health = 'FUTUR BAR', ops = 'Futur Bar' }) {
   const sql = h.sql;
   sql.prepare('DELETE FROM eventops_stations').run(); sql.prepare('DELETE FROM eventops_staff').run();
   sql.prepare('DELETE FROM data_monitors').run(); sql.prepare('DELETE FROM staff_alert_state').run(); sql.prepare('DELETE FROM staff_alert_log').run();
-  sql.prepare('DELETE FROM eventops_staff_push').run(); sql.prepare('DELETE FROM eventops_staff_wa').run();
+  sql.prepare('DELETE FROM eventops_staff_push').run(); sql.prepare('DELETE FROM eventops_staff_wa').run(); sql.prepare('DELETE FROM eventops_staff_alert').run();
   sql.prepare("INSERT INTO eventops_stations (id, entity_id, suite_id, name, kind, created_at) VALUES ('st1','ent1','su1',?, 'bar', '2026-01-01')").run(ops);
   sql.prepare("INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, created_at) VALUES ('sf1','ent1','su1','Thabo','+2782','bars','st1','2026-01-01')").run();
   sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields, warn_min, stale_min, check_every_min, cooldown_min, status, state, filters, roster_snapshot, created_at, updated_at)
@@ -123,6 +123,16 @@ test('after go-live, a WhatsApp-window staffer gets the alert on WhatsApp', () =
   h.mod.tick();
   assert.ok(h.waSends.some((m) => m.to === '2782' && /devices dark/.test(m.text)));
   db.setSetting('data_health_test_mode', '1');
+});
+
+test('a firing writes a per-staff alert feed row for each crew member', () => {
+  const h = mountAlerts();
+  seed(h, { on: 2, off: 2 }); // Thabo (sf1) crews Futur Bar
+  h.mod.tick();
+  const rows = h.sql.prepare("SELECT * FROM eventops_staff_alert WHERE staff_id='sf1'").all();
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].message, /devices dark/);
+  assert.equal(rows[0].acked_at, '');
 });
 
 test('the master all-off switch silences every event', () => {
