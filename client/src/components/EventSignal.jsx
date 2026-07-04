@@ -83,10 +83,89 @@ function StationTile({ s, selected, onSelect }) {
   );
 }
 
+// Tap-through deep dive for one station: the day's per-device timeline pulled
+// live into the card — who's sending, who's dark, and when each device worked.
+function DeepDive({ apiBase, mid, station, unit }) {
+  const [t, setT] = useState(null);
+  const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
+  const [robot, setRobot] = useState(true);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true; setT(null); setObs(null); setErr('');
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
+      .then((r) => r.json()).then((d) => { if (alive) { if (d && d.devices) setT(d); else setErr((d && d.error) || 'No timeline'); } })
+      .catch((e) => { if (alive) setErr(e.message); });
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
+      .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [apiBase, mid, station]);
+  if (err) return <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>⚠️ {err}</div>;
+  if (!t) return <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Pulling the day's device timeline…</div>;
+  const isOn = (d) => (d.lagMin != null ? d.lagMin <= (t.onlineMin || 15) : (d.active || []).slice(-2).some(Boolean));
+  const devs = [...(t.devices || [])].sort((a, b) => (isOn(a) - isOn(b)) || String(a.device).localeCompare(String(b.device)));
+  const tot = (d) => (d.counts || []).reduce((x, y) => x + y, 0);
+  // 🚦 Robot view: fuse the blocks with the OBSERVED log — per block: online +
+  // data (green), seen OFFLINE at a check yet data synced later (amber),
+  // offline + no data (red), online but quiet (grey). Same language as the
+  // Combined mode in Data health; a late sync can never repaint the red.
+  let offMap = null;
+  if (robot && obs && obs.configured && (t.buckets || []).length) {
+    const first = Date.parse(t.buckets[0]);
+    const ivMs = (t.intervalMin || 30) * 60000;
+    const n = t.buckets.length;
+    const tickB = (obs.ticks || []).map((k) => Math.floor((Date.parse(k.at) - first) / ivMs));
+    offMap = new Map((obs.devices || []).map((d) => [d.device, new Set((d.offAt || []).map((ti) => tickB[ti]).filter((b) => b >= 0 && b < n))]));
+  }
+  const cellBg = (dev, a, i) => {
+    const off = !!(offMap && offMap.get(dev) && offMap.get(dev).has(i));
+    if (a && off) return STATUS_COLOR.warn;
+    if (a) return STATUS_COLOR.fresh;
+    if (off) return STATUS_COLOR.stale;
+    return 'var(--hairline)';
+  };
+  const chip = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, color: act ? 'var(--brand)' : 'var(--muted)', background: 'var(--card)', borderRadius: 999, padding: '2px 9px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' });
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', flex: 1, minWidth: 180 }}>
+          Today per device — each block 30 min from the start.{' '}
+          {offMap
+            ? <><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = online + data</span> · <span style={{ color: STATUS_COLOR.warn, fontWeight: 700 }}>amber = offline at a check, data synced later</span> · <span style={{ color: STATUS_COLOR.stale, fontWeight: 700 }}>red = offline + no data</span> · grey = quiet.</>
+            : <><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = sent data</span>, grey = silent.</>}
+          {' '}Dark devices listed first.
+        </span>
+        <button style={chip(!robot)} onClick={() => setRobot(false)}>🟩 Blocks</button>
+        <button style={chip(robot)} onClick={() => setRobot(true)}>🚦 Robot</button>
+      </div>
+      {robot && obs && !obs.configured && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 6 }}>No observed checks in this window yet — amber/red appear once Pulse's own offline log has coverage.</div>}
+      <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {devs.map((d) => (
+          <div key={d.device} style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11.5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: isOn(d) ? STATUS_COLOR.fresh : STATUS_COLOR.stale }} />
+            <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '32%' }}>{d.device}</span>
+            {d.operator ? <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '20%' }}>{d.operator}</span> : null}
+            <span style={{ display: 'flex', gap: 1, flexShrink: 1, minWidth: 0, overflow: 'hidden' }}>
+              {(d.active || []).map((a, i) => (
+                <i key={i} style={{ width: 4, height: 10, borderRadius: 1, flexShrink: 0, background: cellBg(d.device, a, i) }} />
+              ))}
+            </span>
+            <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', fontWeight: 700, flexShrink: 0 }}>{tot(d).toLocaleString('en-ZA')}</span>
+            <span style={{ color: d.lagMin != null && !isOn(d) ? STATUS_COLOR.stale : 'var(--muted)', fontVariantNumeric: 'tabular-nums', width: 44, textAlign: 'right', flexShrink: 0 }}>{fmtLag(d.lagMin)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>
+        {devs.length} device{devs.length === 1 ? '' : 's'} · totals are today's {unit} per device · 🩺 Diagnose and the offline log live in the 📶 Data health tab.
+      </div>
+    </div>
+  );
+}
+
 // The board itself — presentational; give it the monitors array the page
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
-export function SignalBoard({ monitors }) {
+export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
+  const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
   const open = (monitors || []).filter((m) => m.status !== 'closed');
 
   const rows = [];
@@ -94,22 +173,31 @@ export function SignalBoard({ monitors }) {
     const roll = new Map(((m.rosterSnapshot && m.rosterSnapshot.stations) || []).map((s) => [s.station, s]));
     for (const st of m.streams || []) {
       const name = st.station || m.name;
-      const r = roll.get(name);
+      // A monitor with no station split rolls all its devices into one ''
+      // entry — that belongs to the monitor's own tile.
+      const r = roll.get(name) || (st.station ? null : roll.get(''));
       rows.push({
-        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name,
+        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name, mid: m.id, sn: st.station || '',
         on: r ? r.on : null, off: r ? r.off : 0, txnH: r ? r.txnH : null, spark: r ? r.spark : null,
       });
       roll.delete(name);
+      if (r) roll.delete(r.station);
     }
     // stations the roll-up saw but the stream memory hasn't named yet
     for (const r of roll.values()) {
-      if (r.station === '—') continue;
-      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
+      if (r.station === '—' || !r.station) continue;
+      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, mid: m.id, sn: r.station, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
     }
   }
 
+  // Filter chips — one per monitor (Bars / Vendors / Check-in), so the board
+  // can flick between station families without leaving the page.
+  const chipIcon = (m) => (m.area === 'Bar' ? '🍺' : m.area === 'Vendors' ? '🧾' : '🎟️');
+  const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
+  const shown = pick ? rows.filter((s) => s.mid === pick) : rows;
+
   const zones = new Map();
-  for (const s of rows) {
+  for (const s of shown) {
     if (!zones.has(s.zone)) zones.set(s.zone, []);
     zones.get(s.zone).push(s);
   }
@@ -117,11 +205,11 @@ export function SignalBoard({ monitors }) {
     .map(([k, list]) => ({ k, list: list.sort((a, b) => a.name.localeCompare(b.name)), dev: list.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0) }))
     .sort((a, b) => b.dev - a.dev);
 
-  const sum = (k) => rows.reduce((a, s) => a + (s[k] || 0), 0);
-  const units = new Set(rows.map((s) => s.unit));
+  const sum = (k) => shown.reduce((a, s) => a + (s[k] || 0), 0);
+  const units = new Set(shown.map((s) => s.unit));
   const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
   const dials = [
-    ['Stations', rows.length], ['Zones', zoneList.length],
+    ['Stations', shown.length], ['Zones', zoneList.length],
     ['Devices on', sum('on'), STATUS_COLOR.fresh],
     ['Dark', sum('off'), sum('off') ? STATUS_COLOR.stale : undefined],
     [`${short}/h`, sum('txnH').toLocaleString('en-ZA')],
@@ -131,8 +219,26 @@ export function SignalBoard({ monitors }) {
     return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>No stations yet — the board builds itself from the Data health monitors once their first checks land.</div>;
   }
 
+  const chipStyle = (act) => ({
+    border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, cursor: 'pointer',
+    background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', fontWeight: act ? 800 : 600,
+    padding: '5px 12px', fontSize: 12, fontFamily: 'inherit', minHeight: 30,
+  });
+
   return (
     <div>
+      {/* monitor filter chips — split the board by station family */}
+      {chips.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          <button onClick={() => { setPick(''); setSel(null); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+          {chips.map((m) => (
+            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); }} style={chipStyle(pick === m.id)}>
+              {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {dials.map(([l, v, c]) => (
@@ -171,24 +277,24 @@ export function SignalBoard({ monitors }) {
         })}
       </div>
 
-      {/* selected station */}
+      {/* selected station — a sheet-style modal over the board (tap outside to close) */}
       {sel && (
-        <div style={{ ...card, marginTop: 10, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}` }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-            <strong style={{ fontSize: 14 }}>{sel.name}</strong>
-            <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{sel.zone}</span>
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>monitor: {sel.monitor}</span>
-            <span style={{ flex: 1 }} />
-            <button onClick={() => setSel(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 9px', fontSize: 11, cursor: 'pointer' }}>✕</button>
-          </div>
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
-            <span><b style={{ color: STATUS_COLOR.fresh }}>{sel.on ?? '—'}</b> sending</span>
-            <span><b style={{ color: sel.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{sel.off ?? 0}</b> dark</span>
-            <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
-            <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-            For the deep dive — 🩺 Diagnose, the day timeline and the offline log — open this station's monitor in the 📶 Data health tab.
+        <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 10 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...card, borderLeft: `4px solid ${STATUS_COLOR[sel.status] || 'var(--hairline)'}`, width: '100%', maxWidth: 780, maxHeight: '85vh', overflowY: 'auto', borderRadius: 14, boxShadow: '0 18px 48px rgba(0,0,0,0.35)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 14 }}>{sel.name}</strong>
+              <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{sel.zone}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>monitor: {sel.monitor}</span>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setSel(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 34, minHeight: 30, fontSize: 12, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
+              <span><b style={{ color: STATUS_COLOR.fresh }}>{sel.on ?? '—'}</b> sending</span>
+              <span><b style={{ color: sel.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{sel.off ?? 0}</b> dark</span>
+              <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
+              <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
+            </div>
+            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
           </div>
         </div>
       )}
@@ -201,22 +307,28 @@ export function SignalBoard({ monitors }) {
 export default function SignalOps({ entityId, suiteId }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
+  const [tick, setTick] = useState(0); // manual refresh bumps this
+  const [at, setAt] = useState(null);
   useEffect(() => {
     let alive = true;
     const load = () => fetch(`/api/my/data-health?entityId=${encodeURIComponent(entityId || '')}&suiteId=${encodeURIComponent(suiteId || '')}`)
-      .then((r) => r.json()).then((d) => { if (alive) { setData(d); setErr(''); } })
+      .then((r) => r.json()).then((d) => { if (alive) { setData(d); setAt(new Date()); setErr(''); } })
       .catch((e) => { if (alive) setErr(e.message); });
     load();
     const t = setInterval(load, 60000);
     return () => { alive = false; clearInterval(t); };
-  }, [entityId, suiteId]);
+  }, [entityId, suiteId, tick]);
   if (err) return <div style={{ ...card, fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err}</div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
   return (
     <div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 10px' }}>
-        Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
+          Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
+        </p>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
+      </div>
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );

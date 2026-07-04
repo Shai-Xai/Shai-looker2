@@ -324,17 +324,22 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
           </select>
         )}
         <span style={{ flex: 1 }} />
-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log'], ['combined', '🚦 Combined']].map(([k, l]) => (
-          <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
-        ))}
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
-        {[['start', '▶ Start'], [12, '12h'], [24, '24h'], [48, '48h']].map(([h, l]) => (
-          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{l}</button>
-        ))}
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
-        {[5, 10, 20, 30, 60].map((m) => (
-          <button key={m} style={{ ...ghostBtn, padding: '4px 8px', ...(interval === m ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setIntervalMin(m)}>{m === 60 ? '1h' : `${m}m`}</button>
-        ))}
+        {/* one dropdown per decision (view · window · block size) beats twelve buttons */}
+        <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          <option value="blocks">🟩 Blocks</option>
+          <option value="counts">🔢 Counts</option>
+          <option value="observed">📡 Offline log</option>
+          <option value="combined">🚦 Combined</option>
+        </select>
+        <select value={String(hours)} disabled={busy} onChange={(e) => setHours(e.target.value === 'start' ? 'start' : Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          <option value="start">▶ From start</option>
+          <option value="12">Last 12h</option>
+          <option value="24">Last 24h</option>
+          <option value="48">Last 48h</option>
+        </select>
+        <select value={interval} disabled={busy} onChange={(e) => setIntervalMin(Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          {[5, 10, 20, 30, 60].map((n) => <option key={n} value={n}>{n === 60 ? '1h' : `${n}m`} blocks</option>)}
+        </select>
         <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours, interval)}>{busy ? '…' : '🔄'}</button>
       </div>
       {data.anchored && data.startAt && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>From the start time — {new Date(data.startAt).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} to now.</div>}
@@ -388,7 +393,17 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
                   </div>
                 );
               })()
-      ) : !data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+      ) : !data.devices.length ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          No device activity in this window.
+          {data.sample && <div style={{ marginTop: 6, color: STATUS_COLOR.warn }}>⚠️ Looker returned {data.sample.rows} row{data.sample.rows === 1 ? '' : 's'} but none fit the grid — sample: device “{data.sample.device}”, bucket “{data.sample.bucket}”. Screenshot this for support.</div>}
+          {Array.isArray(data.readPath) && data.readPath.length > 0 && (
+            <div style={{ marginTop: 6, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10.5, lineHeight: 1.7 }}>
+              {data.readPath.map((s, i) => <div key={i}>{s}</div>)}
+            </div>
+          )}
+        </div>
+      ) : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse' }}>
             <thead>
@@ -567,6 +582,7 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   // expanded for), full-height so a big device timeline is fully visible.
   const [expanded, setExpanded] = useState(false);
   const [showHist, setShowHist] = useState(true);
+  const [tools, setTools] = useState(false); // ⚙️ Manage — the everyday buttons, folded away
   const [checkMsg, setCheckMsg] = useState('');
   // Clicking the offline count opens a LIVE offline list split by station.
   const [offPanel, setOffPanel] = useState(null); // null | 'busy' | roster json | {error}
@@ -726,6 +742,14 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {!readOnly && <>
           <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
+          <button style={{ ...ghostBtn, ...(tools ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
+            title="Edit, duplicate, pause, close, delete — the everyday buttons stay out of the way" onClick={() => setTools((v) => !v)}>⚙️ Manage</button>
+        </>}
+        <DiagnosePanel monitorId={m.id} base={base} />
+        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
+      </div>
+      {!readOnly && tools && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
           <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
           <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
           <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
@@ -739,11 +763,9 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {m.status === 'closed' ? '🚪 Reopen' : '🚪 Mark closed'}
           </button>
           <button style={{ ...ghostBtn, color: STATUS_COLOR.stale }} disabled={!!busy}
-            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
-        </>}
-        <DiagnosePanel monitorId={m.id} base={base} />
-        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
-      </div>
+            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑 Delete</button>
+        </div>
+      )}
       {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} stations={m.streams.map((s) => s.station).filter(Boolean)} unit={unitFor(m)} />}
       </>}
     </div>
@@ -979,7 +1001,7 @@ function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpe
           {board && (
             <div style={{ marginBottom: 10 }}>
               <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
-                <SignalBoard monitors={monitors} />
+                <SignalBoard monitors={monitors} apiBase={ADMIN_BASE} />
               </Suspense>
             </div>
           )}
@@ -1452,6 +1474,7 @@ export default function DataHealthAdmin() {
   const [entities, setEntities] = useState([]);
   const [suites, setSuites] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | monitor
+  const [view, setView] = useState('overview'); // 'overview' | 'board' — the two main faces
   const [err, setErr] = useState('');
   const timerRef = useRef(null);
 
@@ -1488,8 +1511,37 @@ export default function DataHealthAdmin() {
   }
   const platformDot = staleN ? 'stale' : warnN ? 'warn' : allStreams.length ? 'fresh' : undefined;
 
+  const segBtn = (act) => ({
+    flex: 1, minHeight: 44, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 13.5, fontWeight: 800, border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`,
+    background: act ? 'var(--brand)' : 'var(--card)', color: act ? '#fff' : 'var(--text)',
+  });
+
   return (
     <div>
+      {/* the two main faces of Data health: the monitor overview and the live site board */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button style={segBtn(view === 'overview')} onClick={() => setView('overview')}>📡 Overview</button>
+        <button style={segBtn(view === 'board')} onClick={() => setView('board')}>🎛️ Board</button>
+      </div>
+
+      {view === 'board' ? (
+        !data ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
+          : !monitors.length ? (
+            <div style={card}>
+              <strong style={{ fontSize: 14 }}>Nothing on the board yet</strong>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Create monitors in the Overview and the board builds itself from their checks.</p>
+            </div>
+          ) : groups.map((g) => (
+            <section key={g.key} style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 850, letterSpacing: 0.3, margin: '0 0 8px' }}>{g.label}</h3>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={g.monitors} apiBase={ADMIN_BASE} />
+              </Suspense>
+            </section>
+          ))
+      ) : (
+        <>
       <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
         Watches the <strong>stream of data flowing into Looker from BigQuery / Howler</strong> — the pipe every dashboard reads.
         Each monitor pulls the latest record timestamp on an explore (optionally per station: check-in scanners, bars, vendors),
@@ -1549,6 +1601,8 @@ export default function DataHealthAdmin() {
             reportBody={g.entityId ? { entityId: g.entityId, suiteId: g.suiteId || '' } : null}
             onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+        </>
+      )}
     </div>
   );
 }
@@ -1560,22 +1614,28 @@ export default function DataHealthAdmin() {
 export function DataHealthOps({ entityId, suiteId }) {
   const [monitors, setMonitors] = useState(null);
   const [err, setErr] = useState('');
+  const [tick, setTick] = useState(0); // manual refresh bumps this
+  const [at, setAt] = useState(null);
   useEffect(() => {
     let alive = true;
     const load = () => jget(`/api/my/data-health?entityId=${encodeURIComponent(entityId || '')}&suiteId=${encodeURIComponent(suiteId || '')}`)
-      .then((r) => { if (alive) { setMonitors(r.monitors || []); setErr(''); } })
+      .then((r) => { if (alive) { setMonitors(r.monitors || []); setAt(new Date()); setErr(''); } })
       .catch((e) => { if (alive) { setErr(e.message); setMonitors((m) => m || []); } });
     load();
     const t = setInterval(load, 60000);
     return () => { alive = false; clearInterval(t); };
-  }, [entityId, suiteId]);
+  }, [entityId, suiteId, tick]);
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
   return (
     <div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px' }}>
-        Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
-        Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
+          Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
+          Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
+        </p>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
+      </div>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>

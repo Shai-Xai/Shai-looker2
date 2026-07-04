@@ -624,9 +624,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // without that timeframe 400s → raw-time fallback; whichever works is
     // remembered per monitor+interval.
     const bKey = `${m.id}:${iv}`;
-    const bucketCands = iv === 60 ? [hourField]
+    // After minuteN, prefer the RAW timeframe: this LookML family has already
+    // proven the picked _time timeframe silently drops rows in aggregate reads
+    // (same disease the MAX roster read had) — _raw is the shape that works.
+    const bucketCands = iv === 60 ? [hourField, `${group}_raw`]
       : bucketFieldByMonitor.has(bKey) ? [bucketFieldByMonitor.get(bKey)]
-        : [`${group}_minute${iv}`, m.timeField];
+        : [`${group}_minute${iv}`, `${group}_raw`, m.timeField];
     const timeFilter = anchor
       ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
       : `last ${h} hours`;
@@ -661,11 +664,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           if (/^transaction_count$/i.test(f)) return 0;
           if (/transaction/i.test(f)) return 1;
           if (/cumulative|topup|tip|customer|operator|distinct|tab/i.test(f)) return 9;
+          // The check-ins family's real per-scan counter (Attendance_Check_Ins)
+          // — its plain .count is another zero-only row-counter on this explore.
+          if (/attendance|check_?in/i.test(f)) return 2;
           return 5;
         };
         probed = (ef.measures || [])
           .map((x) => (x && x.name) || x)
-          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count/i.test(n))
+          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count|check_?in|attendance/i.test(n))
           .filter((n) => score(n) < 9)
           .sort((a, b) => score(a) - score(b))
           .slice(0, 3);
@@ -679,6 +685,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
+    const tried = []; // read-path trace — shown in the UI when the grid comes back empty
+    const step = (bf, cand, out) => tried.push(`${String(bf).split('.').pop()} + ${String(cand).split('.').pop()} → ${out}`);
     for (const bf of bucketCands) {
       for (const cand of modes) {
         const body = { ...baseBody(m), sorts: [`${bf} desc`], limit: '20000', fields: [m.rosterField, bf] };
@@ -693,16 +701,35 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
+          // A bucket dim can be silently ACCEPTED yet come back blank on every
+          // row (created_at_minute10 on the check-ins family — no 400, just
+          // null buckets). The bucket shape is broken, not the measure: jump
+          // straight to the next bucket candidate.
+          if (got.length && !got.some((r) => parseTs(r[bf]))) {
+            step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
+          }
           // Combined-explore trap: a count measure can exist yet count ANOTHER
           // view's rows — every returned row then reads 0. Rows prove activity,
           // so a zero-only count is a soft failure: try the next counting mode.
+          // An EMPTY result from a counting mode is just as suspect (a broken
+          // join can drop every row) — only 'none' may accept a quiet feed.
           const cTry = fieldFor(cand);
           if (cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
-            lastErr = new Error(`${cTry} returned 0 for every row`); continue;
+            step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
           }
+          if (cand !== 'none' && !got.length) {
+            step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
+          }
+          // Even plain presence only accepts an empty window on the LAST
+          // bucket shape — an earlier bucket may be the one dropping rows.
+          if (cand === 'none' && !got.length && bf !== bucketCands[bucketCands.length - 1]) {
+            step(bf, cand, 'no rows'); lastErr = new Error('no rows in window'); break;
+          }
+          step(bf, cand, `${got.length} rows`);
           rows = got; mode = cand; bucketField = bf; break;
         } catch (e) {
           lastErr = e;
+          step(bf, cand, String(e.message || e).slice(0, 90));
           if (String(e.message || e).includes(bf)) break; // the bucket dim itself is unknown — next candidate
         }
       }
@@ -767,6 +794,10 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
+      // Empty grid → say exactly what was tried (and show a sample row when
+      // rows arrived but none survived the bucketing) — no more silent blanks.
+      readPath: byDevice.size ? undefined : tried,
+      sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
       truncated: rows.length >= 20000,
@@ -996,26 +1027,26 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         // check already made, so the board costs nothing to render.
         let stations = null;
         try {
-          if (tl && m.stationField && tl.devices.length) {
+          if (tl && tl.devices.length) {
             const a3 = rosterAnchor(m);
-            const info3 = await deviceDetailsLite(m, a3
+            const info3 = !m.stationField ? null : await deviceDetailsLite(m, a3
               ? `after ${a3.toISOString().slice(0, 16).replace('T', ' ')}`
               : `last ${m.rosterBaselineMin} minutes`);
-            if (info3) {
-              const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
-              const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
-              const byS = new Map();
-              for (const d of tl.devices) {
-                const stn = (info3.get(d.device) || {}).station || '—';
-                if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
-                const e3 = byS.get(stn);
-                if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
-                e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
-                const s6 = d.counts.slice(-6);
-                s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
-              }
-              stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
+            const win = Math.max(1, Math.ceil(m.rosterOnlineMin / tl.intervalMin));
+            const hrN = Math.max(1, Math.round(60 / tl.intervalMin));
+            const byS = new Map();
+            for (const d of tl.devices) {
+              // Station-less monitors (e.g. one gate's check-in) lump into a
+              // single '' entry the board joins back to the monitor's own tile.
+              const stn = info3 ? ((info3.get(d.device) || {}).station || '—') : '';
+              if (!byS.has(stn)) byS.set(stn, { station: stn, on: 0, off: 0, txnH: 0, spark: [0, 0, 0, 0, 0, 0] });
+              const e3 = byS.get(stn);
+              if (d.active.slice(-win).some(Boolean)) e3.on += 1; else e3.off += 1;
+              e3.txnH += d.counts.slice(-hrN).reduce((a3, b3) => a3 + b3, 0);
+              const s6 = d.counts.slice(-6);
+              s6.forEach((c3, i3) => { e3.spark[6 - s6.length + i3] += c3; });
             }
+            stations = [...byS.values()].sort((a3, b3) => (b3.on + b3.off) - (a3.on + a3.off)).slice(0, 80);
           }
         } catch (e) { console.warn('[data-health] station roll-up failed', m.id, e.message); }
         // The tile day-graph reads the OBSERVED log once it has any history —
