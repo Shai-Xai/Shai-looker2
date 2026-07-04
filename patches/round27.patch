@@ -1,0 +1,251 @@
+diff --git a/client/src/components/StaffAlertsTab.jsx b/client/src/components/StaffAlertsTab.jsx
+index aaf0f88..b745971 100644
+--- a/client/src/components/StaffAlertsTab.jsx
++++ b/client/src/components/StaffAlertsTab.jsx
+@@ -46,0 +47,6 @@ export default function StaffAlertsTab({ suiteId }) {
++  const setAllOff = (p) => {
++    fetch('/api/my/staff-alerts/settings', {
++      method: 'PUT', headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ suiteId, allOff: p }),
++    }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
++  };
+@@ -58,0 +65,12 @@ export default function StaffAlertsTab({ suiteId }) {
++      {/* Master OFF — kills every event's ops alerts. Distinct from per-event pause. */}
++      {data.allOff ? (
++        <div style={{ ...card, borderLeft: '4px solid #dc2626', background: 'rgba(220,38,38,0.08)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
++          <span style={{ fontSize: 12.5 }}>🛑 <b>All ops alerts are OFF</b> — nothing will send for any event until you switch them back on.</span>
++          <span style={{ flex: 1 }} />
++          <button onClick={() => setAllOff(false)} style={{ border: 'none', background: '#16a34a', color: '#fff', borderRadius: 8, padding: '7px 14px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', minHeight: 34 }}>▶ Switch alerts on</button>
++        </div>
++      ) : (
++        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
++          <button onClick={() => { if (confirm('Switch OFF ops alerts for EVERY event? Nothing will send until you turn them back on.')) setAllOff(true); }} title="Master switch — stop all ops alerts everywhere" style={{ border: '1px solid #dc2626', background: 'var(--card)', color: '#dc2626', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 32 }}>🛑 Switch off all ops alerts</button>
++        </div>
++      )}
+@@ -82,0 +101,5 @@ export default function StaffAlertsTab({ suiteId }) {
++      {data.whatsappFrom && (
++        <div style={{ ...card, borderLeft: '4px solid #25D366', fontSize: 12, marginBottom: 10 }}>
++          💬 <b>Staff WhatsApp:</b> {data.whatsappFrom} — staff message this number once to switch alerts on (opens WhatsApp’s 24h window; they don’t reach the Owl). 🔔 = push on this phone · 💬 = WhatsApp reachable.
++        </div>
++      )}
+@@ -122 +145 @@ export default function StaffAlertsTab({ suiteId }) {
+-                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
++                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.whatsapp ? '💬 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
+diff --git a/client/src/pages/EventOpsPortalPage.jsx b/client/src/pages/EventOpsPortalPage.jsx
+index 6b20845..10cf10b 100644
+--- a/client/src/pages/EventOpsPortalPage.jsx
++++ b/client/src/pages/EventOpsPortalPage.jsx
+@@ -145,0 +146,13 @@ export default function EventOpsPortalPage({ suiteId, token }) {
++            {info.whatsappFrom && (
++              <a href={`https://wa.me/${info.whatsappFrom.replace(/[^\d]/g, '')}?text=${encodeURIComponent(`ALERTS ${staff.number || ''}`.trim())}`}
++                target="_blank" rel="noopener noreferrer"
++                style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, textDecoration: 'none', color: 'inherit', borderLeft: '4px solid #25D366' }}>
++                <span style={{ fontSize: 22 }}>💬</span>
++                <div style={{ minWidth: 0, flex: 1 }}>
++                  <div style={{ fontWeight: 700, fontSize: 14 }}>Get alerts on WhatsApp</div>
++                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tap to message <b>{info.whatsappFrom}</b> once — that switches on station alerts here. (We only send alerts; it isn’t a chat line.)</div>
++                </div>
++                <span style={{ fontSize: 13, color: '#25D366', fontWeight: 800, flexShrink: 0 }}>Open ›</span>
++              </a>
++            )}
++
+diff --git a/server/eventops.js b/server/eventops.js
+index 1cd6fa9..8596b23 100644
+--- a/server/eventops.js
++++ b/server/eventops.js
+@@ -43 +43 @@ const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts',
+-function mount(app, { db, auth, push = require('./push') }) {
++function mount(app, { db, auth, push = require('./push'), messaging = null }) {
+@@ -893,0 +894,2 @@ function mount(app, { db, auth, push = require('./push') }) {
++      // Howler WhatsApp number (if configured) so staff can open the alert channel.
++      whatsappFrom: (messaging && messaging.waFrom && messaging.waConfigured && messaging.waConfigured()) ? messaging.waFrom() : '',
+diff --git a/server/index.js b/server/index.js
+index 4ad66bd..07a10e9 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -146 +146 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
+-let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
++let osApi, waDigestFor, staffInboundFn = null; // waDigestFor set when digests mount; staffInboundFn set when staffAlerts mounts (lets the WhatsApp Owl intercept staff numbers before they reach it)
+@@ -150 +150 @@ const owlUploads = require('./owlUploads').mount(app, { db, auth }); const drive
+-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
++require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
+@@ -643 +643 @@ require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug>
+-const eventopsApi = require('./eventops').mount(app, { db, auth, push }); require('./staffAlerts').mount(app, { db, auth, mailer, push }); // device/station logistics + 🚨 staff alerts phase 1 (🧪, dark station → assigned crew) → server/eventops.js, server/staffAlerts.js
++const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging }); staffInboundFn = (require('./staffAlerts').mount(app, { db, auth, mailer, push, messaging }) || {}).staffInbound; // device/station logistics + 🚨 staff alerts (dark station → crew via push/WhatsApp; staff WhatsApp intercepted before the Owl) → server/eventops.js, server/staffAlerts.js
+diff --git a/server/owlChat.js b/server/owlChat.js
+index 71581c2..9c5a775 100644
+--- a/server/owlChat.js
++++ b/server/owlChat.js
+@@ -243 +243 @@ function owlAllowed(user) {
+-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
++function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
+@@ -773 +773 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
+-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
++  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound }); // WhatsApp door onto the Owl (Clickatell)
+diff --git a/server/owlWhatsapp.js b/server/owlWhatsapp.js
+index e83cb2f..c8a4576 100644
+--- a/server/owlWhatsapp.js
++++ b/server/owlWhatsapp.js
+@@ -57 +57 @@ function parseFollowups(out) {
+-function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
++function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound = null }) {
+@@ -425,0 +426,9 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
++    // Staff-alerts intercept: a message from a known Event Ops staff number is
++    // captured for ops and answered simply — it must NEVER reach the client
++    // Owl. Fully guarded: any non-staff number (or an error) falls straight
++    // through to the normal Owl flow below.
++    const staffInbound = getStaffInbound && getStaffInbound();
++    if (staffInbound) {
++      try { if (await staffInbound(msisdn, rawText)) { logEvent(msisdn, 'staff-alert', 'captured (kept off the Owl)'); return; } }
++      catch (e) { console.error('[owlWhatsapp] staffInbound failed', e && e.message); }
++    }
+diff --git a/server/staffAlerts.js b/server/staffAlerts.js
+index 097636b..8e0379c 100644
+--- a/server/staffAlerts.js
++++ b/server/staffAlerts.js
+@@ -14 +14 @@ const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').tr
+-function mount(app, { db, auth, mailer = require('./mailer'), push = require('./push') }) {
++function mount(app, { db, auth, mailer = require('./mailer'), push = require('./push'), messaging = null }) {
+@@ -22,0 +23,11 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++    -- Staff who've opened a WhatsApp window (messaged our number). msisdn ↔ staff,
++    -- with the last inbound time (the 24h free-form window) and their last message.
++    CREATE TABLE IF NOT EXISTS eventops_staff_wa (
++      msisdn      TEXT NOT NULL PRIMARY KEY,
++      staff_id    TEXT NOT NULL,
++      suite_id    TEXT NOT NULL,
++      last_in_at  TEXT NOT NULL,
++      last_msg    TEXT NOT NULL DEFAULT '',
++      opted_out   INTEGER NOT NULL DEFAULT 0
++    );
++    CREATE INDEX IF NOT EXISTS idx_eventops_staff_wa ON eventops_staff_wa(staff_id);
+@@ -41,0 +53,3 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++  // Master OFF switch for EVERY event's ops alerts (the big red stop). Distinct
++  // from per-event pause; when off the tick sends nothing anywhere.
++  const allOff = () => db.getSetting('staff_alerts_all_off', '0') === '1';
+@@ -94,0 +109,42 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++  // WhatsApp as an alert channel (phase 3).
++  // Staff open the channel by messaging the Howler WhatsApp number — that opens
++  // the 24h window WhatsApp requires for free-form messages. They do NOT reach
++  // the Owl: staffInbound() intercepts a known staff number, captures the note
++  // for ops, and replies with a simple confirmation. Returns TRUE only for a
++  // real staff number (any other number falls straight through to the Owl).
++  const waNorm = (n) => (messaging && messaging.normaliseMsisdn ? messaging.normaliseMsisdn(n) : String(n || '').replace(/[^\d]/g, ''));
++  async function staffInbound(msisdn, text) {
++    if (!messaging) return false;
++    const m = waNorm(msisdn);
++    if (!m) return false;
++    // Match against every event's staff numbers (normalised).
++    const cand = sql.prepare("SELECT id, suite_id, number, name FROM eventops_staff WHERE number!=''").all()
++      .find((s) => waNorm(s.number) === m);
++    if (!cand) return false; // not staff → let the Owl handle it as before
++    const body = String(text || '').trim();
++    const stop = /^(stop|unsubscribe|opt.?out)$/i.test(body);
++    sql.prepare(`INSERT INTO eventops_staff_wa (msisdn, staff_id, suite_id, last_in_at, last_msg, opted_out) VALUES (?,?,?,?,?,?)
++      ON CONFLICT(msisdn) DO UPDATE SET staff_id=excluded.staff_id, suite_id=excluded.suite_id, last_in_at=excluded.last_in_at, last_msg=excluded.last_msg, opted_out=excluded.opted_out`)
++      .run(m, cand.id, cand.suite_id, now(), body.slice(0, 500), stop ? 1 : 0);
++    log(cand.suite_id, cand.name || cand.number, stop ? 'wa-optout' : 'wa-msg', `WhatsApp from ${cand.name || cand.number}: ${body.slice(0, 200)}`, '');
++    const reply = stop
++      ? 'You will no longer get station alerts on WhatsApp. Message us again any time to switch them back on.'
++      : `✅ Thanks ${cand.name || ''}${cand.name ? ' — ' : ''}you're set up for station alerts on WhatsApp. We'll message you here if a station you're on goes dark. Reply STOP to opt out.`;
++    try { await messaging.sendWhatsapp({ to: m, text: reply }); } catch { /* best effort */ }
++    return true;
++  }
++
++  // Free-form WhatsApp to the crew — ONLY numbers with an open 24h window and
++  // not opted out (WhatsApp forbids free-form outside the window without a
++  // template). Live-mode only.
++  function sendWhatsappToStaff(staffIds, text) {
++    const ids = (staffIds || []).filter(Boolean);
++    if (!ids.length || !messaging || !messaging.sendWhatsapp) return;
++    const rows = sql.prepare(`SELECT msisdn, last_in_at, opted_out FROM eventops_staff_wa WHERE staff_id IN (${ids.map(() => '?').join(',')})`).all(...ids);
++    for (const r of rows) {
++      if (r.opted_out) continue;
++      if (Date.now() - Date.parse(r.last_in_at) >= 24 * 3600000) continue; // window closed
++      Promise.resolve(messaging.sendWhatsapp({ to: r.msisdn, text })).catch(() => {});
++    }
++  }
++
+@@ -118 +174,3 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-      // phase 2: ping the crew's OWN phones (portal push); phase 3: WhatsApp.
++      // phase 2: ping the crew's OWN phones (portal push) + phase 3: WhatsApp
++      // (only numbers with an open 24h window).
++      const line = `🚨 ${hs.station}: ${hs.off} of ${total} devices dark — check the connection.`;
+@@ -119,0 +178 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++      sendWhatsappToStaff(crew.map((x) => x.id), line);
+@@ -144 +203 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-    if (!enabled()) return;
++    if (!enabled() || allOff()) return;
+@@ -203 +262 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-    // Which staff have opted into portal push (reachable on their own phone).
++    // Which staff are reachable — portal push, or an open WhatsApp window.
+@@ -204,0 +264 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++    const waReach = new Set(sql.prepare("SELECT staff_id FROM eventops_staff_wa WHERE suite_id=? AND opted_out=0 AND last_in_at > ?").all(suiteId, new Date(Date.now() - 24 * 3600000).toISOString()).map((r) => r.staff_id));
+@@ -209 +269 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-      return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number, reachable: reachable.has(x.id) })) };
++      return { station: hs.station, monitor: hs.monitor, on: hs.on, off: hs.off, opsStationId: map.id, manual: map.manual, alerting: !!st && st.status === 'alerting', staff: crew.map((x) => ({ name: x.name, role: x.role, number: x.number, reachable: reachable.has(x.id), whatsapp: waReach.has(x.id) })) };
+@@ -212 +272,2 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), stations, opsStations, log: logRows });
++    const whatsappFrom = (messaging && messaging.waFrom && messaging.waConfigured && messaging.waConfigured()) ? messaging.waFrom() : '';
++    res.json({ testMode: testMode(), testEmail: testMode() ? testEmail() : '', thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), allOff: allOff(), whatsappFrom, stations, opsStations, log: logRows });
+@@ -226,0 +288,5 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
++    // Master off — silences EVERY event's ops alerts (global). Admin-only.
++    if (typeof b.allOff === 'boolean' && req.user && req.user.role === 'admin') {
++      db.setSetting('staff_alerts_all_off', b.allOff ? '1' : '0');
++      log(suiteId, '(all)', b.allOff ? 'all-off' : 'all-on', b.allOff ? 'ALL ops alerts switched off.' : 'Ops alerts switched back on.', '');
++    }
+@@ -232 +298 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-    res.json({ thresholdPct: thresholdPct(suiteId), paused: paused(suiteId) });
++    res.json({ thresholdPct: thresholdPct(suiteId), paused: paused(suiteId), allOff: allOff() });
+@@ -250 +316 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
+-  return { tick, healthStations, resolveStation };
++  return { tick, healthStations, resolveStation, staffInbound };
+diff --git a/test/staffAlerts.test.js b/test/staffAlerts.test.js
+index 4e0a1cb..43d1635 100644
+--- a/test/staffAlerts.test.js
++++ b/test/staffAlerts.test.js
+@@ -15,0 +16 @@ function mountAlerts() {
++  const waSends = [];
+@@ -30,0 +32 @@ function mountAlerts() {
++    messaging: { normaliseMsisdn: (n) => String(n || '').replace(/[^\d]/g, ''), sendWhatsapp: async (m) => { waSends.push(m); return { ok: true }; }, waFrom: () => '27110001111', waConfigured: () => true },
+@@ -32 +34 @@ function mountAlerts() {
+-  return { mod, sql, testEmails, pushes, rawSends };
++  return { mod, sql, testEmails, pushes, rawSends, waSends };
+@@ -40,0 +43 @@ function seed(h, { on, off, health = 'FUTUR BAR', ops = 'Futur Bar' }) {
++  sql.prepare('DELETE FROM eventops_staff_push').run(); sql.prepare('DELETE FROM eventops_staff_wa').run();
+@@ -99,0 +103,36 @@ test('after go-live, a subscribed crew member is pushed on their own phone', ()
++test('staffInbound captures a known staff number (kept off the Owl) and ignores others', async () => {
++  const h = mountAlerts();
++  seed(h, { on: 4, off: 0 }); // staffer Thabo, number +2782, at su1
++  // A message from Thabo's number → intercepted (returns true), captured, replied.
++  const handled = await h.mod.staffInbound('+2782', 'hi');
++  assert.equal(handled, true);
++  assert.equal(h.waSends.length, 1);
++  assert.match(h.waSends[0].text, /station alerts on WhatsApp/);
++  const row = h.sql.prepare("SELECT * FROM eventops_staff_wa WHERE staff_id='sf1'").get();
++  assert.ok(row && row.msisdn === '2782');
++  // An unknown number → NOT handled (falls through to the Owl).
++  const other = await h.mod.staffInbound('+9999', 'hello');
++  assert.equal(other, false);
++});
++
++test('after go-live, a WhatsApp-window staffer gets the alert on WhatsApp', () => {
++  const h = mountAlerts();
++  seed(h, { on: 2, off: 2 });
++  db.setSetting('data_health_test_mode', '0');
++  h.sql.prepare("INSERT INTO eventops_staff_wa (msisdn, staff_id, suite_id, last_in_at, last_msg, opted_out) VALUES ('2782','sf1','su1',?, 'hi', 0)").run(new Date().toISOString());
++  h.mod.tick();
++  assert.ok(h.waSends.some((m) => m.to === '2782' && /devices dark/.test(m.text)));
++  db.setSetting('data_health_test_mode', '1');
++});
++
++test('the master all-off switch silences every event', () => {
++  const h = mountAlerts();
++  seed(h, { on: 2, off: 2 });
++  db.setSetting('staff_alerts_all_off', '1');
++  h.mod.tick();
++  assert.equal(h.testEmails.length, 0);
++  db.setSetting('staff_alerts_all_off', '0');
++  h.mod.tick();
++  assert.equal(h.testEmails.length, 1);
++});
++
