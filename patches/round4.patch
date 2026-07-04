@@ -82,7 +82,7 @@ index 5761447..9ae4b51 100644
 +  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
 +  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
 +  h.setRowsFn(async (b) => {
-+    if (b.fields.includes('scans.scanned_at_minute10')) throw new Error('Unknown field \"scans.scanned_at_minute10\"');
++    if (b.fields.includes('scans.scanned_at_minute10')) throw new Error('Unknown field "scans.scanned_at_minute10"');
 +    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 7 }];
 +    return []; // the _time bucket shape returns nothing — must never be accepted over raw
 +  });
@@ -109,8 +109,8 @@ index 5761447..9ae4b51 100644
 @@ -610,3 +657,4 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
 -    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
 -    // and the raw time dim takes over.
--    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field \"scans.scanned_at_minute10\"');
+-    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field "scans.scanned_at_minute10"');
 +    // No minuteN (or _raw) timeframes in this LookML — the aggregate-bucket
 +    // probes 400 and the picked time dim takes over.
 +    const bad = b.fields.find((f) => f.includes('_minute') || f.endsWith('_raw'));
-+    if (bad) throw new Error(`Unknown field \"${bad}\"`);
++    if (bad) throw new Error(`Unknown field "${bad}"`);
