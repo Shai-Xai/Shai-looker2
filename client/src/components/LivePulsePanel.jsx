@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useAuth } from '../lib/auth.jsx';
 
 // The "Live updates" tab of the Alerts page (Live Pulse). Where an alert watches ONE
 // number for a threshold, a live update sends the team a compact MULTI-metric snapshot
@@ -11,6 +12,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 //
 // Mobile-first: single stacked column; the editor is a full-height sheet on phones.
 export default function LivePulsePanel({ suites }) {
+  const { isAdmin } = useAuth(); // admins (incl. client preview) always get the create/manage controls
   const [bySuite, setBySuite] = useState({}); // suiteId -> { pulses, canManage, smsAvailable, whatsappAvailable, eventopsAvailable }
   const [editor, setEditor] = useState(null); // { suiteId, pulse } | null
 
@@ -20,7 +22,10 @@ export default function LivePulsePanel({ suites }) {
   useEffect(() => { suites.forEach((s) => loadSuite(s.id)); }, [suites.map((s) => s.id).join(','), loadSuite]); // eslint-disable-line react-hooks/exhaustive-deps
   const reloadAll = () => suites.forEach((s) => loadSuite(s.id));
 
-  const rows = suites.map((s) => ({ suite: s, pulses: [], canManage: false, loaded: bySuite[s.id] !== undefined, ...(bySuite[s.id] || {}) }));
+  // A real admin can always manage (the server's canManage() bypasses the client
+  // permission for admins), so the save will succeed — show the button even when the
+  // client-scoped permission would hide it (e.g. admin viewing a client in preview).
+  const rows = suites.map((s) => ({ suite: s, pulses: [], loaded: bySuite[s.id] !== undefined, ...(bySuite[s.id] || {}), canManage: !!(bySuite[s.id]?.canManage) || isAdmin }));
 
   const toggleLive = (p) => api.setLivePulseLive(p.id, !p.live).then(() => loadSuite(p.suiteId)).catch((e) => window.alert(e.message));
   const toggleStatus = (p) => api.setLivePulseStatus(p.id, p.status === 'paused' ? 'active' : 'paused').then(() => loadSuite(p.suiteId)).catch((e) => window.alert(e.message));

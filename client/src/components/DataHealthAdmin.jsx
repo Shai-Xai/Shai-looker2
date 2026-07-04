@@ -589,6 +589,17 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   const [checkMsg, setCheckMsg] = useState('');
   // Clicking the offline count opens a LIVE offline list split by station.
   const [offPanel, setOffPanel] = useState(null); // null | 'busy' | roster json | {error}
+  // The day chart reads the OBSERVED log directly (online + total per check) so
+  // the offline share is live — the snapshot's frozen coverage lags a re-check.
+  const [obsCov, setObsCov] = useState(null);
+  useEffect(() => {
+    if (!m.rosterField) return undefined;
+    let alive = true;
+    jget(`${base}/monitors/${m.id}/observed?hours=start`)
+      .then((d) => { if (alive && d && d.configured && (d.ticks || []).length) setObsCov(d.ticks.map((t) => ({ t: String(t.at).slice(11, 16), n: t.online || 0, tot: t.total || 0 })).slice(-288)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [m.id, base, m.rosterField]);
   const loadOffline = async (e) => {
     e.stopPropagation();
     if (offPanel) { setOffPanel(null); return; }
@@ -695,8 +706,8 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
         </div>
         {/* The approved tile graph: one bar per stored block, full height,
             grey stubs for zero blocks, SA-time labels at the ends. */}
-        {m.rosterField && (m.rosterSnapshot?.coverage?.length || 0) > 1 && (() => {
-          const cov = m.rosterSnapshot.coverage;
+        {m.rosterField && ((obsCov?.length || 0) > 1 || (m.rosterSnapshot?.coverage?.length || 0) > 1) && (() => {
+          const cov = (obsCov && obsCov.length > 1) ? obsCov : m.rosterSnapshot.coverage;
           // Stack offline (linked-but-silent) on top of online. tot is the
           // linked count that block; older snapshots without tot just show green.
           const off = (c) => Math.max(0, (c.tot ?? c.n) - c.n);
