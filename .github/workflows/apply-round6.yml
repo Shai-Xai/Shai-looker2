@@ -1,0 +1,47 @@
+name: apply-round6
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "24aff46434204081c5d963219edcf670011b136dd21feccef61cde4354db9aaf  patches/EventSignal6.jsx" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/EventSignal6.jsx /tmp/EventSignal.jsx
+          cat > /tmp/msg <<'MSG'
+          Board deep dive: robot view + modal
+
+          The station deep dive gains the three-colour robot view (green =
+          online + data, amber = offline at a check but data synced later,
+          red = offline + no data, grey = quiet) by fusing the day timeline
+          with the observed offline log - same language as Data health's
+          Combined mode, with a Blocks/Robot toggle. And tapping a station
+          now opens the detail as a sheet-style modal over the board instead
+          of below it.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
+          git add client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/EventSignal6.jsx .github/workflows/apply-round6.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
