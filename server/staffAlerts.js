@@ -104,6 +104,23 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
     }
   }
 
+  // STORM GUARD: when several stations cross in the same tick it's the PIPE
+  // (ingest stall), not the people — send ONE site-wide note, max one per 15
+  // min per event, instead of paging every station's crew at once.
+  const STORM_N = 4;
+  function siteNotify(suiteId, entityId, fires) {
+    const list = fires.slice(0, 8).map((h) => `${h.station} ${h.off}/${h.on + h.off} dark`).join(' · ');
+    const title = `📡 ${fires.length} stations went half-dark together — likely the data pipe, not staff`;
+    const body = `${list}${fires.length > 8 ? ` +${fires.length - 8} more` : ''}. When one pipe stalls every station looks dark at once — check the cashless/data sync before dispatching anyone.`;
+    log(suiteId, '(site-wide)', 'site', `${fires.length} stations crossed together. ${body}`, '');
+    if (testMode()) {
+      const to = testEmail();
+      if (to && mailer?.send) mailer.send({ to, subject: `[TEST] ${title}`, text: `${body}\n\n🧪 TEST MODE — one combined note instead of ${fires.length} station alerts; staff were NOT contacted.`, kind: 'notification' }).catch((e) => console.error('[staff-alerts] test mail failed', e.message));
+    } else if (entityId) {
+      Promise.resolve(push.sendToEntity(entityId, { title, body, url: '/event-ops' }, 'alerts')).catch(() => {});
+    }
+  }
+
   // The rule (phase 1): HALF the station's devices dark → alert; back under a
   // QUARTER → recovered. Edge-detected per suite+station, 15-min re-fire cooldown.
   function tick() {
@@ -113,6 +130,7 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
       for (const suiteId of suites) {
         const opsStations = sql.prepare('SELECT id, name FROM eventops_stations WHERE suite_id=?').all(suiteId);
         const staff = sql.prepare('SELECT name, number, role, station_id FROM eventops_staff WHERE suite_id=?').all(suiteId);
+        const fires = [];
         for (const hs of healthStations(suiteId)) {
           const total = hs.on + hs.off;
           if (total < 2) continue; // one lonely device flapping must not page anyone
@@ -122,12 +140,24 @@ function mount(app, { db, auth, mailer = require('./mailer'), push = require('./
           const alerting = st && st.status === 'alerting';
           if (!alerting && share >= 0.5) {
             if (st && Date.now() - Date.parse(st.at) < 15 * 60000) continue;
-            const map = resolveStation(suiteId, hs.station, opsStations);
-            notify(suiteId, hs, map.id ? staff.filter((x) => x.station_id === map.id) : [], map);
+            fires.push(hs);
             sql.prepare('INSERT INTO staff_alert_state (k, status, at) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET status=excluded.status, at=excluded.at').run(k, 'alerting', now());
           } else if (alerting && share <= 0.25) {
             sql.prepare('UPDATE staff_alert_state SET status=?, at=? WHERE k=?').run('ok', now(), k);
             log(suiteId, hs.station, 'recovered', `${hs.on}/${total} devices back online`, '');
+          }
+        }
+        if (fires.length >= STORM_N) {
+          const sk = `${suiteId}|__site__`;
+          const ss = sql.prepare('SELECT status, at FROM staff_alert_state WHERE k=?').get(sk);
+          if (!ss || Date.now() - Date.parse(ss.at) >= 15 * 60000) {
+            siteNotify(suiteId, fires[0].entityId, fires);
+            sql.prepare('INSERT INTO staff_alert_state (k, status, at) VALUES (?,?,?) ON CONFLICT(k) DO UPDATE SET status=excluded.status, at=excluded.at').run(sk, 'alerting', now());
+          }
+        } else {
+          for (const hs of fires) {
+            const map = resolveStation(suiteId, hs.station, opsStations);
+            notify(suiteId, hs, map.id ? staff.filter((x) => x.station_id === map.id) : [], map);
           }
         }
       }
