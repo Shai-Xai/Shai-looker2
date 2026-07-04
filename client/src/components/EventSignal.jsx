@@ -152,6 +152,35 @@ function DeepDive({ apiBase, mid, station, unit }) {
         <button style={chip(robot)} onClick={() => setRobot(true)}>🚦 Robot</button>
       </div>
       {robot && obs && !obs.configured && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 6 }}>No observed checks in this window yet — amber/red appear once Pulse's own offline log has coverage.</div>}
+      {/* 📈 The station's pulse line — its hourly rate with the peak flagged,
+          built from the same 30-min timeline (pairs summed into hours). */}
+      {(t.buckets || []).length >= 4 && (() => {
+        const hourly = [];
+        for (let i = 0; i + 1 < t.buckets.length; i += 2) {
+          hourly.push({ label: String(t.buckets[i]).slice(11, 16), v: devs.reduce((a, d) => a + ((d.counts || [])[i] || 0) + ((d.counts || [])[i + 1] || 0), 0) });
+        }
+        const max = Math.max(1, ...hourly.map((x) => x.v));
+        const pk = hourly.reduce((bi, x, i) => (x.v > hourly[bi].v ? i : bi), 0);
+        const act = hourly.filter((x) => x.v > 0);
+        const mean = act.length ? Math.round(act.reduce((a, x) => a + x.v, 0) / act.length) : 0;
+        if (!act.length) return null;
+        return (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)' }}>Station rhythm · {unit}/h</span>
+              <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>peak <b style={{ color: 'var(--brand)' }}>{hourly[pk].v.toLocaleString('en-ZA')}</b> at {hourly[pk].label} · ~{mean.toLocaleString('en-ZA')}/h avg</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 44, borderBottom: '1px solid var(--hairline)', marginTop: 3 }}>
+              {hourly.map((x, i) => (
+                <i key={i} title={`${x.label} · ${x.v.toLocaleString('en-ZA')}/h`} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: Math.max(2, Math.round((x.v / max) * 42)), background: i === pk ? 'var(--brand)' : STATUS_COLOR.fresh, opacity: i === pk ? 1 : 0.85 }} />
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
+              <span>{hourly[0].label}</span><span>{hourly[hourly.length - 1].label}</span>
+            </div>
+          </div>
+        );
+      })()}
       {/* Stacked day graph — online (green) vs offline (red) at every Pulse
           check, scoped to THIS station's devices via the observed log. */}
       {obs && obs.configured && (obs.ticks || []).length >= 3 && devs.length > 0 && (() => {
@@ -313,10 +342,104 @@ function OwlDrawer({ entityId, suiteId, title, onClose }) {
   return createPortal(node, document.body);
 }
 
+// 📈 The Rate river — every station's pace on one shared clock: one row per
+// station, one cell per hour, colour depth = how busy (green = transactions,
+// blue = scans), the day's avg/h on the right. The site's stacked total sits
+// on top. Hourly numbers come from each monitor's day timeline (hour blocks).
+function RhythmView({ monitors, apiBase, rows, onSelect }) {
+  const [data, setData] = useState({}); // monitor id -> hourly timeline
+  useEffect(() => {
+    let alive = true;
+    monitors.forEach((m) => {
+      if (data[m.id]) return;
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=60`)
+        .then((r) => r.json()).then((d) => { if (alive && d && d.devices) setData((p) => ({ ...p, [m.id]: d })); })
+        .catch(() => {});
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
+  }, [monitors.map((m) => m.id).join(','), apiBase]);
+
+  const loaded = monitors.filter((m) => data[m.id]);
+  // Global hour axis across all monitors (anchors differ per monitor).
+  const hourSet = new Set();
+  loaded.forEach((m) => (data[m.id].buckets || []).forEach((b) => hourSet.add(b.slice(0, 13))));
+  const hours = [...hourSet].sort().slice(-24);
+  const hIdx = new Map(hours.map((h, i) => [h, i]));
+  const stations = new Map(); // name -> {name, unit, mid, vals[]}
+  loaded.forEach((m) => {
+    const t = data[m.id]; const unit = unitFor(m);
+    (t.devices || []).forEach((d) => {
+      const stn = d.station || m.name;
+      if (!stations.has(stn)) stations.set(stn, { name: stn, unit, mid: m.id, vals: hours.map(() => 0) });
+      const e = stations.get(stn);
+      (t.buckets || []).forEach((b, i) => { const gi = hIdx.get(b.slice(0, 13)); if (gi != null) e.vals[gi] += (d.counts || [])[i] || 0; });
+    });
+  });
+  const list = [...stations.values()].map((s) => {
+    const act = s.vals.filter((v) => v > 0);
+    return { ...s, total: s.vals.reduce((a, b) => a + b, 0), avg: act.length ? Math.round(act.reduce((a, b) => a + b, 0) / act.length) : 0 };
+  }).sort((a, b) => b.total - a.total);
+  const hh = (h) => `${h.slice(11, 13)}:00`;
+  const totMax = Math.max(1, ...hours.map((_, i) => list.reduce((a, s) => a + s.vals[i], 0)));
+  if (!hours.length) {
+    return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>{loaded.length < monitors.length ? 'Reading each monitor’s day timeline…' : 'No hourly data in the window yet.'}</div>;
+  }
+  return (
+    <div>
+      {/* site total, stacked per hour: green = transactions, blue = scans */}
+      <div style={{ ...card, marginBottom: 10 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Whole site · per hour</div>
+        <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 56 }}>
+          {hours.map((h, i) => {
+            const tx = list.filter((s) => s.unit === 'transactions').reduce((a, s) => a + s.vals[i], 0);
+            const sc = list.filter((s) => s.unit === 'scans').reduce((a, s) => a + s.vals[i], 0);
+            return (
+              <span key={h} title={`${hh(h)} · ${tx.toLocaleString('en-ZA')} txns · ${sc.toLocaleString('en-ZA')} scans`} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: 56, minWidth: 3 }}>
+                {sc > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((sc / totMax) * 54)), background: '#2563eb', opacity: 0.85, borderRadius: '1px 1px 0 0' }} />}
+                {tx > 0 && <i style={{ display: 'block', height: Math.max(2, Math.round((tx / totMax) * 54)), background: STATUS_COLOR.fresh, borderRadius: sc ? 0 : '1px 1px 0 0' }} />}
+              </span>
+            );
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+          <span>{hh(hours[0])}</span>
+          <span><span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>transactions</span> · <span style={{ color: '#2563eb', fontWeight: 700 }}>scans</span></span>
+          <span>{hh(hours[hours.length - 1])}</span>
+        </div>
+      </div>
+      {/* the river — deeper colour = busier hour; tap a row for the station modal */}
+      <div style={{ ...card }}>
+        {list.map((s) => {
+          const max = Math.max(1, ...s.vals);
+          const row = (rows || []).find((r) => r.name === s.name || r.sn === s.name);
+          return (
+            <div key={s.name} role="button" tabIndex={0} onClick={() => onSelect && onSelect(row || { name: s.name, zone: zoneOf(s.name), monitor: s.name, mid: s.mid, sn: s.name === s.mid ? '' : s.name, unit: s.unit, status: 'fresh', lagMin: null, on: null, off: 0, txnH: null })}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.click(); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, cursor: 'pointer', minWidth: 0 }}>
+              <span style={{ width: 130, flexShrink: 0, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
+              <span style={{ display: 'flex', gap: 2, flex: 1, height: 18 }}>
+                {s.vals.map((v, i) => (
+                  <i key={i} title={`${hh(hours[i])} · ${v.toLocaleString('en-ZA')}/h`} style={{ flex: 1, borderRadius: 2, background: v ? (s.unit === 'scans' ? `rgba(37,99,235,${(0.12 + 0.88 * (v / max)).toFixed(2)})` : `rgba(22,163,74,${(0.12 + 0.88 * (v / max)).toFixed(2)})`) : 'var(--hairline)' }} />
+                ))}
+              </span>
+              <span style={{ width: 84, textAlign: 'right', fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                {s.avg.toLocaleString('en-ZA')}<span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 9 }}> {s.unit === 'scans' ? 'scans' : 'txns'}/h avg</span>
+              </span>
+            </div>
+          );
+        })}
+        {loaded.length < monitors.length && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Still reading {monitors.length - loaded.length} monitor{monitors.length - loaded.length === 1 ? '' : 's'}…</div>}
+      </div>
+    </div>
+  );
+}
+
 // The board itself — presentational; give it the monitors array the page
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
+  const [view, setView] = useState('board'); // 'board' | 'rhythm' (the rate river)
   const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
   const open = (monitors || []).filter((m) => m.status !== 'closed');
 
@@ -379,18 +502,27 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 
   return (
     <div>
-      {/* monitor filter chips — split the board by station family */}
-      {chips.length > 1 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+      {/* monitor filter chips — split the board by station family — and the
+          view toggle: 🎛️ tiles vs 📈 the rate river. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+        {chips.length > 1 && <>
           <button onClick={() => { setPick(''); setSel(null); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
           {chips.map((m) => (
             <button key={m.id} onClick={() => { setPick(m.id); setSel(null); }} style={chipStyle(pick === m.id)}>
               {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
             </button>
           ))}
-        </div>
+        </>}
+        <span style={{ flex: 1 }} />
+        <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
+        <button onClick={() => setView('rhythm')} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
+      </div>
+
+      {view === 'rhythm' && (
+        <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
       )}
 
+      {view === 'board' && <>
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {dials.map(([l, v, c]) => (
@@ -428,6 +560,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           );
         })}
       </div>
+      </>}
 
       {/* selected station — a sheet-style modal over the board (tap outside to close) */}
       {sel && (
