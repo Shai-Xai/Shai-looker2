@@ -1,0 +1,196 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 53a6948..178d190 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -327,11 +327,16 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
+-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log'], ['combined', '🚦 Combined']].map(([k, l]) => (
+-          <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
+-        ))}
+-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
+-        {[['start', '▶ Start'], [12, '12h'], [24, '24h'], [48, '48h']].map(([h, l]) => (
+-          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{l}</button>
+-        ))}
+-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
+-        {[5, 10, 20, 30, 60].map((m) => (
+-          <button key={m} style={{ ...ghostBtn, padding: '4px 8px', ...(interval === m ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setIntervalMin(m)}>{m === 60 ? '1h' : `${m}m`}</button>
+-        ))}
++        {/* one dropdown per decision (view · window · block size) beats twelve buttons */}
++        <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
++          <option value="blocks">🟩 Blocks</option>
++          <option value="counts">🔢 Counts</option>
++          <option value="observed">📡 Offline log</option>
++          <option value="combined">🚦 Combined</option>
++        </select>
++        <select value={String(hours)} disabled={busy} onChange={(e) => setHours(e.target.value === 'start' ? 'start' : Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
++          <option value="start">▶ From start</option>
++          <option value="12">Last 12h</option>
++          <option value="24">Last 24h</option>
++          <option value="48">Last 48h</option>
++        </select>
++        <select value={interval} disabled={busy} onChange={(e) => setIntervalMin(Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
++          {[5, 10, 20, 30, 60].map((n) => <option key={n} value={n}>{n === 60 ? '1h' : `${n}m`} blocks</option>)}
++        </select>
+@@ -569,0 +575 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
++  const [tools, setTools] = useState(false); // ⚙️ Manage — the everyday buttons, folded away
+@@ -728,0 +735,8 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
++          <button style={{ ...ghostBtn, ...(tools ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
++            title="Edit, duplicate, pause, close, delete — the everyday buttons stay out of the way" onClick={() => setTools((v) => !v)}>⚙️ Manage</button>
++        </>}
++        <DiagnosePanel monitorId={m.id} base={base} />
++        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
++      </div>
++      {!readOnly && tools && (
++        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+@@ -742,5 +756,3 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
+-        </>}
+-        <DiagnosePanel monitorId={m.id} base={base} />
+-        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
+-      </div>
++            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑 Delete</button>
++        </div>
++      )}
+@@ -982 +994 @@ function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpe
+-                <SignalBoard monitors={monitors} />
++                <SignalBoard monitors={monitors} apiBase={ADMIN_BASE} />
+@@ -1517 +1529 @@ export default function DataHealthAdmin() {
+-                <SignalBoard monitors={g.monitors} />
++                <SignalBoard monitors={g.monitors} apiBase={ADMIN_BASE} />
+@@ -1594,0 +1607,2 @@ export function DataHealthOps({ entityId, suiteId }) {
++  const [tick, setTick] = useState(0); // manual refresh bumps this
++  const [at, setAt] = useState(null);
+@@ -1598 +1612 @@ export function DataHealthOps({ entityId, suiteId }) {
+-      .then((r) => { if (alive) { setMonitors(r.monitors || []); setErr(''); } })
++      .then((r) => { if (alive) { setMonitors(r.monitors || []); setAt(new Date()); setErr(''); } })
+@@ -1603 +1617 @@ export function DataHealthOps({ entityId, suiteId }) {
+-  }, [entityId, suiteId]);
++  }, [entityId, suiteId, tick]);
+@@ -1607,4 +1621,8 @@ export function DataHealthOps({ entityId, suiteId }) {
+-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px' }}>
+-        Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
+-        Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
+-      </p>
++      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 12px' }}>
++        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
++          Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
++          Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
++        </p>
++        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
++        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14 }}>🔄</button>
++      </div>
+diff --git a/client/src/components/EventSignal.jsx b/client/src/components/EventSignal.jsx
+index e7bcb8f..2229f65 100644
+--- a/client/src/components/EventSignal.jsx
++++ b/client/src/components/EventSignal.jsx
+@@ -85,0 +86,45 @@ function StationTile({ s, selected, onSelect }) {
++// Tap-through deep dive for one station: the day's per-device timeline pulled
++// live into the card — who's sending, who's dark, and when each device worked.
++function DeepDive({ apiBase, mid, station, unit }) {
++  const [t, setT] = useState(null);
++  const [err, setErr] = useState('');
++  useEffect(() => {
++    let alive = true; setT(null); setErr('');
++    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
++      .then((r) => r.json()).then((d) => { if (alive) { if (d && d.devices) setT(d); else setErr((d && d.error) || 'No timeline'); } })
++      .catch((e) => { if (alive) setErr(e.message); });
++    return () => { alive = false; };
++  }, [apiBase, mid, station]);
++  if (err) return <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>⚠️ {err}</div>;
++  if (!t) return <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Pulling the day's device timeline…</div>;
++  const isOn = (d) => (d.lagMin != null ? d.lagMin <= (t.onlineMin || 15) : (d.active || []).slice(-2).some(Boolean));
++  const devs = [...(t.devices || [])].sort((a, b) => (isOn(a) - isOn(b)) || String(a.device).localeCompare(String(b.device)));
++  const tot = (d) => (d.counts || []).reduce((x, y) => x + y, 0);
++  return (
++    <div style={{ marginTop: 10 }}>
++      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
++        Today per device — each block 30 min from the start, <span style={{ color: STATUS_COLOR.fresh, fontWeight: 700 }}>green = sent data</span>, grey = silent. Dark devices listed first.
++      </div>
++      <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
++        {devs.map((d) => (
++          <div key={d.device} style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11.5 }}>
++            <span style={{ width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: isOn(d) ? STATUS_COLOR.fresh : STATUS_COLOR.stale }} />
++            <span style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '32%' }}>{d.device}</span>
++            {d.operator ? <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '20%' }}>{d.operator}</span> : null}
++            <span style={{ display: 'flex', gap: 1, flexShrink: 1, minWidth: 0, overflow: 'hidden' }}>
++              {(d.active || []).map((a, i) => (
++                <i key={i} style={{ width: 4, height: 10, borderRadius: 1, flexShrink: 0, background: a ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
++              ))}
++            </span>
++            <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', fontWeight: 700, flexShrink: 0 }}>{tot(d).toLocaleString('en-ZA')}</span>
++            <span style={{ color: d.lagMin != null && !isOn(d) ? STATUS_COLOR.stale : 'var(--muted)', fontVariantNumeric: 'tabular-nums', width: 44, textAlign: 'right', flexShrink: 0 }}>{fmtLag(d.lagMin)}</span>
++          </div>
++        ))}
++      </div>
++      <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>
++        {devs.length} device{devs.length === 1 ? '' : 's'} · totals are today's {unit} per device · 🩺 Diagnose and the offline log live in the 📶 Data health tab.
++      </div>
++    </div>
++  );
++}
++
+@@ -88 +133 @@ function StationTile({ s, selected, onSelect }) {
+-export function SignalBoard({ monitors }) {
++export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+@@ -102 +147 @@ export function SignalBoard({ monitors }) {
+-        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name, mid: m.id,
++        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name, mid: m.id, sn: st.station || '',
+@@ -111 +156 @@ export function SignalBoard({ monitors }) {
+-      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, mid: m.id, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
++      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, mid: m.id, sn: r.station, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
+@@ -218,3 +263 @@ export function SignalBoard({ monitors }) {
+-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+-            For the deep dive — 🩺 Diagnose, the day timeline and the offline log — open this station's monitor in the 📶 Data health tab.
+-          </div>
++          <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
+@@ -231,0 +275,2 @@ export default function SignalOps({ entityId, suiteId }) {
++  const [tick, setTick] = useState(0); // manual refresh bumps this
++  const [at, setAt] = useState(null);
+@@ -235 +280 @@ export default function SignalOps({ entityId, suiteId }) {
+-      .then((r) => r.json()).then((d) => { if (alive) { setData(d); setErr(''); } })
++      .then((r) => r.json()).then((d) => { if (alive) { setData(d); setAt(new Date()); setErr(''); } })
+@@ -240 +285 @@ export default function SignalOps({ entityId, suiteId }) {
+-  }, [entityId, suiteId]);
++  }, [entityId, suiteId, tick]);
+@@ -245,3 +290,7 @@ export default function SignalOps({ entityId, suiteId }) {
+-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 10px' }}>
+-        Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
+-      </p>
++      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
++        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, flex: 1, minWidth: 0 }}>
++          Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
++        </p>
++        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
++        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
++      </div>
+diff --git a/server/dataHealth.js b/server/dataHealth.js
+index 5afb351..227d47e 100644
+--- a/server/dataHealth.js
++++ b/server/dataHealth.js
+@@ -663,0 +664,3 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
++          // The check-ins family's real per-scan counter (Attendance_Check_Ins)
++          // — its plain .count is another zero-only row-counter on this explore.
++          if (/attendance|check_?in/i.test(f)) return 2;
+@@ -668 +671 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
+-          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count/i.test(n))
++          .filter((n) => typeof n === 'string' && n.split('.')[0] === tv && n !== nativeField && /count|check_?in|attendance/i.test(n))
+diff --git a/test/dataHealth.test.js b/test/dataHealth.test.js
+index 711a642..5761447 100644
+--- a/test/dataHealth.test.js
++++ b/test/dataHealth.test.js
+@@ -506,0 +507,16 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
++test('deviceTimeline: check-in monitors probe the attendance counter', async () => {
++  // The check-ins family has no transaction_count — its per-scan counter is
++  // Attendance_Check_Ins, and the plain .count is another zero-only row-counter.
++  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.count' }, { name: 'scans.Attendance_Check_Ins' }] }) } });
++  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
++  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
++  h.setRowsFn(async (b) => {
++    if (b.fields.includes('scans.Attendance_Check_Ins')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.Attendance_Check_Ins': 87 }];
++    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
++    throw new Error('unexpected read');
++  });
++  const t = await h.mod.deviceTimeline(m, 12);
++  assert.equal(t.countField, 'scans.Attendance_Check_Ins');
++  assert.equal(t.grandTotal, 87);
++});
++
