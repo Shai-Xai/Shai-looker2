@@ -1,0 +1,58 @@
+name: apply-round25
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply round 25 and push
+        run: |
+          set -e
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          sha256sum -c - <<'SUMS'
+          cf44ac2d0132bbfe9c3c443367974dda530a958031a471138ccbb81492e270ba  patches/round25.patch
+          e7379fbdd6ba166312733cb020b9af24cb76b434aadedacbb94f282f147d1b82  patches/EventOpsPortalPage25.jsx
+          SUMS
+          mkdir -p /tmp/p && cp patches/round25.patch patches/EventOpsPortalPage25.jsx /tmp/p/
+          cat > /tmp/msg <<'MSG'
+          Staff portal push (phase 2a): alerts reach the person at the station
+
+          Staff have no Pulse account, only a portal login by number - so alerts
+          now ride web-push keyed by staff id:
+          - push.js exposes sendRaw + vapidPublicKey (generic transport for modules
+            that own their own subscription table).
+          - eventops.js: token-gated portal routes push-key / push / push-off, an
+            eventops_staff_push table keyed by staff id (no account needed).
+          - The staff portal PWA gets a 'Alerts' toggle in the staff header -
+            request permission, subscribe, register - reusing the existing service
+            worker (same origin, already handles push + notification taps).
+          - staffAlerts sendToStaff pushes the assigned crew's own phones once an
+            event is live (test mode still contacts only the admin); Hive -> Alerts
+            shows a bell next to reachable staff.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          F="server/push.js server/eventops.js server/staffAlerts.js server/index.js client/src/components/StaffAlertsTab.jsx test/staffAlerts.test.js docs/PRODUCT_OVERVIEW_SALES.md client/src/pages/EventOpsPortalPage.jsx"
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero /tmp/p/round25.patch
+          cp /tmp/p/EventOpsPortalPage25.jsx client/src/pages/EventOpsPortalPage.jsx
+          git add $F
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git pull origin main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- $F
+          git add $F
+          git commit -F /tmp/msg
+          for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round25.patch patches/EventOpsPortalPage25.jsx .github/workflows/apply-round25.yml
+          git commit -m "chore: clean round25 helpers"
+          git push origin claude/ecstatic-thompson-vUFsS
