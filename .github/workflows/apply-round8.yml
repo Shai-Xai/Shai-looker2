@@ -1,0 +1,54 @@
+name: apply-round8
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/ecstatic-thompson-vUFsS
+          fetch-depth: 0
+      - name: apply and push
+        run: |
+          set -euo pipefail
+          echo "08d7583bba12f24c1de929578d61a39cb11ecdd779573deb4de4cec5edd0edc7  patches/round8.patch" | sha256sum -c -
+          echo "0746ba609a3d2842c29ac4a800b282dafdcd7cd183afa5f625fc4c4513ecf776  patches/EventSignal8.jsx" | sha256sum -c -
+          git config user.name "Shai-Xai"
+          git config user.email "shai.evian@howler.co.za"
+          cp patches/round8.patch /tmp/p.patch
+          cp patches/EventSignal8.jsx /tmp/EventSignal.jsx
+          cat > /tmp/msg <<'MSG'
+          Faster board drill-down, centred modal, stacked day graph
+
+          - A station-filtered timeline read that comes back empty is the
+            known broken join: accept immediately and go straight to the
+            label-map fallback instead of walking every measure and bucket
+            shape first, and remember per monitor that the station filter is
+            dead so the next tap skips the doomed reads entirely (this also
+            un-breaks the fallback for monitors with a memoized count mode,
+            which could 502 before reaching it).
+          - The station modal opens centred on screen.
+          - The drill-down gains the devices-online-through-the-day graph,
+            stacked green (online) / red (offline) per observed check, scoped
+            to the tapped station's devices.
+
+          Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+          Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
+          MSG
+          sed -i 's/^          //' /tmp/msg
+          git checkout claude/looker-data-monitoring-jeo2l9
+          git apply --unidiff-zero --index /tmp/p.patch
+          cp /tmp/EventSignal.jsx client/src/components/EventSignal.jsx
+          git add client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin claude/looker-data-monitoring-jeo2l9
+          git checkout main
+          git checkout claude/looker-data-monitoring-jeo2l9 -- server/dataHealth.js client/src/components/EventSignal.jsx
+          git commit -F /tmp/msg
+          git push origin main || { git pull --rebase origin main && git push origin main; }
+          git checkout claude/ecstatic-thompson-vUFsS
+          git rm -q patches/round8.patch patches/EventSignal8.jsx .github/workflows/apply-round8.yml
+          git commit -m "chore: remove one-shot apply helper"
+          git push origin claude/ecstatic-thompson-vUFsS
