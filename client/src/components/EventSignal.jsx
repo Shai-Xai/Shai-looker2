@@ -90,6 +90,7 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
   const [robot, setRobot] = useState(true);
   const [err, setErr] = useState('');
+  const [tryN, setTryN] = useState(0); // Retry bumps this — live reads can hiccup mid-event
   useEffect(() => {
     let alive = true; setT(null); setObs(null); setErr('');
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
@@ -98,8 +99,15 @@ function DeepDive({ apiBase, mid, station, unit }) {
     fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
       .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
     return () => { alive = false; };
-  }, [apiBase, mid, station]);
-  if (err) return <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>⚠️ {err}</div>;
+  }, [apiBase, mid, station, tryN]);
+  if (err) {
+    return (
+      <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>
+        ⚠️ {err}{' '}
+        <button onClick={() => setTryN((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer', marginLeft: 6 }}>Retry</button>
+      </div>
+    );
+  }
   if (!t) return <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}>Pulling the day's device timeline…</div>;
   const isOn = (d) => (d.lagMin != null ? d.lagMin <= (t.onlineMin || 15) : (d.active || []).slice(-2).some(Boolean));
   const devs = [...(t.devices || [])].sort((a, b) => (isOn(a) - isOn(b)) || String(a.device).localeCompare(String(b.device)));
