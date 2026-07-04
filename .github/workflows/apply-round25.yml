@@ -14,11 +14,8 @@ jobs:
           set -e
           git config user.name "Shai-Xai"
           git config user.email "shai.evian@howler.co.za"
-          sha256sum -c - <<'SUMS'
-          cf44ac2d0132bbfe9c3c443367974dda530a958031a471138ccbb81492e270ba  patches/round25.patch
-          e7379fbdd6ba166312733cb020b9af24cb76b434aadedacbb94f282f147d1b82  patches/EventOpsPortalPage25.jsx
-          SUMS
-          mkdir -p /tmp/p && cp patches/round25.patch patches/EventOpsPortalPage25.jsx /tmp/p/
+          echo "44a1e7dd21746a60ea5f114e68768bd298147617e3ba713fb3b7b4872187d270  patches/round25.patch" | sha256sum -c -
+          cp patches/round25.patch /tmp/round25.patch
           cat > /tmp/msg <<'MSG'
           Staff portal push (phase 2a): alerts reach the person at the station
 
@@ -39,10 +36,9 @@ jobs:
           Claude-Session: https://claude.ai/code/session_01TagcJraLcEJPw3PuBibLMB
           MSG
           sed -i 's/^          //' /tmp/msg
-          F="server/push.js server/eventops.js server/staffAlerts.js server/index.js client/src/components/StaffAlertsTab.jsx test/staffAlerts.test.js docs/PRODUCT_OVERVIEW_SALES.md client/src/pages/EventOpsPortalPage.jsx"
+          F="server/push.js server/eventops.js server/staffAlerts.js server/index.js client/src/components/StaffAlertsTab.jsx client/src/pages/EventOpsPortalPage.jsx test/staffAlerts.test.js docs/PRODUCT_OVERVIEW_SALES.md"
           git checkout claude/looker-data-monitoring-jeo2l9
-          git apply --unidiff-zero /tmp/p/round25.patch
-          cp /tmp/p/EventOpsPortalPage25.jsx client/src/pages/EventOpsPortalPage.jsx
+          git apply --unidiff-zero /tmp/round25.patch
           git add $F
           git commit -F /tmp/msg
           git push origin claude/looker-data-monitoring-jeo2l9
@@ -53,6 +49,6 @@ jobs:
           git commit -F /tmp/msg
           for i in 1 2 3 4; do git push origin main && break || git pull --rebase origin main; done
           git checkout claude/ecstatic-thompson-vUFsS
-          git rm -q patches/round25.patch patches/EventOpsPortalPage25.jsx .github/workflows/apply-round25.yml
+          git rm -q patches/round25.patch .github/workflows/apply-round25.yml
           git commit -m "chore: clean round25 helpers"
           git push origin claude/ecstatic-thompson-vUFsS

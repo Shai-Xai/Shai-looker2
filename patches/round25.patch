@@ -5,6 +5,70 @@ index 72f0bdc..aaf0f88 100644
 @@ -122 +122 @@ export default function StaffAlertsTab({ suiteId }) {
 -                ? s.staff.map((x) => `${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
 +                ? s.staff.map((x) => `${x.reachable ? '🔔 ' : ''}${x.name}${x.role ? ` (${x.role})` : ''}`).join(', ')
+diff --git a/client/src/pages/EventOpsPortalPage.jsx b/client/src/pages/EventOpsPortalPage.jsx
+index eec51ce..005bab2 100644
+--- a/client/src/pages/EventOpsPortalPage.jsx
++++ b/client/src/pages/EventOpsPortalPage.jsx
+@@ -139 +139 @@ export default function EventOpsPortalPage({ suiteId, token }) {
+-              <div>
++              <div style={{ minWidth: 0, flex: 1 }}>
+@@ -142,0 +143 @@ export default function EventOpsPortalPage({ suiteId, token }) {
++              <AlertsToggle suiteId={suiteId} token={token} staffId={staff.id} flash={flash} />
+@@ -205,0 +207,54 @@ export default function EventOpsPortalPage({ suiteId, token }) {
++// 🔔 Opt this phone into station alerts. Web-push, keyed by staff id via the
++// token-gated portal routes — no Pulse account. Best-effort: unsupported
++// browsers just hide the button.
++function b64ToU8(base64) {
++  const pad = '='.repeat((4 - (base64.length % 4)) % 4);
++  const b = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/');
++  const raw = atob(b); const out = new Uint8Array(raw.length);
++  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
++  return out;
++}
++function AlertsToggle({ suiteId, token, staffId, flash }) {
++  const base = `/api/eventops/portal/${encodeURIComponent(suiteId)}/${encodeURIComponent(token)}`;
++  const supported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
++  const [on, setOn] = useState(false);
++  const [busy, setBusy] = useState(false);
++  useEffect(() => {
++    if (!supported) return;
++    navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription()).then((s) => setOn(!!s)).catch(() => {});
++  }, [supported]);
++  if (!supported) return null;
++  async function enable() {
++    setBusy(true);
++    try {
++      const key = await fetch(`${base}/push-key`).then((r) => r.json());
++      if (!key.enabled || !key.publicKey) throw new Error('Alerts are not available right now.');
++      const perm = await Notification.requestPermission();
++      if (perm !== 'granted') throw new Error('Turn on notifications for this site in your browser settings.');
++      const reg = await navigator.serviceWorker.ready;
++      let sub = await reg.pushManager.getSubscription();
++      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key.publicKey) });
++      await fetch(`${base}/push`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staffId, subscription: sub.toJSON() }) });
++      setOn(true); flash?.('🔔 Alerts on for this phone');
++    } catch (e) { flash?.(e.message || 'Could not turn on alerts'); }
++    setBusy(false);
++  }
++  async function disable() {
++    setBusy(true);
++    try {
++      const reg = await navigator.serviceWorker.ready;
++      const sub = await reg.pushManager.getSubscription();
++      if (sub) { await fetch(`${base}/push-off`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }); await sub.unsubscribe(); }
++      setOn(false); flash?.('Alerts off');
++    } catch { /* ignore */ }
++    setBusy(false);
++  }
++  return (
++    <button onClick={on ? disable : enable} disabled={busy}
++      title={on ? 'Alerts on for this phone — tap to turn off' : 'Get station alerts on this phone'}
++      style={{ flexShrink: 0, border: `1px solid ${on ? '#16a34a' : 'var(--hairline)'}`, background: on ? 'rgba(22,163,74,0.12)' : 'var(--card)', color: on ? '#16a34a' : 'var(--text)', borderRadius: 999, padding: '7px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 36 }}>
++      {busy ? '…' : on ? '🔔 Alerts on' : '🔔 Alerts'}
++    </button>
++  );
++}
++
 diff --git a/docs/PRODUCT_OVERVIEW_SALES.md b/docs/PRODUCT_OVERVIEW_SALES.md
 index c8d94f1..c80c36d 100644
 --- a/docs/PRODUCT_OVERVIEW_SALES.md
