@@ -87,6 +87,7 @@ function StationTile({ s, selected, onSelect }) {
 // already holds (admin groups) or let SignalOps below fetch for Event Ops.
 export function SignalBoard({ monitors }) {
   const [sel, setSel] = useState(null);
+  const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
   const open = (monitors || []).filter((m) => m.status !== 'closed');
 
   const rows = [];
@@ -94,22 +95,31 @@ export function SignalBoard({ monitors }) {
     const roll = new Map(((m.rosterSnapshot && m.rosterSnapshot.stations) || []).map((s) => [s.station, s]));
     for (const st of m.streams || []) {
       const name = st.station || m.name;
-      const r = roll.get(name);
+      // A monitor with no station split rolls all its devices into one ''
+      // entry — that belongs to the monitor's own tile.
+      const r = roll.get(name) || (st.station ? null : roll.get(''));
       rows.push({
-        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name,
+        name, zone: zoneOf(name), status: st.status, lagMin: st.lagMin, unit: unitFor(m), monitor: m.name, mid: m.id,
         on: r ? r.on : null, off: r ? r.off : 0, txnH: r ? r.txnH : null, spark: r ? r.spark : null,
       });
       roll.delete(name);
+      if (r) roll.delete(r.station);
     }
     // stations the roll-up saw but the stream memory hasn't named yet
     for (const r of roll.values()) {
-      if (r.station === '—') continue;
-      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
+      if (r.station === '—' || !r.station) continue;
+      rows.push({ name: r.station, zone: zoneOf(r.station), status: r.on ? (r.off ? 'warn' : 'fresh') : 'stale', lagMin: null, unit: unitFor(m), monitor: m.name, mid: m.id, on: r.on, off: r.off, txnH: r.txnH, spark: r.spark });
     }
   }
 
+  // Filter chips — one per monitor (Bars / Vendors / Check-in), so the board
+  // can flick between station families without leaving the page.
+  const chipIcon = (m) => (m.area === 'Bar' ? '🍺' : m.area === 'Vendors' ? '🧾' : '🎟️');
+  const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
+  const shown = pick ? rows.filter((s) => s.mid === pick) : rows;
+
   const zones = new Map();
-  for (const s of rows) {
+  for (const s of shown) {
     if (!zones.has(s.zone)) zones.set(s.zone, []);
     zones.get(s.zone).push(s);
   }
@@ -117,11 +127,11 @@ export function SignalBoard({ monitors }) {
     .map(([k, list]) => ({ k, list: list.sort((a, b) => a.name.localeCompare(b.name)), dev: list.reduce((a, s) => a + (s.on || 0) + (s.off || 0), 0) }))
     .sort((a, b) => b.dev - a.dev);
 
-  const sum = (k) => rows.reduce((a, s) => a + (s[k] || 0), 0);
-  const units = new Set(rows.map((s) => s.unit));
+  const sum = (k) => shown.reduce((a, s) => a + (s[k] || 0), 0);
+  const units = new Set(shown.map((s) => s.unit));
   const short = units.size > 1 ? 'scans+txns' : units.has('transactions') ? 'txns' : 'scans';
   const dials = [
-    ['Stations', rows.length], ['Zones', zoneList.length],
+    ['Stations', shown.length], ['Zones', zoneList.length],
     ['Devices on', sum('on'), STATUS_COLOR.fresh],
     ['Dark', sum('off'), sum('off') ? STATUS_COLOR.stale : undefined],
     [`${short}/h`, sum('txnH').toLocaleString('en-ZA')],
@@ -131,8 +141,26 @@ export function SignalBoard({ monitors }) {
     return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>No stations yet — the board builds itself from the Data health monitors once their first checks land.</div>;
   }
 
+  const chipStyle = (act) => ({
+    border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, cursor: 'pointer',
+    background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', fontWeight: act ? 800 : 600,
+    padding: '5px 12px', fontSize: 12, fontFamily: 'inherit', minHeight: 30,
+  });
+
   return (
     <div>
+      {/* monitor filter chips — split the board by station family */}
+      {chips.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          <button onClick={() => { setPick(''); setSel(null); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+          {chips.map((m) => (
+            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); }} style={chipStyle(pick === m.id)}>
+              {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* dials */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {dials.map(([l, v, c]) => (

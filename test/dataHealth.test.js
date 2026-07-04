@@ -834,6 +834,35 @@ test('check() stores a per-station roll-up for the signal board', async () => {
   assert.equal(one.spark.length, 6);
 });
 
+test('check() rolls a station-less monitor into one board entry', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { stationField: '', rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.length === 1) return [{ 'scans.count': 9 }];                        // whole-feed total
+    if (b.fields.includes('data_health_latest')) return [{ data_health_latest: minsAgo(2) }];
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', data_health_last: minsAgo(2) },
+        { 'scans.device_id': 'D-2', data_health_last: minsAgo(120) },
+      ];
+    }
+    if (b.fields.includes('scans.count')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': min10(120), 'scans.count': 3 },
+      ];
+    }
+    return [{ data_health_latest: minsAgo(2) }];
+  });
+  await h.mod.check(m);
+  const st = h.mod.monitorById(m.id).rosterSnapshot.stations;
+  assert.ok(Array.isArray(st));
+  assert.equal(st.length, 1);
+  assert.equal(st[0].station, '');
+  assert.equal(st[0].on, 1); assert.equal(st[0].off, 1); assert.equal(st[0].txnH, 4);
+});
+
 test('clean() bounds thresholds and drops junk filters', () => {
   const h = mountHealth();
   const c = h.mod.clean({
