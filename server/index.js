@@ -1755,7 +1755,7 @@ const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.n
 const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
 const briefStore = require('./briefingCache')({
   sql: db.db,
-  getUser: (id) => db.getUser(id),
+  getUser: (id) => db.getUser(id), currentSegment: () => timeSegment(Number(new Intl.DateTimeFormat('en-GB', { timeZone: process.env.REPORTING_TIMEZONE || 'Africa/Johannesburg', hour: 'numeric', hour12: false }).format(new Date()))),
   regenerate: async (user, entityId, segment) => {
     await generateBriefing(user, entityId, segment, { force: true });
     if (clientCatalogue(entityId).suites.length > 1) await generateEvents(user, entityId, segment, { force: true });

@@ -11,7 +11,7 @@
 // active users. Factory: require('./briefingCache')({ sql, getUser, regenerate }).
 // Remove that line in index.js + this file to uninstall.
 
-module.exports = function createBriefingCache({ sql, getUser, regenerate, log = console }) {
+module.exports = function createBriefingCache({ sql, getUser, regenerate, currentSegment, log = console }) {
   sql.exec(`CREATE TABLE IF NOT EXISTS briefing_cache (
     key       TEXT PRIMARY KEY,
     payload   TEXT NOT NULL,
@@ -63,8 +63,13 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
   function clearMem() { mem.clear(); }
 
   // ── Warmer ──
-  const INTERVAL = Number(process.env.BRIEFING_WARM_INTERVAL_MS) || 15 * 60 * 1000;
-  const ACTIVE_WINDOW = Number(process.env.BRIEFING_WARM_ACTIVE_MS) || 24 * 60 * 60 * 1000;
+  // Cost guardrails (the warmer is the #1 Anthropic spend driver — every cycle is
+  // a real Sonnet call per warmed briefing): hourly cycles, only users active in
+  // the last 8h, and only the CURRENT time-of-day segment (a morning briefing is
+  // not re-generated all evening; the SWR serve path refreshes it when the user
+  // actually comes back). All env-tunable.
+  const INTERVAL = Number(process.env.BRIEFING_WARM_INTERVAL_MS) || 60 * 60 * 1000;
+  const ACTIVE_WINDOW = Number(process.env.BRIEFING_WARM_ACTIVE_MS) || 8 * 60 * 60 * 1000;
   const PRUNE_AFTER = 30 * 24 * 60 * 60 * 1000; // drop briefings unused for 30 days
   let running = false;
   async function warm() {
@@ -78,11 +83,14 @@ module.exports = function createBriefingCache({ sql, getUser, regenerate, log = 
       // first three colon-parts are always userId, entityId, segment (UUIDs use
       // hyphens, segment is a word). Dedupe to one regen per (user, entity,
       // segment); regenerate() handles single-vs-multi-event internally.
+      let curSeg = null;
+      try { curSeg = typeof currentSegment === 'function' ? currentSegment() : null; } catch { curSeg = null; }
       const seen = new Set();
       let warmed = 0;
       for (const key of keys) {
         const [userId, entityId, segment] = key.split(':');
         if (!userId || !entityId || !segment) continue;
+        if (curSeg && segment !== curSeg) continue; // other times of day refresh on demand (SWR)
         const dk = `${userId}:${entityId}:${segment}`;
         if (seen.has(dk)) continue;
         seen.add(dk);
