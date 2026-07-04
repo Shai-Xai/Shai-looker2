@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
+import AiMark from './AiMark.jsx';
+import OwlQuips from './OwlQuips.jsx';
+import { useIsMobile } from '../lib/useIsMobile.js';
+import { useSheetDrag } from '../lib/useSheetDrag.js';
 
 // 🎛 Event Signal — the site board: every station a tile inside its venue zone,
 // every device a countable tick (green = sending, red = dark). Data comes from
@@ -213,34 +218,99 @@ export function healthShareText(monitors) {
   }).join('\n');
 }
 
-// 🦉 The Owl's quick take on the whole surface — same AI report the Data
-// health tab drafts, presented as a summary card with its own Share.
+// 🦉 The Owl summary — SAME affordance as every dashboard: the AiMark
+// "Summary" pill that opens the docked right drawer (bottom sheet on phones).
 export function OwlSummary({ entityId, suiteId, title = 'Data health' }) {
-  const [state, setState] = useState(null); // null | 'busy' | {markdown} | {error}
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)} title="AI summary of this page"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 999, padding: '5px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', minHeight: 34, fontFamily: 'inherit' }}>
+        <AiMark size={18} /> Summary
+      </button>
+      {open && <OwlDrawer entityId={entityId} suiteId={suiteId} title={title} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+const OWL_W = 420; // keep in sync with the dashboard drawer's reflow width
+function OwlDrawer({ entityId, suiteId, title, onClose }) {
+  const isMobile = useIsMobile();
+  const [state, setState] = useState('busy'); // 'busy' | {markdown} | {error}
   const run = () => {
     setState('busy');
     fetch('/api/my/data-health/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId: entityId || '', suiteId: suiteId || '' }) })
       .then((r) => r.json()).then((d) => setState(d && d.markdown ? d : { error: (d && d.error) || 'No summary came back' }))
       .catch((e) => setState({ error: e.message }));
   };
-  if (!state) {
-    return <button onClick={run} style={{ ...card, cursor: 'pointer', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, padding: '9px 14px', marginBottom: 10 }}>🦉 Owl summary — what's happening right now?</button>;
-  }
-  if (state === 'busy') return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)', marginBottom: 10 }}>🦉 The Owl is reading the board…</div>;
-  if (state.error) {
-    return <div style={{ ...card, fontSize: 12.5, color: STATUS_COLOR.stale, marginBottom: 10 }}>⚠️ {state.error} <button onClick={run} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer', marginLeft: 6 }}>Retry</button></div>;
-  }
-  return (
-    <div style={{ ...card, marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <strong style={{ fontSize: 13 }}>🦉 Owl summary</strong>
-        <span style={{ flex: 1 }} />
-        <ShareMenu variant="header" heading={`${title} · Owl summary`} text={state.markdown} />
-        <button onClick={() => setState(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 30, minHeight: 28, fontSize: 11, cursor: 'pointer' }}>✕</button>
+  useEffect(() => { run(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+  // Desktop: dock as a right column and shift the app left, like the dashboard Owl.
+  useEffect(() => {
+    if (isMobile) return undefined;
+    document.body.style.setProperty('--owl-width', `${OWL_W}px`);
+    document.body.classList.add('owl-docked');
+    return () => { document.body.classList.remove('owl-docked'); document.body.style.removeProperty('--owl-width'); };
+  }, [isMobile]);
+  const drag = useSheetDrag(onClose);
+  const text = state && state.markdown ? String(state.markdown) : '';
+  const md = (s) => s.split('\n').filter((l) => l.trim()).map((line, i) => {
+    const t = line.trim();
+    const head = /^#{1,6}\s+/.test(t);
+    const bul = /^[-*]\s+/.test(t);
+    const parts = t.replace(/^[-*]\s+/, '').replace(/^#{1,6}\s+/, '').split(/(\*\*[^*]+\*\*)/g)
+      .map((p, j) => (p.startsWith('**') && p.endsWith('**') ? <strong key={j}>{p.slice(2, -2)}</strong> : p));
+    if (head) return <div key={i} style={{ fontWeight: 700, margin: '12px 0 6px' }}>{parts}</div>;
+    return <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>{bul && <span style={{ color: 'var(--brand)' }}>•</span>}<span>{parts}</span></div>;
+  });
+  const panel = { width: `min(${OWL_W}px, 94vw)`, height: '100%', background: 'var(--card)', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', borderLeft: '1px solid var(--hairline)', pointerEvents: 'auto', display: 'flex', flexDirection: 'column' };
+  const btn = { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 17, color: '#888' };
+  const node = (
+    <div className={isMobile ? 'ai-overlay' : ''}
+      style={isMobile ? { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 400 }
+        : { position: 'fixed', top: 0, right: 0, bottom: 0, left: 0, background: 'transparent', pointerEvents: 'none', display: 'flex', justifyContent: 'flex-end', zIndex: 400 }}
+      onClick={isMobile ? onClose : undefined}>
+      <div className={(isMobile ? 'ai-sheet' : 'ai-panel') + ' ai-glow'}
+        style={isMobile ? { ...panel, width: '100%', maxHeight: '92dvh', borderRadius: '18px 18px 0 0', ...drag.style } : panel}
+        onClick={(e) => e.stopPropagation()}>
+        <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
+        {isMobile && <div className="sheet-grip" {...drag.handlers} style={{ marginTop: 8 }} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid var(--hairline)' }}>
+          <AiMark size={28} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Live status summary</div>
+            <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
+          </div>
+          {text && <ShareMenu variant="header" isMobile={isMobile} heading={`${title} · Owl summary`} text={text} />}
+          <button style={btn} onClick={run} disabled={state === 'busy'} title="Regenerate">↻</button>
+          <button style={{ ...btn, fontSize: isMobile ? 22 : 17 }} onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 18 }}>
+          {state === 'busy' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ color: 'var(--muted)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+                Reading every station and summarising…
+              </div>
+              <OwlQuips prefix="" style={{ paddingLeft: 26 }} />
+            </div>
+          ) : state.error ? (
+            <div style={{ color: STATUS_COLOR.stale, fontSize: 14, lineHeight: 1.5 }}>⚠ {state.error} <button onClick={run} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 6, padding: '2px 10px', fontSize: 12, cursor: 'pointer', marginLeft: 6 }}>Retry</button></div>
+          ) : (
+            <div style={{ fontSize: 14, lineHeight: 1.65, color: 'var(--text)' }}>{md(text)}</div>
+          )}
+        </div>
+        {!!text && (
+          <div style={{ padding: '12px 18px 0' }}>
+            <ShareMenu variant="footer" isMobile={isMobile} heading={`${title} · Owl summary`} text={text} label="Share this summary" />
+          </div>
+        )}
+        <div style={{ padding: '10px 18px', borderTop: '1px solid var(--hairline)', fontSize: 11, color: 'var(--muted)' }}>
+          Generated by Claude from this page's live station data. Verify important figures.
+        </div>
       </div>
-      <div style={{ fontSize: 12.5, lineHeight: 1.65, whiteSpace: 'pre-wrap', maxHeight: 380, overflowY: 'auto' }}>{String(state.markdown).replace(/^#{1,3} /gm, '').replace(/\*\*/g, '')}</div>
     </div>
   );
+  return createPortal(node, document.body);
 }
 
 // The board itself — presentational; give it the monitors array the page
@@ -409,10 +479,10 @@ export default function SignalOps({ entityId, suiteId }) {
           Your event as a live board — every zone, every station, every device. Green ticks are devices sending now; red are dark. Numbers are this hour's volume per station.
         </p>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto every 60s</span>
+        <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
         <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14 }}>🔄</button>
       </div>
-      <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );
