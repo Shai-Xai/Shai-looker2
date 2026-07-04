@@ -27,6 +27,13 @@ export default function StaffAlertsTab({ suiteId }) {
       body: JSON.stringify({ suiteId, healthStation, opsStationId: opsStationId === 'auto' ? null : opsStationId }),
     }).then(() => setTick((v) => v + 1)).catch(() => {});
   };
+  const saveThreshold = (v) => {
+    const n = Math.max(10, Math.min(100, Math.round(Number(v) || 50)));
+    fetch('/api/my/staff-alerts/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suiteId, thresholdPct: n }),
+    }).then(() => setTick((v2) => v2 + 1)).catch(() => {});
+  };
 
   if (err) return <div style={{ ...card, fontSize: 12.5, color: '#dc2626' }}>⚠️ {err}</div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Loading staff alerts…</div>;
@@ -39,11 +46,18 @@ export default function StaffAlertsTab({ suiteId }) {
           🧪 <b>Test mode</b> — station alerts email {data.testEmail} only; assigned staff are listed but never contacted. Go live in Admin → Data health.
         </div>
       )}
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
-        When half a station's devices go dark, Pulse alerts the staff assigned to it.
-        {unmapped ? <> · <b style={{ color: '#dc2626' }}>{unmapped} station{unmapped > 1 ? 's' : ''} unmapped</b></> : null}
-        {uncrewed ? <> · <b style={{ color: '#d97706' }}>{uncrewed} mapped but no staff assigned</b></> : null}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '0 0 10px', fontSize: 12, color: 'var(--muted)' }}>
+        <span>
+          Alert the assigned staff when{' '}
+          <input type="number" min={10} max={100} key={data.thresholdPct} defaultValue={data.thresholdPct} aria-label="Dark threshold %"
+            onKeyDown={(e) => { if (e.key === 'Enter') saveThreshold(e.currentTarget.value); }}
+            onBlur={(e) => { if (Number(e.currentTarget.value) !== data.thresholdPct) saveThreshold(e.currentTarget.value); }}
+            style={{ ...sel, width: 58, minHeight: 30, padding: '4px 6px', fontVariantNumeric: 'tabular-nums' }} />
+          % of a station's devices go dark (recovers under {Math.round(data.thresholdPct / 2)}%).
+        </span>
+        {unmapped ? <b style={{ color: '#dc2626' }}>{unmapped} station{unmapped > 1 ? 's' : ''} unmapped</b> : null}
+        {uncrewed ? <b style={{ color: '#d97706' }}>{uncrewed} mapped but no staff assigned</b> : null}
+      </div>
       <div style={{ display: 'grid', gap: 8 }}>
         {data.stations.map((s) => (
           <div key={s.station} style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderLeft: `4px solid ${s.alerting ? '#dc2626' : s.off ? '#d97706' : '#16a34a'}`, padding: '9px 12px' }}>

@@ -80,7 +80,7 @@ test('storm guard: many stations crossing together send ONE site-wide note', () 
   h.mod.tick();
   h.mod.tick(); // 15-min site cooldown: no second combined note either
   assert.equal(h.testEmails.length, 1);
-  assert.match(h.testEmails[0].subject, /5 stations went half-dark together/);
+  assert.match(h.testEmails[0].subject, /5 stations went dark together/);
   assert.match(h.testEmails[0].text, /BAR 1 2\/4 dark/);
 });
 
