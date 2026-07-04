@@ -224,6 +224,14 @@ function buildOption({ rows, dimensions, measures, pivots, visType, stacked, vis
         const parts = k.split(' - ');
         if (parts.length >= 2 && parts[parts.length - 1] === mName && parts.slice(0, -1).join(' - ') === String(pivotKey)) return v;
       }
+      // A bare measure-name override styles every pivot of that measure.
+      if (st[mName]) return st[mName];
+      // The config predates this pivot value (a NEW event/year appeared since the
+      // tile was set up, so only e.g. "<last year> - cumulative" is keyed): inherit
+      // the type this measure has under the OTHER pivot values when they all agree
+      // — a cumulative line stays a line for the new year too.
+      const others = Object.entries(st).filter(([k]) => k.endsWith(` - ${mName}`)).map(([, v]) => v);
+      if (others.length && others.every((v) => v === others[0])) return others[0];
     }
     return null;
   };
