@@ -1,0 +1,21 @@
+diff --git a/client/src/components/DataHealthAdmin.jsx b/client/src/components/DataHealthAdmin.jsx
+index 1aad8c2..ef08c51 100644
+--- a/client/src/components/DataHealthAdmin.jsx
++++ b/client/src/components/DataHealthAdmin.jsx
+@@ -591,0 +592,11 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
++  // The day chart reads the OBSERVED log directly (online + total per check) so
++  // the offline share is live — the snapshot's frozen coverage lags a re-check.
++  const [obsCov, setObsCov] = useState(null);
++  useEffect(() => {
++    if (!m.rosterField) return undefined;
++    let alive = true;
++    jget(`${base}/monitors/${m.id}/observed?hours=start`)
++      .then((d) => { if (alive && d && d.configured && (d.ticks || []).length) setObsCov(d.ticks.map((t) => ({ t: String(t.at).slice(11, 16), n: t.online || 0, tot: t.total || 0 })).slice(-288)); })
++      .catch(() => {});
++    return () => { alive = false; };
++  }, [m.id, base, m.rosterField]);
+@@ -698,2 +709,2 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
+-        {m.rosterField && (m.rosterSnapshot?.coverage?.length || 0) > 1 && (() => {
+-          const cov = m.rosterSnapshot.coverage;
++        {m.rosterField && ((obsCov?.length || 0) > 1 || (m.rosterSnapshot?.coverage?.length || 0) > 1) && (() => {
++          const cov = (obsCov && obsCov.length > 1) ? obsCov : m.rosterSnapshot.coverage;
