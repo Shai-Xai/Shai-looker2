@@ -84,6 +84,17 @@ test('storm guard: many stations crossing together send ONE site-wide note', () 
   assert.match(h.testEmails[0].text, /BAR 1 2\/4 dark/);
 });
 
+test('a paused event fires nothing until resumed', () => {
+  const h = mountAlerts();
+  seed(h, { on: 2, off: 2 });
+  db.setSetting('staff_alerts_paused_su1', '1');
+  h.mod.tick();
+  assert.equal(h.testEmails.length, 0);
+  db.setSetting('staff_alerts_paused_su1', '0');
+  h.mod.tick();
+  assert.equal(h.testEmails.length, 1);
+});
+
 test('a manual bridge override beats the name match; single devices never page', () => {
   const h = mountAlerts();
   seed(h, { on: 0, off: 1, health: 'MYSTERY STAND', ops: 'Totally Different' });
