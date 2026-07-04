@@ -15,6 +15,8 @@ const EventOpsScanner = lazy(() => import('./EventOpsScanner.jsx'));
 const DataHealthOps = lazy(() => import('./DataHealthAdmin.jsx').then((m) => ({ default: m.DataHealthOps })));
 // 🎛 Event Signal: the event as a live site board — zones, stations, device ticks.
 const SignalOps = lazy(() => import('./EventSignal.jsx'));
+// 🚨 Staff alerts (🧪): board-station ↔ ops-station bridge + who gets called.
+const StaffAlertsTab = lazy(() => import('./StaffAlertsTab.jsx'));
 
 const STATE_LABEL = { in_stock: 'Hive', deployed: 'Deployed', returned: 'Returned', lost: 'Lost', damaged: 'Damaged' };
 const STATE_ORDER = ['deployed', 'in_stock', 'returned', 'lost', 'damaged'];
@@ -25,7 +27,7 @@ const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts',
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
 // 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
 // Signal board stay top-level. Clicking Hive opens the sub-drawer.
-const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['alerts', '🚨', 'Alerts'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
 const TOP_TABS = [['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
 // Quick-pick resolutions (staff can also type a custom comment).
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
@@ -138,6 +140,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
           {suiteId && tab === 'map' && <MapTab suiteId={suiteId} canManage={canManage} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
           {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onDevice={setActionDevice} />}
+          {suiteId && tab === 'alerts' && <Suspense fallback={null}><StaffAlertsTab suiteId={suiteId} /></Suspense>}
           {suiteId && tab === 'checks' && <ChecksTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
