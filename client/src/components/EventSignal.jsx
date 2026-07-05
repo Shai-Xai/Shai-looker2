@@ -1070,6 +1070,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
   const [iv, setIv] = useState(30); const [scale, setScale] = useState('abs'); // 🔥 Heat: window minutes + Absolute/Relative
   const [heat, setHeat] = useState(null); const [heatIdx, setHeatIdx] = useState(null); const [playing, setPlaying] = useState(false); const [rez, setRez] = useState(0);
+  const [full, setFull] = useState(false); // ⛶ fullscreen the map (great for Heat on a big screen)
   const heatRef = useRef(null);
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
@@ -1277,11 +1278,16 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     const box = boxRef.current; if (!box || typeof ResizeObserver === 'undefined') return undefined;
     const ro = new ResizeObserver(() => setRez((n) => n + 1)); ro.observe(box); return () => ro.disconnect();
   }, [mode]);
+  useEffect(() => {
+    if (!full) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
   if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
   const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
   const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
   return (
-    <div>
+    <div style={full ? { position: 'fixed', inset: 0, zIndex: 1300, background: 'var(--bg)', padding: '12px 14px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}>
       <style>{VM_CSS}</style>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
@@ -1293,6 +1299,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
           <button style={btn(mode === 'heat')} onClick={() => setMode('heat')}>🔥 Heat</button>
+          <button style={btn(full)} onClick={() => setFull(!full)} title={full ? 'Exit fullscreen' : 'Fullscreen'}>{full ? '⛶ Exit' : '⛶'}</button>
         </>}
         {!edit && mode === 'heat' && <>
           <span style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 999, overflow: 'hidden' }}>
@@ -1323,7 +1330,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           viewport with no scrolling — so when the height would overflow, the box
           narrows itself instead: width = min(100%, available-height × aspect). */}
       <div ref={boxRef} onPointerDown={onMapPointerDown}
-        style={{ position: 'relative', width: `min(100%, calc((100dvh - 250px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        style={{ position: 'relative', width: `min(100%, calc((100dvh - ${full ? 120 : 250}px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
         {cfg.image
           ? <img src={cfg.image} alt="venue site plan" onLoad={(e) => { const im = e.target; if (im.naturalWidth && im.naturalHeight) setAr(im.naturalWidth / im.naturalHeight); }} style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }} />
           : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -1365,11 +1372,11 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           return (
             <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
               onClick={(e) => { e.stopPropagation(); if (edit) return; onSelect(s); }}
-              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
-              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 40, height: 40, marginLeft: -20, marginTop: -20, borderRadius: '50%', border: `2px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
-              <span className={alarm ? 'vm-anim' : ''} style={{ width: 20, height: 20, borderRadius: '50%', background: col, border: '2.5px solid var(--card)', boxShadow: `0 0 10px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
-              <span style={{ position: 'absolute', top: -15, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 800, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{s.name}</span>
-              <span style={{ position: 'absolute', bottom: -15, left: '50%', transform: 'translateX(-50%)', fontSize: 12.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
+              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 30, height: 30, marginLeft: -15, marginTop: -15, borderRadius: '50%', border: `1.5px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
+              <span className={alarm ? 'vm-anim' : ''} style={{ width: 15, height: 15, borderRadius: '50%', background: col, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
+              <span style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 700, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{s.name}</span>
+              <span style={{ position: 'absolute', bottom: -12, left: '50%', transform: 'translateX(-50%)', fontSize: 11, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
               {edit && <button onClick={(e) => { e.stopPropagation(); unpin(s.name); }} onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -2, right: -8, width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 9, lineHeight: '15px', padding: 0, cursor: 'pointer' }}>✕</button>}
             </div>
           );
