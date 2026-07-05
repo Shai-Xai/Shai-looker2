@@ -1182,15 +1182,19 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
   const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
-  // ── 🔥 Heat: per-station transaction volume, one timeline read per monitor at the
-  // chosen window; built into a shared time axis so the scrubber replays the day. ──
+  // ── 🔥 Heat: per-station transaction volume on ONE shared time axis. Read a rolling
+  // 24h window (NOT each monitor's own roster start — that clipped busy stations like
+  // bars whose anchor is late) and keep only TODAY's active range, so every category
+  // lines up from its real first sale. Re-pulls every 60s so the live view stays fresh. ──
+  const [heatTick, setHeatTick] = useState(0);
   useEffect(() => {
     if (mode !== 'heat' || !suiteId) return undefined;
     let alive = true;
     const ivMs = iv * 60000;
+    const sastMidUTC = Math.floor((Date.now() + 7200000) / 86400000) * 86400000 - 7200000; // today 00:00 SAST in UTC ms
     const mids = [...new Set(sts.map((s) => s.mid))];
     const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
-    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=${iv}`)
+    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`)
       .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
       .then((packs) => {
         if (!alive) return;
@@ -1198,7 +1202,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         for (const { mid, d } of packs) {
           if (!d || !d.buckets) continue;
           const bk = d.buckets.map((b) => Math.floor(Date.parse(b) / ivMs) * ivMs);
-          bk.forEach((b) => { if (Number.isFinite(b)) axisSet.add(b); });
+          bk.forEach((b) => { if (Number.isFinite(b) && b >= sastMidUTC) axisSet.add(b); });
           const per = {};
           if (d.stationTotals && Object.keys(d.stationTotals).length) Object.assign(per, d.stationTotals);
           else for (const dev of (d.devices || [])) { const st = dev.station || ''; if (!per[st]) per[st] = bk.map(() => 0); (dev.counts || []).forEach((c, i) => { if (per[st][i] != null) per[st][i] += (c || 0); }); }
@@ -1207,17 +1211,23 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             if (!st) continue;
             if (!series.has(st)) series.set(st, new Map());
             const m2 = series.get(st);
-            arr.forEach((v, i) => { const b = bk[i]; if (b != null) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
+            arr.forEach((v, i) => { const b = bk[i]; if (b != null && b >= sastMidUTC) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
             catKeyOf.set(st, mid); catCol.set(st, col);
-            dayPeak.set(mid, Math.max(dayPeak.get(mid) || 0, ...arr.map((v) => v || 0)));
+            dayPeak.set(mid, Math.max(dayPeak.get(mid) || 0, ...arr.map((v, i) => (bk[i] >= sastMidUTC ? (v || 0) : 0))));
           }
         }
-        setHeat({ axis: [...axisSet].sort((a, b) => a - b), series, catKeyOf, catCol, dayPeak });
-        setHeatIdx(null); setPlaying(false);
+        let axis = [...axisSet].sort((a, b) => a - b);
+        const tot = (b) => { let s2 = 0; for (const m2 of series.values()) s2 += m2.get(b) || 0; return s2; };
+        let lo = 0; while (lo < axis.length && tot(axis[lo]) === 0) lo++;
+        let hi = axis.length - 1; while (hi > lo && tot(axis[hi]) === 0) hi--;
+        if (lo <= hi) axis = axis.slice(lo, hi + 1); // trim to the first→last active bucket
+        setHeat({ axis, series, catKeyOf, catCol, dayPeak });
       });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval
-  }, [mode, iv, suiteId, apiBase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval/60s tick
+  }, [mode, iv, suiteId, apiBase, heatTick]);
+  useEffect(() => { if (mode === 'heat') { setHeatIdx(null); setPlaying(false); } }, [iv, mode]); // fresh live view on enter / window change
+  useEffect(() => { if (mode !== 'heat') return undefined; const t = setInterval(() => setHeatTick((n) => n + 1), 60000); return () => clearInterval(t); }, [mode]);
   useEffect(() => { // play advances the scrub through the day
     if (!playing || !heat || !heat.axis.length) return undefined;
     const t = setInterval(() => setHeatIdx((i) => { const cur = i == null ? heat.axis.length - 1 : i; const nx = cur + 1; return nx >= heat.axis.length ? 0 : nx; }), 380);
