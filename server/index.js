@@ -610,11 +610,11 @@ async function metricCatalog(entityId) {
 
 // Read a built metric's live number — one measure, the user's dimension filters,
 // scoped to THIS event + client exactly like the dashboards. Fail-closed.
-async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
+async function resolveCustomMetric({ model, view, measure, filters, user, suiteId, live = false }) {
   if (!model || !view || !measure) return null;
   const body = await scopedMetricBody({ model, view, fields: [measure], limit: 1, extraOverrides: filters || {}, user, suiteId });
   if (!body) return null;
-  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live); // live → bypass Pulse + Looker caches (live event alerts)
   return primaryTileValue(data, {});
 }
 
@@ -644,7 +644,7 @@ const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
-const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); require('./signalReport').mount(app, { db, auth, mailer, dataHealth: dataHealthApi, signalFlow: staffAlertsApi.signalFlow }); require('./venueMap').mount(app, { db, auth }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) + shareable print-to-PDF device-health report & scheduled/drop-alert ops digest to the network/ops provider → server/dataHealth.js, server/signalReport.js
+const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); require('./signalReport').mount(app, { db, auth, mailer, dataHealth: dataHealthApi, signalFlow: staffAlertsApi.signalFlow }); require('./venueMap').mount(app, { db, auth }); require('./lineup').mount(app, { db, auth }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) + shareable print-to-PDF device-health report & scheduled/drop-alert ops digest to the network/ops provider → server/dataHealth.js, server/signalReport.js
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing
