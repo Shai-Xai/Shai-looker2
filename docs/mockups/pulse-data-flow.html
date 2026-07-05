@@ -1,0 +1,638 @@
+<title>Pulse — data flow motion concept</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0b0b0f; --panel:#14141b; --panel2:#1a1a23; --line:#26262f; --line2:#33333f;
+    --ink:#f2f2f5; --mut:#9a9aa8; --dim:#6b6b7a;
+    --brand:#ff385c; --brand2:#ff6b35;
+    --c-tix:#fbbf24; --c-cash:#22d3ee; --c-web:#a78bfa; --c-app:#60a5fa; --c-pay:#34d399; --c-ops:#a3e635;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  /* Deliberately single-theme: a live ops-room screen. Dark in both modes. */
+  :root[data-theme="light"]{ --bg:#0b0b0f; }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:40px 20px 80px}
+
+  /* ---------- header ---------- */
+  .eyebrow{
+    font-family:var(--mono); font-size:11px; letter-spacing:.22em; color:var(--brand);
+    text-transform:uppercase; display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow::before{content:'';width:22px;height:1px;background:var(--brand)}
+  h1{
+    font-size:clamp(30px,5vw,52px); font-weight:800; letter-spacing:-.03em; line-height:1.04;
+    margin:14px 0 12px; text-wrap:balance;
+  }
+  h1 .out{background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--mut);max-width:58ch;margin:0 0 26px}
+
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px}
+  .tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px}
+  .tab{
+    border:0;background:transparent;color:var(--mut);font:600 13px/1 inherit;font-family:inherit;
+    padding:10px 16px;border-radius:999px;cursor:pointer;min-height:40px;
+  }
+  .tab:hover{color:var(--ink)}
+  .tab.on{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff}
+  .tab:focus-visible,.ctl:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  .ctl{
+    border:1px solid var(--line);background:var(--panel);color:var(--mut);border-radius:999px;
+    font:600 13px/1 inherit;font-family:inherit;padding:10px 16px;cursor:pointer;min-height:40px;
+  }
+  .ctl:hover{color:var(--ink);border-color:var(--line2)}
+
+  /* ---------- stage ---------- */
+  .stage{
+    position:relative;border:1px solid var(--line);border-radius:22px;overflow:hidden;
+    background:
+      radial-gradient(1100px 500px at 50% 0%, rgba(255,56,92,.05), transparent 60%),
+      radial-gradient(800px 600px at 50% 100%, rgba(124,58,237,.05), transparent 60%),
+      #0e0e13;
+  }
+  #flow{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .cols{position:relative;z-index:1;display:grid;grid-template-columns:248px 1fr 392px;gap:20px;padding:26px;min-height:620px;align-items:center}
+
+  .colhead{
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
+    margin:0 0 12px;
+  }
+  .colhead b{color:var(--mut);font-weight:600}
+
+  /* sources */
+  .srcs{display:flex;flex-direction:column;gap:10px}
+  .src{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 13px;
+    display:flex;flex-direction:column;gap:4px;position:relative;min-width:0;
+  }
+  .src-top{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
+  .src-dot{width:8px;height:8px;border-radius:99px;background:var(--c);box-shadow:0 0 8px var(--c);flex:none}
+  .src-tick{
+    font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;min-height:16px;transition:opacity .3s;
+  }
+  .src.blip .src-dot{animation:blip .5s}
+  @keyframes blip{40%{transform:scale(1.9)}}
+
+  /* core */
+  .coreCol{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+  .core{position:relative;width:196px;height:196px;flex:none}
+  .core-ring{
+    position:absolute;inset:0;border-radius:50%;
+    background:conic-gradient(from 0deg,var(--brand),var(--brand2),#7c3aed,#06b6d4,var(--brand));
+    animation:spin 7s linear infinite;
+    filter:drop-shadow(0 0 22px rgba(255,56,92,.35));
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .core-in{
+    position:absolute;inset:5px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#1d1d27,#101016 70%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;
+    transition:box-shadow .25s;
+  }
+  .core.hit .core-in{box-shadow:inset 0 0 34px rgba(255,56,92,.35)}
+  .core-name{font-weight:800;font-size:22px;letter-spacing:-.02em}
+  .core-name span{background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .core-count{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .core-count b{color:var(--ink);font-weight:600}
+  .core-cap{
+    font-family:var(--mono);font-size:10.5px;color:var(--dim);max-width:130px;min-height:28px;
+    transition:opacity .35s;margin-top:5px;
+  }
+  .core-sub{
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+    text-align:center;
+  }
+
+  /* surfaces */
+  .surfs{display:flex;flex-direction:column;gap:12px}
+  .frame{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+
+  .desk .chrome{display:flex;align-items:center;gap:6px;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .chrome i{width:9px;height:9px;border-radius:99px;background:var(--line2);display:block}
+  .chrome i:first-child{background:#e0556a80}
+  .chrome-url{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:6px}
+  .desk-body{padding:12px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+  .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 8px;min-width:0;overflow:hidden}
+  .kpi small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+  .kpi b{display:block;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .kpi em{font-style:normal;font-family:var(--mono);font-size:10px;color:#34d399}
+  .desk-toasts{display:flex;flex-direction:column;gap:6px;min-height:52px}
+
+  .duo{display:flex;gap:12px;align-items:stretch}
+  .duo .desk{flex:1;min-width:0}
+  .phone{
+    width:158px;flex:none;background:#101016;border:1px solid var(--line2);border-radius:22px;
+    padding:8px 8px 12px;position:relative;box-shadow:0 18px 44px -18px rgba(0,0,0,.7);
+  }
+  .notch{width:54px;height:5px;border-radius:99px;background:var(--line2);margin:2px auto 8px}
+  .p-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 8px}
+  .p-brand{font-weight:800;font-size:12px}
+  .p-brand span{color:var(--brand)}
+  .p-time{font-family:var(--mono);font-size:10px;color:var(--dim)}
+  .p-toasts{display:flex;flex-direction:column;gap:6px;min-height:170px}
+
+  .toast{
+    background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--tc,var(--brand));
+    border-radius:10px;padding:7px 9px;font-size:11px;line-height:1.45;color:var(--ink);
+    animation:pop .35s cubic-bezier(.2,1.4,.4,1);overflow:hidden;
+  }
+  .toast small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:2px}
+  .toast.bye{opacity:0;transition:opacity .6s}
+  @keyframes pop{from{transform:translateY(8px) scale(.96);opacity:0}}
+
+  .chans{display:grid;grid-template-columns:1fr;gap:8px}
+  .chan{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+  .chan-ic{
+    width:30px;height:30px;border-radius:99px;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:800;background:color-mix(in srgb,var(--cc) 18%,transparent);color:var(--cc);
+    border:1px solid color-mix(in srgb,var(--cc) 35%,transparent);
+  }
+  .chan-body{min-width:0;flex:1}
+  .chan-name{font-weight:700;font-size:12px;display:flex;gap:8px;align-items:baseline}
+  .chan-name small{font-family:var(--mono);font-size:9px;color:var(--dim);font-weight:400}
+  .chan-msg{
+    font-size:11px;color:var(--mut);line-height:1.5;margin-top:3px;border-radius:0 10px 10px 10px;
+    transition:opacity .3s;
+  }
+  .chan.blip .chan-ic{animation:blip .5s}
+
+  /* ---------- below the stage ---------- */
+  h2{font-size:21px;font-weight:800;letter-spacing:-.02em;margin:56px 0 6px}
+  .lede{color:var(--mut);max-width:62ch;margin:0 0 20px}
+  .uses{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .use{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+  .use h3{margin:0 0 6px;font-size:14.5px;font-weight:700}
+  .use h3 small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);margin-bottom:6px;font-weight:600}
+  .use p{margin:0;font-size:13px;color:var(--mut)}
+  .note{
+    margin-top:26px;border:1px dashed var(--line2);border-radius:14px;padding:14px 18px;
+    font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.7;
+  }
+  .note b{color:var(--mut);font-weight:600}
+
+  /* ---------- responsive: mobile-first flow becomes vertical ---------- */
+  @media (max-width:940px){
+    .cols{grid-template-columns:1fr;min-height:0;gap:26px;padding:20px 16px}
+    .srcs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .src-tick{font-size:10px}
+    .coreCol{order:2}
+    .surfs{order:3}
+    .duo{flex-direction:column-reverse;align-items:center}
+    .duo .desk{width:100%}
+    .phone{width:200px}
+    .uses{grid-template-columns:1fr}
+  }
+  @media (max-width:480px){ .srcs{grid-template-columns:1fr 1fr} .src{padding:9px 11px} }
+
+  @media (prefers-reduced-motion:reduce){
+    .core-ring{animation:none}
+    .toast{animation:none}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Howler Pulse · Motion concept</div>
+    <h1>Every signal flows in.<br><span class="out">Insight flows out.</span></h1>
+    <p class="sub">A live mockup of the Pulse story told as motion: six raw data streams pour into one
+    brain, and what comes out the other side is insight — landing on the desktop, the phone,
+    WhatsApp, ChatGPT and Claude. Switch the scenario to see the kinds of data and alerts each moment produces.</p>
+  </header>
+
+  <div class="bar" role="tablist" aria-label="Scenario">
+    <div class="tabs">
+      <button class="tab on" role="tab" aria-selected="true" data-sc="onsale">On-sale day</button>
+      <button class="tab" role="tab" aria-selected="false" data-sc="eventday">Event day</button>
+      <button class="tab" role="tab" aria-selected="false" data-sc="morning">Morning after</button>
+    </div>
+    <button class="ctl" id="pause" aria-pressed="false">Pause motion</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="flow" aria-hidden="true"></canvas>
+    <div class="cols">
+
+      <section class="srcCol">
+        <p class="colhead"><b>Signals in</b> · live sources</p>
+        <div class="srcs" id="srcs"></div>
+      </section>
+
+      <section class="coreCol">
+        <div class="core" id="core">
+          <div class="core-ring"></div>
+          <div class="core-in">
+            <div class="core-name">howler<span>:pulse</span></div>
+            <div class="core-count"><b id="count">0</b> signals</div>
+            <div class="core-cap" id="cap">correlating streams…</div>
+          </div>
+        </div>
+        <p class="core-sub">one brain · insight → action → results</p>
+      </section>
+
+      <section class="surfs">
+        <p class="colhead"><b>Insight out</b> · every surface</p>
+        <div class="duo">
+          <div class="frame desk">
+            <div class="chrome"><i></i><i></i><i></i><span class="chrome-url">pulse.howler.co.za</span></div>
+            <div class="desk-body">
+              <div class="kpis">
+                <div class="kpi"><small>Revenue</small><b id="k-rev">€212,4k</b><em id="k-rev-d">+9%</em></div>
+                <div class="kpi"><small>Tickets</small><b id="k-tix">8,412</b><em id="k-tix-d">+312</em></div>
+                <div class="kpi"><small>Per head</small><b id="k-sph">€14,20</b><em id="k-sph-d">+4%</em></div>
+              </div>
+              <div class="desk-toasts" id="t-desktop"></div>
+            </div>
+          </div>
+          <div class="phone" id="phone">
+            <div class="notch"></div>
+            <div class="p-head"><span class="p-brand">howler<span>:pulse</span></span><span class="p-time" id="p-time">16:42</span></div>
+            <div class="p-toasts" id="t-mobile"></div>
+          </div>
+        </div>
+        <div class="chans">
+          <div class="chan" id="ch-whatsapp" style="--cc:#25d366">
+            <div class="chan-ic">W</div>
+            <div class="chan-body"><div class="chan-name">WhatsApp <small>daily digest</small></div><div class="chan-msg" id="m-whatsapp">Digest arrives here every morning…</div></div>
+          </div>
+          <div class="chan" id="ch-claude" style="--cc:#d97757">
+            <div class="chan-ic">✳</div>
+            <div class="chan-body"><div class="chan-name">Claude <small>Owl via MCP</small></div><div class="chan-msg" id="m-claude">Ask the Owl anything about your event…</div></div>
+          </div>
+          <div class="chan" id="ch-chatgpt" style="--cc:#74aa9c">
+            <div class="chan-ic">⌾</div>
+            <div class="chan-body"><div class="chan-name">ChatGPT <small>Owl connector</small></div><div class="chan-msg" id="m-chatgpt">Same brain, your team's tool of choice…</div></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <h2>Where this lives</h2>
+  <p class="lede">Three realistic placements for the same animation system — one build, tuned per surface.</p>
+  <div class="uses">
+    <div class="use">
+      <h3><small>Placement 01</small>Landing-page hero</h3>
+      <p>Runs full-bleed behind the headline on the public Pulse page, pointer-events off, at
+      ~60% of this intensity. The scenario auto-rotates every 20s so the page never looks the same twice.</p>
+    </div>
+    <div class="use">
+      <h3><small>Placement 02</small>In-app loading &amp; empty states</h3>
+      <p>A single-stream slice of the same system (one source → core → one surface) replaces
+      spinners while dashboards hydrate — the wait itself tells the product story.</p>
+    </div>
+    <div class="use">
+      <h3><small>Placement 03</small>Sales deck &amp; wizard finale</h3>
+      <p>Full interactive version with the scenario tabs, used live in pitches and as the
+      closing screen of the client setup wizard — "this is what we just switched on for you."</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>Implementation notes:</b> one &lt;canvas&gt; for the particle streams + plain DOM cards for
+    the toasts — no libraries, ~10&nbsp;KB gzipped. Respects prefers-reduced-motion (static paths,
+    slower toast cycle), throttles to zero when the tab is hidden, and the whole stage collapses to
+    a vertical top→down flow on phones. All figures shown are example data.
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------------- data: sources, scenarios, insights ---------------- */
+  const SOURCES = [
+    { id:'tix',  name:'Ticketing',   color:'#fbbf24' },
+    { id:'cash', name:'Cashless',    color:'#22d3ee' },
+    { id:'web',  name:'Web',         color:'#a78bfa' },
+    { id:'app',  name:'App',         color:'#60a5fa' },
+    { id:'pay',  name:'Payments',    color:'#34d399' },
+    { id:'ops',  name:'Event ops',   color:'#a3e635' },
+  ];
+
+  const SCENARIOS = {
+    onsale: {
+      feeds: {
+        tix:  ['Phase 2 GA ×128 · €4 480','VIP table ×2 · €1 900','Waitlist +312 joined','Promo HOWL10 used ×46'],
+        cash: ['Wristband pre-load €50','Wallet top-up €25','Pre-order: 2× meal bundle','Linked card added'],
+        web:  ['1 812 live sessions','Checkout conversion 4,8%','Referrer spike: IG story','Cart abandon 22%'],
+        app:  ['Installs +214 today','Push open rate 61%','Lineup views +180%','DAU 3 412'],
+        pay:  ['Auth burst 96/min','Settlement batch €18 420','Chargeback flagged #8812','Payout scheduled Fri'],
+        ops:  ['Staff roster 94% ✓','Vendor 12 signed','Site plan v3 uploaded','Radio check complete'],
+      },
+      insights: [
+        { to:'desktop', tag:'Insight',      text:'GA Phase 2 pacing +23% vs last year — release Phase 3 tonight?' },
+        { to:'mobile',  tag:'⚠ Alert',      text:'Checkout errors ×3 on Safari — gateway timeouts since 14:10.', tc:'#fbbf24' },
+        { to:'whatsapp',text:'Sales digest: €38,4k today (+31%) · 812 tickets · top source: IG story.' },
+        { to:'claude',  text:'Owl: “61% of VIP buyers are returning customers — segment saved for you.”' },
+        { to:'mobile',  tag:'Goal',         text:'🎯 70% sold — Phase 2 hit its target 6 days early.', tc:'#34d399' },
+        { to:'chatgpt', text:'Owl: “68% of today’s sales came from mobile — push campaign drafted.”' },
+        { to:'desktop', tag:'⚠ Alert',      text:'Cart abandonment 22% on payment step — up 6 pts this week.', tc:'#fbbf24' },
+      ],
+      kpis: { rev:['€38,4k','+31%'], tix:['812','+128'], sph:['4,8%','conv'] },
+    },
+    eventday: {
+      feeds: {
+        tix:  ['Gate 2 scans 214/min','Duplicate ticket blocked','Comp list check-in ×12','No-show rate 6,2%'],
+        cash: ['Bar 3: 42 sales/min','Kiosk queue 4 min','Vendor 7 float low','Tap declined ×9 · Bar 1'],
+        web:  ['Live stream 2,1k viewers','FAQ trending: “set times”','Info page: 640 active'],
+        app:  ['Map opens +320%','Friend-finder pings 1,1k','Push delivered 96%','Schedule saves 2,4k'],
+        pay:  ['Terminal 14 offline','Card fallback 3,1%','Auth rate 99,2%'],
+        ops:  ['Gate 4 queue 11 min','Medical: minor ×2 logged','Rain risk 18:00 · 60%','Stage B changeover ✓'],
+      },
+      insights: [
+        { to:'mobile',  tag:'🚨 Alert',     text:'Bar 3 beer stock 12% — projected dry in 40 min. Dispatch restock?', tc:'#ff385c' },
+        { to:'desktop', tag:'⚠ Alert',      text:'Gate 4 wait 11 min & rising — open lane 5; Gate 1 staff idle.', tc:'#fbbf24' },
+        { to:'whatsapp',text:'16:00 pulse: 8 412 in · spend €14,20/head · bars +9% vs plan.' },
+        { to:'claude',  text:'Owl: “Main Stage East is your busiest bar — €31k, 18% of cashless revenue.”' },
+        { to:'mobile',  tag:'Insight',      text:'Kiosk queues peak at changeovers — push mobile top-ups at 17:50.' },
+        { to:'chatgpt', text:'Owl: “Rain at 18:00 — indoor-stage push drafted, ready for 17:30.”' },
+        { to:'desktop', tag:'Insight',      text:'Spend/head +€1,10 after headliner announcement push.' },
+      ],
+      kpis: { rev:['€119,6k','+9%'], tix:['8 412','in'], sph:['€14,20','+4%'] },
+    },
+    morning: {
+      feeds: {
+        tix:  ['Final attendance 14 213','Scan coverage 98,4%','Refund queue: 7 open'],
+        cash: ['Unspent balances €21k','Auto-refund run queued','Top vendor: Taco Bros €18k'],
+        web:  ['Recap page 5,2k visits','Gallery CTR 34%','Aftermovie plays 1,9k'],
+        app:  ['Survey responses 1,8k','NPS 62 (+8)','Uninstalls 0,4%'],
+        pay:  ['Settlement €412k initiated','Fees reconciled ✓','Vendor payouts ×38 queued'],
+        ops:  ['Incidents closed: 14','Lost & found: 89 items','Load-out 62% complete'],
+      },
+      insights: [
+        { to:'desktop', tag:'Report',       text:'Revenue €486k (+12% YoY) — full settlement report is ready.', tc:'#34d399' },
+        { to:'whatsapp',text:'Morning digest: 14 213 attended · €34,20/head · NPS 62 · settlement Friday.' },
+        { to:'mobile',  tag:'✓ Done',       text:'Auto-refunds queued: €21k unspent back to 3 108 wristbands.', tc:'#34d399' },
+        { to:'claude',  text:'Owl: “18–24s spent 22% more per head — next-event segment saved.”' },
+        { to:'desktop', tag:'Insight',      text:'Taco Bros outsold food plan 2,1× — offer them a second stand next time.' },
+        { to:'chatgpt', text:'Owl: “Peak upsell moment was 21:40 (headliner) — campaign template saved.”' },
+        { to:'mobile',  tag:'Insight',      text:'NPS detractors cite Gate 4 queues — ops fix drafted for the next event.' },
+      ],
+      kpis: { rev:['€486k','+12%'], tix:['14 213','98,4%'], sph:['€34,20','NPS 62'] },
+    },
+  };
+  const CAPTIONS = [
+    'correlating cashless × ticketing…','watching gate throughput…','scoring anomalies…',
+    'drafting the morning digest…','checking goals vs pace…','answering the Owl…',
+  ];
+
+  /* ---------------- build source cards ---------------- */
+  const srcsEl = document.getElementById('srcs');
+  for (const s of SOURCES) {
+    const d = document.createElement('div');
+    d.className = 'src'; d.id = 'src-' + s.id; d.style.setProperty('--c', s.color);
+    d.innerHTML = '<div class="src-top"><span class="src-dot"></span>' + s.name +
+                  '</div><div class="src-tick" id="tick-' + s.id + '">—</div>';
+    srcsEl.appendChild(d);
+  }
+
+  /* ---------------- state ---------------- */
+  let scenario = 'onsale';
+  let running = true;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let count = 0;
+  const countEl = document.getElementById('count');
+  const capEl = document.getElementById('cap');
+  const coreEl = document.getElementById('core');
+
+  document.getElementById('p-time').textContent =
+    new Date().toTimeString().slice(0, 5);
+
+  /* scenario tabs */
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => { x.classList.remove('on'); x.setAttribute('aria-selected','false'); });
+    t.classList.add('on'); t.setAttribute('aria-selected','true');
+    scenario = t.dataset.sc;
+    insightIdx = 0;
+    applyKpis();
+  }));
+
+  const pauseBtn = document.getElementById('pause');
+  pauseBtn.addEventListener('click', () => {
+    running = !running;
+    pauseBtn.textContent = running ? 'Pause motion' : 'Play motion';
+    pauseBtn.setAttribute('aria-pressed', String(!running));
+  });
+
+  function applyKpis() {
+    const k = SCENARIOS[scenario].kpis;
+    const set = (id, v) => document.getElementById(id).textContent = v;
+    set('k-rev', k.rev[0]); set('k-rev-d', k.rev[1]);
+    set('k-tix', k.tix[0]); set('k-tix-d', k.tix[1]);
+    set('k-sph', k.sph[0]); set('k-sph-d', k.sph[1]);
+  }
+  applyKpis();
+
+  /* ---------------- canvas plumbing ---------------- */
+  const stage = document.getElementById('stage');
+  const cv = document.getElementById('flow');
+  const cx = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1, vertical = false;
+
+  function resize() {
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = stage.clientWidth; H = stage.clientHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    vertical = innerWidth <= 940;
+    anchors();
+  }
+
+  /* anchor points: sources → core → surfaces */
+  const A = { src:{}, core:{x:0,y:0}, surf:{} };
+  const SURF_IDS = { desktop:'t-desktop', mobile:'phone', whatsapp:'ch-whatsapp', claude:'ch-claude', chatgpt:'ch-chatgpt' };
+
+  function pt(el, side) {
+    const r = el.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    const x = r.left - s.left, y = r.top - s.top;
+    if (side === 'right')  return { x: x + r.width,     y: y + r.height / 2 };
+    if (side === 'left')   return { x,                  y: y + r.height / 2 };
+    if (side === 'bottom') return { x: x + r.width / 2, y: y + r.height };
+    if (side === 'top')    return { x: x + r.width / 2, y };
+    return { x: x + r.width / 2, y: y + r.height / 2 };
+  }
+  function anchors() {
+    for (const s of SOURCES) A.src[s.id] = pt(document.getElementById('src-' + s.id), vertical ? 'bottom' : 'right');
+    A.core = pt(coreEl, 'center');
+    for (const [k, id] of Object.entries(SURF_IDS)) {
+      const el = (k === 'desktop') ? document.querySelector('.desk') : document.getElementById(id);
+      A.surf[k] = pt(el, vertical ? 'top' : 'left');
+    }
+  }
+  addEventListener('resize', resize);
+  new ResizeObserver(() => resize()).observe(stage);
+  resize();
+  setInterval(anchors, 700); // toasts change layout; keep anchors honest
+
+  function bez(p0, p1) {
+    if (vertical) {
+      const dy = (p1.y - p0.y) * 0.5;
+      return [{ x: p0.x, y: p0.y + dy }, { x: p1.x, y: p1.y - dy }];
+    }
+    const dx = (p1.x - p0.x) * 0.5;
+    return [{ x: p0.x + dx, y: p0.y }, { x: p1.x - dx, y: p1.y }];
+  }
+  function at(p0, c1, c2, p1, t) {
+    const u = 1 - t;
+    return {
+      x: u*u*u*p0.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*p1.x,
+      y: u*u*u*p0.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*p1.y,
+    };
+  }
+
+  /* ---------------- particles ---------------- */
+  const parts = [];
+  function spawnIn(srcId) {
+    const s = SOURCES.find(x => x.id === srcId);
+    parts.push({ kind:'in', p0:A.src[srcId], p1:A.core, color:s.color, t:0, sp:0.006 + Math.random()*0.004, r:2.4 });
+    const el = document.getElementById('src-' + srcId);
+    el.classList.remove('blip'); void el.offsetWidth; el.classList.add('blip');
+  }
+  function spawnOut(surfKey) {
+    parts.push({ kind:'out', p0:A.core, p1:A.surf[surfKey], surf:surfKey, color:'#ff5a7a', t:0, sp:0.007, r:3.4 });
+  }
+
+  function drawPaths() {
+    cx.save();
+    cx.setLineDash([2, 7]);
+    cx.lineDashOffset = -perfNow * 0.02;
+    for (const s of SOURCES) {
+      const p0 = A.src[s.id], p1 = A.core, [c1, c2] = bez(p0, p1);
+      cx.strokeStyle = s.color + '22'; cx.lineWidth = 1;
+      cx.beginPath(); cx.moveTo(p0.x, p0.y); cx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, p1.x, p1.y); cx.stroke();
+    }
+    for (const k of Object.keys(A.surf)) {
+      const p0 = A.core, p1 = A.surf[k], [c1, c2] = bez(p0, p1);
+      cx.strokeStyle = 'rgba(255,90,122,0.16)'; cx.lineWidth = 1;
+      cx.beginPath(); cx.moveTo(p0.x, p0.y); cx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, p1.x, p1.y); cx.stroke();
+    }
+    cx.restore();
+  }
+
+  function drawParts(dt) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.t += p.sp * dt / 16.7;
+      if (p.t >= 1) { arrive(p); parts.splice(i, 1); continue; }
+      const [c1, c2] = bez(p.p0, p.p1);
+      // trail
+      for (let g = 4; g >= 0; g--) {
+        const tt = Math.max(0, p.t - g * 0.022);
+        const q = at(p.p0, c1, c2, p.p1, tt);
+        cx.globalAlpha = (1 - g / 5) * 0.9;
+        cx.fillStyle = p.color;
+        cx.shadowColor = p.color; cx.shadowBlur = g === 0 ? 10 : 0;
+        cx.beginPath(); cx.arc(q.x, q.y, p.r * (1 - g * 0.14), 0, 7); cx.fill();
+      }
+      cx.globalAlpha = 1; cx.shadowBlur = 0;
+    }
+  }
+
+  function arrive(p) {
+    if (p.kind === 'in') {
+      count++; countEl.textContent = count.toLocaleString('en').replace(/,/g, ' ');
+      coreEl.classList.add('hit'); setTimeout(() => coreEl.classList.remove('hit'), 220);
+    } else {
+      deliver(p.surf);
+    }
+  }
+
+  /* ---------------- toasts & channel messages ---------------- */
+  let insightIdx = 0;
+  function nextInsight() {
+    const list = SCENARIOS[scenario].insights;
+    const it = list[insightIdx % list.length];
+    insightIdx++;
+    return it;
+  }
+  const pending = {};   // surfKey -> queued insight payload
+
+  function deliver(surfKey) {
+    const it = pending[surfKey]; delete pending[surfKey];
+    if (!it) return;
+    if (surfKey === 'desktop' || surfKey === 'mobile') {
+      const box = document.getElementById(surfKey === 'desktop' ? 't-desktop' : 't-mobile');
+      const t = document.createElement('div');
+      t.className = 'toast'; if (it.tc) t.style.setProperty('--tc', it.tc);
+      t.innerHTML = '<small>' + (it.tag || 'Insight') + ' · Pulse</small>' + esc(it.text);
+      box.prepend(t);
+      const max = surfKey === 'desktop' ? 2 : 3;
+      while (box.children.length > max) box.lastChild.remove();
+      setTimeout(() => t.classList.add('bye'), 12000);
+    } else {
+      const el = document.getElementById('m-' + surfKey);
+      el.style.opacity = 0;
+      setTimeout(() => { el.textContent = it.text; el.style.opacity = 1; }, 260);
+      const chip = document.getElementById('ch-' + surfKey);
+      chip.classList.remove('blip'); void chip.offsetWidth; chip.classList.add('blip');
+    }
+  }
+  const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+  /* ---------------- tickers ---------------- */
+  const tickIdx = {};
+  function tick(srcId) {
+    const feed = SCENARIOS[scenario].feeds[srcId];
+    tickIdx[srcId] = ((tickIdx[srcId] ?? Math.floor(Math.random()*4)) + 1) % feed.length;
+    const el = document.getElementById('tick-' + srcId);
+    el.style.opacity = 0;
+    setTimeout(() => { el.textContent = feed[tickIdx[srcId]]; el.style.opacity = 1; }, 240);
+  }
+  SOURCES.forEach((s, i) => setTimeout(() => tick(s.id), 120 * i));
+
+  let capIdx = 0;
+  function rotateCap() {
+    capIdx = (capIdx + 1) % CAPTIONS.length;
+    capEl.style.opacity = 0;
+    setTimeout(() => { capEl.textContent = CAPTIONS[capIdx]; capEl.style.opacity = 1; }, 300);
+  }
+
+  /* ---------------- main loop ---------------- */
+  let perfNow = 0, last = 0;
+  let accIn = 0, accOut = 1800, accTick = 0, accCap = 0;
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    const dt = Math.min(50, now - last); last = now;
+    if (!running || document.hidden) return;
+    perfNow = now;
+
+    cx.clearRect(0, 0, W, H);
+    drawPaths();
+
+    if (!reduced) {
+      accIn += dt;
+      if (accIn > 420 + Math.random() * 380) {
+        accIn = 0;
+        spawnIn(SOURCES[Math.floor(Math.random() * SOURCES.length)].id);
+      }
+      accOut += dt;
+      if (accOut > 2600 + Math.random() * 900) {
+        accOut = 0;
+        const it = nextInsight();
+        if (!pending[it.to]) { pending[it.to] = it; spawnOut(it.to); }
+      }
+      drawParts(dt);
+    } else {
+      // reduced motion: no particles; still deliver insights slowly
+      accOut += dt;
+      if (accOut > 6000) { accOut = 0; const it = nextInsight(); pending[it.to] = it; deliver(it.to); count += 9; countEl.textContent = String(count); }
+    }
+
+    accTick += dt;
+    if (accTick > 1400) { accTick = 0; tick(SOURCES[Math.floor(Math.random() * SOURCES.length)].id); }
+    accCap += dt;
+    if (accCap > 3400) { accCap = 0; rotateCap(); }
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
