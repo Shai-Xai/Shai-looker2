@@ -63,7 +63,7 @@ module.exports = function tileValues({ db, query }) {
 
   // `preferPivotKey` (optional) explicitly names which pivot column to read — a goal's
   // saved "this event" override. It beats the Current-Event-lock auto-match below.
-  async function resolveTileValue({ dashboardId, tileId, user, suiteId, preferPivotKey }) {
+  async function resolveTileValue({ dashboardId, tileId, user, suiteId, preferPivotKey, live = false }) {
     const def = db.getDashboard(dashboardId);
     if (!def) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -83,7 +83,7 @@ module.exports = function tileValues({ db, query }) {
     // goal, the curve and the dashboard on one number. No-op for tiles without such a
     // filter (date ranges and other filters are untouched).
     body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters;
-    const data = await runLookerQuery('/queries/run/json_detail', body);
+    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live);
     // On a current-vs-past comparison (measure pivoted by event), read THIS event's
     // column specifically — identified by the suite's Current Event lock — instead of
     // the latest/biggest pivot (which can be a prior edition). Falls back to the
@@ -114,7 +114,7 @@ module.exports = function tileValues({ db, query }) {
   // total) and includes hidden fields (the point IS the underlying data — e.g.
   // an email column a table hides for display). Pivoted tiles flatten to one
   // column per (measure × pivot value). Returns { fields, rows } or null.
-  async function resolveTileRows({ dashboardId, tileId, user, suiteId, limit }) {
+  async function resolveTileRows({ dashboardId, tileId, user, suiteId, limit, live = false }) {
     const def = db.getDashboard(dashboardId);
     if (!def) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -126,7 +126,7 @@ module.exports = function tileValues({ db, query }) {
     const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
     if (!body) return null; // scope denied or non-queryable tile
     body.limit = String(Math.min(Math.max(Number(limit) || 500, 1), 10000));
-    const data = await runLookerQuery('/queries/run/json_detail', body);
+    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live);
     const f = data?.fields || {};
     const dims = f.dimensions || [];
     const measures = [...(f.measures || []), ...(f.table_calculations || [])];

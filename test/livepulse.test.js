@@ -18,14 +18,14 @@ function mountLivePulse(over = {}) {
   const sql = db.db;
   let tileValue = 0;
   let metricBySuite = {};          // suiteId -> value (drives the last-event comparison)
-  const metricCalls = [];          // every metric read: { suiteId, filters } (asserts the same-point clip)
+  const metricCalls = [];          // every metric read: { suiteId, filters, live } (asserts the same-point clip + live/cached)
   const announced = [];
   const sms = [];
   const wa = [];
   const mod = require('../server/livepulse').mount(fakeApp(), {
     db, auth,
     resolveTileValue: async () => tileValue,
-    resolveCustomMetric: async ({ suiteId, filters }) => { metricCalls.push({ suiteId, filters: filters || {} }); return suiteId in metricBySuite ? metricBySuite[suiteId] : tileValue; },
+    resolveCustomMetric: async ({ suiteId, filters, live }) => { metricCalls.push({ suiteId, filters: filters || {}, live: !!live }); return suiteId in metricBySuite ? metricBySuite[suiteId] : tileValue; },
     resolveTileRows: over.resolveTileRows || (async () => null),
     resolveEventDate: over.resolveEventDate,
     os: { announce: (a) => { announced.push(a); return { id: 'thread' }; } },
@@ -288,4 +288,36 @@ test('sendPreviewToMe delivers to the current user only (their push + own email)
   assert.equal(pushed.length, 1);
   assert.equal(pushed[0].uid, 'u7', 'push went to the current user only');
   assert.equal(mailed[0].to, 'me@test', 'email went to the current user\'s own address');
+});
+
+test('a live update reads the CURRENT event live (cache-bypassing) and the past-event comparison cached', async () => {
+  const h = mountLivePulse();
+  const entA = makeEntity('Live A', 'A Org');
+  const entB = makeEntity('Live B', 'B Org');
+  const suA = db.createSuite({ entityId: entA.id, name: 'This Year' });
+  const suB = db.createSuite({ entityId: entB.id, name: 'Last Year' });
+  h.setMetricBySuite({ [suA.id]: 5000, [suB.id]: 8000 });
+  const admin = { id: 'a1', email: 'admin@test', role: 'admin' };
+  // A metric block comparing against last year's FINAL number.
+  const r = h.mod.createLivePulse({
+    suiteId: suA.id, user: admin,
+    draft: { name: 'Gate watch', live: 1, channels: ['push'],
+      blocks: [{ type: 'value', source: 'metric', model: 'm', view: 'v', measure: 'v.count', compare: true, compareMode: 'final' }],
+      compareSuiteId: suB.id, compareLabel: 'last year' },
+  });
+  // Cross-tenant guard would drop the compare — keep them same-entity for this test.
+  const suB2 = db.createSuite({ entityId: entA.id, name: 'A Last Year' });
+  h.setMetricBySuite({ [suA.id]: 5000, [suB2.id]: 8000 });
+  const r2 = h.mod.createLivePulse({
+    suiteId: suA.id, user: admin,
+    draft: { name: 'Gate watch 2', live: 1, channels: ['push'],
+      blocks: [{ type: 'value', source: 'metric', model: 'm', view: 'v', measure: 'v.count', compare: true, compareMode: 'final' }],
+      compareSuiteId: suB2.id, compareLabel: 'last year' },
+  });
+  assert.equal(r2.ok, true);
+  await h.mod.sendUpdate(r2.pulse, { manual: true });
+  const cur = h.metricCalls.find((c) => c.suiteId === suA.id);
+  const cmp = h.metricCalls.find((c) => c.suiteId === suB2.id);
+  assert.ok(cur && cur.live === true, 'the current event is read LIVE (cache bypassed)');
+  assert.ok(cmp && cmp.live === false, 'the settled past-event comparison is read from cache');
 });

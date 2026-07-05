@@ -610,11 +610,11 @@ async function metricCatalog(entityId) {
 
 // Read a built metric's live number — one measure, the user's dimension filters,
 // scoped to THIS event + client exactly like the dashboards. Fail-closed.
-async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
+async function resolveCustomMetric({ model, view, measure, filters, user, suiteId, live = false }) {
   if (!model || !view || !measure) return null;
   const body = await scopedMetricBody({ model, view, fields: [measure], limit: 1, extraOverrides: filters || {}, user, suiteId });
   if (!body) return null;
-  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live); // live → bypass Pulse + Looker caches (live event alerts)
   return primaryTileValue(data, {});
 }
 

@@ -225,15 +225,18 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   function evalUser(p) {
     return { id: `livepulse:${p.entityId}`, email: p.createdBy || 'livepulse@howler', role: 'client', entityIds: [p.entityId] };
   }
-  async function readValueBlock(p, b, suiteId, extraFilters) {
+  // `live` forces a cache-bypassing read — ON for the current event (a live update
+  // must report the true current figure, not a cached one) and OFF for the
+  // past-event comparison (that number is settled, so cache it).
+  async function readValueBlock(p, b, suiteId, extraFilters, live = false) {
     try {
       if (b.source === 'metric') {
         if (typeof resolveCustomMetric !== 'function') return null;
-        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: { ...(b.metricFilters || {}), ...(extraFilters || {}) }, user: evalUser(p), suiteId });
+        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: { ...(b.metricFilters || {}), ...(extraFilters || {}) }, user: evalUser(p), suiteId, live });
         return v == null ? null : Number(v);
       }
       if (typeof resolveTileValue !== 'function') return null;
-      const v = await resolveTileValue({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId });
+      const v = await resolveTileValue({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId, live });
       return v == null ? null : Number(v);
     } catch (e) { console.error('[livepulse] value read failed', p.id, b.id, e.message); return null; }
   }
@@ -243,7 +246,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   async function readTopListBlock(p, b) {
     try {
       if (typeof resolveTileRows !== 'function') return [];
-      const r = await resolveTileRows({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId: p.suiteId, limit: 200 });
+      const r = await resolveTileRows({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId: p.suiteId, limit: 200, live: true });
       if (!r || !r.fields || r.fields.length < 2) return [];
       const nameF = r.fields[0].name, valF = r.fields[r.fields.length - 1].name;
       return (r.rows || [])
@@ -325,10 +328,10 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       if (b.type === 'eventops') { snap[b.id] = { ops: readEventOpsBlock(p) }; continue; }
       if (b.type === 'signal') { snap[b.id] = { flow: readSignalBlock(p, b) }; continue; }
       if (b.type === 'top_list') { snap[b.id] = { rows: await readTopListBlock(p, b) }; continue; }
-      const cur = { value: await readValueBlock(p, b, p.suiteId) };
+      const cur = { value: await readValueBlock(p, b, p.suiteId, undefined, true) }; // current event → cache-bypassing live read
       if (b.compare && p.compareSuiteId) {
         const clip = await samePointClip(p, b);
-        cur.compare = await readValueBlock(p, b, p.compareSuiteId, clip || undefined);
+        cur.compare = await readValueBlock(p, b, p.compareSuiteId, clip || undefined); // past event → cached (settled)
         cur.compareMode = clip ? 'same_point' : 'final';
       }
       snap[b.id] = cur;
