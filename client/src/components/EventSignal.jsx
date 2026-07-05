@@ -1698,16 +1698,15 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         );
       })()}
 
-      {/* 📅 Day picker — a multi-day event's past days, derived from the monitors'
-          roster start. Applies to Stations, Rhythm and the deep-dives (Board/Map/
-          River/Network stay live). A festival day runs daily-start → +24h. */}
+      {/* 📅 Day picker — the event's PAST days that actually have coverage, taken
+          from the observed log (m.days, SAST dates) so it works whether a monitor
+          uses a fixed start or a daily anchor. Applies to Stations, Rhythm and the
+          deep-dives; Board/Map/River/Network stay live. A day runs start → +24h. */}
       {(view === 'stations' || view === 'rhythm') && (() => {
-        const starts = (monitors || []).map((m) => Date.parse(m.rosterStart || '')).filter((x) => !Number.isNaN(x));
-        if (!starts.length) return null;
-        const sast = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(0, 10); // SAST calendar date
-        const today = sast(Date.now());
-        const days = [];
-        for (let ms = Math.min(...starts); sast(ms) < today && days.length < 7; ms += 864e5) days.push(sast(ms));
+        const today = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10); // SAST calendar date
+        const set = new Set();
+        (monitors || []).forEach((m) => (m.days || []).forEach((d) => { if (d < today) set.add(d); }));
+        const days = [...set].sort().slice(-7);
         if (!days.length) return null;
         const dChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
         const lbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
