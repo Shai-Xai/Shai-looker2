@@ -1007,6 +1007,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [placing, setPlacing] = useState(''); // station being placed by tapping the map
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [q, setQ] = useState(''); // unplaced-tray search
+  const [zf, setZf] = useState(''); // unplaced-tray zone filter
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
   useEffect(() => {
@@ -1113,12 +1115,27 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           );
         })}
       </div>
-      {edit && !!unplaced.length && (
-        <div style={{ ...card, marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', width: '100%' }}>Unplaced · tap one, then tap its spot on the map</span>
-          {unplaced.map((s) => <button key={s.name} style={btn(placing === s.name)} onClick={() => setPlacing(placing === s.name ? '' : s.name)}>{s.name}</button>)}
-        </div>
-      )}
+      {edit && !!unplaced.length && (() => {
+        const zonesU = [...new Set(unplaced.map((s) => s.zone))].sort();
+        const list = unplaced
+          .filter((s) => (!zf || s.zone === zf) && (!q || s.name.toLowerCase().includes(q.toLowerCase())))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        return (
+          <div style={{ ...card, marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', flex: 1, minWidth: 150 }}>Unplaced · {list.length}/{unplaced.length} · tap one, then tap the map</span>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 find a station…" inputMode="search"
+              style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontFamily: 'inherit', minHeight: 32, width: 160 }} />
+            {zonesU.length > 1 && (
+              <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', width: '100%' }}>
+                <button style={btn(!zf)} onClick={() => setZf('')}>All zones</button>
+                {zonesU.map((z) => <button key={z} style={btn(zf === z)} onClick={() => setZf(zf === z ? '' : z)}>{z} · {unplaced.filter((s) => s.zone === z).length}</button>)}
+              </span>
+            )}
+            {list.map((s) => <button key={s.name} style={btn(placing === s.name)} onClick={() => setPlacing(placing === s.name ? '' : s.name)}>{s.name}</button>)}
+            {!list.length && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>No station matches “{q}”{zf ? ` in ${zf}` : ''}.</span>}
+          </div>
+        );
+      })()}
       {!edit && !!alarmed.length && (
         <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
