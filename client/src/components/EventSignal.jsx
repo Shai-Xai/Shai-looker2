@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
 import SignalReportPanel from './SignalReportPanel.jsx';
+import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -1083,6 +1084,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
         <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
         <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
+        <button onClick={() => { setView('flow'); backToLive(); }} style={chipStyle(view === 'flow')}>🌡️ Flow</button>
       </div>
 
       {allClosed && (
@@ -1097,6 +1099,10 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 
       {view === 'stations' && (
         <StationDayView monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
+      )}
+
+      {view === 'flow' && (
+        <EventFlow monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
       )}
 
       {view === 'board' && <>
