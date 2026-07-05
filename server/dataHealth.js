@@ -734,26 +734,28 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
-    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows → the count line reads zero for early hours on big fleets (300+ bar devices, multi-day). Re-read grouped by bucket (+station when not filtered to one) — no device fan-out, never capped — for an exact line the Stations view can split.
+    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows → the count line reads zero for early hours on big fleets (300+ bar devices, multi-day). Re-read grouped by bucket (+station when not filtered to one) — no device fan-out — for an exact line the Stations view can split.
     let stationTotals = null;
     if (rows.length >= 20000 && mode !== 'none' && !String(mode).startsWith('distinct')) {
       try {
-        const grp = !st && m.stationField ? [bucketField, m.stationField] : [bucketField];
-        const ab = { ...baseBody(m), fields: [...grp, cKey], sorts: [`${bucketField} desc`], limit: '50000' };
-        ab.filters[m.timeField] = timeFilter; if (st && m.stationField) ab.filters[m.stationField] = stExpr;
-        const agg = await runScoped(m, ab); const fresh = Array(n).fill(0); const perSt = {}; let any = false;
-        for (const r of agg) {
-          const ts = parseTs(r[bucketField]); if (!ts) continue;
-          const idx = Math.floor((ts.getTime() - firstBucket) / ivMs); if (idx < 0 || idx >= n) continue;
-          const c = Number(r[cKey]); if (!Number.isFinite(c)) continue; fresh[idx] += c; any = true;
-          if (!st && m.stationField) { const sn = String(r[m.stationField] ?? '').trim() || '—'; (perSt[sn] || (perSt[sn] = Array(n).fill(0)))[idx] += c; }
+        // Group by a TRUE interval dim (minuteN → hour), NOT the raw per-second bucketField: raw doesn't
+        // aggregate so the read truncates at the row cap, dropping EARLY hours (bars "starting" mid-evening).
+        // An interval dim aggregates to buckets×stations rows (never capped); a coarser hour fallback spreads evenly.
+        for (const abf of (iv < 60 ? [`${group}_minute${iv}`, hourField] : [hourField])) {
+          const ab = { ...baseBody(m), fields: [...(!st && m.stationField ? [abf, m.stationField] : [abf]), cKey], limit: '50000' }; ab.filters[m.timeField] = timeFilter; if (st && m.stationField) ab.filters[m.stationField] = stExpr;
+          let agg; try { agg = await runScoped(m, ab); } catch (e) { continue; }
+          if (!agg.length || agg.filter((r) => parseTs(r[abf])).length * 2 <= agg.length) continue; // dim blank → next
+          const spread = Math.max(1, Math.round((/_minute(\d+)/.test(abf) ? Number(RegExp.$1) * 60000 : 3600000) / ivMs)); const fresh = Array(n).fill(0); const perSt = {}; let any = false;
+          for (const r of agg) {
+            const ts = parseTs(r[abf]); const c = Number(r[cKey]); if (!ts || !Number.isFinite(c)) continue;
+            const base = Math.floor((ts.getTime() - firstBucket) / ivMs); const share = c / spread; const sn = String(r[m.stationField] ?? '').trim() || '—';
+            for (let k = 0; k < spread; k++) { const idx = base + k; if (idx < 0 || idx >= n) continue; fresh[idx] += share; any = true; if (!st && m.stationField) (perSt[sn] || (perSt[sn] = Array(n).fill(0)))[idx] += share; }
+          }
+          if (any) { for (let i = 0; i < n; i++) bucketTotals[i] = Math.round(fresh[i]); if (!st && m.stationField) { for (const k of Object.keys(perSt)) perSt[k] = perSt[k].map((x) => Math.round(x)); stationTotals = perSt; } break; }
         }
-        if (any) { for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i]; if (!st && m.stationField) stationTotals = perSt; }
-        // Per-device totals were truncated too — re-read the count grouped by device ONLY (no time bucket, so one row per device) for exact totals.
-        const dg = { ...baseBody(m), fields: [m.rosterField, cKey], sorts: [`${cKey} desc`], limit: '20000' };
-        dg.filters[m.timeField] = timeFilter; if (st && m.stationField) dg.filters[m.stationField] = stExpr;
-        const tmap = new Map();
-        for (const r of await runScoped(m, dg)) { const dv = String(r[m.rosterField] ?? '').trim(); const c = Number(r[cKey]); if (dv && Number.isFinite(c)) tmap.set(dv, c); }
+        // Per-device totals were truncated too — re-read grouped by device ONLY (one row per device) for exact totals.
+        const dg = { ...baseBody(m), fields: [m.rosterField, cKey], sorts: [`${cKey} desc`], limit: '20000' }; dg.filters[m.timeField] = timeFilter; if (st && m.stationField) dg.filters[m.stationField] = stExpr;
+        const tmap = new Map(); for (const r of await runScoped(m, dg)) { const dv = String(r[m.rosterField] ?? '').trim(); const c = Number(r[cKey]); if (dv && Number.isFinite(c)) tmap.set(dv, c); }
         if (tmap.size) devices.forEach((d) => { if (tmap.has(d.device)) d.total = tmap.get(d.device); });
       } catch (e) { /* keep the device-derived totals */ }
     }
@@ -777,16 +779,14 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     }
     if (withInfo && devices.length) {
       labelDevices(devices, await deviceDetails(m, timeFilter, st ? stExpr : ''));
-      const missing = devices.filter((d) => !d.station);
-      if (m.stationField && missing.length) labelDevices(missing, await deviceDetailsLite(m, timeFilter));
+      const missing = devices.filter((d) => !d.station); if (m.stationField && missing.length) labelDevices(missing, await deviceDetailsLite(m, timeFilter));
     }
     return {
       configured: true, hours: Math.round((n * iv) / 60), intervalMin: iv, hourField, bucketField, countBasis: mode === 'native2' || mode.includes('.') ? 'native' : mode === 'distinct2' ? 'distinct' : mode,
       countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
-      // Empty grid → say what was tried (+ a sample row when rows arrived but none bucketed) — no silent blanks.
-      readPath: byDevice.size ? undefined : tried,
+      readPath: byDevice.size ? undefined : tried, // empty grid → what was tried (+ sample row below) — no silent blanks
       sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
       devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0), stationTotals,
