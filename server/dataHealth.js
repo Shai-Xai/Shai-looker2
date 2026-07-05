@@ -272,9 +272,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  // The roster's "linked since" anchor, in precedence order: the recurring daily
-  // time (today at HH:MM SAST — yesterday's if that moment is still ahead), then
-  // the fixed start, else null (rolling window). SAST is fixed UTC+2 (no DST).
+  // The roster's "linked since" anchor, in precedence: the recurring daily time (today at HH:MM SAST —
+  // yesterday's if that moment is still ahead), then the fixed start, else null (rolling). SAST = UTC+2, no DST.
   function rosterAnchor(m, nowMs = Date.now()) {
     if (/^\d{1,2}:\d{2}$/.test(m.rosterDaily || '')) {
       const [hh, mm] = m.rosterDaily.split(':').map(Number);
@@ -380,10 +379,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     });
   }
 
-  // The device roster: "expected vs actual". Every device seen in the BASELINE
-  // window is linked; any of those silent through the ONLINE window is offline
-  // — named, with how long. The expected set is learned from the data itself
-  // (one scoped read, reduced to last-seen per device; no manual register).
+  // The device roster: "expected vs actual". Every device seen in the BASELINE window is linked; any silent
+  // through the ONLINE window is offline — named, with how long. Expected set learned from the data itself.
   const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
 
   const LAST_FIELD = 'data_health_last';
@@ -484,10 +481,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     } catch (e) { void e; return null; }
   }
 
-  // Labels WITHOUT timestamps: distinct (device, station, operator) combos in
-  // the window — no measures, no time dim, so it works on the strictest Looker
-  // and can't lose long-quiet devices to a newest-first row cap. Fills the
-  // devices the timed read missed (they'd otherwise land under "No station").
+  // Labels WITHOUT timestamps: distinct (device, station, operator) combos in the window — no measures, no
+  // time dim, so it works on the strictest Looker and can't lose long-quiet devices to a newest-first row
+  // cap. Fills the devices the timed read missed (they'd otherwise land under "No station").
   async function deviceDetailsLite(m, timeFilter) {
     const ex = [];
     if (m.stationField) ex.push(m.stationField);
@@ -758,6 +754,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           if (!st && m.stationField) { const sn = String(r[m.stationField] ?? '').trim() || '—'; (perSt[sn] || (perSt[sn] = Array(n).fill(0)))[idx] += c; }
         }
         if (any) { for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i]; if (!st && m.stationField) stationTotals = perSt; }
+        // Per-device totals were truncated too — re-read the count grouped by device ONLY (no time bucket, so one row per device) for exact totals.
+        const dg = { ...baseBody(m), fields: [m.rosterField, cKey], sorts: [`${cKey} desc`], limit: '20000' };
+        dg.filters[m.timeField] = timeFilter; if (st && m.stationField) dg.filters[m.stationField] = stExpr;
+        const tmap = new Map();
+        for (const r of await runScoped(m, dg)) { const dv = String(r[m.rosterField] ?? '').trim(); const c = Number(r[cKey]); if (dv && Number.isFinite(c)) tmap.set(dv, c); }
+        if (tmap.size) devices.forEach((d) => { if (tmap.has(d.device)) d.total = tmap.get(d.device); });
       } catch (e) { /* keep the device-derived totals */ }
     }
     // Some explore joins return NOTHING when the station filter rides the count read (the join drops
