@@ -1077,7 +1077,13 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
     { key: 'security', label: 'Security', icon: '🛡️' },
     { key: 'medical', label: 'Medical', icon: '🚑' },
   ];
-  const callReason = (k) => CALL_REASONS.find((r) => r.key === k) || CALL_REASONS[2];
+  // 'cat:<label>' keys are the event's device ISSUE CATEGORIES (mainly operators calling
+  // about the device itself) — same catalogue the Log-issue picker uses.
+  const callReason = (k) => {
+    const s = String(k || '');
+    if (s.startsWith('cat:')) { const lbl = s.slice(4, 44).trim(); if (lbl) return { key: `cat:${lbl}`, label: `Device · ${lbl.replace(/_/g, ' ')}`, icon: '🔧' }; }
+    return CALL_REASONS.find((r) => r.key === s) || CALL_REASONS[2];
+  };
   const callTestMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
   const callTestEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
   const callRow = (c) => ({
@@ -1122,7 +1128,8 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
     const d = getDevice(req.params.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
     res.json({ suite: { id: su.id, name: su.name }, device: deviceRow(d),
-      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS });
+      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS,
+      deviceIssues: issueCategories(su).map((c2) => ({ key: 'cat:' + c2.label, label: c2.label.replace(/_/g, ' '), icon: '🔧' })) });
   });
   // PUBLIC: raise a call. Station + device come from the link; the caller adds a reason
   // (+ their name, an optional note and what they've already tried).
