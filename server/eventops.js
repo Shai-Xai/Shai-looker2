@@ -1077,7 +1077,13 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
     { key: 'security', label: 'Security', icon: '🛡️' },
     { key: 'medical', label: 'Medical', icon: '🚑' },
   ];
-  const callReason = (k) => CALL_REASONS.find((r) => r.key === k) || CALL_REASONS[2];
+  // 'cat:<label>' keys are the event's device ISSUE CATEGORIES (mainly operators calling
+  // about the device itself) — same catalogue the Log-issue picker uses.
+  const callReason = (k) => {
+    const s = String(k || '');
+    if (s.startsWith('cat:')) { const lbl = s.slice(4, 44).trim(); if (lbl) return { key: `cat:${lbl}`, label: `Device · ${lbl.replace(/_/g, ' ')}`, icon: '🔧' }; }
+    return CALL_REASONS.find((r) => r.key === s) || CALL_REASONS[2];
+  };
   const callTestMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
   const callTestEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
   const callRow = (c) => ({
@@ -1122,7 +1128,8 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
     const d = getDevice(req.params.deviceId);
     if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
     res.json({ suite: { id: su.id, name: su.name }, device: deviceRow(d),
-      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS });
+      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS,
+      deviceIssues: issueCategories(su).map((c2) => ({ key: 'cat:' + c2.label, label: c2.label.replace(/_/g, ' '), icon: '🔧' })) });
   });
   // PUBLIC: raise a call. Station + device come from the link; the caller adds a reason
   // (+ their name, an optional note and what they've already tried).
@@ -1300,6 +1307,16 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
       let rows = sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(suiteId, Math.min(100, limit)).map(cpLogRow);
       if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
       return rows.map((c) => ({ checkpoint: c.checkpointName, station: c.stationLabel, by: c.staffLabel, comment: c.comment, hasPhoto: !!c.photo, at: c.at }));
+    },
+    // Device support calls: an operator/barman tapped a reason on the device's pre-bound link asking for help.
+    listCalls(suiteId, status = 'open', { stationName } = {}) {
+      const st = ['open', 'acked', 'resolved'].includes(status) ? status : status === 'all' ? null : 'open';
+      const rows = st
+        ? sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? AND status=? ORDER BY created_at DESC').all(suiteId, st)
+        : sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? ORDER BY created_at DESC').all(suiteId);
+      let out = rows.map(callRow);
+      if (stationName) { const n = String(stationName).toLowerCase(); out = out.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
+      return out.map((c) => ({ station: c.stationLabel, device: c.deviceLabel, reason: c.reasonLabel, caller: c.callerName, comment: c.comment, tried: c.tried, status: c.status, calledAt: c.createdAt, ackedBy: c.ackedBy, eta: c.eta, resolvedBy: c.resolvedBy, resolvedAt: c.resolvedAt }));
     },
   };
   const STATE_LABEL_ = (s) => ({ in_stock: 'Hive', deployed: 'deployed', returned: 'Hive', lost: 'lost', damaged: 'damaged' }[s] || s);

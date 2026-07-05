@@ -163,6 +163,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     add('roster_daily', "roster_daily TEXT NOT NULL DEFAULT ''");                    // recurring daily anchor 'HH:MM' (SAST) — beats roster_start; multi-day events
     add('roster_snapshot', "roster_snapshot TEXT NOT NULL DEFAULT ''");              // last roster counts JSON, refreshed by check() — collapsed cards read this, no live query
     add('roster_alert_pct', 'roster_alert_pct INTEGER NOT NULL DEFAULT 0');          // alert when ≥ this % of linked devices are offline (0 = off)
+    add('count_field', "count_field TEXT NOT NULL DEFAULT ''");                      // measure to count as volume (e.g. …transaction_count); blank = auto-detect
   } catch (e) { console.error('[data-health] column migration skipped:', e.message); }
 
   const parseJson = (s, fb) => { try { const v = JSON.parse(s); return v == null ? fb : v; } catch { return fb; } };
@@ -173,7 +174,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       id: r.id, name: r.name, area: r.area, entityId: r.entity_id, suiteId: r.suite_id,
       model: r.model, view: r.view, timeField: r.time_field, stationField: r.station_field,
       detailFields: parseJson(r.detail_fields, []),
-      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '',
+      rosterField: r.roster_field || '', rosterBaselineMin: r.roster_baseline_min, rosterOnlineMin: r.roster_online_min, rosterStart: r.roster_start || '', rosterDaily: r.roster_daily || '', countField: r.count_field || '',
       rosterSnapshot: parseJson(r.roster_snapshot, null),
       rosterAlertPct: r.roster_alert_pct || 0,
       filters: parseJson(r.filters, {}), warnMin: r.warn_min, staleMin: r.stale_min,
@@ -214,13 +215,12 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       detailFields: Array.isArray(b.detailFields)
         ? [...new Set(b.detailFields.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim().slice(0, 200)))].slice(0, 4)
         : [],
-      // Device roster: dimension identifying a device/operator, plus the "linked"
-      // baseline window and the "online" recency window (minutes).
+      // Device roster: the device/operator dimension; "linked" + "online" windows (minutes).
       rosterField: String(b.rosterField || '').slice(0, 200),
+      countField: String(b.countField || '').slice(0, 200), // pin the volume/transactions measure (blank = auto-detect)
       rosterBaselineMin: num(b.rosterBaselineMin, 1440, 10, 20160),
       rosterOnlineMin: num(b.rosterOnlineMin, 30, 1, 1440),
-      // Fixed "linked since" anchor (UTC ISO). When set it beats the rolling window
-      // — the event-day shape: "every device seen since doors opened".
+      // Fixed "linked since" anchor (UTC ISO) — beats the rolling window (event-day shape).
       rosterStart: (b.rosterStart && !Number.isNaN(Date.parse(b.rosterStart))) ? new Date(b.rosterStart).toISOString() : '',
       // Recurring daily anchor (multi-day events): 'HH:MM' South-Africa time —
       // the roster restarts from that time each day. Beats rosterStart when set.
@@ -242,27 +242,25 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const ts = now();
     if (id) {
       sql.prepare(`UPDATE data_monitors SET name=?, area=?, entity_id=?, suite_id=?, model=?, view=?, time_field=?, station_field=?, detail_fields=?,
-        roster_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?, roster_alert_pct=?,
+        roster_field=?, count_field=?, roster_baseline_min=?, roster_online_min=?, roster_start=?, roster_daily=?, roster_alert_pct=?,
         filters=?, warn_min=?, stale_min=?, check_every_min=?, channels=?, notify_recovery=?, cooldown_min=?, status=?, updated_at=? WHERE id=?`)
         .run(c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-          c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct,
+          c.rosterField, c.countField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct,
           JSON.stringify(c.filters), c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, ts, id);
       return monitorById(id);
     }
     const nid = uuid();
     sql.prepare(`INSERT INTO data_monitors (id, name, area, entity_id, suite_id, model, view, time_field, station_field, detail_fields,
-      roster_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, roster_alert_pct, filters,
+      roster_field, count_field, roster_baseline_min, roster_online_min, roster_start, roster_daily, roster_alert_pct, filters,
       warn_min, stale_min, check_every_min, channels, notify_recovery, cooldown_min, status, state, created_by, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?,?,?)`)
       .run(nid, c.name, c.area, c.entityId, c.suiteId, c.model, c.view, c.timeField, c.stationField, JSON.stringify(c.detailFields),
-        c.rosterField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct, JSON.stringify(c.filters),
+        c.rosterField, c.countField, c.rosterBaselineMin, c.rosterOnlineMin, c.rosterStart, c.rosterDaily, c.rosterAlertPct, JSON.stringify(c.filters),
         c.warnMin, c.staleMin, c.checkEveryMin, JSON.stringify(c.channels), c.notifyRecovery, c.cooldownMin, c.status, who || '', now(), now());
     return monitorById(nid);
   }
 
-  // ── the Looker read ──
-  // Looker time-dimension values arrive as "YYYY-MM-DD HH:MM:SS" strings in the
-  // query timezone — we force UTC so lag math is deterministic.
+  // ── the Looker read ── time-dimension values arrive as "YYYY-MM-DD HH:MM:SS" strings in the query timezone — we force UTC so lag math is deterministic.
   function parseTs(v) {
     if (v == null || v === '') return null;
     let s = String(v).trim();
@@ -272,9 +270,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  // The roster's "linked since" anchor, in precedence order: the recurring daily
-  // time (today at HH:MM SAST — yesterday's if that moment is still ahead), then
-  // the fixed start, else null (rolling window). SAST is fixed UTC+2 (no DST).
+  // The roster's "linked since" anchor, in precedence: the recurring daily time (today at HH:MM SAST —
+  // yesterday's if that moment is still ahead), then the fixed start, else null (rolling). SAST = UTC+2, no DST.
   function rosterAnchor(m, nowMs = Date.now()) {
     if (/^\d{1,2}:\d{2}$/.test(m.rosterDaily || '')) {
       const [hh, mm] = m.rosterDaily.split(':').map(Number);
@@ -287,6 +284,13 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (m.rosterStart && !Number.isNaN(Date.parse(m.rosterStart))) return new Date(m.rosterStart);
     return null;
   }
+  // One festival DAY = that date's daily-start time (SAST) → +24h, so the after-midnight tail belongs to its party. Feeds the board's day picker via hours='day:YYYY-MM-DD'.
+  function dayWindow(m, ymd) {
+    const hm = /^(\d{1,2}):(\d{2})$/.exec(String(m.rosterDaily || '').trim());
+    const start = new Date(Date.parse(`${ymd}T00:00:00+02:00`) + (hm ? (+hm[1] * 60 + +hm[2]) * 60000 : 0));
+    return Number.isNaN(start.getTime()) ? null : { start, end: new Date(start.getTime() + 864e5) };
+  }
+  const dayOf = (hours) => { const dm = /^day:(\d{4}-\d{2}-\d{2})$/.exec(String(hours || '')); return dm ? dm[1] : null; };
 
   // Scoped reads: pinned-to-client monitors run as a synthetic CLIENT locked to that
   // entity (applyScope forces the organiser boundary, exactly like alerts/goals);
@@ -312,9 +316,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     query_timezone: 'UTC',
   });
 
-  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
-  // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
-  // monitor hits that, remember it and go straight to the sorted-scan path.
+  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension. Once a monitor hits that, remember it and go straight to the sorted-scan path.
   const maxMeasureUnsupported = new Set();
 
   async function readLatest(m) {
@@ -329,39 +331,27 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // station regardless of how busy the raw table is.
     if (!maxMeasureUnsupported.has(m.id)) {
       try {
-        const rows = await runScoped(m, {
-          ...baseBody(m),
-          fields: [m.stationField, MAX_FIELD],
-          dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
-          limit: '500',
-        });
+        const b = { ...baseBody(m), fields: [m.stationField, MAX_FIELD], dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]), limit: '500' };
+        if (!b.filters[m.timeField]) b.filters[m.timeField] = '30 days'; // recycled station names from PAST events must never surface as live streams
+        const rows = await runScoped(m, b);
         return reduceRows(m, rows, MAX_FIELD);
       } catch (e) {
-        // Custom-measure rejection is permanent for this field — memoise and fall
-        // through to the scan. Any other failure also gets one scan attempt (it
-        // may still work); if the scan fails too, THAT error surfaces.
+        // Custom-measure rejection is permanent — memoise, fall through to the scan. Any other failure also gets one scan attempt; if the scan fails too, THAT error surfaces.
         if (/must evaluate to/i.test(String(e.message || ''))) maxMeasureUnsupported.add(m.id);
         console.warn('[data-health] max-measure read failed, trying sorted scan', m.id, e.message);
       }
     }
 
-    // Fallback: newest rows first, reduced to max-per-station in JS. Sorted desc,
-    // so the FIRST time a station appears is its latest record. Stations idle for
-    // longer than the window won't appear — the per-station memory keeps evaluating
-    // them from their remembered last_event_at, which is exactly the stale signal.
-    const rows = await runScoped(m, {
-      ...baseBody(m),
-      fields: [m.stationField, m.timeField],
-      sorts: [`${m.timeField} desc`],
-      limit: '5000',
-    });
+    // Fallback: newest rows first, reduced to max-per-station in JS (first appearance = latest record).
+    // Stations idle past the window won't appear — the per-station memory keeps evaluating them from their remembered last_event_at, which is exactly the stale signal.
+    const b2 = { ...baseBody(m), fields: [m.stationField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+    if (!b2.filters[m.timeField]) b2.filters[m.timeField] = '30 days';
+    const rows = await runScoped(m, b2);
     return reduceRows(m, rows, m.timeField);
   }
 
-  // The raw tail of the feed: the N most recent (station, timestamp) records,
-  // newest first — a live, cache-bypassed peek so an admin can SEE what the pipe
-  // last delivered rather than trusting the lag number. Note Looker groups
-  // identical rows, so same-station-same-second records collapse into one.
+  // The raw tail of the feed: N most recent (station, timestamp) records, newest first — a live cache-bypassed
+  // peek so an admin SEES what the pipe delivered. Looker groups identical rows (same-second records collapse).
   async function latestRecords(m, limit = 20) {
     const n = Math.max(1, Math.min(100, Math.round(Number(limit) || 20)));
     // Detail columns ride along in the same query (station/action/whatever the
@@ -382,19 +372,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     });
   }
 
-  // The device roster: "expected vs actual". Every device seen in the BASELINE
-  // window is linked; any of those silent through the ONLINE window is offline
-  // — named, with how long. The expected set is learned from the data itself
-  // (one scoped read, reduced to last-seen per device; no manual register).
+  // The device roster: "expected vs actual". Every device seen in the BASELINE window is linked; any silent
+  // through the ONLINE window is offline — named, with how long. Expected set learned from the data itself.
   const SUFFIX = /_(raw|time|date|hour|minute\d*|second|week|month|quarter|year|time_of_day|hour_of_day|day_of_week|day_of_month|day_of_year)$/;
 
   const LAST_FIELD = 'data_health_last';
 
-  // Last-seen read shared by the roster and the labels lookup: ONE aggregated
-  // row per device (+extras) via a dynamic MAX measure — based on the _raw
-  // timeframe first (custom max measures want a raw date), then the picked
-  // timeframe — else plain rows, newest first, at a high cap. What worked is
-  // remembered per monitor.
+  // Last-seen read shared by the roster and the labels lookup: ONE aggregated row per device (+extras)
+  // via a dynamic MAX measure — _raw timeframe first (custom max measures want a raw date), then the
+  // picked timeframe — else plain rows, newest first, at a high cap. What worked is remembered per monitor.
   const lastReadModeByMonitor = new Map(); // m.id -> 'raw' | 'time' | 'rows'
   async function latestRows(m, timeFilter, ex = [], stationExpr = '') {
     const group = SUFFIX.test(m.timeField) ? m.timeField.replace(SUFFIX, '') : m.timeField;
@@ -488,10 +474,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     } catch (e) { void e; return null; }
   }
 
-  // Labels WITHOUT timestamps: distinct (device, station, operator) combos in
-  // the window — no measures, no time dim, so it works on the strictest Looker
-  // and can't lose long-quiet devices to a newest-first row cap. Fills the
-  // devices the timed read missed (they'd otherwise land under "No station").
+  // Labels WITHOUT timestamps: distinct (device, station, operator) combos in the window — no measures, no
+  // time dim, so it works on the strictest Looker and can't lose long-quiet devices to a newest-first row
+  // cap. Fills the devices the timed read missed (they'd otherwise land under "No station").
   async function deviceDetailsLite(m, timeFilter) {
     const ex = [];
     if (m.stationField) ex.push(m.stationField);
@@ -539,8 +524,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
 
   // The log since a moment: per-check online counts, which ticks each device
   // was offline at, and per-device contiguous offline WINDOWS (worst first).
-  function observedLog(m, sinceIso) {
-    const rows = sql.prepare('SELECT at, total, online, offline_names FROM data_monitor_obs WHERE monitor_id=? AND at>=? ORDER BY at').all(m.id, sinceIso);
+  function observedLog(m, sinceIso, untilIso = null) {
+    const rows = sql.prepare('SELECT at, total, online, offline_names FROM data_monitor_obs WHERE monitor_id=? AND at>=? AND at<=? ORDER BY at').all(m.id, sinceIso, untilIso || '9999');
     const ticks = rows.map((r) => ({ at: r.at, total: r.total, online: r.online, offline: parseJson(r.offline_names, []) })).slice(-288);
     const byDevice = new Map(), stationOf = new Map(); // device -> offline tick idxs · device -> station
     ticks.forEach((tk, i) => {
@@ -567,6 +552,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     };
   }
   const obsSinceFor = (m, hours) => {
+    const d = dayOf(hours) ? dayWindow(m, dayOf(hours)) : null;
+    if (d) return d.start.toISOString();
     const a = String(hours || 'start') === 'start' ? rosterAnchor(m) : null;
     if (a) return a.toISOString();
     const h = Math.max(1, Math.min(72, Math.round(Number(hours) || 12)));
@@ -602,16 +589,15 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // hours === 'start' anchors the window to the roster's start time (daily
     // HH:MM / once-off start) — the event-day view: no dead grey hours before
     // doors. Falls back to a rolling 24h when the monitor has no anchor.
-    const anchor = String(hours) === 'start' ? rosterAnchor(m) : null;
+    const dayW = dayOf(hours) ? dayWindow(m, dayOf(hours)) : null;
+    const anchor = dayW ? dayW.start : String(hours) === 'start' ? rosterAnchor(m) : null;
     let h = anchor
       ? Math.max(1, Math.ceil((Date.now() - anchor.getTime()) / 3600000))
       : Math.max(3, Math.min(72, Math.round(Number(hours) || 24)));
     h = Math.min(h, Math.floor((288 * iv) / 60)); // cap the grid at 288 blocks (5-min blocks top out at 24h)
-    // Sub-hour blocks first try the matching minuteN sibling dimension so
-    // Looker aggregates to one row per (device, block) — a busy bar day stops
-    // overflowing the row cap instead of returning one row per scan. LookML
-    // without that timeframe 400s → raw-time fallback; whichever works is
-    // remembered per monitor+interval.
+    // Sub-hour blocks first try the matching minuteN sibling dimension so Looker aggregates to one row
+    // per (device, block) — a busy bar day stops overflowing the row cap instead of one row per scan.
+    // LookML without that timeframe 400s → raw-time fallback; whichever works is remembered per monitor+interval.
     const bKey = `${m.id}:${iv}`;
     // After minuteN, prefer the RAW timeframe: this LookML family has already
     // proven the picked _time timeframe silently drops rows in aggregate reads
@@ -619,9 +605,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const memoB = bucketFieldByMonitor.get(bKey); const bCands = [`${group}_minute${iv}`, `${group}_raw`, m.timeField];
     const bucketCands = iv === 60 ? [hourField, `${group}_raw`]
       : memoB ? [memoB, ...bCands.filter((x) => x !== memoB)] : bCands;
-    const timeFilter = anchor
-      ? `after ${anchor.toISOString().slice(0, 16).replace('T', ' ')}`
-      : `last ${h} hours`;
+    const fmtF = (d) => d.toISOString().slice(0, 16).replace('T', ' ');
+    const timeFilter = dayW ? `${fmtF(dayW.start)} to ${fmtF(dayW.end)}` : anchor ? `after ${fmtF(anchor)}` : `last ${h} hours`;
     // Optional station narrowing — the per-station view of a monitor that
     // spans many bars/gates. Plain value (the form every other filter in this
     // module uses); quoted only when the value carries filter-syntax chars
@@ -664,12 +649,11 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
           .slice(0, 3);
       } catch (e) { void e; }
     }
-    // Catalogue measures FIRST: the explore-name guess can be a measure like
-    // "Cashless Events Count" that returns 1 per group — non-zero, so the
-    // zero-check can't catch it, and it must never outrank transaction_count.
+    // Catalogue measures FIRST: an explore-name guess like "Cashless Events Count" returns 1 per group (non-zero, so the zero-check can't catch it) and must never outrank transaction_count.
     const allModes = [...probed, 'native', ...(viewField !== nativeField ? ['native2'] : []), 'distinct', 'distinct2', 'none'];
-    // A memoized mode/bucket is the FIRST choice, never the only one — it can degrade and must self-heal.
-    const modes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
+    // Memoized mode is the first choice (self-heals); an explicit count_field override wins outright.
+    const memoModes = countModeByMonitor.has(m.id) ? [countModeByMonitor.get(m.id), ...allModes.filter((x) => x !== countModeByMonitor.get(m.id))] : allModes;
+    const pinnedMeasure = m.countField && m.countField.includes('.') ? m.countField : null; const modes = pinnedMeasure ? [pinnedMeasure] : memoModes; // pinned measure is STICKY — only mode tried, never swapped off
     // A cand containing '.' IS the measure field (a probed catalogue measure).
     const fieldFor = (cand) => (cand === 'native' ? nativeField : cand === 'native2' ? viewField : cand.includes('.') ? cand : CNT_FIELD);
     let rows = null; let mode = 'none'; let bucketField = bucketCands[0]; let lastErr = null;
@@ -691,26 +675,22 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         }
         try {
           const got = await runScoped(m, body);
-          // A bucket dim can be ACCEPTED yet come back blank (created_at_minute10;
-          // date_minute30 partially) — half-or-more blank = broken, next candidate.
+          // A bucket dim can be ACCEPTED yet come back blank — half-or-more blank = broken, next candidate.
           if (got.length && got.filter((r) => parseTs(r[bf])).length * 2 <= got.length) {
             step(bf, cand, `${got.length} rows, blank buckets`); lastErr = new Error(`${bf} returned blank values`); break;
           }
-          // Combined-explore trap: a count measure can exist yet count ANOTHER
-          // view's rows — every returned row then reads 0. Rows prove activity,
-          // so a zero-only count is a soft failure: try the next counting mode.
-          // An EMPTY counting result is as suspect as all-zeros ('none' may accept a quiet feed).
+          // Combined-explore trap: a count measure can count ANOTHER view's rows → every row reads 0.
+          // Rows prove activity, so a zero-only (or empty) count is a soft failure: try the next mode.
           const cTry = fieldFor(cand);
-          if (cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
+          if (!pinnedMeasure && cand !== 'none' && got.length && !got.some((r) => Number(r[cTry]) > 0)) {
             step(bf, cand, 'all zeros'); lastErr = new Error(`${cTry} returned 0 for every row`); continue;
           }
           // Station filter + empty = the known broken join — go to the fallback.
           if (!got.length && st) { step(bf, cand, 'no rows (station filter)'); rows = got; mode = cand; bucketField = bf; break; }
-          if (cand !== 'none' && !got.length) {
+          if (!pinnedMeasure && cand !== 'none' && !got.length) {
             step(bf, cand, 'no rows'); lastErr = new Error(`${cTry} returned no rows`); continue;
           }
-          // Even plain presence only accepts an empty window on the LAST
-          // bucket shape — an earlier bucket may be the one dropping rows.
+          // Even plain presence only accepts an empty window on the LAST bucket shape — an earlier bucket may be dropping rows.
           if (cand === 'none' && !got.length && bf !== bucketCands[bucketCands.length - 1]) {
             step(bf, cand, 'no rows'); lastErr = new Error('no rows in window'); break;
           }
@@ -730,10 +710,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (mode !== 'none') countModeByMonitor.set(m.id, mode); else countModeByMonitor.delete(m.id);
     const cKey = mode === 'none' ? CNT_FIELD : fieldFor(mode);
     const nowMs = Date.now();
-    const lastBucket = Math.floor(nowMs / ivMs) * ivMs; // current block start (UTC)
-    // Anchored: first block is the one containing the start time; rolling: n
-    // blocks back from now. Either way the grid stays capped at 288 blocks
-    // (anchored windows longer than that keep the most recent blocks).
+    const lastBucket = Math.floor((dayW ? Math.min(nowMs, dayW.end.getTime() - 1) : nowMs) / ivMs) * ivMs; // last block: now, or the picked day's end
+    // Anchored: first block contains the start time; rolling: n blocks back from now. Capped at 288 blocks (longer anchored windows keep the most recent).
     let n = anchor
       ? Math.floor((lastBucket - Math.floor(anchor.getTime() / ivMs) * ivMs) / ivMs) + 1
       : Math.round((h * 60) / iv);
@@ -756,11 +734,32 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       counts.forEach((c, i) => { bucketTotals[i] += c; });
       return { device, counts, total: counts.reduce((a, b) => a + b, 0), active: counts.map((c) => (c ? 1 : 0)) };
     }).sort((a, b) => a.device.localeCompare(b.device)).slice(0, 200);
-    // Some explore join paths return NOTHING when the station filter rides the
-    // count read (the join that resolves the station drops the sales rows).
-    // Fall back: read the whole feed and keep the devices whose latest station
-    // — from the labels lookup, which joins the same pair successfully — is
-    // the one asked for.
+    // A truncated device×bucket read (20k cap, sorted desc) drops the OLDEST rows → the count line reads zero for early hours on big fleets (300+ bar devices, multi-day). Re-read grouped by bucket (+station when not filtered to one) — no device fan-out, never capped — for an exact line the Stations view can split.
+    let stationTotals = null;
+    if (rows.length >= 20000 && mode !== 'none' && !String(mode).startsWith('distinct')) {
+      try {
+        const grp = !st && m.stationField ? [bucketField, m.stationField] : [bucketField];
+        const ab = { ...baseBody(m), fields: [...grp, cKey], sorts: [`${bucketField} desc`], limit: '50000' };
+        ab.filters[m.timeField] = timeFilter; if (st && m.stationField) ab.filters[m.stationField] = stExpr;
+        const agg = await runScoped(m, ab); const fresh = Array(n).fill(0); const perSt = {}; let any = false;
+        for (const r of agg) {
+          const ts = parseTs(r[bucketField]); if (!ts) continue;
+          const idx = Math.floor((ts.getTime() - firstBucket) / ivMs); if (idx < 0 || idx >= n) continue;
+          const c = Number(r[cKey]); if (!Number.isFinite(c)) continue; fresh[idx] += c; any = true;
+          if (!st && m.stationField) { const sn = String(r[m.stationField] ?? '').trim() || '—'; (perSt[sn] || (perSt[sn] = Array(n).fill(0)))[idx] += c; }
+        }
+        if (any) { for (let i = 0; i < n; i++) bucketTotals[i] = fresh[i]; if (!st && m.stationField) stationTotals = perSt; }
+        // Per-device totals were truncated too — re-read the count grouped by device ONLY (no time bucket, so one row per device) for exact totals.
+        const dg = { ...baseBody(m), fields: [m.rosterField, cKey], sorts: [`${cKey} desc`], limit: '20000' };
+        dg.filters[m.timeField] = timeFilter; if (st && m.stationField) dg.filters[m.stationField] = stExpr;
+        const tmap = new Map();
+        for (const r of await runScoped(m, dg)) { const dv = String(r[m.rosterField] ?? '').trim(); const c = Number(r[cKey]); if (dv && Number.isFinite(c)) tmap.set(dv, c); }
+        if (tmap.size) devices.forEach((d) => { if (tmap.has(d.device)) d.total = tmap.get(d.device); });
+      } catch (e) { /* keep the device-derived totals */ }
+    }
+    // Some explore joins return NOTHING when the station filter rides the count read (the join drops
+    // the sales rows). Fall back: read the whole feed, keep devices whose latest station (from the
+    // labels lookup, which joins the same pair successfully) is the one asked for.
     if (st && !devices.length) {
       const info = await deviceDetails(m, timeFilter);
       if (info && [...info.values()].some((v) => v.station === st)) {
@@ -769,8 +768,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         if (keep.length) {
           stationFilterDead.add(m.id); // remember: skip the doomed direct read next time
           labelDevices(keep, info);
-          const totals = Array(whole.buckets.length).fill(0);
-          for (const d of keep) d.counts.forEach((c, i) => { totals[i] += c; });
+          // Kept devices' counts came from the truncated whole-feed read, so summing them loses the early hours. Prefer the non-truncated per-station line when the whole read supplied it; else the device sum.
+          const st1 = whole.stationTotals && whole.stationTotals[st];
+          const totals = st1 && st1.length === whole.buckets.length ? st1.slice() : (() => { const t2 = Array(whole.buckets.length).fill(0); for (const d of keep) d.counts.forEach((c, i) => { t2[i] += c; }); return t2; })();
           return { ...whole, station: st, devices: keep, devicesTotal: keep.length, bucketTotals: totals, grandTotal: totals.reduce((a, b) => a + b, 0) };
         }
       }
@@ -785,22 +785,19 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       countField: mode !== 'none' && fieldFor(mode).includes('.') ? fieldFor(mode) : null,
       anchored: !!anchor, startAt: anchor ? anchor.toISOString() : null, trimmedStart,
       station: st, devicesTotal: byDevice.size, onlineMin: m.rosterOnlineMin,
-      // Empty grid → say what was tried (+ a sample row when rows arrived but
-      // none survived the bucketing) — no more silent blanks.
+      // Empty grid → say what was tried (+ a sample row when rows arrived but none bucketed) — no silent blanks.
       readPath: byDevice.size ? undefined : tried,
       sample: !byDevice.size && rows.length ? { device: String(rows[0][m.rosterField] ?? ''), bucket: String(rows[0][bucketField] ?? ''), rows: rows.length } : undefined,
       buckets: Array.from({ length: n }, (_, i) => new Date(firstBucket + i * ivMs).toISOString()),
-      devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0),
+      devices, bucketTotals, grandTotal: bucketTotals.reduce((a, b) => a + b, 0), stationTotals,
       truncated: rows.length >= 20000,
     };
   }
 
-  // Distinct values of a dimension (scoped) — feeds the editor's linked filter
-  // dropdowns so users pick a real station/event/type instead of typing blind.
+  // Distinct values of a dimension (scoped) — feeds the editor's linked filter dropdowns so users pick a real station/event/type instead of typing blind.
   async function fieldValues({ model, view, field, entityId, suiteId, filters }) {
     const mLike = { id: 'editor', model: String(model), view: String(view), entityId: String(entityId || ''), suiteId: String(suiteId || '') };
-    // The editor's OTHER filters constrain the value list — with an event
-    // filter set, the station dropdown offers only THAT event's stations.
+    // The editor's OTHER filters constrain the value list — an event filter set means the station dropdown offers only THAT event's stations.
     const extra = {};
     if (filters && typeof filters === 'object' && !Array.isArray(filters)) {
       for (const [k, v] of Object.entries(filters).slice(0, 10)) {
@@ -841,10 +838,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       .run(uuid(), monitorId, station || '', now(), kind, lagMin == null ? null : Math.round(lagMin * 10) / 10, String(message || '').slice(0, 500));
   }
 
-  // Fan out: internal ops Slack ALWAYS (this is first and foremost a Howler health
-  // tool); plus the client's inbox/push/email/Slack via the OS spine when the
-  // monitor is pinned to an entity and has channels ticked. In TEST MODE both are
-  // muted and the alert is emailed only to the test address. Returns where the
+  // Fan out: internal ops Slack ALWAYS (first and foremost a Howler health tool); plus the client's
+  // inbox/push/email/Slack via the OS spine when the monitor is pinned to an entity and has channels
+  // ticked. In TEST MODE both are muted and the alert is emailed only to the test address. Returns where the
   // alert actually went, so the event history stays truthful.
   function deliver(m, title, body) {
     if (testMode()) {
@@ -898,7 +894,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       last_event_at = MAX(last_event_at, excluded.last_event_at), last_seen_at = excluded.last_seen_at`);
     for (const [station, latest] of seen) upStream.run(m.id, station, latest.toISOString(), ts);
 
-    // Evaluate EVERY remembered stream — including ones absent from this pull.
+    // Evaluate EVERY remembered stream — including ones absent from this pull. A stream
+    // whose last record is >30 days old is a past-event ghost: forget it entirely.
+    sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=? AND last_event_at < ?').run(m.id, new Date(Date.now() - 30 * 864e5).toISOString());
     const streams = sql.prepare('SELECT * FROM data_monitor_streams WHERE monitor_id=?').all(m.id);
     const nowMs = Date.now();
     const upd = sql.prepare('UPDATE data_monitor_streams SET lag_min=?, status=?, stale_since=? WHERE monitor_id=? AND station=?');
@@ -1252,7 +1250,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     if (!enabled()) return off(res);
     const m = monitorById(req.params.id);
     if (!m) return res.status(404).json({ error: 'Monitor not found' });
-    res.json(observedLog(m, obsSinceFor(m, req.query.hours)));
+    const dW = dayOf(req.query.hours) ? dayWindow(m, dayOf(req.query.hours)) : null;
+    res.json(observedLog(m, obsSinceFor(m, req.query.hours), dW ? dW.end.toISOString() : null));
   });
 
   app.get('/api/admin/data-health/monitors/:id/history', auth.requireAdmin, (req, res) => {
@@ -1285,7 +1284,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       status: m.status, state: m.state, lastCheckedAt: m.lastCheckedAt, lastError: m.lastError,
       warnMin: m.warnMin, staleMin: m.staleMin, checkEveryMin: m.checkEveryMin,
       stationField: m.stationField, detailFields: m.detailFields,
-      rosterField: m.rosterField, rosterAlertPct: m.rosterAlertPct, rosterSnapshot: m.rosterSnapshot,
+      rosterField: m.rosterField, rosterAlertPct: m.rosterAlertPct, rosterSnapshot: m.rosterSnapshot, countField: m.countField, rosterStart: m.rosterStart, rosterDaily: m.rosterDaily,
       streams: streamsFor(m.id),
     }));
   }
@@ -1426,7 +1425,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
   const MY_READS = {
     latest: async (req, m) => ({ records: await latestRecords(m, req.query.limit), stationField: m.stationField, timeField: m.timeField, detailFields: (m.detailFields || []).filter((f) => f && f !== m.timeField && f !== m.stationField) }),
     roster: async (_req, m) => deviceRoster(m, true),
-    observed: async (req, m) => observedLog(m, obsSinceFor(m, req.query.hours)),
+    observed: async (req, m) => { const dW = dayOf(req.query.hours) ? dayWindow(m, dayOf(req.query.hours)) : null; return observedLog(m, obsSinceFor(m, req.query.hours), dW ? dW.end.toISOString() : null); },
     timeline: async (req, m) => deviceTimeline(m, req.query.hours, Number(req.query.interval) || 60, req.query.station || '', true),
     history: async (_req, m) => ({
       checks: sql.prepare('SELECT at, ok, stations, fresh, warn, stale, max_lag_min, latest_event_at, error FROM data_monitor_checks WHERE monitor_id=? ORDER BY at DESC LIMIT 200').all(m.id),
@@ -1487,7 +1486,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     const dims = hit.data.dimensions || [];
     res.json({
       timeFields: dims.filter((d) => /date|time/i.test(d.type || '')),
-      dimensions: dims,
+      dimensions: dims, measures: hit.data.measures || [],
     });
   }));
 

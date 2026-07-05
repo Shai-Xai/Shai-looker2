@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
 import SignalReportPanel from './SignalReportPanel.jsx';
+import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -92,7 +93,7 @@ function StationTile({ s, selected, onSelect }) {
 
 // Tap-through deep dive for one station: the day's per-device timeline pulled
 // live into the card — who's sending, who's dark, and when each device worked.
-function DeepDive({ apiBase, mid, station, unit }) {
+function DeepDive({ apiBase, mid, station, unit, day = '' }) {
   const [t, setT] = useState(null);
   const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
   const [robot, setRobot] = useState(true);
@@ -102,13 +103,14 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const [pulseTip, setPulseTip] = useState('');
   useEffect(() => {
     let alive = true; setT(null); setObs(null); setErr('');
-    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
+    const hrs = day ? `day:${day}` : 'start'; // a picked festival day time-travels the whole dive
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=${hrs}&interval=30&station=${encodeURIComponent(station)}`)
       .then((r) => r.json()).then((d) => { if (alive) { if (d && d.devices) setT(d); else setErr((d && d.error) || 'No timeline'); } })
       .catch((e) => { if (alive) setErr(e.message); });
-    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=${hrs}`)
       .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
     return () => { alive = false; };
-  }, [apiBase, mid, station, tryN]);
+  }, [apiBase, mid, station, tryN, day]);
   if (err) {
     return (
       <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>
@@ -158,9 +160,13 @@ function DeepDive({ apiBase, mid, station, unit }) {
       {/* 📈 The station's pulse line — its hourly rate with the peak flagged,
           built from the same 30-min timeline (pairs summed into hours). */}
       {(t.buckets || []).length >= 4 && (() => {
+        // Prefer the server's bucketTotals — on a big fleet the per-device counts are truncated (20k cap),
+        // so summing them here loses the early hours; bucketTotals is the non-truncated line.
+        const bt = (t.bucketTotals && t.bucketTotals.length === t.buckets.length) ? t.bucketTotals : null;
         const hourly = [];
         for (let i = 0; i + 1 < t.buckets.length; i += 2) {
-          hourly.push({ label: String(t.buckets[i]).slice(11, 16), v: devs.reduce((a, d) => a + ((d.counts || [])[i] || 0) + ((d.counts || [])[i + 1] || 0), 0) });
+          const v = bt ? ((bt[i] || 0) + (bt[i + 1] || 0)) : devs.reduce((a, d) => a + ((d.counts || [])[i] || 0) + ((d.counts || [])[i + 1] || 0), 0);
+          hourly.push({ label: String(t.buckets[i]).slice(11, 16), v });
         }
         const max = Math.max(1, ...hourly.map((x) => x.v));
         const pk = hourly.reduce((bi, x, i) => (x.v > hourly[bi].v ? i : bi), 0);
@@ -606,13 +612,14 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
 // station, one cell per hour, colour depth = how busy (green = transactions,
 // blue = scans), the day's avg/h on the right. The site's stacked total sits
 // on top. Hourly numbers come from each monitor's day timeline (hour blocks).
-function RhythmView({ monitors, apiBase, rows, onSelect }) {
+function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
   const [data, setData] = useState({}); // monitor id -> hourly timeline
+  const hrs = day ? `day:${day}` : 'start';
   useEffect(() => {
     let alive = true;
     monitors.forEach((m) => {
       if (data[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=60`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=${hrs}&interval=60`)
         .then((r) => r.json()).then((d) => { if (alive && d && d.devices) setData((p) => ({ ...p, [m.id]: d })); })
         .catch(() => {});
     });
@@ -779,6 +786,9 @@ function StationRow({ st, show, onSelect }) {
     const d = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
     return { d, area: `${d} L${xy[xy.length - 1][0].toFixed(1)} 100 L${xy[0][0].toFixed(1)} 100 Z` };
   })() : null;
+  // Over the green/red bars a white line reads best; with the bars hidden (txns is
+  // the only layer on) it sits on the card, so use the text colour (dark / light).
+  const txnStroke = (show.online || show.offline) ? '#ffffff' : 'var(--text)';
 
   const nowCol = st.closed ? 'var(--muted)' : st.nowPct >= 95 ? STATUS_COLOR.fresh : st.nowPct >= 85 ? STATUS_COLOR.warn : STATUS_COLOR.stale;
   const stripe = st.closed ? 'transparent' : st.nowPct < 90 ? STATUS_COLOR.stale : st.minPct < 95 ? STATUS_COLOR.warn : 'transparent';
@@ -806,8 +816,8 @@ function StationRow({ st, show, onSelect }) {
         })}
         {line && (
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
-            <path d={line.area} fill={TXN_COL} opacity="0.12" />
-            <path d={line.d} fill="none" stroke={TXN_COL} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            <path d={line.area} fill={txnStroke} opacity="0.1" />
+            <path d={line.d} fill="none" stroke={txnStroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
           </svg>
         )}
       </div>
@@ -819,7 +829,7 @@ function StationRow({ st, show, onSelect }) {
   );
 }
 
-function StationDayView({ monitors, apiBase, onSelect }) {
+function StationDayView({ monitors, apiBase, onSelect, day = '' }) {
   const [logs, setLogs] = useState({});
   const [tl, setTl] = useState({}); // mid -> { buckets:[iso], byStation:{name:counts[]} } — ONE timeline read per monitor
   const [q, setQ] = useState('');
@@ -830,7 +840,7 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     let alive = true;
     monitors.forEach((m) => {
       if (logs[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=${day ? 'day:' + day : 'start'}`)
         .then((r) => r.json()).then((d) => { if (alive && d) setLogs((p) => ({ ...p, [m.id]: d })); }).catch(() => {});
     });
     return () => { alive = false; };
@@ -842,16 +852,21 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     let alive = true;
     monitors.forEach((m) => {
       if (tl[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=30`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=${day ? 'day:' + day : 'start'}&interval=30`)
         .then((r) => r.json()).then((d) => {
           if (!alive) return;
           const buckets = (d && d.buckets) || [];
-          const byStation = {};
-          if (buckets.length) (d.devices || []).forEach((dev) => {
-            const s = dev.station || '';
-            if (!byStation[s]) byStation[s] = buckets.map(() => 0);
-            (dev.counts || []).forEach((c, i) => { if (byStation[s][i] != null) byStation[s][i] += (c || 0); });
-          });
+          // A big fleet (e.g. bars) truncates the per-device read, so summing dev.counts loses the early
+          // hours. The server sends stationTotals (a non-truncated per-station line) when that happens — prefer it.
+          let byStation = (d && d.stationTotals && Object.keys(d.stationTotals).length) ? d.stationTotals : null;
+          if (!byStation) {
+            byStation = {};
+            if (buckets.length) (d.devices || []).forEach((dev) => {
+              const s = dev.station || '';
+              if (!byStation[s]) byStation[s] = buckets.map(() => 0);
+              (dev.counts || []).forEach((c, i) => { if (byStation[s][i] != null) byStation[s][i] += (c || 0); });
+            });
+          }
           setTl((p) => ({ ...p, [m.id]: { buckets, byStation } }));
         }).catch(() => { if (alive) setTl((p) => ({ ...p, [m.id]: { buckets: [], byStation: {} } })); });
     });
@@ -975,10 +990,606 @@ function StationDayView({ monitors, apiBase, onSelect }) {
   );
 }
 
+// ═══ 🗺️ Venue map — the site plan as a LIVE board ═══════════════════════════════
+// Pins live where stations physically stand (dragged into place once, stored per
+// event via server/venueMap.js). Healthy pins ripple; a dark pin flashes red; and
+// when 2+ alarmed pins sit in the same corner, a red halo blooms over that AREA —
+// connectivity failures are usually spatial (one mast/switch), so the map shows
+// WHERE it's dying, not just which list rows. Tap a pin → the station deep-dive.
+// View switcher: ONE pill on the chips row — tap it and the other views SLIDE OUT
+// inline from the button (Apple segmented-control feel); pick one and it collapses
+// back to just the active view. No drawer, no overlay — all on the same line.
+const SB_VIEWS = [
+  ['board', '🎛️', 'Board'],
+  ['rhythm', '📈', 'Rhythm'],
+  ['stations', '📶', 'Stations'],
+  ['flow', '🌡️', 'Flow'],
+  ['map', '🗺️', 'Map'],
+  ['river', '🌊', 'River'],
+  ['network', '🕸️', 'Network'],
+];
+function ViewPill({ view, setView, open, setOpen }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', border: `1px solid ${open ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, background: 'var(--card)', padding: 3, maxWidth: '100%', overflowX: 'auto', scrollbarWidth: 'none' }}>
+      {SB_VIEWS.map(([k, ic, name]) => {
+        const act = view === k;
+        const show = open || act;
+        return (
+          <button key={k}
+            onClick={() => {
+              if (!open) { setOpen(true); return; }
+              if (!act) setView(k);
+              setTimeout(() => setOpen(false), act ? 0 : 170); // let the highlight land, then fold
+            }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              background: act ? 'color-mix(in srgb, var(--brand) 13%, transparent)' : 'transparent',
+              color: act ? 'var(--brand)' : 'var(--text)', fontWeight: act ? 800 : 600, fontSize: 12,
+              borderRadius: 999, minHeight: 30, whiteSpace: 'nowrap', overflow: 'hidden',
+              maxWidth: show ? 150 : 0, opacity: show ? 1 : 0, padding: show ? '4px 12px' : '4px 0',
+              transition: 'max-width .3s cubic-bezier(.32,.72,.28,1), opacity .18s ease, padding .3s cubic-bezier(.32,.72,.28,1)',
+            }}>
+            <span style={{ fontSize: 14 }}>{ic}</span>{name}
+            {act && !open && <span style={{ fontSize: 9, opacity: 0.6 }}>▸</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const VM_CSS = `
+@keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
+@keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
+@keyframes vmHalo{0%,100%{opacity:.5}50%{opacity:.95}}
+@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}}`;
+function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
+  const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
+  const [cfg, setCfg] = useState(null);
+  const [pins, setPins] = useState({});
+  const [edit, setEdit] = useState(false);
+  const [placing, setPlacing] = useState(''); // station being placed by tapping the map
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [q, setQ] = useState(''); // unplaced-tray search
+  const [zf, setZf] = useState(''); // unplaced-tray zone filter
+  const [mode, setMode] = useState('station'); // 'station' pins only | 'operator' fans every device around its pin
+  const [ar, setAr] = useState(4 / 3); // the uploaded plan's aspect ratio — box fits the screen without scrolling
+  const [satOpen, setSatOpen] = useState(false); const [satPos, setSatPos] = useState(''); const [satW, setSatW] = useState('800'); // 🛰️ fetch-satellite form
+  const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
+  const boxRef = useRef(null);
+  const dragRef = useRef(null); // { name, moved } during a pin drag
+  useEffect(() => {
+    let alive = true;
+    if (!suiteId) { setCfg({ image: '', pins: {} }); return () => {}; }
+    fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`).then((r) => r.json())
+      .then((d) => { if (alive && d && !d.error) { setCfg(d); setPins(d.pins || {}); } else if (alive) setCfg({ image: '', pins: {} }); })
+      .catch(() => { if (alive) setCfg({ image: '', pins: {} }); });
+    return () => { alive = false; };
+  }, [scope, suiteId]);
+  // one row per station name (a name can appear under one monitor only in practice)
+  const sts = []; const seenN = new Set();
+  for (const r of rows) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+  // Operator mode: one timeline read per monitor (cached) gives every device its
+  // station + operator + freshness — the dots fan out around their station's pin.
+  useEffect(() => {
+    if (mode !== 'operator') return undefined;
+    let alive = true;
+    [...new Set(sts.map((s) => s.mid))].filter((mid) => !devs[mid]).forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=60`)
+        .then((r) => r.json())
+        .then((d) => { if (alive && d) setDevs((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
+        .catch(() => { if (alive) setDevs((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor on first toggle
+  }, [mode]);
+  const devsFor = (s) => {
+    const pack = devs[s.mid]; if (!pack) return null;
+    const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+    return pack.list.filter((v) => (v.station || '') === s.name).map((v) => ({ ...v, isOn: isOnD(v) }));
+  };
+  const placed = sts.filter((s) => pins[s.name]);
+  const unplaced = sts.filter((s) => !pins[s.name]);
+  const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
+  const alarmed = placed.filter(isAlarm);
+  // area halos: 2+ alarmed pins within ~20% of the map of each other = the AREA is dying
+  const halos = []; const used = new Set();
+  for (const a of alarmed) {
+    if (used.has(a.name)) continue;
+    const pa = pins[a.name];
+    const near = alarmed.filter((b) => { const pb = pins[b.name]; return Math.hypot(pb.x - pa.x, pb.y - pa.y) < 0.2; });
+    if (near.length >= 2) { near.forEach((b) => used.add(b.name)); halos.push({ x: near.reduce((t, b) => t + pins[b.name].x, 0) / near.length, y: near.reduce((t, b) => t + pins[b.name].y, 0) / near.length, n: near.length }); }
+  }
+  const frac = (e) => { const b = boxRef.current.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) }; };
+  const savePins = (next) => {
+    setSaving(true);
+    fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pins: next }) })
+      .then((r) => r.json()).then((d) => { if (d && !d.error) { setCfg(d); setPins(d.pins || {}); setDirty(false); } })
+      .finally(() => setSaving(false));
+  };
+  const saveImage = (dataUrl) => {
+    setSaving(true);
+    return fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) })
+      .then((r) => r.json()).then((d) => { if (d && d.error) alert(d.error); else if (d) setCfg(d); })
+      .finally(() => setSaving(false));
+  };
+  // 🛰️ Satellite: fetch real aerial imagery for typed coordinates (Esri World Imagery —
+  // licensed for exactly this, unlike Google screenshots) and save it as the venue map.
+  // Attribution is baked into the image itself so it travels with the map.
+  const fetchSatellite = async () => {
+    const mm = /(-?\d{1,3}\.\d+)[,\s]+(-?\d{1,3}\.\d+)/.exec(String(satPos));
+    if (!mm) { alert('Paste coordinates like 45.0866, 7.6560 (a Google Maps link with them in it works too)'); return; }
+    const lat = +mm[1], lon = +mm[2], span = Number(satW) || 800;
+    const R = 20037508.34, x = (lon * R) / 180, y = (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) / (Math.PI / 180)) * (R / 180);
+    const hw = span / 2, hh = hw * 0.75;
+    const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${x - hw},${y - hh},${x + hw},${y + hh}&bboxSR=3857&imageSR=3857&size=1600,1200&format=jpg&f=image`;
+    setSaving(true);
+    try {
+      const blob = await (await fetch(url)).blob();
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      const g2 = c.getContext('2d'); g2.drawImage(bmp, 0, 0);
+      g2.font = '600 20px sans-serif'; g2.textAlign = 'right'; g2.lineWidth = 3;
+      g2.strokeStyle = 'rgba(0,0,0,.55)'; g2.strokeText('Imagery © Esri & partners', c.width - 12, c.height - 12);
+      g2.fillStyle = 'rgba(255,255,255,.9)'; g2.fillText('Imagery © Esri & partners', c.width - 12, c.height - 12);
+      await saveImage(c.toDataURL('image/jpeg', 0.85));
+      setSatOpen(false);
+    } catch { alert('Could not fetch satellite imagery — check the coordinates and try again.'); setSaving(false); }
+  };
+  const uploadMap = (file) => {
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 1600 / img.width);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.82);
+      setSaving(true);
+      fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) })
+        .then((r) => r.json()).then((d) => { if (d && d.error) alert(d.error); else if (d) setCfg(d); })
+        .finally(() => setSaving(false));
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  };
+  const onMapPointerDown = (e) => {
+    if (!edit || !placing) return;
+    const p = frac(e);
+    setPins((prev) => ({ ...prev, [placing]: p })); setPlacing(''); setDirty(true);
+  };
+  const onPinPointerDown = (name) => (e) => {
+    if (!edit) return;
+    e.stopPropagation(); e.preventDefault();
+    dragRef.current = { name, moved: false };
+    const move = (ev) => { dragRef.current.moved = true; const p = frac(ev); setPins((prev) => ({ ...prev, [name]: p })); setDirty(true); };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); dragRef.current = null; };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
+  if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
+  const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
+  const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
+  return (
+    <div>
+      <style>{VM_CSS}</style>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
+          {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
+            : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+        </span>
+        {!edit && <>
+          <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
+          <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
+        </>}
+        {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
+        {edit && <button style={btn(satOpen)} onClick={() => setSatOpen(!satOpen)}>🛰️ Satellite</button>}
+        {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
+        {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
+        <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
+      </div>
+      {edit && satOpen && (
+        <div style={{ ...card, marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', width: '100%' }}>🛰️ Real aerial imagery as the map (Esri, licence-safe)</span>
+          <input value={satPos} onChange={(e) => setSatPos(e.target.value)} placeholder="45.0866, 7.6560 — or paste a maps link" inputMode="text"
+            style={{ flex: '1 1 220px', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: 'inherit', minHeight: 36 }} />
+          <select value={satW} onChange={(e) => setSatW(e.target.value)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '8px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 36 }}>
+            <option value="400">~400 m wide</option><option value="800">~800 m wide</option><option value="1200">~1.2 km wide</option><option value="2000">~2 km wide</option>
+          </select>
+          <button style={btn(true)} disabled={saving} onClick={fetchSatellite}>{saving ? 'Fetching…' : 'Fetch & set as map'}</button>
+        </div>
+      )}
+      {/* The box keeps the image's exact aspect (pins are % of it) but must FIT the
+          viewport with no scrolling — so when the height would overflow, the box
+          narrows itself instead: width = min(100%, available-height × aspect). */}
+      <div ref={boxRef} onPointerDown={onMapPointerDown}
+        style={{ position: 'relative', width: `min(100%, calc((100dvh - 250px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        {cfg.image
+          ? <img src={cfg.image} alt="venue site plan" onLoad={(e) => { const im = e.target; if (im.naturalWidth && im.naturalHeight) setAr(im.naturalWidth / im.naturalHeight); }} style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }} />
+          : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)', padding: 8 }}>No site plan yet — ✏️ Edit pins → ⬆ Upload site plan (pins work on the blank grid too)</span>
+            </div>}
+        {halos.map((h2, i) => (
+          <div key={i} className="vm-anim" style={{ position: 'absolute', left: `${h2.x * 100}%`, top: `${h2.y * 100}%`, width: 130 + h2.n * 30, height: 130 + h2.n * 30, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(220,38,38,.30) 0%, transparent 70%)', animation: 'vmHalo 1.6s ease-in-out infinite', pointerEvents: 'none' }}>
+            <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
+          </div>
+        ))}
+        {mode === 'operator' && !edit && placed.map((s) => {
+          const list = devsFor(s); const p = pins[s.name];
+          if (!list) return <span key={'d' + s.name} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + 14px)`, transform: 'translateX(-50%)', fontSize: 8.5, color: 'var(--muted)' }}>…</span>;
+          // A tidy dot GRID under the pin (10 per row) — the ring fan collided on dense
+          // stations. No per-dot names (they're in the tap-through deep-dive); one
+          // "n dark" label per station instead of a red name pile-up.
+          const COLS = 10; const dark = list.filter((v) => !v.isOn).length;
+          const rowsN = Math.ceil(list.length / COLS);
+          return [
+            ...list.map((v, i) => {
+              const cols = Math.min(COLS, list.length - Math.floor(i / COLS) * COLS);
+              const dx = ((i % COLS) - (cols - 1) / 2) * 11, dy = 18 + Math.floor(i / COLS) * 11;
+              const dc = v.isOn ? STATUS_COLOR.fresh : STATUS_COLOR.stale;
+              return (
+                <span key={s.name + v.device} onClick={(e) => { e.stopPropagation(); onSelect(s); }} title={`${v.operator || v.device} · ${v.isOn ? 'online' : 'dark'}`}
+                  className={v.isOn ? '' : 'vm-anim'}
+                  style={{ position: 'absolute', left: `calc(${p.x * 100}% + ${dx}px)`, top: `calc(${p.y * 100}% + ${dy}px)`, transform: 'translate(-50%,-50%)', width: 8, height: 8, borderRadius: '50%', background: dc, border: '1.5px solid var(--card)', boxShadow: `0 0 4px ${dc}`, cursor: 'pointer', animation: v.isOn ? 'none' : 'vmFlash 0.9s ease-in-out infinite' }} />
+              );
+            }),
+            dark > 0 && <i key={s.name + '·dark'} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + ${18 + rowsN * 11}px)`, transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8.5, fontStyle: 'normal', fontWeight: 800, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{dark} dark</i>,
+          ];
+        })}
+        {placed.map((s) => {
+          const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
+          return (
+            <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
+              onClick={(e) => { e.stopPropagation(); if (edit) return; onSelect(s); }}
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
+              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 26, height: 26, borderRadius: '50%', border: `1.5px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
+              <span className={alarm ? 'vm-anim' : ''} style={{ width: 13, height: 13, borderRadius: '50%', background: col, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
+              <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 700, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card)' }}>{s.name}</span>
+              <span style={{ position: 'absolute', bottom: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 9, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
+              {edit && <button onClick={(e) => { e.stopPropagation(); unpin(s.name); }} onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -4, right: -6, width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 9, lineHeight: '15px', padding: 0, cursor: 'pointer' }}>✕</button>}
+            </div>
+          );
+        })}
+      </div>
+      {edit && !!unplaced.length && (() => {
+        const zonesU = [...new Set(unplaced.map((s) => s.zone))].sort();
+        const list = unplaced
+          .filter((s) => (!zf || s.zone === zf) && (!q || s.name.toLowerCase().includes(q.toLowerCase())))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        return (
+          <div style={{ ...card, marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', flex: 1, minWidth: 150 }}>Unplaced · {list.length}/{unplaced.length} · tap one, then tap the map</span>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 find a station…" inputMode="search"
+              style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontFamily: 'inherit', minHeight: 32, width: 160 }} />
+            {zonesU.length > 1 && (
+              <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', width: '100%' }}>
+                <button style={btn(!zf)} onClick={() => setZf('')}>All zones</button>
+                {zonesU.map((z) => <button key={z} style={btn(zf === z)} onClick={() => setZf(zf === z ? '' : z)}>{z} · {unplaced.filter((s) => s.zone === z).length}</button>)}
+              </span>
+            )}
+            {list.map((s) => <button key={s.name} style={btn(placing === s.name)} onClick={() => setPlacing(placing === s.name ? '' : s.name)}>{s.name}</button>)}
+            {!list.length && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>No station matches “{q}”{zf ? ` in ${zf}` : ''}.</span>}
+          </div>
+        );
+      })()}
+      {!edit && !!alarmed.length && (
+        <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
+        </div>
+      )}
+      {!edit && !!unplaced.length && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>{unplaced.length} station{unplaced.length > 1 ? 's' : ''} not on the map yet — ✏️ Edit pins to place: {unplaced.slice(0, 6).map((s) => s.name).join(' · ')}{unplaced.length > 6 ? ' …' : ''}</div>}
+    </div>
+  );
+}
+
+// ═══ 🌊 Flow river — transactions as moving particles ═══════════════════════════
+// Every station streams sparks into the Pulse core; stream density IS throughput
+// (txns/h from the same roster snapshots the board uses — no extra Looker reads).
+// A dark station's stream stutters red and its node flashes. Tap a node → deep-dive.
+// Tap a station node → the river DRILLS IN: that station's devices each become a
+// stream (labelled by operator), so you see which barman's device is pouring and
+// which is dry. ← back returns to the all-stations river.
+function FlowRiverView({ rows, apiBase, onSelect }) {
+  const cvRef = useRef(null);
+  const nodesRef = useRef([]);
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const [focus, setFocus] = useState(null); // { s, nodes: [...] } = device-level river for one station
+  const focusRef = useRef(null); focusRef.current = focus;
+  const [loading, setLoading] = useState('');
+  const drill = (s) => {
+    setLoading(s.name);
+    fetch(`${apiBase}/monitors/${encodeURIComponent(s.mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(s.sn || '')}`)
+      .then((r) => r.json()).then((d) => {
+        const devs = (d && d.devices) || [];
+        const onlineMin = (d && d.onlineMin) || 15;
+        const isOn = (v) => (v.lagMin != null ? v.lagMin <= onlineMin : (v.active || []).slice(-2).some(Boolean));
+        const nodes = devs.map((v) => {
+          const c = v.counts || [];
+          const rate = (c[c.length - 1] || 0) + (c[c.length - 2] || 0); // last hour, txns
+          return { key: v.device, label: v.operator || v.device, sub: `${v.operator ? v.device + ' · ' : ''}${rate.toLocaleString('en-ZA')}/h`, rate, alarm: !isOn(v), warn: false };
+        }).sort((a, b) => b.rate - a.rate).slice(0, 40);
+        setFocus({ s, nodes });
+      }).catch(() => {}).finally(() => setLoading(''));
+  };
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return () => {};
+    const ctx = cv.getContext('2d');
+    const css = (n, f) => (getComputedStyle(cv).getPropertyValue(n) || '').trim() || f; // read from the canvas: Pulse sets theme vars below the root, so documentElement misses dark mode
+    const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const parts = []; let raf = 0; let last = 0; let t = 0;
+    const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
+    const layout = () => {
+      const f = focusRef.current;
+      let list;
+      if (f) list = f.nodes;
+      else {
+        const sts = []; const seenN = new Set();
+        for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+        sts.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+        const top = sts.slice(0, 22);
+        for (const s of sts.slice(22)) if (s.status === 'stale') top.push(s);
+        list = top.map((s) => ({ key: s.name, label: s.name, sub: `${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}/h`, rate: s.txnH || 0, alarm: isAlarm(s), warn: (s.off || 0) > 0, s }));
+      }
+      const w = cv.clientWidth || 720;
+      const hgt = Math.max(340, list.length * 30 + 70);
+      if (cv.width !== w * 2 || cv.height !== hgt * 2) { cv.width = w * 2; cv.height = hgt * 2; cv.style.height = hgt + 'px'; ctx.setTransform(2, 0, 0, 2, 0, 0); }
+      const x0 = Math.min(190, Math.max(120, w * 0.32));
+      nodesRef.current = list.map((n, i) => ({ ...n, x: x0, y: 44 + (hgt - 80) * (list.length === 1 ? 0.5 : i / (list.length - 1)) }));
+      return { w, hgt, cx: w - 84, cy: hgt / 2, coreLabel: f ? (f.s.name.length > 11 ? f.s.name.slice(0, 10) + '…' : f.s.name) : 'PULSE' };
+    };
+    const frame = (ts) => {
+      const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts; t += dt;
+      const { w, hgt, cx, cy, coreLabel } = layout();
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
+      const nodes = nodesRef.current;
+      const maxTx = Math.max(1, ...nodes.map((n) => n.rate));
+      const totTx = nodes.reduce((a, n) => a + n.rate, 0);
+      const rr = 30 + 2.5 * Math.sin(t * 2.2);
+      const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, rr + 22);
+      g.addColorStop(0, C.brand); g.addColorStop(1, 'transparent');
+      ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rr + 22, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.bg; ctx.strokeStyle = C.brand; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = '800 11px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(coreLabel, cx, cy);
+      ctx.fillStyle = C.muted; ctx.font = '9px ui-monospace,monospace'; ctx.fillText(totTx.toLocaleString('en-ZA') + '/h', cx, cy + 13);
+      for (const n of nodes) {
+        const col = n.alarm ? STATUS_COLOR.stale : n.warn ? STATUS_COLOR.warn : STATUS_COLOR.fresh;
+        ctx.strokeStyle = C.line; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.bezierCurveTo((n.x + cx) / 2, n.y, (n.x + cx) / 2, cy, cx - rr - 3, cy); ctx.stroke(); ctx.globalAlpha = 1;
+        if (n.alarm) { const fl = (Math.sin(t * 7 + n.y) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.55 * fl})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(n.x, n.y, 8 + 5 * fl, 0, 7); ctx.stroke(); }
+        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 7;
+        ctx.beginPath(); ctx.arc(n.x, n.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = C.text; ctx.font = '600 10.5px -apple-system,sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText(n.label.length > 20 ? n.label.slice(0, 19) + '…' : n.label, n.x - 12, n.y + 3.5);
+        ctx.fillStyle = n.alarm ? STATUS_COLOR.stale : C.muted; ctx.font = '9px ui-monospace,monospace';
+        ctx.fillText(n.sub, n.x - 12, n.y + 14);
+        const stutter = n.alarm && Math.sin(t * 3 + n.y) > -0.2;
+        const spawn = reduced ? 0 : dt * (1.5 + 11 * (n.rate / maxTx)) * (stutter ? 0.12 : 1) * (n.alarm && !n.rate ? 0 : 1);
+        if (Math.random() < spawn) parts.push({ p: 0, sp: 0.28 + Math.random() * 0.3, y0: n.y, x0: n.x, jit: (Math.random() - 0.5) * 12, col: n.alarm ? STATUS_COLOR.stale : TXN_COL });
+      }
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i]; p.p += dt * p.sp;
+        if (p.p >= 1) { parts.splice(i, 1); continue; }
+        const u = p.p, m = 1 - u, mx = (p.x0 + cx) / 2;
+        const px = m * m * m * p.x0 + 3 * m * m * u * mx + 3 * m * u * u * mx + u * u * u * (cx - rr - 3);
+        const py = m * m * m * p.y0 + 3 * m * m * u * p.y0 + 3 * m * u * u * cy + u * u * u * cy + p.jit * Math.sin(u * Math.PI);
+        ctx.globalAlpha = 0.3 + 0.7 * Math.sin(u * Math.PI); ctx.fillStyle = p.col; ctx.fillRect(px, py, 2.2, 2.2); ctx.globalAlpha = 1;
+      }
+      if (parts.length > 2200) parts.splice(0, parts.length - 2200);
+      if (!reduced) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const pick = (e) => {
+    const b = cvRef.current.getBoundingClientRect();
+    const x = e.clientX - b.left, y = e.clientY - b.top;
+    let best = null, bd = 26;
+    for (const n of nodesRef.current) { const d = Math.hypot(x - n.x, y - n.y); if (d < bd) { bd = d; best = n; } }
+    if (!best) return;
+    if (focus) onSelect(focus.s);            // device river → the station deep-dive (that device's strip is inside)
+    else if (best.s) drill(best.s);          // station river → drill into its devices
+  };
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: '1px solid var(--hairline)' }}>
+        {focus ? <>
+          <button onClick={() => setFocus(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>← All stations</button>
+          <b style={{ fontSize: 12.5 }}>{focus.s.name}</b>
+          <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{focus.nodes.length} devices · each stream is one device (operator named)</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => onSelect(focus.s)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>📋 Details</button>
+        </> : <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{loading ? `Opening ${loading}'s devices…` : 'Tap a station to open its devices as their own river'}</span>}
+      </div>
+      <canvas ref={cvRef} onClick={pick} style={{ display: 'block', width: '100%' }} />
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '7px 12px', borderTop: '1px solid var(--hairline)', fontSize: 10.5, color: 'var(--muted)' }}>
+        <span>each spark = transactions · stream density = throughput{focus ? ' (per device, last hour)' : ''}</span>
+        <span style={{ color: STATUS_COLOR.stale }}>red stutter = dark</span>
+      </div>
+    </div>
+  );
+}
+
+// ═══ 🕸️ Network (Cascade) — the granular event as a river delta ═════════════════
+// Four tiers, left → right: every OPERATOR pours into their STATION, stations merge
+// into their monitor family (TYPE), types merge into Pulse. Sparks travel the whole
+// chain, so a blockage is visible at the exact tier it lives in. Per station the
+// busiest operators are named (dark ones always shown); the rest fold into "+n".
+const TYPE_COLS = ['#ff8fa3', '#b39ddb', '#80cbc4', '#ffd166', '#8b7cf6'];
+function CascadeView({ rows, apiBase, onSelect }) {
+  const cvRef = useRef(null);
+  const hitRef = useRef([]); // clickable node positions → station rows
+  const [packs, setPacks] = useState({}); // mid -> { list, onlineMin }
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const packsRef = useRef(packs); packsRef.current = packs;
+  useEffect(() => {
+    let alive = true;
+    [...new Set(rows.map((r) => r.mid))].forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30`)
+        .then((r) => r.json())
+        .then((d) => { if (alive && d) setPacks((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
+        .catch(() => { if (alive) setPacks((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one read per monitor at mount
+  }, []);
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return () => {};
+    const ctx = cv.getContext('2d');
+    const css = (n, f) => (getComputedStyle(cv).getPropertyValue(n) || '').trim() || f; // read from the canvas: Pulse sets theme vars below the root, so documentElement misses dark mode
+    const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const parts = []; let raf = 0; let last = 0; let t = 0;
+    const build = () => {
+      // stations (deduped), grouped by monitor family so the tiers nest cleanly
+      const sts = []; const seenN = new Set();
+      for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+      const types = new Map();
+      sts.forEach((s) => { if (!types.has(s.monitor)) types.set(s.monitor, []); types.get(s.monitor).push(s); });
+      const model = [];
+      let ty = 0;
+      for (const [type, list] of types) {
+        const col = TYPE_COLS[ty++ % TYPE_COLS.length];
+        list.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+        for (const s of list) {
+          const pack = packsRef.current[s.mid];
+          let ops = null;
+          if (pack) {
+            const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+            const all = pack.list.filter((v) => (v.station || '') === s.name)
+              .map((v) => { const c = v.counts || []; return { name: v.operator || v.device, rate: (c[c.length - 1] || 0) + (c[c.length - 2] || 0), on: isOnD(v) }; })
+              .sort((a, b) => b.rate - a.rate);
+            const named = all.filter((o, i) => i < 5 || !o.on).slice(0, 9);
+            const rest = all.filter((o) => !named.includes(o));
+            ops = named;
+            if (rest.length) ops = [...named, { name: `+${rest.length} more`, rate: rest.reduce((a2, o) => a2 + o.rate, 0), on: true, agg: true }];
+          }
+          model.push({ s, type, col, ops });
+        }
+      }
+      return model;
+    };
+    const frame = (ts) => {
+      const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts; t += dt;
+      const model = build();
+      const w = cv.clientWidth || 720;
+      const opRows = model.reduce((a, m) => a + (m.ops ? m.ops.length : 1), 0);
+      const hgt = Math.max(380, opRows * 17 + model.length * 8 + 90);
+      if (cv.width !== w * 2 || cv.height !== hgt * 2) { cv.width = w * 2; cv.height = hgt * 2; cv.style.height = hgt + 'px'; ctx.setTransform(2, 0, 0, 2, 0, 0); }
+      const xO = Math.min(210, Math.max(130, w * 0.3)), xS = w * 0.52, xT = w * 0.74, xC = w - 66, cy = hgt / 2;
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
+      ctx.fillStyle = C.muted; ctx.font = '700 8.5px ui-monospace,monospace'; ctx.textAlign = 'left';
+      ctx.fillText('OPERATORS', 12, 22); ctx.fillText('STATIONS', xS - 20, 22); ctx.fillText('TYPES', xT - 10, 22); ctx.fillText('PULSE', xC - 16, 22);
+      // vertical layout
+      let y = 44; const hits = [];
+      const tyPos = new Map();
+      for (const m of model) {
+        const n = (m.ops ? m.ops.length : 1);
+        m.opY = []; for (let i = 0; i < n; i++) { m.opY.push(y); y += 17; }
+        m.y = m.opY.reduce((a2, b) => a2 + b, 0) / n; y += 8;
+        if (!tyPos.has(m.type)) tyPos.set(m.type, []);
+        tyPos.get(m.type).push(m.y);
+      }
+      const maxRate = Math.max(1, ...model.map((m) => m.s.txnH || 0));
+      let totTx = 0;
+      for (const m of model) {
+        const tyY = tyPos.get(m.type).reduce((a2, b) => a2 + b, 0) / tyPos.get(m.type).length;
+        const alarm = m.s.status === 'stale' || ((m.s.off || 0) > 0 && !(m.s.on || 0));
+        totTx += m.s.txnH || 0;
+        // station → type → (drawn once per type below) edges
+        ctx.strokeStyle = m.col; ctx.globalAlpha = 0.22; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(xS, m.y); ctx.lineTo(xT, tyY); ctx.stroke(); ctx.globalAlpha = 1;
+        // operators
+        const ops = m.ops || [{ name: '…', rate: m.s.txnH || 0, on: true, agg: true }];
+        ops.forEach((o, i) => {
+          const oy = m.opY[i];
+          const col = o.on ? (o.agg ? C.muted : STATUS_COLOR.fresh) : STATUS_COLOR.stale;
+          ctx.strokeStyle = col; ctx.globalAlpha = o.on ? 0.13 : 0.32; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(xO, oy); ctx.lineTo(xS, m.y); ctx.stroke(); ctx.globalAlpha = 1;
+          if (!o.on) { const fl = (Math.sin(t * 7 + oy) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.5 * fl})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(xO, oy, 5 + 3 * fl, 0, 7); ctx.stroke(); }
+          ctx.fillStyle = col; ctx.beginPath(); ctx.arc(xO, oy, o.agg ? 2 : 2.4, 0, 7); ctx.fill();
+          ctx.fillStyle = o.on ? (o.agg ? C.muted : C.text) : STATUS_COLOR.stale; ctx.font = `${o.agg ? '' : '600 '}9px -apple-system,sans-serif`; ctx.textAlign = 'right';
+          ctx.fillText(`${o.name.length > 17 ? o.name.slice(0, 16) + '…' : o.name} · ${Math.round(o.rate)}/h`, xO - 8, oy + 3);
+          hits.push({ x: xO, y: oy, s: m.s });
+          const stutter = !o.on;
+          const spawn = reduced || stutter ? 0 : dt * (0.25 + 6 * (o.rate / Math.max(1, maxRate)));
+          if (Math.random() < spawn) parts.push({ path: [[xO, oy], [xS, m.y], [xT, tyY], [xC - 26, cy]], leg: 0, p: 0, sp: 0.9 + Math.random() * 0.5, col: TXN_COL });
+        });
+        // station node
+        ctx.fillStyle = alarm ? STATUS_COLOR.stale : m.col; ctx.shadowColor = alarm ? STATUS_COLOR.stale : m.col; ctx.shadowBlur = 6;
+        ctx.beginPath(); ctx.arc(xS, m.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = alarm ? STATUS_COLOR.stale : C.text; ctx.font = '700 9.5px -apple-system,sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(`${m.s.name.length > 16 ? m.s.name.slice(0, 15) + '…' : m.s.name} ${m.s.on || 0}/${(m.s.on || 0) + (m.s.off || 0)}`, xS + 8, m.y + 3);
+        hits.push({ x: xS, y: m.y, s: m.s });
+      }
+      // type nodes + type → core edges
+      let ti = 0;
+      for (const [type, ys] of tyPos) {
+        const tyY = ys.reduce((a2, b) => a2 + b, 0) / ys.length;
+        const col = TYPE_COLS[ti++ % TYPE_COLS.length];
+        ctx.strokeStyle = col; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(xT, tyY); ctx.lineTo(xC - 26, cy); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.arc(xT, tyY, 6, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = col; ctx.font = '800 9px ui-monospace,monospace'; ctx.textAlign = 'left';
+        ctx.fillText(type.toUpperCase(), xT + 10, tyY + 3);
+      }
+      // particles (multi-leg)
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const q = parts[i]; q.p += dt * q.sp;
+        if (q.p >= 1) { q.leg++; q.p = 0; if (q.leg >= q.path.length - 1) { parts.splice(i, 1); continue; } }
+        const a = q.path[q.leg], b = q.path[q.leg + 1];
+        const x = a[0] + (b[0] - a[0]) * q.p, yy = a[1] + (b[1] - a[1]) * q.p;
+        ctx.globalAlpha = 0.35 + 0.65 * Math.sin(q.p * Math.PI); ctx.fillStyle = q.col; ctx.fillRect(x - 1.1, yy - 1.1, 2.2, 2.2); ctx.globalAlpha = 1;
+      }
+      if (parts.length > 2400) parts.splice(0, parts.length - 2400);
+      // core
+      const rr = 24 + 2 * Math.sin(t * 2.2);
+      const g = ctx.createRadialGradient(xC - 26, cy, 4, xC - 26, cy, rr + 18);
+      g.addColorStop(0, C.brand); g.addColorStop(1, 'transparent');
+      ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(xC - 26, cy, rr + 18, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.bg; ctx.strokeStyle = C.brand; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(xC - 26, cy, rr, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = '800 11px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText('PULSE', xC - 26, cy + 1);
+      ctx.fillStyle = C.muted; ctx.font = '8.5px ui-monospace,monospace'; ctx.fillText(totTx.toLocaleString('en-ZA') + '/h', xC - 26, cy + 13);
+      hitRef.current = hits;
+      if (!reduced) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const pick = (e) => {
+    const b = cvRef.current.getBoundingClientRect();
+    const x = e.clientX - b.left, yy = e.clientY - b.top;
+    let best = null, bd = 22;
+    for (const n of hitRef.current) { const d = Math.hypot(x - n.x, yy - n.y); if (d < bd) { bd = d; best = n; } }
+    if (best) onSelect(best.s);
+  };
+  const loadedAll = rows.length && [...new Set(rows.map((r) => r.mid))].every((mid) => packs[mid]);
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      <div style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+        <canvas ref={cvRef} onClick={pick} style={{ display: 'block', width: '100%' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '7px 12px', borderTop: '1px solid var(--hairline)', fontSize: 10.5, color: 'var(--muted)' }}>
+        <span>{loadedAll ? 'operator → station → type → Pulse · busiest operators named, dark ones always shown' : 'naming operators…'}</span>
+        <span style={{ color: STATUS_COLOR.stale }}>red ring = operator dark</span>
+        <span>tap anything for the station deep-dive</span>
+      </div>
+    </div>
+  );
+}
+
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
-  const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
+  const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
+  const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
+  const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
+  const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
+  const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
   const openMons = (monitors || []).filter((m) => m.status !== 'closed');
@@ -1014,7 +1625,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   // can flick between station families without leaving the page.
   const chipIcon = (m) => (m.area === 'Bar' ? '🍺' : m.area === 'Vendors' ? '🧾' : '🎟️');
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
-  const shown = pick ? rows.filter((s) => s.mid === pick) : rows;
+  const famShown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
+  const shown = stPicks.length ? famShown.filter((s) => stPicks.includes(s.name)) : famShown;
 
   // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
   // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
@@ -1060,18 +1672,53 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
         {chips.length > 1 && <>
-          <button onClick={() => { setPick(''); setSel(null); backToLive(); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+          <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
           {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); backToLive(); }} style={chipStyle(pick === m.id)}>
+            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
               {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
             </button>
           ))}
         </>}
         <span style={{ flex: 1 }} />
-        <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
-        <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
-        <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
+        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
       </div>
+      {/* station-NAME drill: pick a family above and its stations appear here — tap to
+          narrow every view to just those stations; scrolls sideways, never wraps tall. */}
+      {!!picks.length && (() => {
+        const names = [...new Set(famShown.map((s) => s.name))].sort((a, b) => a.localeCompare(b));
+        if (names.length < 2) return null;
+        const stChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
+        return (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', scrollbarWidth: 'thin', marginBottom: 10, paddingBottom: 2 }}>
+            <button onClick={() => setStPicks([])} style={stChip(!stPicks.length)}>All · {names.length}</button>
+            {names.map((n) => (
+              <button key={n} onClick={() => { setStPicks((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n])); setSel(null); }} style={stChip(stPicks.includes(n))}>{n}</button>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* 📅 Day picker — a multi-day event's past days, derived from the monitors'
+          roster start. Applies to Stations, Rhythm and the deep-dives (Board/Map/
+          River/Network stay live). A festival day runs daily-start → +24h. */}
+      {(view === 'stations' || view === 'rhythm') && (() => {
+        const starts = (monitors || []).map((m) => Date.parse(m.rosterStart || '')).filter((x) => !Number.isNaN(x));
+        if (!starts.length) return null;
+        const sast = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(0, 10); // SAST calendar date
+        const today = sast(Date.now());
+        const days = [];
+        for (let ms = Math.min(...starts); sast(ms) < today && days.length < 7; ms += 864e5) days.push(sast(ms));
+        if (!days.length) return null;
+        const dChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
+        const lbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+        return (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', marginBottom: 10 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', flex: '0 0 auto' }}>📅</span>
+            <button onClick={() => setDay('')} style={dChip(!day)}>LIVE · today</button>
+            {days.map((d) => <button key={d} onClick={() => { setDay(day === d ? '' : d); setSel(null); }} style={dChip(day === d)}>{lbl(d)}</button>)}
+          </div>
+        );
+      })()}
 
       {allClosed && (
         <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
@@ -1080,16 +1727,31 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'rhythm' && (
-        <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
+        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} />
       )}
 
       {view === 'stations' && (
-        <StationDayView monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
+        <StationDayView key={'s' + day} monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} day={day} />
       )}
+
+      {view === 'flow' && (
+        <EventFlow monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} />
+      )}
+
+      {view === 'map' && (
+        <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
+      )}
+
+      {/* key on the filter set: changing chips while drilled into a station's devices
+          resets the river to the (re-filtered) all-stations level — otherwise the
+          drill ignores the new filter and the chips look dead. */}
+      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+
+      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
-      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
+      <PulseStrip monitors={picked(open)} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
       {replay && (
         <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
           <b style={{ fontSize: 12.5 }}>⏪ Replay · {replay.t.toTimeString().slice(0, 5)}</b>
@@ -1155,7 +1817,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
               <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
               <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
             </div>
-            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
+            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} day={(view === 'stations' || view === 'rhythm') ? day : ''} />
           </div>
         </div>
       )}
@@ -1194,9 +1856,10 @@ export default function SignalOps({ entityId, suiteId }) {
             <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
             <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
             {suiteId && <SignalReportPanel suiteId={suiteId} />}
-            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+            <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
           </>;
-          return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+          return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
         })()}
       </div>
       {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
