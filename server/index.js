@@ -2649,10 +2649,10 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // ─── Public platform surface → server/publicSurface.js ─────────────────────────
 // API keys + /api/v1 (read + drafts) + remote MCP server + OAuth connect flow —
 // thin adapters over the SAME service core; the app's scope gates apply.
-require('./publicSurface').mount(app, {
-  db, auth, rateLimit, mailer, currency, language, clientCatalogue,
-  resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
+const publicApi = require('./publicSurface').mount(app, {
+  db, auth, rateLimit, mailer, currency, language, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
 });
+require('./peopleFlow').mount(app, { db, auth, queryData: publicApi.core.queryData }); // 🌊 crowd movement between touchpoints
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
