@@ -1582,9 +1582,13 @@ function CascadeView({ rows, apiBase, onSelect }) {
   );
 }
 
-export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
+export function SignalBoard({ monitors, apiBase = '/api/my/data-health', view: viewProp, onView }) {
   const [sel, setSel] = useState(null);
-  const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
+  // View is controllable: when the left nav drives it (onView given) we use the
+  // prop and hide the in-board pill; standalone, the pill + local state run it.
+  const [viewLocal, setViewLocal] = useState('board');
+  const view = viewProp || viewLocal;
+  const setView = onView || setViewLocal;
   const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
@@ -1699,7 +1703,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
             {dayOpts.map((d) => <option key={d} value={d}>📅 {dayLbl(d)}</option>)}
           </select>
         )}
-        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
+        {!onView && <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />}
       </div>
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
           narrow every view to just those stations; scrolls sideways, never wraps tall. */}
@@ -1833,7 +1837,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 
 // Event Ops wrapper: fetches this event's monitors (entity-scoped, read only)
 // and keeps the board fresh on the same cadence as the health tab.
-export default function SignalOps({ entityId, suiteId }) {
+export default function SignalOps({ entityId, suiteId, view, onView }) {
   const isMobile = useIsMobile();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -1859,8 +1863,8 @@ export default function SignalOps({ entityId, suiteId }) {
         <span style={{ flex: 1 }} />
         {(() => {
           const controls = <>
-            <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
-            <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
+            <OwlSummary entityId={entityId} suiteId={suiteId} title="Flow board" />
+            <ShareMenu variant="header" heading="Flow board — live site status" text={healthShareText(data.monitors)} />
             {suiteId && <SignalReportPanel suiteId={suiteId} />}
             <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
             <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
@@ -1871,7 +1875,7 @@ export default function SignalOps({ entityId, suiteId }) {
       {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
         Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
       </p>}
-      <SignalBoard monitors={data.monitors || []} />
+      <SignalBoard monitors={data.monitors || []} view={view} onView={onView} />
     </div>
   );
 }

@@ -29,7 +29,9 @@ const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Conne
 // 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
 // Signal board stay top-level. Clicking Hive opens the sub-drawer.
 const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['alerts', '🚨', 'Alerts'], ['calls', '📣', 'Calls'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
-const TOP_TABS = [['health', '📶', 'Data health'], ['signal', '🎛️', 'Signal board']];
+const TOP_TABS = [['health', '📶', 'Data health']];
+// 🎛️ Flow board views — collapse into the left nav like the Hive sub-drawer.
+const SIGNAL_VIEWS = [['board', '🎛️', 'Board'], ['rhythm', '📈', 'Rhythm'], ['stations', '📶', 'Stations'], ['flow', '🌡️', 'Flow'], ['map', '🗺️', 'Map'], ['river', '🌊', 'River'], ['network', '🕸️', 'Network']];
 // Quick-pick resolutions (staff can also type a custom comment).
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 
@@ -41,6 +43,9 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [tab, setTab] = useState('live');
   const [hiveOpen, setHiveOpen] = useState(false); // 🐝 sub-drawer closed until tapped — the landing stays 3 buttons
   const inHive = HIVE_TABS.some(([t]) => t === tab);
+  const [signalView, setSignalView] = useState('board'); // 🎛️ Flow board view, driven from the nav sub-drawer
+  const [signalOpen, setSignalOpen] = useState(false);
+  const inSignal = tab === 'signal';
   const [scan, setScan] = useState(null);        // null | { for: 'move' }
   const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
   const [actionDevice, setActionDevice] = useState(null); // device shown in the action sheet
@@ -121,6 +126,22 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
                 <span style={{ fontSize: 15 }}>{icon}</span> {label}
               </button>
             ))}
+            {/* 🎛️ Flow board — collapses into its views like the Hive sub-drawer. */}
+            <button onClick={() => { if (!inSignal) { setTab('signal'); setSignalOpen(true); } else setSignalOpen((v) => !v); }}
+              style={isMobile ? tabBtn(inSignal) : navItem(inSignal)}>
+              <span style={{ fontSize: 15 }}>🎛️</span> Flow board <span style={{ fontSize: 10, opacity: 0.7 }}>{signalOpen ? '▾' : '▸'}</span>
+            </button>
+            {signalOpen && (
+              <div style={isMobile
+                ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
+                : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
+                {SIGNAL_VIEWS.map(([v, icon, label]) => (
+                  <button key={v} onClick={() => { setTab('signal'); setSignalView(v); }} style={{ ...(isMobile ? tabBtn(inSignal && signalView === v) : navItem(inSignal && signalView === v)), fontSize: 12.5 }}>
+                    <span style={{ fontSize: 13 }}>{icon}</span> {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {/* Scan + Move are Hive (device-ops) tools — keep them off the
               read-only Data health / Signal board tabs on every screen. */}
@@ -147,7 +168,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
           {suiteId && tab === 'health' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Loading data health…</div>}><DataHealthOps entityId={entityId} suiteId={suiteId} /></Suspense>}
-          {suiteId && tab === 'signal' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Raising the board…</div>}><SignalOps entityId={entityId} suiteId={suiteId} /></Suspense>}
+          {suiteId && tab === 'signal' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Raising the board…</div>}><SignalOps entityId={entityId} suiteId={suiteId} view={signalView} onView={setSignalView} /></Suspense>}
         </div>
       </div>
 
