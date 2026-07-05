@@ -1055,6 +1055,7 @@ const HEAT_CAT = (name) => {
   return [77, 159, 255];
 };
 function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
+  const isMobile = useIsMobile();
   const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
   const [cfg, setCfg] = useState(null);
   const [pins, setPins] = useState({});
@@ -1184,26 +1185,27 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   };
   const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
   // ── 🔥 Heat: per-station transaction volume on ONE shared time axis. Read a rolling
-  // 24h window (NOT each monitor's own roster start — that clipped busy stations like
-  // bars whose anchor is late) and keep only TODAY's active range, so every category
-  // lines up from its real first sale. Re-pulls every 60s so the live view stays fresh. ──
+  // 24h window (NOT each monitor's own roster start — that clipped busy bars whose anchor
+  // is late) then trim to the CURRENT activity run: the last active bucket back to the
+  // last quiet gap of 4h+. Night events cross midnight, so we must NOT clip to calendar
+  // midnight (that hid the whole evening once the clock ticked past 00:00) — a quiet-gap
+  // boundary groups one event night whether or not it spans midnight. Re-pulls every 60s. ──
   const [heatTick, setHeatTick] = useState(0);
   useEffect(() => {
     if (mode !== 'heat' || !suiteId) return undefined;
     let alive = true;
     const ivMs = iv * 60000;
-    const sastMidUTC = Math.floor((Date.now() + 7200000) / 86400000) * 86400000 - 7200000; // today 00:00 SAST in UTC ms
     const mids = [...new Set(sts.map((s) => s.mid))];
     const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
     Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`)
       .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
       .then((packs) => {
         if (!alive) return;
-        const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const dayPeak = new Map(); const axisSet = new Set();
+        const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const axisSet = new Set();
         for (const { mid, d } of packs) {
           if (!d || !d.buckets) continue;
           const bk = d.buckets.map((b) => Math.floor(Date.parse(b) / ivMs) * ivMs);
-          bk.forEach((b) => { if (Number.isFinite(b) && b >= sastMidUTC) axisSet.add(b); });
+          bk.forEach((b) => { if (Number.isFinite(b)) axisSet.add(b); });
           const per = {};
           if (d.stationTotals && Object.keys(d.stationTotals).length) Object.assign(per, d.stationTotals);
           else for (const dev of (d.devices || [])) { const st = dev.station || ''; if (!per[st]) per[st] = bk.map(() => 0); (dev.counts || []).forEach((c, i) => { if (per[st][i] != null) per[st][i] += (c || 0); }); }
@@ -1212,16 +1214,19 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             if (!st) continue;
             if (!series.has(st)) series.set(st, new Map());
             const m2 = series.get(st);
-            arr.forEach((v, i) => { const b = bk[i]; if (b != null && b >= sastMidUTC) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
+            arr.forEach((v, i) => { const b = bk[i]; if (b != null) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
             catKeyOf.set(st, mid); catCol.set(st, col);
-            dayPeak.set(mid, Math.max(dayPeak.get(mid) || 0, ...arr.map((v, i) => (bk[i] >= sastMidUTC ? (v || 0) : 0))));
           }
         }
         let axis = [...axisSet].sort((a, b) => a - b);
         const tot = (b) => { let s2 = 0; for (const m2 of series.values()) s2 += m2.get(b) || 0; return s2; };
-        let lo = 0; while (lo < axis.length && tot(axis[lo]) === 0) lo++;
-        let hi = axis.length - 1; while (hi > lo && tot(axis[hi]) === 0) hi--;
-        if (lo <= hi) axis = axis.slice(lo, hi + 1); // trim to the first→last active bucket
+        let hi = axis.length - 1; while (hi > 0 && tot(axis[hi]) === 0) hi--; // last active bucket
+        let lo = hi, zeros = 0; // walk back through the run, stopping at a 4h+ quiet gap
+        for (let i = hi; i >= 0; i--) { if (tot(axis[i]) > 0) { lo = i; zeros = 0; } else { zeros += ivMs; if (zeros >= 4 * 3600000) break; } }
+        axis = axis.slice(lo, hi + 1);
+        // Per-category all-day peak (Absolute scale) computed over just this run.
+        const dayPeak = new Map();
+        for (const [st, m2] of series.entries()) { const mid = catKeyOf.get(st); let mx = dayPeak.get(mid) || 0; for (const b of axis) { const v = m2.get(b) || 0; if (v > mx) mx = v; } dayPeak.set(mid, mx); }
         setHeat({ axis, series, catKeyOf, catCol, dayPeak });
       });
     return () => { alive = false; };
@@ -1326,6 +1331,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <button style={btn(true)} disabled={saving} onClick={fetchSatellite}>{saving ? 'Fetching…' : 'Fetch & set as map'}</button>
         </div>
       )}
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>
       {/* The box keeps the image's exact aspect (pins are % of it) but must FIT the
           viewport with no scrolling — so when the height would overflow, the box
           narrows itself instead: width = min(100%, available-height × aspect). */}
@@ -1394,10 +1401,12 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
+      </div>{/* ── left column: map + scrubber ── */}
       {!edit && mode === 'heat' && heat && heat.axis.length > 0 && (() => {
         // 🖐 Hand index — every placed station ranked busiest→quietest for the frame
         // currently on the map (live, or wherever you paused the scrub), colour-coded
-        // by category. Pause the day and this reads the whole venue at a glance.
+        // by category. Sits in a right rail on desktop, stacks under the map on mobile.
+        // Pause the day and this reads the whole venue at a glance.
         const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
         const T = heat.axis[idx];
         const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
@@ -1406,35 +1415,47 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           .filter((r) => r.v > 0).sort((a, b) => b.v - a.v);
         const rmax = rank.length ? rank[0].v : 1;
         const rtot = rank.reduce((s2, r) => s2 + r.v, 0);
+        // Bar scale follows the Absolute/Relative toggle: Relative fills to the busiest
+        // station RIGHT NOW; Absolute measures against the busiest single station all run,
+        // so scrubbing a quiet hour shows genuinely short bars (the toggle visibly bites).
+        const gPeak = Math.max(1, ...heat.dayPeak.values());
+        const barDenom = scale === 'abs' ? gPeak : rmax;
+        // On MOBILE the rail stacks under the map, so a changing height reflows the page and
+        // jumps the aspect-locked map — pin the height off the CONSTANT placed count. On
+        // desktop it's a separate column, so it can hug content up to a cap safely.
+        const listStyle = isMobile
+          ? { height: Math.min(300, Math.max(64, placed.length * 24)) }
+          : { maxHeight: full ? '80vh' : 'calc(100dvh - 300px)' };
         return (
-          <div style={{ ...card, marginTop: 8, padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🖐 Hand index · busiest now</span>
+          <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🖐 Hand index</span>
               <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)' }}>{heatIdx == null ? '● LIVE' : hhmm(T)}</span>
-              <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{rtot.toLocaleString('en-ZA')} txns · {iv < 60 ? iv + 'm' : '1h'}</span>
+              <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{rtot.toLocaleString('en-ZA')} · {iv < 60 ? iv + 'm' : '1h'}</span>
             </div>
-            {rank.length === 0
-              ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No transactions in this window.</div>
-              : <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: full ? '46vh' : 240, overflowY: 'auto' }}>
-                {rank.map((r, i) => {
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', ...listStyle }}>
+              {rank.length === 0
+                ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No transactions in this window.</div>
+                : rank.map((r, i) => {
                   const c = `rgb(${r.col[0]},${r.col[1]},${r.col[2]})`;
                   return (
                     <div key={r.name} onClick={() => { const st = placed.find((s) => s.name === r.name); if (st) onSelect(st); }}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '2px 0' }}>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--faint)', width: 20, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--faint)', width: 18, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
                       <span style={{ width: 9, height: 9, borderRadius: '50%', background: c, flexShrink: 0, boxShadow: `0 0 5px ${c}` }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 0 34%' }}>{r.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 0 36%' }}>{r.name}</span>
                       <span style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}>
-                        <span style={{ display: 'block', height: '100%', width: `${Math.max(4, (r.v / rmax) * 100)}%`, background: c, borderRadius: 4 }} />
+                        <span style={{ display: 'block', height: '100%', width: `${Math.max(4, Math.min(100, (r.v / barDenom) * 100))}%`, background: c, borderRadius: 4 }} />
                       </span>
-                      <span style={{ fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c, width: 52, textAlign: 'right' }}>{r.v.toLocaleString('en-ZA')}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c, width: 50, textAlign: 'right' }}>{r.v.toLocaleString('en-ZA')}</span>
                     </div>
                   );
                 })}
-              </div>}
+            </div>
           </div>
         );
       })()}
+      </div>{/* ── map + index row ── */}
       {!edit && mode === 'heat' && (
         <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <span>🔥 glow = transactions in the window · number = the count · {scale === 'abs' ? 'each category vs its own busiest all day' : 'each category vs its busiest right now'}</span>
