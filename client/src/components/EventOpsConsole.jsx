@@ -125,12 +125,14 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
                 <span style={{ fontSize: 15 }}>{icon}</span> {label}
               </button>
             ))}
-            {/* 🎛️ Flow board — collapses into its views like the Hive sub-drawer. */}
-            <button onClick={() => { if (!inSignal) { setTab('signal'); setSignalOpen(true); } else setSignalOpen((v) => !v); }}
+            {/* 🎛️ Flow board — collapses into its views like the Hive sub-drawer on
+                DESKTOP. On mobile that 7-button grid duplicates the board's own compact
+                expanding view pill, so we skip it: the tab just opens the board. */}
+            <button onClick={() => { if (isMobile) { setTab('signal'); return; } if (!inSignal) { setTab('signal'); setSignalOpen(true); } else setSignalOpen((v) => !v); }}
               style={isMobile ? tabBtn(inSignal) : navItem(inSignal)}>
-              <span style={{ fontSize: 15 }}>🎛️</span> Flow board <span style={{ fontSize: 10, opacity: 0.7 }}>{signalOpen ? '▾' : '▸'}</span>
+              <span style={{ fontSize: 15 }}>🎛️</span> Flow board {!isMobile && <span style={{ fontSize: 10, opacity: 0.7 }}>{signalOpen ? '▾' : '▸'}</span>}
             </button>
-            {signalOpen && (
+            {signalOpen && !isMobile && (
               <div style={isMobile
                 ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
                 : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
