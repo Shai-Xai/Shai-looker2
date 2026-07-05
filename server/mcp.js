@@ -107,7 +107,7 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
         query: z.enum(['overview', 'devices', 'timeline', 'observed', 'signal', 'latest']).optional().describe('What to fetch (default overview)'),
         monitor: z.string().optional().describe('For devices/timeline/latest: the monitor/station name (fuzzy, e.g. "Gate B")'),
         suiteId: z.string().optional().describe('Event (suite) id — required for signal; narrows others to one event'),
-        hours: z.string().optional().describe('For timeline: "start" (from the roster start time) or rolling hours like "12"'),
+        hours: z.string().optional().describe('For timeline/observed: "start" (roster start), rolling hours like "12", or "day:YYYY-MM-DD" for one festival day'),
         intervalMin: z.number().optional().describe('For timeline: block minutes (5/10/20/30/60; default 10)'),
         station: z.string().optional().describe('For timeline/signal: narrow to ONE station'),
         zone: z.string().optional().describe('For signal: narrow to one zone/category (bars, gates, vendors…)'),

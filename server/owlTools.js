@@ -1181,7 +1181,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       properties: {
         query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'signal', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline". signal = signal-flow: share of devices on-air vs the event target, per zone/category/station (needs an event).' },
         monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
-        hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
+        hours: { type: 'string', description: 'For timeline/observed: "start" (from the roster start time — default when one is set), rolling hours like "12", or "day:YYYY-MM-DD" for ONE festival day of a multi-day event (daily start → +24h).' },
         intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
         station: { type: 'string', description: 'For timeline/signal: narrow to ONE station name exactly as it appears in the streams — use when a monitor/event spans many bars/vendors.' },
         zone: { type: 'string', description: 'For signal: narrow to one zone/category (bars, gates, vendors…).' },

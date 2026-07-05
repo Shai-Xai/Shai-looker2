@@ -93,7 +93,7 @@ function StationTile({ s, selected, onSelect }) {
 
 // Tap-through deep dive for one station: the day's per-device timeline pulled
 // live into the card — who's sending, who's dark, and when each device worked.
-function DeepDive({ apiBase, mid, station, unit }) {
+function DeepDive({ apiBase, mid, station, unit, day = '' }) {
   const [t, setT] = useState(null);
   const [obs, setObs] = useState(null); // the observed offline log — fuels the 🚦 robot view
   const [robot, setRobot] = useState(true);
@@ -103,13 +103,14 @@ function DeepDive({ apiBase, mid, station, unit }) {
   const [pulseTip, setPulseTip] = useState('');
   useEffect(() => {
     let alive = true; setT(null); setObs(null); setErr('');
-    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(station)}`)
+    const hrs = day ? `day:${day}` : 'start'; // a picked festival day time-travels the whole dive
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=${hrs}&interval=30&station=${encodeURIComponent(station)}`)
       .then((r) => r.json()).then((d) => { if (alive) { if (d && d.devices) setT(d); else setErr((d && d.error) || 'No timeline'); } })
       .catch((e) => { if (alive) setErr(e.message); });
-    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=start`)
+    fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/observed?hours=${hrs}`)
       .then((r) => r.json()).then((d) => { if (alive) setObs(d); }).catch(() => {});
     return () => { alive = false; };
-  }, [apiBase, mid, station, tryN]);
+  }, [apiBase, mid, station, tryN, day]);
   if (err) {
     return (
       <div style={{ fontSize: 12, color: STATUS_COLOR.stale, marginTop: 10 }}>
@@ -438,7 +439,7 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
     let alive = true;
     monitors.forEach((m) => {
       if (logs[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=${day ? 'day:' + day : 'start'}`)
         .then((r) => r.json()).then((d) => { if (alive && d && d.configured) setLogs((p) => ({ ...p, [m.id]: d })); })
         .catch(() => {});
     });
@@ -611,13 +612,14 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
 // station, one cell per hour, colour depth = how busy (green = transactions,
 // blue = scans), the day's avg/h on the right. The site's stacked total sits
 // on top. Hourly numbers come from each monitor's day timeline (hour blocks).
-function RhythmView({ monitors, apiBase, rows, onSelect }) {
+function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
   const [data, setData] = useState({}); // monitor id -> hourly timeline
+  const hrs = day ? `day:${day}` : 'start';
   useEffect(() => {
     let alive = true;
     monitors.forEach((m) => {
       if (data[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=60`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=${hrs}&interval=60`)
         .then((r) => r.json()).then((d) => { if (alive && d && d.devices) setData((p) => ({ ...p, [m.id]: d })); })
         .catch(() => {});
     });
@@ -827,7 +829,7 @@ function StationRow({ st, show, onSelect }) {
   );
 }
 
-function StationDayView({ monitors, apiBase, onSelect }) {
+function StationDayView({ monitors, apiBase, onSelect, day = '' }) {
   const [logs, setLogs] = useState({});
   const [tl, setTl] = useState({}); // mid -> { buckets:[iso], byStation:{name:counts[]} } — ONE timeline read per monitor
   const [q, setQ] = useState('');
@@ -838,7 +840,7 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     let alive = true;
     monitors.forEach((m) => {
       if (logs[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=${day ? 'day:' + day : 'start'}`)
         .then((r) => r.json()).then((d) => { if (alive && d) setLogs((p) => ({ ...p, [m.id]: d })); }).catch(() => {});
     });
     return () => { alive = false; };
@@ -850,7 +852,7 @@ function StationDayView({ monitors, apiBase, onSelect }) {
     let alive = true;
     monitors.forEach((m) => {
       if (tl[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=start&interval=30`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/timeline?hours=${day ? 'day:' + day : 'start'}&interval=30`)
         .then((r) => r.json()).then((d) => {
           if (!alive) return;
           const buckets = (d && d.buckets) || [];
@@ -1053,6 +1055,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [zf, setZf] = useState(''); // unplaced-tray zone filter
   const [mode, setMode] = useState('station'); // 'station' pins only | 'operator' fans every device around its pin
   const [ar, setAr] = useState(4 / 3); // the uploaded plan's aspect ratio — box fits the screen without scrolling
+  const [satOpen, setSatOpen] = useState(false); const [satPos, setSatPos] = useState(''); const [satW, setSatW] = useState('800'); // 🛰️ fetch-satellite form
   const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
@@ -1105,6 +1108,35 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
       .then((r) => r.json()).then((d) => { if (d && !d.error) { setCfg(d); setPins(d.pins || {}); setDirty(false); } })
       .finally(() => setSaving(false));
   };
+  const saveImage = (dataUrl) => {
+    setSaving(true);
+    return fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) })
+      .then((r) => r.json()).then((d) => { if (d && d.error) alert(d.error); else if (d) setCfg(d); })
+      .finally(() => setSaving(false));
+  };
+  // 🛰️ Satellite: fetch real aerial imagery for typed coordinates (Esri World Imagery —
+  // licensed for exactly this, unlike Google screenshots) and save it as the venue map.
+  // Attribution is baked into the image itself so it travels with the map.
+  const fetchSatellite = async () => {
+    const mm = /(-?\d{1,3}\.\d+)[,\s]+(-?\d{1,3}\.\d+)/.exec(String(satPos));
+    if (!mm) { alert('Paste coordinates like 45.0866, 7.6560 (a Google Maps link with them in it works too)'); return; }
+    const lat = +mm[1], lon = +mm[2], span = Number(satW) || 800;
+    const R = 20037508.34, x = (lon * R) / 180, y = (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) / (Math.PI / 180)) * (R / 180);
+    const hw = span / 2, hh = hw * 0.75;
+    const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${x - hw},${y - hh},${x + hw},${y + hh}&bboxSR=3857&imageSR=3857&size=1600,1200&format=jpg&f=image`;
+    setSaving(true);
+    try {
+      const blob = await (await fetch(url)).blob();
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      const g2 = c.getContext('2d'); g2.drawImage(bmp, 0, 0);
+      g2.font = '600 20px sans-serif'; g2.textAlign = 'right'; g2.lineWidth = 3;
+      g2.strokeStyle = 'rgba(0,0,0,.55)'; g2.strokeText('Imagery © Esri & partners', c.width - 12, c.height - 12);
+      g2.fillStyle = 'rgba(255,255,255,.9)'; g2.fillText('Imagery © Esri & partners', c.width - 12, c.height - 12);
+      await saveImage(c.toDataURL('image/jpeg', 0.85));
+      setSatOpen(false);
+    } catch { alert('Could not fetch satellite imagery — check the coordinates and try again.'); setSaving(false); }
+  };
   const uploadMap = (file) => {
     if (!file) return;
     const img = new Image();
@@ -1152,10 +1184,22 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
         </>}
         {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
+        {edit && <button style={btn(satOpen)} onClick={() => setSatOpen(!satOpen)}>🛰️ Satellite</button>}
         {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
         {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
         <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
       </div>
+      {edit && satOpen && (
+        <div style={{ ...card, marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', width: '100%' }}>🛰️ Real aerial imagery as the map (Esri, licence-safe)</span>
+          <input value={satPos} onChange={(e) => setSatPos(e.target.value)} placeholder="45.0866, 7.6560 — or paste a maps link" inputMode="text"
+            style={{ flex: '1 1 220px', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: 'inherit', minHeight: 36 }} />
+          <select value={satW} onChange={(e) => setSatW(e.target.value)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '8px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 36 }}>
+            <option value="400">~400 m wide</option><option value="800">~800 m wide</option><option value="1200">~1.2 km wide</option><option value="2000">~2 km wide</option>
+          </select>
+          <button style={btn(true)} disabled={saving} onClick={fetchSatellite}>{saving ? 'Fetching…' : 'Fetch & set as map'}</button>
+        </div>
+      )}
       {/* The box keeps the image's exact aspect (pins are % of it) but must FIT the
           viewport with no scrolling — so when the height would overflow, the box
           narrows itself instead: width = min(100%, available-height × aspect). */}
@@ -1544,6 +1588,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
+  const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -1653,6 +1698,28 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         );
       })()}
 
+      {/* 📅 Day picker — a multi-day event's past days, derived from the monitors'
+          roster start. Applies to Stations, Rhythm and the deep-dives (Board/Map/
+          River/Network stay live). A festival day runs daily-start → +24h. */}
+      {(view === 'stations' || view === 'rhythm') && (() => {
+        const starts = (monitors || []).map((m) => Date.parse(m.rosterStart || '')).filter((x) => !Number.isNaN(x));
+        if (!starts.length) return null;
+        const sast = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(0, 10); // SAST calendar date
+        const today = sast(Date.now());
+        const days = [];
+        for (let ms = Math.min(...starts); sast(ms) < today && days.length < 7; ms += 864e5) days.push(sast(ms));
+        if (!days.length) return null;
+        const dChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
+        const lbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+        return (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', marginBottom: 10 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', flex: '0 0 auto' }}>📅</span>
+            <button onClick={() => setDay('')} style={dChip(!day)}>LIVE · today</button>
+            {days.map((d) => <button key={d} onClick={() => { setDay(day === d ? '' : d); setSel(null); }} style={dChip(day === d)}>{lbl(d)}</button>)}
+          </div>
+        );
+      })()}
+
       {allClosed && (
         <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
           This event is <b>closed</b> — you're looking at its final state and full day. Board and Rhythm show the closing snapshot; <b>📶 Stations</b> is the best view to replay each station's day.
@@ -1660,11 +1727,11 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'rhythm' && (
-        <RhythmView monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} />
+        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} />
       )}
 
       {view === 'stations' && (
-        <StationDayView monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} />
+        <StationDayView key={'s' + day} monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} day={day} />
       )}
 
       {view === 'flow' && (
@@ -1750,7 +1817,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
               <span><b>{sel.txnH != null ? sel.txnH.toLocaleString('en-ZA') : '—'}</b> {sel.unit}/h</span>
               <span style={{ color: 'var(--muted)' }}>latest record {fmtLag(sel.lagMin)} ago</span>
             </div>
-            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} />
+            <DeepDive apiBase={apiBase} mid={sel.mid} station={sel.sn} unit={sel.unit} day={(view === 'stations' || view === 'rhythm') ? day : ''} />
           </div>
         </div>
       )}
