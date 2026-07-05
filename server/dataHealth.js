@@ -1285,6 +1285,8 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       warnMin: m.warnMin, staleMin: m.staleMin, checkEveryMin: m.checkEveryMin,
       stationField: m.stationField, detailFields: m.detailFields,
       rosterField: m.rosterField, rosterAlertPct: m.rosterAlertPct, rosterSnapshot: m.rosterSnapshot, countField: m.countField, rosterStart: m.rosterStart, rosterDaily: m.rosterDaily,
+      // Festival days with actual coverage (SAST dates from the observed log) — drives the board's 📅 day picker regardless of whether the monitor uses a fixed start or a daily anchor.
+      days: sql.prepare("SELECT DISTINCT substr(datetime(at, '+2 hours'), 1, 10) d FROM data_monitor_obs WHERE monitor_id=? ORDER BY d").all(m.id).map((r) => r.d).filter(Boolean),
       streams: streamsFor(m.id),
     }));
   }
