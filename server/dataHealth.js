@@ -312,9 +312,7 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     query_timezone: 'UTC',
   });
 
-  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension
-  // ("Expressions for fields of type \"max\" must evaluate to \"number\""). Once a
-  // monitor hits that, remember it and go straight to the sorted-scan path.
+  // Some Looker versions reject a custom max() measure on a DATE/TIME dimension. Once a monitor hits that, remember it and go straight to the sorted-scan path.
   const maxMeasureUnsupported = new Set();
 
   async function readLatest(m) {
@@ -773,8 +771,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
         if (keep.length) {
           stationFilterDead.add(m.id); // remember: skip the doomed direct read next time
           labelDevices(keep, info);
-          const totals = Array(whole.buckets.length).fill(0);
-          for (const d of keep) d.counts.forEach((c, i) => { totals[i] += c; });
+          // Kept devices' counts came from the truncated whole-feed read, so summing them loses the early hours. Prefer the non-truncated per-station line when the whole read supplied it; else the device sum.
+          const st1 = whole.stationTotals && whole.stationTotals[st];
+          const totals = st1 && st1.length === whole.buckets.length ? st1.slice() : (() => { const t2 = Array(whole.buckets.length).fill(0); for (const d of keep) d.counts.forEach((c, i) => { t2[i] += c; }); return t2; })();
           return { ...whole, station: st, devices: keep, devicesTotal: keep.length, bucketTotals: totals, grandTotal: totals.reduce((a, b) => a + b, 0) };
         }
       }
