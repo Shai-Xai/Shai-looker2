@@ -1044,6 +1044,16 @@ const VM_CSS = `
 @keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
 @keyframes vmHalo{0%,100%{opacity:.5}50%{opacity:.95}}
 @media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}}`;
+// 🔥 Heat category colour by monitor name — bars red, food amber, vendors purple,
+// gates/check-in teal, else blue. Keeps "gates and bars readable at the same time".
+const HEAT_CAT = (name) => {
+  const n = String(name || '').toLowerCase();
+  if (/food|pizza|kosmo|burger|gelat|poke|kebab|snack|hot ?dog/.test(n)) return [255, 157, 30];
+  if (/vendor|merch|store|retail|shop/.test(n)) return [179, 136, 255];
+  if (/check|gate|access|entry|scan|ticket|door|turnstile/.test(n)) return [0, 201, 183];
+  if (/bar|beer|drink|acqua/.test(n)) return [255, 90, 122];
+  return [77, 159, 255];
+};
 function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
   const [cfg, setCfg] = useState(null);
@@ -1058,6 +1068,9 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [ar, setAr] = useState(4 / 3); // the uploaded plan's aspect ratio — box fits the screen without scrolling
   const [satOpen, setSatOpen] = useState(false); const [satPos, setSatPos] = useState(''); const [satW, setSatW] = useState('800'); // 🛰️ fetch-satellite form
   const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
+  const [iv, setIv] = useState(30); const [scale, setScale] = useState('abs'); // 🔥 Heat: window minutes + Absolute/Relative
+  const [heat, setHeat] = useState(null); const [heatIdx, setHeatIdx] = useState(null); const [playing, setPlaying] = useState(false); const [rez, setRez] = useState(0);
+  const heatRef = useRef(null);
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
   useEffect(() => {
@@ -1169,6 +1182,91 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
   const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
+  // ── 🔥 Heat: per-station transaction volume, one timeline read per monitor at the
+  // chosen window; built into a shared time axis so the scrubber replays the day. ──
+  useEffect(() => {
+    if (mode !== 'heat' || !suiteId) return undefined;
+    let alive = true;
+    const ivMs = iv * 60000;
+    const mids = [...new Set(sts.map((s) => s.mid))];
+    const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
+    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=${iv}`)
+      .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
+      .then((packs) => {
+        if (!alive) return;
+        const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const dayPeak = new Map(); const axisSet = new Set();
+        for (const { mid, d } of packs) {
+          if (!d || !d.buckets) continue;
+          const bk = d.buckets.map((b) => Math.floor(Date.parse(b) / ivMs) * ivMs);
+          bk.forEach((b) => { if (Number.isFinite(b)) axisSet.add(b); });
+          const per = {};
+          if (d.stationTotals && Object.keys(d.stationTotals).length) Object.assign(per, d.stationTotals);
+          else for (const dev of (d.devices || [])) { const st = dev.station || ''; if (!per[st]) per[st] = bk.map(() => 0); (dev.counts || []).forEach((c, i) => { if (per[st][i] != null) per[st][i] += (c || 0); }); }
+          const col = HEAT_CAT(monName.get(mid));
+          for (const [st, arr] of Object.entries(per)) {
+            if (!st) continue;
+            if (!series.has(st)) series.set(st, new Map());
+            const m2 = series.get(st);
+            arr.forEach((v, i) => { const b = bk[i]; if (b != null) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
+            catKeyOf.set(st, mid); catCol.set(st, col);
+            dayPeak.set(mid, Math.max(dayPeak.get(mid) || 0, ...arr.map((v) => v || 0)));
+          }
+        }
+        setHeat({ axis: [...axisSet].sort((a, b) => a - b), series, catKeyOf, catCol, dayPeak });
+        setHeatIdx(null); setPlaying(false);
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval
+  }, [mode, iv, suiteId, apiBase]);
+  useEffect(() => { // play advances the scrub through the day
+    if (!playing || !heat || !heat.axis.length) return undefined;
+    const t = setInterval(() => setHeatIdx((i) => { const cur = i == null ? heat.axis.length - 1 : i; const nx = cur + 1; return nx >= heat.axis.length ? 0 : nx; }), 380);
+    return () => clearInterval(t);
+  }, [playing, heat]);
+  useEffect(() => { // draw the heat canvas on any relevant change
+    const cv = heatRef.current, box = boxRef.current;
+    if (mode !== 'heat' || !cv || !box || !heat || !heat.axis.length) { if (cv) { const c = cv.getContext('2d'); if (c) c.clearRect(0, 0, cv.width, cv.height); } return; }
+    const ctx = cv.getContext('2d');
+    const bgc = getComputedStyle(box).backgroundColor.match(/\d+/g);
+    const dark = bgc ? (0.299 * +bgc[0] + 0.587 * +bgc[1] + 0.114 * +bgc[2]) / 255 < 0.5 : true;
+    const w = box.clientWidth, h = box.clientHeight;
+    if (cv.width !== w * 2 || cv.height !== h * 2) { cv.width = w * 2; cv.height = h * 2; }
+    ctx.setTransform(2, 0, 0, 2, 0, 0); ctx.clearRect(0, 0, w, h);
+    if (!dark) { ctx.fillStyle = 'rgba(10,14,20,0.26)'; ctx.fillRect(0, 0, w, h); } // scrim so heat reads on a light plan
+    const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+    const T = heat.axis[idx];
+    const frameMax = new Map();
+    for (const s of placed) { const v = heat.series.get(s.name)?.get(T) || 0; const k = heat.catKeyOf.get(s.name); if (v > (frameMax.get(k) || 0)) frameMax.set(k, v); }
+    ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+    const R0 = Math.max(w, h) * 0.055;
+    for (const s of placed) {
+      const v = heat.series.get(s.name)?.get(T) || 0; const k = heat.catKeyOf.get(s.name);
+      const denom = scale === 'abs' ? (heat.dayPeak.get(k) || 1) : (frameMax.get(k) || 1);
+      const I = Math.min(1, v / denom); if (I < 0.05) continue;
+      const [r, g, b] = heat.catCol.get(s.name) || [77, 159, 255]; const p = pins[s.name];
+      const x = p.x * w, y = p.y * h, R = R0 * (0.55 + 1.1 * I);
+      const gr = ctx.createRadialGradient(x, y, 2, x, y, R);
+      gr.addColorStop(0, `rgba(${r},${g},${b},${dark ? 0.55 * I + 0.15 : 0.62 * I + 0.12})`);
+      gr.addColorStop(0.5, `rgba(${r},${g},${b},${dark ? 0.22 * I : 0.28 * I})`);
+      gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (const s of placed) {
+      const v = Math.round(heat.series.get(s.name)?.get(T) || 0);
+      const k = heat.catKeyOf.get(s.name); const denom = scale === 'abs' ? (heat.dayPeak.get(k) || 1) : (frameMax.get(k) || 1);
+      const I = Math.min(1, v / denom); if (I < 0.14 && !v) continue;
+      const [r, g, b] = heat.catCol.get(s.name) || [77, 159, 255]; const p = pins[s.name]; const x = p.x * w, y = p.y * h;
+      if (I > 0.14) { ctx.fillStyle = dark ? '#e8eef6' : '#16202c'; ctx.font = '600 10px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(s.name, x, y - 15); }
+      ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.font = '800 11px ui-monospace,monospace'; ctx.textAlign = 'center'; ctx.fillText(v.toLocaleString('en-ZA'), x, y + 4);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- placed/pins read fresh each draw
+  }, [mode, heat, heatIdx, scale, pins, rez]);
+  useEffect(() => {
+    if (mode !== 'heat') return undefined;
+    const box = boxRef.current; if (!box || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setRez((n) => n + 1)); ro.observe(box); return () => ro.disconnect();
+  }, [mode]);
   if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
   const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
   const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
@@ -1178,11 +1276,21 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
           {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
-            : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+            : mode === 'heat' ? <>Transaction heatmap — how busy each station is. Press ▶ to time-lapse the day; tap a station for its detail.</>
+              : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
         </span>
         {!edit && <>
           <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
+          <button style={btn(mode === 'heat')} onClick={() => setMode('heat')}>🔥 Heat</button>
+        </>}
+        {!edit && mode === 'heat' && <>
+          <span style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 999, overflow: 'hidden' }}>
+            {[['abs', 'Absolute'], ['rel', 'Relative']].map(([k, l]) => <button key={k} onClick={() => setScale(k)} style={{ border: 'none', background: scale === k ? 'var(--brand)' : 'var(--card)', color: scale === k ? '#fff' : 'var(--text)', fontSize: 11, fontWeight: 700, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>{l}</button>)}
+          </span>
+          <select value={iv} onChange={(e) => setIv(+e.target.value)} title="Transactions per window" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer' }}>
+            {[5, 10, 20, 30, 60].map((m) => <option key={m} value={m}>{m < 60 ? m + ' min' : '1 hour'}</option>)}
+          </select>
         </>}
         {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
         {edit && <button style={btn(satOpen)} onClick={() => setSatOpen(!satOpen)}>🛰️ Satellite</button>}
@@ -1211,7 +1319,11 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
               <span style={{ fontSize: 10.5, color: 'var(--muted)', padding: 8 }}>No site plan yet — ✏️ Edit pins → ⬆ Upload site plan (pins work on the blank grid too)</span>
             </div>}
-        {halos.map((h2, i) => (
+        {mode === 'heat' && !edit && (
+          <canvas ref={heatRef} onClick={(e) => { const b = boxRef.current.getBoundingClientRect(); const x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height; let best = null, bd = 0.06; for (const s of placed) { const p = pins[s.name]; const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = s; } } if (best) onSelect(best); }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+        )}
+        {mode !== 'heat' && halos.map((h2, i) => (
           <div key={i} className="vm-anim" style={{ position: 'absolute', left: `${h2.x * 100}%`, top: `${h2.y * 100}%`, width: 130 + h2.n * 30, height: 130 + h2.n * 30, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(220,38,38,.30) 0%, transparent 70%)', animation: 'vmHalo 1.6s ease-in-out infinite', pointerEvents: 'none' }}>
             <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
           </div>
@@ -1238,7 +1350,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             dark > 0 && <i key={s.name + '·dark'} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + ${18 + rowsN * 11}px)`, transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8.5, fontStyle: 'normal', fontWeight: 800, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{dark} dark</i>,
           ];
         })}
-        {placed.map((s) => {
+        {mode !== 'heat' && placed.map((s) => {
           const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
           return (
             <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
@@ -1253,6 +1365,24 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           );
         })}
       </div>
+      {!edit && mode === 'heat' && !heat && <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Reading transactions per {iv < 60 ? iv + ' min' : 'hour'}…</div>}
+      {!edit && mode === 'heat' && heat && heat.axis.length > 1 && (() => {
+        const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+        const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
+        return (
+          <div style={{ ...card, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play the day'} style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>{playing ? '⏸' : '▶'}</button>
+            <input type="range" min={0} max={heat.axis.length - 1} value={idx} onChange={(e) => { setPlaying(false); setHeatIdx(+e.target.value === heat.axis.length - 1 ? null : +e.target.value); }} style={{ flex: 1, accentColor: 'var(--brand)' }} aria-label="Scrub the day" />
+            <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 62, textAlign: 'right' }}>{heatIdx == null ? '● LIVE' : hhmm(heat.axis[idx]) + ' · ' + (iv < 60 ? iv + 'm' : '1h')}</span>
+          </div>
+        );
+      })()}
+      {!edit && mode === 'heat' && (
+        <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <span>🔥 glow = transactions in the window · number = the count · {scale === 'abs' ? 'each category vs its own busiest all day' : 'each category vs its busiest right now'}</span>
+          <span style={{ color: 'var(--faint)' }}>{[['#ff5a7a', 'Bars'], ['#00c9b7', 'Gates/access'], ['#b388ff', 'Vendors'], ['#ff9d1e', 'Food']].map(([c, l]) => `● ${l}`).join('  ')}</span>
+        </div>
+      )}
       {edit && !!unplaced.length && (() => {
         const zonesU = [...new Set(unplaced.map((s) => s.zone))].sort();
         const list = unplaced
@@ -1274,7 +1404,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
-      {!edit && !!alarmed.length && (
+      {!edit && mode !== 'heat' && !!alarmed.length && (
         <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
         </div>
@@ -1716,7 +1846,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
             <option value="offline">🔴 Offline</option>
           </select>
         )}
-        {!onView && <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />}
+        {/* The inline expanding pill stays alongside the left-nav dropdown — both drive
+            the same view (setView routes to onView when the nav controls it). */}
+        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
         {trailing && <>
           <span style={{ flex: 1 }} />
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{trailing}</span>
