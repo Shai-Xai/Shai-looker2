@@ -1150,10 +1150,31 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
 // Every station streams sparks into the Pulse core; stream density IS throughput
 // (txns/h from the same roster snapshots the board uses — no extra Looker reads).
 // A dark station's stream stutters red and its node flashes. Tap a node → deep-dive.
-function FlowRiverView({ rows, onSelect }) {
+// Tap a station node → the river DRILLS IN: that station's devices each become a
+// stream (labelled by operator), so you see which barman's device is pouring and
+// which is dry. ← back returns to the all-stations river.
+function FlowRiverView({ rows, apiBase, onSelect }) {
   const cvRef = useRef(null);
   const nodesRef = useRef([]);
   const rowsRef = useRef(rows); rowsRef.current = rows;
+  const [focus, setFocus] = useState(null); // { s, nodes: [...] } = device-level river for one station
+  const focusRef = useRef(null); focusRef.current = focus;
+  const [loading, setLoading] = useState('');
+  const drill = (s) => {
+    setLoading(s.name);
+    fetch(`${apiBase}/monitors/${encodeURIComponent(s.mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(s.sn || '')}`)
+      .then((r) => r.json()).then((d) => {
+        const devs = (d && d.devices) || [];
+        const onlineMin = (d && d.onlineMin) || 15;
+        const isOn = (v) => (v.lagMin != null ? v.lagMin <= onlineMin : (v.active || []).slice(-2).some(Boolean));
+        const nodes = devs.map((v) => {
+          const c = v.counts || [];
+          const rate = (c[c.length - 1] || 0) + (c[c.length - 2] || 0); // last hour, txns
+          return { key: v.device, label: v.operator || v.device, sub: `${v.operator ? v.device + ' · ' : ''}${rate.toLocaleString('en-ZA')}/h`, rate, alarm: !isOn(v), warn: false };
+        }).sort((a, b) => b.rate - a.rate).slice(0, 40);
+        setFocus({ s, nodes });
+      }).catch(() => {}).finally(() => setLoading(''));
+  };
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return () => {};
     const ctx = cv.getContext('2d');
@@ -1161,51 +1182,55 @@ function FlowRiverView({ rows, onSelect }) {
     const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const parts = []; let raf = 0; let last = 0; let t = 0;
+    const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
     const layout = () => {
-      const sts = []; const seenN = new Set();
-      for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
-      sts.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
-      const list = sts.slice(0, 22);
-      for (const s of sts.slice(22)) if (s.status === 'stale') list.push(s);
+      const f = focusRef.current;
+      let list;
+      if (f) list = f.nodes;
+      else {
+        const sts = []; const seenN = new Set();
+        for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+        sts.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+        const top = sts.slice(0, 22);
+        for (const s of sts.slice(22)) if (s.status === 'stale') top.push(s);
+        list = top.map((s) => ({ key: s.name, label: s.name, sub: `${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}/h`, rate: s.txnH || 0, alarm: isAlarm(s), warn: (s.off || 0) > 0, s }));
+      }
       const w = cv.clientWidth || 720;
       const hgt = Math.max(340, list.length * 30 + 70);
       if (cv.width !== w * 2 || cv.height !== hgt * 2) { cv.width = w * 2; cv.height = hgt * 2; cv.style.height = hgt + 'px'; ctx.setTransform(2, 0, 0, 2, 0, 0); }
-      const x0 = Math.min(170, Math.max(120, w * 0.3));
-      nodesRef.current = list.map((s, i) => ({ s, x: x0, y: 44 + (hgt - 80) * (list.length === 1 ? 0.5 : i / (list.length - 1)) }));
-      return { w, hgt, x0, cx: w - 84, cy: hgt / 2 };
+      const x0 = Math.min(190, Math.max(120, w * 0.32));
+      nodesRef.current = list.map((n, i) => ({ ...n, x: x0, y: 44 + (hgt - 80) * (list.length === 1 ? 0.5 : i / (list.length - 1)) }));
+      return { w, hgt, cx: w - 84, cy: hgt / 2, coreLabel: f ? (f.s.name.length > 11 ? f.s.name.slice(0, 10) + '…' : f.s.name) : 'PULSE' };
     };
-    const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
     const frame = (ts) => {
       const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts; t += dt;
-      const { w, hgt, cx, cy } = layout();
+      const { w, hgt, cx, cy, coreLabel } = layout();
       ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
       const nodes = nodesRef.current;
-      const maxTx = Math.max(1, ...nodes.map((n) => n.s.txnH || 0));
-      const totTx = nodes.reduce((a, n) => a + (n.s.txnH || 0), 0);
-      // core
+      const maxTx = Math.max(1, ...nodes.map((n) => n.rate));
+      const totTx = nodes.reduce((a, n) => a + n.rate, 0);
       const rr = 30 + 2.5 * Math.sin(t * 2.2);
       const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, rr + 22);
       g.addColorStop(0, C.brand); g.addColorStop(1, 'transparent');
       ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rr + 22, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
       ctx.fillStyle = C.bg; ctx.strokeStyle = C.brand; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = C.text; ctx.font = '800 12px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText('PULSE', cx, cy);
+      ctx.fillStyle = C.text; ctx.font = '800 11px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(coreLabel, cx, cy);
       ctx.fillStyle = C.muted; ctx.font = '9px ui-monospace,monospace'; ctx.fillText(totTx.toLocaleString('en-ZA') + '/h', cx, cy + 13);
       for (const n of nodes) {
-        const s = n.s; const alarm = isAlarm(s);
-        const col = alarm ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh;
+        const col = n.alarm ? STATUS_COLOR.stale : n.warn ? STATUS_COLOR.warn : STATUS_COLOR.fresh;
         ctx.strokeStyle = C.line; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.bezierCurveTo((n.x + cx) / 2, n.y, (n.x + cx) / 2, cy, cx - rr - 3, cy); ctx.stroke(); ctx.globalAlpha = 1;
-        if (alarm) { const fl = (Math.sin(t * 7 + n.y) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.55 * fl})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(n.x, n.y, 8 + 5 * fl, 0, 7); ctx.stroke(); }
+        if (n.alarm) { const fl = (Math.sin(t * 7 + n.y) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.55 * fl})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(n.x, n.y, 8 + 5 * fl, 0, 7); ctx.stroke(); }
         ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 7;
         ctx.beginPath(); ctx.arc(n.x, n.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
         ctx.fillStyle = C.text; ctx.font = '600 10.5px -apple-system,sans-serif'; ctx.textAlign = 'right';
-        ctx.fillText(s.name.length > 20 ? s.name.slice(0, 19) + '…' : s.name, n.x - 12, n.y + 3.5);
-        ctx.fillStyle = alarm ? STATUS_COLOR.stale : C.muted; ctx.font = '9px ui-monospace,monospace';
-        ctx.fillText(`${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}/h`, n.x - 12, n.y + 14);
-        const stutter = alarm && Math.sin(t * 3 + n.y) > -0.2;
-        const spawn = reduced ? 0 : dt * (1.5 + 11 * ((s.txnH || 0) / maxTx)) * (stutter ? 0.12 : 1);
-        if (Math.random() < spawn) parts.push({ p: 0, sp: 0.28 + Math.random() * 0.3, y0: n.y, x0: n.x, jit: (Math.random() - 0.5) * 12, col: alarm ? STATUS_COLOR.stale : TXN_COL });
+        ctx.fillText(n.label.length > 20 ? n.label.slice(0, 19) + '…' : n.label, n.x - 12, n.y + 3.5);
+        ctx.fillStyle = n.alarm ? STATUS_COLOR.stale : C.muted; ctx.font = '9px ui-monospace,monospace';
+        ctx.fillText(n.sub, n.x - 12, n.y + 14);
+        const stutter = n.alarm && Math.sin(t * 3 + n.y) > -0.2;
+        const spawn = reduced ? 0 : dt * (1.5 + 11 * (n.rate / maxTx)) * (stutter ? 0.12 : 1) * (n.alarm && !n.rate ? 0 : 1);
+        if (Math.random() < spawn) parts.push({ p: 0, sp: 0.28 + Math.random() * 0.3, y0: n.y, x0: n.x, jit: (Math.random() - 0.5) * 12, col: n.alarm ? STATUS_COLOR.stale : TXN_COL });
       }
       for (let i = parts.length - 1; i >= 0; i--) {
         const p = parts[i]; p.p += dt * p.sp;
@@ -1226,15 +1251,25 @@ function FlowRiverView({ rows, onSelect }) {
     const x = e.clientX - b.left, y = e.clientY - b.top;
     let best = null, bd = 26;
     for (const n of nodesRef.current) { const d = Math.hypot(x - n.x, y - n.y); if (d < bd) { bd = d; best = n; } }
-    if (best) onSelect(best.s);
+    if (!best) return;
+    if (focus) onSelect(focus.s);            // device river → the station deep-dive (that device's strip is inside)
+    else if (best.s) drill(best.s);          // station river → drill into its devices
   };
   return (
     <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '8px 12px', borderBottom: '1px solid var(--hairline)' }}>
+        {focus ? <>
+          <button onClick={() => setFocus(null)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>← All stations</button>
+          <b style={{ fontSize: 12.5 }}>{focus.s.name}</b>
+          <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{focus.nodes.length} devices · each stream is one device (operator named)</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => onSelect(focus.s)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>📋 Details</button>
+        </> : <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{loading ? `Opening ${loading}'s devices…` : 'Tap a station to open its devices as their own river'}</span>}
+      </div>
       <canvas ref={cvRef} onClick={pick} style={{ display: 'block', width: '100%' }} />
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '7px 12px', borderTop: '1px solid var(--hairline)', fontSize: 10.5, color: 'var(--muted)' }}>
-        <span>each spark = transactions flowing to Pulse · stream density = throughput</span>
-        <span style={{ color: STATUS_COLOR.stale }}>red stutter = station dark</span>
-        <span>tap a station for its devices &amp; operators</span>
+        <span>each spark = transactions · stream density = throughput{focus ? ' (per device, last hour)' : ''}</span>
+        <span style={{ color: STATUS_COLOR.stale }}>red stutter = dark</span>
       </div>
     </div>
   );
@@ -1243,7 +1278,8 @@ function FlowRiverView({ rows, onSelect }) {
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
-  const [pick, setPick] = useState(''); // monitor id filter: '' = whole site
+  const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
+  const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
   const openMons = (monitors || []).filter((m) => m.status !== 'closed');
@@ -1279,7 +1315,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   // can flick between station families without leaving the page.
   const chipIcon = (m) => (m.area === 'Bar' ? '🍺' : m.area === 'Vendors' ? '🧾' : '🎟️');
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
-  const shown = pick ? rows.filter((s) => s.mid === pick) : rows;
+  const shown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
 
   // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
   // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
@@ -1325,9 +1361,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
         {chips.length > 1 && <>
-          <button onClick={() => { setPick(''); setSel(null); backToLive(); }} style={chipStyle(!pick)}>All stations · {rows.length}</button>
+          <button onClick={() => { setPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
           {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPick(m.id); setSel(null); backToLive(); }} style={chipStyle(pick === m.id)}>
+            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
               {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
             </button>
           ))}
@@ -1348,26 +1384,26 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       )}
 
       {view === 'rhythm' && (
-        <RhythmView monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={rows} onSelect={setSel} />
+        <RhythmView monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} />
       )}
 
       {view === 'stations' && (
-        <StationDayView monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
+        <StationDayView monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} />
       )}
 
       {view === 'flow' && (
-        <EventFlow monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
+        <EventFlow monitors={picked(monitors)} apiBase={apiBase} onSelect={setSel} />
       )}
 
       {view === 'map' && (
         <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
       )}
 
-      {view === 'river' && <FlowRiverView rows={shown} onSelect={setSel} />}
+      {view === 'river' && <FlowRiverView rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
-      <PulseStrip monitors={pick ? open.filter((m) => m.id === pick) : open} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
+      <PulseStrip monitors={picked(open)} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
       {replay && (
         <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
           <b style={{ fontSize: 12.5 }}>⏪ Replay · {replay.t.toTimeString().slice(0, 5)}</b>
