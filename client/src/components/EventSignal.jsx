@@ -1856,10 +1856,10 @@ export default function SignalOps({ entityId, suiteId }) {
             <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
             <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
             {suiteId && <SignalReportPanel suiteId={suiteId} />}
-            <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓{isMobile ? ' PDF' : ''}</button>
-            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+            <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
           </>;
-          return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+          return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
         })()}
       </div>
       {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
