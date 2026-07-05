@@ -1007,6 +1007,7 @@ const SB_VIEWS = [
   ['flow', '🌡️', 'Flow', 'heat map'],
   ['map', '🗺️', 'Map', 'live site plan'],
   ['river', '🌊', 'River', 'flow particles'],
+  ['network', '🕸️', 'Network', 'operator → station → type'],
 ];
 function ViewDrawer({ view, setView, onClose }) {
   const idx = Math.max(0, SB_VIEWS.findIndex(([k]) => k === view));
@@ -1358,6 +1359,176 @@ function FlowRiverView({ rows, apiBase, onSelect }) {
   );
 }
 
+// ═══ 🕸️ Network (Cascade) — the granular event as a river delta ═════════════════
+// Four tiers, left → right: every OPERATOR pours into their STATION, stations merge
+// into their monitor family (TYPE), types merge into Pulse. Sparks travel the whole
+// chain, so a blockage is visible at the exact tier it lives in. Per station the
+// busiest operators are named (dark ones always shown); the rest fold into "+n".
+const TYPE_COLS = ['#ff8fa3', '#b39ddb', '#80cbc4', '#ffd166', '#8b7cf6'];
+function CascadeView({ rows, apiBase, onSelect }) {
+  const cvRef = useRef(null);
+  const hitRef = useRef([]); // clickable node positions → station rows
+  const [packs, setPacks] = useState({}); // mid -> { list, onlineMin }
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const packsRef = useRef(packs); packsRef.current = packs;
+  useEffect(() => {
+    let alive = true;
+    [...new Set(rows.map((r) => r.mid))].forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30`)
+        .then((r) => r.json())
+        .then((d) => { if (alive && d) setPacks((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
+        .catch(() => { if (alive) setPacks((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one read per monitor at mount
+  }, []);
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return () => {};
+    const ctx = cv.getContext('2d');
+    const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim() || f;
+    const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const parts = []; let raf = 0; let last = 0; let t = 0;
+    const build = () => {
+      // stations (deduped), grouped by monitor family so the tiers nest cleanly
+      const sts = []; const seenN = new Set();
+      for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+      const types = new Map();
+      sts.forEach((s) => { if (!types.has(s.monitor)) types.set(s.monitor, []); types.get(s.monitor).push(s); });
+      const model = [];
+      let ty = 0;
+      for (const [type, list] of types) {
+        const col = TYPE_COLS[ty++ % TYPE_COLS.length];
+        list.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+        for (const s of list) {
+          const pack = packsRef.current[s.mid];
+          let ops = null;
+          if (pack) {
+            const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+            const all = pack.list.filter((v) => (v.station || '') === s.name)
+              .map((v) => { const c = v.counts || []; return { name: v.operator || v.device, rate: (c[c.length - 1] || 0) + (c[c.length - 2] || 0), on: isOnD(v) }; })
+              .sort((a, b) => b.rate - a.rate);
+            const named = all.filter((o, i) => i < 5 || !o.on).slice(0, 9);
+            const rest = all.filter((o) => !named.includes(o));
+            ops = named;
+            if (rest.length) ops = [...named, { name: `+${rest.length} more`, rate: rest.reduce((a2, o) => a2 + o.rate, 0), on: true, agg: true }];
+          }
+          model.push({ s, type, col, ops });
+        }
+      }
+      return model;
+    };
+    const frame = (ts) => {
+      const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts; t += dt;
+      const model = build();
+      const w = cv.clientWidth || 720;
+      const opRows = model.reduce((a, m) => a + (m.ops ? m.ops.length : 1), 0);
+      const hgt = Math.max(380, opRows * 17 + model.length * 8 + 90);
+      if (cv.width !== w * 2 || cv.height !== hgt * 2) { cv.width = w * 2; cv.height = hgt * 2; cv.style.height = hgt + 'px'; ctx.setTransform(2, 0, 0, 2, 0, 0); }
+      const xO = Math.min(210, Math.max(130, w * 0.3)), xS = w * 0.52, xT = w * 0.74, xC = w - 66, cy = hgt / 2;
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
+      ctx.fillStyle = C.muted; ctx.font = '700 8.5px ui-monospace,monospace'; ctx.textAlign = 'left';
+      ctx.fillText('OPERATORS', 12, 22); ctx.fillText('STATIONS', xS - 20, 22); ctx.fillText('TYPES', xT - 10, 22); ctx.fillText('PULSE', xC - 16, 22);
+      // vertical layout
+      let y = 44; const hits = [];
+      const tyPos = new Map();
+      for (const m of model) {
+        const n = (m.ops ? m.ops.length : 1);
+        m.opY = []; for (let i = 0; i < n; i++) { m.opY.push(y); y += 17; }
+        m.y = m.opY.reduce((a2, b) => a2 + b, 0) / n; y += 8;
+        if (!tyPos.has(m.type)) tyPos.set(m.type, []);
+        tyPos.get(m.type).push(m.y);
+      }
+      const maxRate = Math.max(1, ...model.map((m) => m.s.txnH || 0));
+      let totTx = 0;
+      for (const m of model) {
+        const tyY = tyPos.get(m.type).reduce((a2, b) => a2 + b, 0) / tyPos.get(m.type).length;
+        const alarm = m.s.status === 'stale' || ((m.s.off || 0) > 0 && !(m.s.on || 0));
+        totTx += m.s.txnH || 0;
+        // station → type → (drawn once per type below) edges
+        ctx.strokeStyle = m.col; ctx.globalAlpha = 0.22; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(xS, m.y); ctx.lineTo(xT, tyY); ctx.stroke(); ctx.globalAlpha = 1;
+        // operators
+        const ops = m.ops || [{ name: '…', rate: m.s.txnH || 0, on: true, agg: true }];
+        ops.forEach((o, i) => {
+          const oy = m.opY[i];
+          const col = o.on ? (o.agg ? C.muted : STATUS_COLOR.fresh) : STATUS_COLOR.stale;
+          ctx.strokeStyle = col; ctx.globalAlpha = o.on ? 0.13 : 0.32; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(xO, oy); ctx.lineTo(xS, m.y); ctx.stroke(); ctx.globalAlpha = 1;
+          if (!o.on) { const fl = (Math.sin(t * 7 + oy) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.5 * fl})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(xO, oy, 5 + 3 * fl, 0, 7); ctx.stroke(); }
+          ctx.fillStyle = col; ctx.beginPath(); ctx.arc(xO, oy, o.agg ? 2 : 2.4, 0, 7); ctx.fill();
+          ctx.fillStyle = o.on ? (o.agg ? C.muted : C.text) : STATUS_COLOR.stale; ctx.font = `${o.agg ? '' : '600 '}9px -apple-system,sans-serif`; ctx.textAlign = 'right';
+          ctx.fillText(`${o.name.length > 17 ? o.name.slice(0, 16) + '…' : o.name} · ${Math.round(o.rate)}/h`, xO - 8, oy + 3);
+          hits.push({ x: xO, y: oy, s: m.s });
+          const stutter = !o.on;
+          const spawn = reduced || stutter ? 0 : dt * (0.25 + 6 * (o.rate / Math.max(1, maxRate)));
+          if (Math.random() < spawn) parts.push({ path: [[xO, oy], [xS, m.y], [xT, tyY], [xC - 26, cy]], leg: 0, p: 0, sp: 0.9 + Math.random() * 0.5, col: TXN_COL });
+        });
+        // station node
+        ctx.fillStyle = alarm ? STATUS_COLOR.stale : m.col; ctx.shadowColor = alarm ? STATUS_COLOR.stale : m.col; ctx.shadowBlur = 6;
+        ctx.beginPath(); ctx.arc(xS, m.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = alarm ? STATUS_COLOR.stale : C.text; ctx.font = '700 9.5px -apple-system,sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(`${m.s.name.length > 16 ? m.s.name.slice(0, 15) + '…' : m.s.name} ${m.s.on || 0}/${(m.s.on || 0) + (m.s.off || 0)}`, xS + 8, m.y + 3);
+        hits.push({ x: xS, y: m.y, s: m.s });
+      }
+      // type nodes + type → core edges
+      let ti = 0;
+      for (const [type, ys] of tyPos) {
+        const tyY = ys.reduce((a2, b) => a2 + b, 0) / ys.length;
+        const col = TYPE_COLS[ti++ % TYPE_COLS.length];
+        ctx.strokeStyle = col; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(xT, tyY); ctx.lineTo(xC - 26, cy); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 8;
+        ctx.beginPath(); ctx.arc(xT, tyY, 6, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = col; ctx.font = '800 9px ui-monospace,monospace'; ctx.textAlign = 'left';
+        ctx.fillText(type.toUpperCase(), xT + 10, tyY + 3);
+      }
+      // particles (multi-leg)
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const q = parts[i]; q.p += dt * q.sp;
+        if (q.p >= 1) { q.leg++; q.p = 0; if (q.leg >= q.path.length - 1) { parts.splice(i, 1); continue; } }
+        const a = q.path[q.leg], b = q.path[q.leg + 1];
+        const x = a[0] + (b[0] - a[0]) * q.p, yy = a[1] + (b[1] - a[1]) * q.p;
+        ctx.globalAlpha = 0.35 + 0.65 * Math.sin(q.p * Math.PI); ctx.fillStyle = q.col; ctx.fillRect(x - 1.1, yy - 1.1, 2.2, 2.2); ctx.globalAlpha = 1;
+      }
+      if (parts.length > 2400) parts.splice(0, parts.length - 2400);
+      // core
+      const rr = 24 + 2 * Math.sin(t * 2.2);
+      const g = ctx.createRadialGradient(xC - 26, cy, 4, xC - 26, cy, rr + 18);
+      g.addColorStop(0, C.brand); g.addColorStop(1, 'transparent');
+      ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(xC - 26, cy, rr + 18, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.bg; ctx.strokeStyle = C.brand; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(xC - 26, cy, rr, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = '800 11px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText('PULSE', xC - 26, cy + 1);
+      ctx.fillStyle = C.muted; ctx.font = '8.5px ui-monospace,monospace'; ctx.fillText(totTx.toLocaleString('en-ZA') + '/h', xC - 26, cy + 13);
+      hitRef.current = hits;
+      if (!reduced) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const pick = (e) => {
+    const b = cvRef.current.getBoundingClientRect();
+    const x = e.clientX - b.left, yy = e.clientY - b.top;
+    let best = null, bd = 22;
+    for (const n of hitRef.current) { const d = Math.hypot(x - n.x, yy - n.y); if (d < bd) { bd = d; best = n; } }
+    if (best) onSelect(best.s);
+  };
+  const loadedAll = rows.length && [...new Set(rows.map((r) => r.mid))].every((mid) => packs[mid]);
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      <div style={{ maxHeight: '72vh', overflowY: 'auto' }}>
+        <canvas ref={cvRef} onClick={pick} style={{ display: 'block', width: '100%' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '7px 12px', borderTop: '1px solid var(--hairline)', fontSize: 10.5, color: 'var(--muted)' }}>
+        <span>{loadedAll ? 'operator → station → type → Pulse · busiest operators named, dark ones always shown' : 'naming operators…'}</span>
+        <span style={{ color: STATUS_COLOR.stale }}>red ring = operator dark</span>
+        <span>tap anything for the station deep-dive</span>
+      </div>
+    </div>
+  );
+}
+
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
@@ -1488,6 +1659,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           resets the river to the (re-filtered) all-stations level — otherwise the
           drill ignores the new filter and the chips look dead. */}
       {view === 'river' && <FlowRiverView key={picks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+
+      {view === 'network' && <CascadeView key={picks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />

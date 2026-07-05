@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-05 (🗺️ Venue map + 🌊 Flow river on the Signal board) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-05 (🕸️ Network view · view drawer · Map operator dots · call categories) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -785,6 +785,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-05 (pm)** — **Signal board: 🕸️ Network view + one-button view switcher** 🧪:
+  the Network view draws the whole event as a river delta — every OPERATOR pours into
+  their station, stations merge into their type (bars/vendors/gates), types merge into
+  Pulse, with live sparks travelling the full chain and dark operators flashing at the
+  exact tier the blockage lives in. The board's six views now sit behind ONE control
+  that opens a slide-in drawer (Apple-style). Also: the Map gained a Stations/Operators
+  toggle (every device fanned around its station's pin), and the device support-call
+  page now offers the event's device issue categories as tap-to-send reasons.
 - **2026-07-05** — **Signal board: 🗺️ Venue map + 🌊 Flow river** 🧪: upload the event's
   site plan and drag each station's pin onto it once — the map then goes LIVE: healthy
   pins ripple green, a dark station's pin flashes red, and when several stations in the
