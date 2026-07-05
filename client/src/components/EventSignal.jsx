@@ -994,6 +994,47 @@ function StationDayView({ monitors, apiBase, onSelect }) {
 // when 2+ alarmed pins sit in the same corner, a red halo blooms over that AREA —
 // connectivity failures are usually spatial (one mast/switch), so the map shows
 // WHERE it's dying, not just which list rows. Tap a pin → the station deep-dive.
+// One control ▸ left drawer for the six board views (Apple-style): backdrop fades,
+// the panel slides in, the selection pill glides to the tapped row, then it closes.
+const SB_CSS = `
+@keyframes sbFade{from{opacity:0}to{opacity:1}}
+@keyframes sbSlide{from{transform:translateX(-102%)}to{transform:translateX(0)}}
+@media (prefers-reduced-motion:reduce){.sb-anim{animation:none !important;transition:none !important}}`;
+const SB_VIEWS = [
+  ['board', '🎛️', 'Board', 'tiles by zone'],
+  ['rhythm', '📈', 'Rhythm', 'rate river'],
+  ['stations', '📶', 'Stations', 'day strips'],
+  ['flow', '🌡️', 'Flow', 'heat map'],
+  ['map', '🗺️', 'Map', 'live site plan'],
+  ['river', '🌊', 'River', 'flow particles'],
+];
+function ViewDrawer({ view, setView, onClose }) {
+  const idx = Math.max(0, SB_VIEWS.findIndex(([k]) => k === view));
+  const [sel, setSel] = useState(idx);
+  const ROW = 54;
+  const choose = (i, k) => { setSel(i); setView(k); setTimeout(onClose, 190); };
+  return createPortal(
+    <div className="sb-anim" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1400, background: 'rgba(0,0,0,0.4)', animation: 'sbFade .2s ease' }}>
+      <div className="sb-anim" onClick={(e) => e.stopPropagation()}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 'min(78vw, 270px)', background: 'var(--card)', borderRight: '1px solid var(--hairline)', boxShadow: '12px 0 40px rgba(0,0,0,0.35)', animation: 'sbSlide .26s cubic-bezier(.32,.72,.28,1)', padding: '18px 12px', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)', padding: '0 10px 12px' }}>Signal views</div>
+        <div style={{ position: 'relative' }}>
+          <div className="sb-anim" style={{ position: 'absolute', left: 0, right: 0, top: sel * ROW, height: ROW - 6, borderRadius: 12, background: 'color-mix(in srgb, var(--brand) 14%, transparent)', border: '1px solid var(--brand)', transition: 'top .22s cubic-bezier(.32,.72,.28,1)', pointerEvents: 'none' }} />
+          {SB_VIEWS.map(([k, ic, name, hint], i) => (
+            <button key={k} onClick={() => choose(i, k)}
+              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, width: '100%', height: ROW - 6, marginBottom: 6, padding: '0 12px', border: 'none', background: 'none', color: view === k ? 'var(--brand)' : 'var(--text)', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+              <span style={{ fontSize: 22 }}>{ic}</span>
+              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                <b style={{ fontSize: 14.5 }}>{name}</b>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 const VM_CSS = `
 @keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
 @keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
@@ -1009,6 +1050,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState(''); // unplaced-tray search
   const [zf, setZf] = useState(''); // unplaced-tray zone filter
+  const [mode, setMode] = useState('station'); // 'station' pins only | 'operator' fans every device around its pin
+  const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
   useEffect(() => {
@@ -1022,6 +1065,25 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   // one row per station name (a name can appear under one monitor only in practice)
   const sts = []; const seenN = new Set();
   for (const r of rows) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+  // Operator mode: one timeline read per monitor (cached) gives every device its
+  // station + operator + freshness — the dots fan out around their station's pin.
+  useEffect(() => {
+    if (mode !== 'operator') return undefined;
+    let alive = true;
+    [...new Set(sts.map((s) => s.mid))].filter((mid) => !devs[mid]).forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=60`)
+        .then((r) => r.json())
+        .then((d) => { if (alive && d) setDevs((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
+        .catch(() => { if (alive) setDevs((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor on first toggle
+  }, [mode]);
+  const devsFor = (s) => {
+    const pack = devs[s.mid]; if (!pack) return null;
+    const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+    return pack.list.filter((v) => (v.station || '') === s.name).map((v) => ({ ...v, isOn: isOnD(v) }));
+  };
   const placed = sts.filter((s) => pins[s.name]);
   const unplaced = sts.filter((s) => !pins[s.name]);
   const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
@@ -1083,6 +1145,10 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
             : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
         </span>
+        {!edit && <>
+          <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
+          <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
+        </>}
         {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
         {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
         {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
@@ -1100,6 +1166,23 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
           </div>
         ))}
+        {mode === 'operator' && !edit && placed.map((s) => {
+          const list = devsFor(s); const p = pins[s.name];
+          if (!list) return <span key={'d' + s.name} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + 14px)`, transform: 'translateX(-50%)', fontSize: 8.5, color: 'var(--muted)' }}>…</span>;
+          return list.map((v, i) => {
+            const a = (i / list.length) * Math.PI * 2 - Math.PI / 2;
+            const rr = 24 + (list.length > 14 ? 12 * ((i % 2)) : 0); // second ring when crowded
+            const dx = rr * Math.cos(a), dy = rr * Math.sin(a);
+            const dc = v.isOn ? STATUS_COLOR.fresh : STATUS_COLOR.stale;
+            return (
+              <span key={s.name + v.device} onClick={(e) => { e.stopPropagation(); onSelect(s); }} title={`${v.operator || v.device} · ${v.isOn ? 'online' : 'dark'}`}
+                className={v.isOn ? '' : 'vm-anim'}
+                style={{ position: 'absolute', left: `calc(${p.x * 100}% + ${dx}px)`, top: `calc(${p.y * 100}% + ${dy}px)`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%', background: dc, border: '1.5px solid var(--card)', boxShadow: `0 0 5px ${dc}`, cursor: 'pointer', animation: v.isOn ? 'none' : 'vmFlash 0.9s ease-in-out infinite' }}>
+                {!v.isOn && <i style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8, fontStyle: 'normal', fontWeight: 700, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{(v.operator || v.device).slice(0, 14)}</i>}
+              </span>
+            );
+          });
+        })}
         {placed.map((s) => {
           const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
           return (
@@ -1278,6 +1361,7 @@ function FlowRiverView({ rows, apiBase, onSelect }) {
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
+  const [viewMenu, setViewMenu] = useState(false); // the ◫ view drawer
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
@@ -1369,13 +1453,14 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           ))}
         </>}
         <span style={{ flex: 1 }} />
-        <button onClick={() => setView('board')} style={chipStyle(view === 'board')}>🎛️ Board</button>
-        <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
-        <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
-        <button onClick={() => { setView('flow'); backToLive(); }} style={chipStyle(view === 'flow')}>🌡️ Flow</button>
-        <button onClick={() => { setView('map'); backToLive(); }} style={chipStyle(view === 'map')}>🗺️ Map</button>
-        <button onClick={() => { setView('river'); backToLive(); }} style={chipStyle(view === 'river')}>🌊 River</button>
+        {(() => { const cur = SB_VIEWS.find(([k]) => k === view) || SB_VIEWS[0]; return (
+          <button onClick={() => setViewMenu(true)} style={{ ...chipStyle(true), display: 'inline-flex', alignItems: 'center', gap: 7, paddingRight: 14 }}>
+            <span style={{ fontSize: 15 }}>{cur[1]}</span> {cur[2]} <span style={{ fontSize: 9, opacity: 0.7 }}>▸</span>
+          </button>
+        ); })()}
       </div>
+      <style>{SB_CSS}</style>
+      {viewMenu && <ViewDrawer view={view} setView={(v) => { setView(v); backToLive(); }} onClose={() => setViewMenu(false)} />}
 
       {allClosed && (
         <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>

@@ -26,12 +26,13 @@ export default function EventOpsCallPage({ suiteId, token, deviceId }) {
     ? [info.station?.name || info.device.location || 'Hive', info.device.label].filter(Boolean).join(' · ')
     : '';
 
+  const allReasons = (i) => [...(i.reasons || []), ...(i.deviceIssues || [])];
   const send = async () => {
     if (!reason) { setErr('Tap what you need first.'); return; }
     setBusy(true); setErr('');
     try {
       await api.eopCallRaise(suiteId, token, deviceId, { reason, name: name.trim(), comment: comment.trim(), tried: tried.trim() });
-      const lbl = (info.reasons.find((r) => r.key === reason) || {}).label || 'Help';
+      const lbl = (allReasons(info).find((r) => r.key === reason) || {}).label || 'Help';
       setSent(lbl); setReason(''); setComment(''); setTried('');
     } catch (e) { setErr(e.message || 'Could not send — try again.'); } finally { setBusy(false); }
   };
@@ -67,6 +68,18 @@ export default function EventOpsCallPage({ suiteId, token, deviceId }) {
           ))}
         </div>
 
+        {!!(info.deviceIssues || []).length && <>
+          <p style={{ color: 'var(--muted)', fontSize: 12.5, fontWeight: 700, margin: '0 0 8px' }}>Device problem? Tap what's wrong:</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
+            {info.deviceIssues.map((r) => (
+              <button key={r.key} onClick={() => { setReason(r.key); setErr(''); }} style={{ ...reasonBtn(reason === r.key), minHeight: 56, flexDirection: 'row', justifyContent: 'flex-start', padding: '10px 12px' }}>
+                <span style={{ fontSize: 20 }}>{r.icon}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, textTransform: 'capitalize' }}>{r.label}</span>
+              </button>
+            ))}
+          </div>
+        </>}
+
         <label style={lbl}>Your name
           <input style={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="So we know who called" />
         </label>
@@ -78,7 +91,7 @@ export default function EventOpsCallPage({ suiteId, token, deviceId }) {
         </label>
 
         {err && <div style={{ color: 'var(--error, #dc2626)', fontSize: 13, margin: '2px 0 10px' }}>{err}</div>}
-        <button onClick={send} disabled={busy} style={sendBtn}>{busy ? 'Sending…' : reason ? `Send — ${(info.reasons.find((r) => r.key === reason) || {}).label}` : 'Send'}</button>
+        <button onClick={send} disabled={busy} style={sendBtn}>{busy ? 'Sending…' : reason ? `Send — ${(allReasons(info).find((r) => r.key === reason) || {}).label}` : 'Send'}</button>
       </div>
     </Shell>
   );
