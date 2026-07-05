@@ -972,11 +972,13 @@ function HealthMetrics({ monitors: allMonitors, trailing = null }) {
       {/* Metrics fill the left and wrap; the page's control cluster (updated · ⓘ ·
           ⋯) pins to the top-right of the SAME line instead of taking its own row. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {/* Compact tiles so the whole fleet+volume set fits one line before
+            wrapping (no single metric stranded on its own row). */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {tiles.map(([l, v, c]) => (
-            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
-              <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '5px 9px', minWidth: 56 }}>
+              <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.2, textTransform: 'uppercase', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{l}</div>
+              <div style={{ fontSize: 15.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)', whiteSpace: 'nowrap' }}>{v}</div>
             </div>
           ))}
         </div>
