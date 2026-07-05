@@ -5,6 +5,7 @@ import SignalReportPanel from './SignalReportPanel.jsx';
 import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
+import InfoTip from './InfoTip.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 
@@ -1848,6 +1849,7 @@ export default function SignalOps({ entityId, suiteId }) {
           refresh and skip the explainer; desktop keeps the inline buttons. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <InfoTip label="About the Signal board">Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour&apos;s volume.</InfoTip>
         <span style={{ flex: 1 }} />
         {(() => {
           const controls = <>
@@ -1860,9 +1862,6 @@ export default function SignalOps({ entityId, suiteId }) {
           return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
         })()}
       </div>
-      {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
-        Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
-      </p>}
       <SignalBoard monitors={data.monitors || []} />
     </div>
   );

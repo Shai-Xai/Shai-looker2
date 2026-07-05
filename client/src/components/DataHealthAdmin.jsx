@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import InfoTip from './InfoTip.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Admin → 📡 Data health: the BigQuery → Looker stream monitor. Each monitor polls
@@ -1664,6 +1665,7 @@ export function DataHealthOps({ entityId, suiteId }) {
           refresh and skip the explainer; desktop keeps the inline buttons. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
         <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+        <InfoTip label="About Data health">Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.</InfoTip>
         <span style={{ flex: 1 }} />
         <Suspense fallback={null}>
           {(() => {
@@ -1677,9 +1679,6 @@ export function DataHealthOps({ entityId, suiteId }) {
           })()}
         </Suspense>
       </div>
-      {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
-        Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.
-      </p>}
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
         <div style={card}>
