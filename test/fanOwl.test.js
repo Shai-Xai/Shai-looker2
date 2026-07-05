@@ -239,3 +239,13 @@ test('funnel: beacons are whitelisted and roll up in the insights view', async (
   assert.equal(funnel.deeplink_click, 1);
   assert.equal(funnel.drop_table, undefined);
 });
+
+test('coerceOwlJson tolerates fences and prose around the ingest JSON', () => {
+  const { coerceOwlJson } = require('../server/fanOwl');
+  const obj = { knowledge: [{ kind: 'faq', body: 'x' }], pages: [] };
+  assert.deepEqual(coerceOwlJson(JSON.stringify(obj)), obj);                       // bare JSON
+  assert.deepEqual(coerceOwlJson('```json\n' + JSON.stringify(obj) + '\n```'), obj); // fenced
+  assert.deepEqual(coerceOwlJson('Here is the JSON:\n```\n' + JSON.stringify(obj) + '\n```\nHope this helps'), obj); // prose + fence
+  assert.deepEqual(coerceOwlJson('Sure! ' + JSON.stringify(obj)), obj);            // leading prose, no fence
+  assert.throws(() => coerceOwlJson('{"knowledge":[{"kind":"faq","body":"trunca')); // truncated → throws
+});
