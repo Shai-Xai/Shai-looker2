@@ -994,46 +994,46 @@ function StationDayView({ monitors, apiBase, onSelect }) {
 // when 2+ alarmed pins sit in the same corner, a red halo blooms over that AREA —
 // connectivity failures are usually spatial (one mast/switch), so the map shows
 // WHERE it's dying, not just which list rows. Tap a pin → the station deep-dive.
-// One control ▸ left drawer for the six board views (Apple-style): backdrop fades,
-// the panel slides in, the selection pill glides to the tapped row, then it closes.
-const SB_CSS = `
-@keyframes sbFade{from{opacity:0}to{opacity:1}}
-@keyframes sbSlide{from{transform:translateX(-102%)}to{transform:translateX(0)}}
-@media (prefers-reduced-motion:reduce){.sb-anim{animation:none !important;transition:none !important}}`;
+// View switcher: ONE pill on the chips row — tap it and the other views SLIDE OUT
+// inline from the button (Apple segmented-control feel); pick one and it collapses
+// back to just the active view. No drawer, no overlay — all on the same line.
 const SB_VIEWS = [
-  ['board', '🎛️', 'Board', 'tiles by zone'],
-  ['rhythm', '📈', 'Rhythm', 'rate river'],
-  ['stations', '📶', 'Stations', 'day strips'],
-  ['flow', '🌡️', 'Flow', 'heat map'],
-  ['map', '🗺️', 'Map', 'live site plan'],
-  ['river', '🌊', 'River', 'flow particles'],
-  ['network', '🕸️', 'Network', 'operator → station → type'],
+  ['board', '🎛️', 'Board'],
+  ['rhythm', '📈', 'Rhythm'],
+  ['stations', '📶', 'Stations'],
+  ['flow', '🌡️', 'Flow'],
+  ['map', '🗺️', 'Map'],
+  ['river', '🌊', 'River'],
+  ['network', '🕸️', 'Network'],
 ];
-function ViewDrawer({ view, setView, onClose }) {
-  const idx = Math.max(0, SB_VIEWS.findIndex(([k]) => k === view));
-  const [sel, setSel] = useState(idx);
-  const ROW = 54;
-  const choose = (i, k) => { setSel(i); setView(k); setTimeout(onClose, 190); };
-  return createPortal(
-    <div className="sb-anim" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1400, background: 'rgba(0,0,0,0.4)', animation: 'sbFade .2s ease' }}>
-      <div className="sb-anim" onClick={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 'min(78vw, 270px)', background: 'var(--card)', borderRight: '1px solid var(--hairline)', boxShadow: '12px 0 40px rgba(0,0,0,0.35)', animation: 'sbSlide .26s cubic-bezier(.32,.72,.28,1)', padding: '18px 12px', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--muted)', padding: '0 10px 12px' }}>Signal views</div>
-        <div style={{ position: 'relative' }}>
-          <div className="sb-anim" style={{ position: 'absolute', left: 0, right: 0, top: sel * ROW, height: ROW - 6, borderRadius: 12, background: 'color-mix(in srgb, var(--brand) 14%, transparent)', border: '1px solid var(--brand)', transition: 'top .22s cubic-bezier(.32,.72,.28,1)', pointerEvents: 'none' }} />
-          {SB_VIEWS.map(([k, ic, name, hint], i) => (
-            <button key={k} onClick={() => choose(i, k)}
-              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, width: '100%', height: ROW - 6, marginBottom: 6, padding: '0 12px', border: 'none', background: 'none', color: view === k ? 'var(--brand)' : 'var(--text)', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-              <span style={{ fontSize: 22 }}>{ic}</span>
-              <span style={{ display: 'flex', flexDirection: 'column' }}>
-                <b style={{ fontSize: 14.5 }}>{name}</b>
-                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>, document.body);
+function ViewPill({ view, setView, open, setOpen }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', border: `1px solid ${open ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 999, background: 'var(--card)', padding: 3, maxWidth: '100%', overflowX: 'auto', scrollbarWidth: 'none' }}>
+      {SB_VIEWS.map(([k, ic, name]) => {
+        const act = view === k;
+        const show = open || act;
+        return (
+          <button key={k}
+            onClick={() => {
+              if (!open) { setOpen(true); return; }
+              if (!act) setView(k);
+              setTimeout(() => setOpen(false), act ? 0 : 170); // let the highlight land, then fold
+            }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              background: act ? 'color-mix(in srgb, var(--brand) 13%, transparent)' : 'transparent',
+              color: act ? 'var(--brand)' : 'var(--text)', fontWeight: act ? 800 : 600, fontSize: 12,
+              borderRadius: 999, minHeight: 30, whiteSpace: 'nowrap', overflow: 'hidden',
+              maxWidth: show ? 150 : 0, opacity: show ? 1 : 0, padding: show ? '4px 12px' : '4px 0',
+              transition: 'max-width .3s cubic-bezier(.32,.72,.28,1), opacity .18s ease, padding .3s cubic-bezier(.32,.72,.28,1)',
+            }}>
+            <span style={{ fontSize: 14 }}>{ic}</span>{name}
+            {act && !open && <span style={{ fontSize: 9, opacity: 0.6 }}>▸</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 const VM_CSS = `
@@ -1262,7 +1262,7 @@ function FlowRiverView({ rows, apiBase, onSelect }) {
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return () => {};
     const ctx = cv.getContext('2d');
-    const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim() || f;
+    const css = (n, f) => (getComputedStyle(cv).getPropertyValue(n) || '').trim() || f; // read from the canvas: Pulse sets theme vars below the root, so documentElement misses dark mode
     const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const parts = []; let raf = 0; let last = 0; let t = 0;
@@ -1385,7 +1385,7 @@ function CascadeView({ rows, apiBase, onSelect }) {
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return () => {};
     const ctx = cv.getContext('2d');
-    const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim() || f;
+    const css = (n, f) => (getComputedStyle(cv).getPropertyValue(n) || '').trim() || f; // read from the canvas: Pulse sets theme vars below the root, so documentElement misses dark mode
     const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const parts = []; let raf = 0; let last = 0; let t = 0;
@@ -1532,8 +1532,9 @@ function CascadeView({ rows, apiBase, onSelect }) {
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
-  const [viewMenu, setViewMenu] = useState(false); // the ◫ view drawer
+  const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
+  const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -1570,7 +1571,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   // can flick between station families without leaving the page.
   const chipIcon = (m) => (m.area === 'Bar' ? '🍺' : m.area === 'Vendors' ? '🧾' : '🎟️');
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
-  const shown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
+  const famShown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
+  const shown = stPicks.length ? famShown.filter((s) => stPicks.includes(s.name)) : famShown;
 
   // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
   // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
@@ -1616,22 +1618,31 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
         {chips.length > 1 && <>
-          <button onClick={() => { setPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
+          <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
           {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
+            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
               {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
             </button>
           ))}
         </>}
         <span style={{ flex: 1 }} />
-        {(() => { const cur = SB_VIEWS.find(([k]) => k === view) || SB_VIEWS[0]; return (
-          <button onClick={() => setViewMenu(true)} style={{ ...chipStyle(true), display: 'inline-flex', alignItems: 'center', gap: 7, paddingRight: 14 }}>
-            <span style={{ fontSize: 15 }}>{cur[1]}</span> {cur[2]} <span style={{ fontSize: 9, opacity: 0.7 }}>▸</span>
-          </button>
-        ); })()}
+        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
       </div>
-      <style>{SB_CSS}</style>
-      {viewMenu && <ViewDrawer view={view} setView={(v) => { setView(v); backToLive(); }} onClose={() => setViewMenu(false)} />}
+      {/* station-NAME drill: pick a family above and its stations appear here — tap to
+          narrow every view to just those stations; scrolls sideways, never wraps tall. */}
+      {!!picks.length && (() => {
+        const names = [...new Set(famShown.map((s) => s.name))].sort((a, b) => a.localeCompare(b));
+        if (names.length < 2) return null;
+        const stChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
+        return (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', scrollbarWidth: 'thin', marginBottom: 10, paddingBottom: 2 }}>
+            <button onClick={() => setStPicks([])} style={stChip(!stPicks.length)}>All · {names.length}</button>
+            {names.map((n) => (
+              <button key={n} onClick={() => { setStPicks((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n])); setSel(null); }} style={stChip(stPicks.includes(n))}>{n}</button>
+            ))}
+          </div>
+        );
+      })()}
 
       {allClosed && (
         <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
@@ -1658,9 +1669,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       {/* key on the filter set: changing chips while drilled into a station's devices
           resets the river to the (re-filtered) all-stations level — otherwise the
           drill ignores the new filter and the chips look dead. */}
-      {view === 'river' && <FlowRiverView key={picks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
-      {view === 'network' && <CascadeView key={picks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
