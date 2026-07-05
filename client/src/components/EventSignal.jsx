@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ShareMenu from './ShareMenu.jsx';
 import SignalReportPanel from './SignalReportPanel.jsx';
@@ -988,6 +988,241 @@ function StationDayView({ monitors, apiBase, onSelect }) {
   );
 }
 
+// ═══ 🗺️ Venue map — the site plan as a LIVE board ═══════════════════════════════
+// Pins live where stations physically stand (dragged into place once, stored per
+// event via server/venueMap.js). Healthy pins ripple; a dark pin flashes red; and
+// when 2+ alarmed pins sit in the same corner, a red halo blooms over that AREA —
+// connectivity failures are usually spatial (one mast/switch), so the map shows
+// WHERE it's dying, not just which list rows. Tap a pin → the station deep-dive.
+const VM_CSS = `
+@keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
+@keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
+@keyframes vmHalo{0%,100%{opacity:.5}50%{opacity:.95}}
+@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}}`;
+function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
+  const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
+  const [cfg, setCfg] = useState(null);
+  const [pins, setPins] = useState({});
+  const [edit, setEdit] = useState(false);
+  const [placing, setPlacing] = useState(''); // station being placed by tapping the map
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const boxRef = useRef(null);
+  const dragRef = useRef(null); // { name, moved } during a pin drag
+  useEffect(() => {
+    let alive = true;
+    if (!suiteId) { setCfg({ image: '', pins: {} }); return () => {}; }
+    fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`).then((r) => r.json())
+      .then((d) => { if (alive && d && !d.error) { setCfg(d); setPins(d.pins || {}); } else if (alive) setCfg({ image: '', pins: {} }); })
+      .catch(() => { if (alive) setCfg({ image: '', pins: {} }); });
+    return () => { alive = false; };
+  }, [scope, suiteId]);
+  // one row per station name (a name can appear under one monitor only in practice)
+  const sts = []; const seenN = new Set();
+  for (const r of rows) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+  const placed = sts.filter((s) => pins[s.name]);
+  const unplaced = sts.filter((s) => !pins[s.name]);
+  const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
+  const alarmed = placed.filter(isAlarm);
+  // area halos: 2+ alarmed pins within ~20% of the map of each other = the AREA is dying
+  const halos = []; const used = new Set();
+  for (const a of alarmed) {
+    if (used.has(a.name)) continue;
+    const pa = pins[a.name];
+    const near = alarmed.filter((b) => { const pb = pins[b.name]; return Math.hypot(pb.x - pa.x, pb.y - pa.y) < 0.2; });
+    if (near.length >= 2) { near.forEach((b) => used.add(b.name)); halos.push({ x: near.reduce((t, b) => t + pins[b.name].x, 0) / near.length, y: near.reduce((t, b) => t + pins[b.name].y, 0) / near.length, n: near.length }); }
+  }
+  const frac = (e) => { const b = boxRef.current.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) }; };
+  const savePins = (next) => {
+    setSaving(true);
+    fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pins: next }) })
+      .then((r) => r.json()).then((d) => { if (d && !d.error) { setCfg(d); setPins(d.pins || {}); setDirty(false); } })
+      .finally(() => setSaving(false));
+  };
+  const uploadMap = (file) => {
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 1600 / img.width);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.82);
+      setSaving(true);
+      fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) })
+        .then((r) => r.json()).then((d) => { if (d && d.error) alert(d.error); else if (d) setCfg(d); })
+        .finally(() => setSaving(false));
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  };
+  const onMapPointerDown = (e) => {
+    if (!edit || !placing) return;
+    const p = frac(e);
+    setPins((prev) => ({ ...prev, [placing]: p })); setPlacing(''); setDirty(true);
+  };
+  const onPinPointerDown = (name) => (e) => {
+    if (!edit) return;
+    e.stopPropagation(); e.preventDefault();
+    dragRef.current = { name, moved: false };
+    const move = (ev) => { dragRef.current.moved = true; const p = frac(ev); setPins((prev) => ({ ...prev, [name]: p })); setDirty(true); };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); dragRef.current = null; };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
+  if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
+  const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
+  const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
+  return (
+    <div>
+      <style>{VM_CSS}</style>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
+          {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
+            : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+        </span>
+        {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
+        {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
+        {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
+        <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
+      </div>
+      <div ref={boxRef} onPointerDown={onMapPointerDown}
+        style={{ position: 'relative', width: '100%', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        {cfg.image
+          ? <img src={cfg.image} alt="venue site plan" style={{ display: 'block', width: '100%', height: 'auto', userSelect: 'none', pointerEvents: 'none' }} />
+          : <div style={{ aspectRatio: '4 / 3', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)', padding: 8 }}>No site plan yet — ✏️ Edit pins → ⬆ Upload site plan (pins work on the blank grid too)</span>
+            </div>}
+        {halos.map((h2, i) => (
+          <div key={i} className="vm-anim" style={{ position: 'absolute', left: `${h2.x * 100}%`, top: `${h2.y * 100}%`, width: 130 + h2.n * 30, height: 130 + h2.n * 30, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(220,38,38,.30) 0%, transparent 70%)', animation: 'vmHalo 1.6s ease-in-out infinite', pointerEvents: 'none' }}>
+            <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
+          </div>
+        ))}
+        {placed.map((s) => {
+          const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
+          return (
+            <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
+              onClick={(e) => { e.stopPropagation(); if (edit) return; onSelect(s); }}
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
+              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 26, height: 26, borderRadius: '50%', border: `1.5px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
+              <span className={alarm ? 'vm-anim' : ''} style={{ width: 13, height: 13, borderRadius: '50%', background: col, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
+              <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 700, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card)' }}>{s.name}</span>
+              <span style={{ position: 'absolute', bottom: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 9, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
+              {edit && <button onClick={(e) => { e.stopPropagation(); unpin(s.name); }} onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -4, right: -6, width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 9, lineHeight: '15px', padding: 0, cursor: 'pointer' }}>✕</button>}
+            </div>
+          );
+        })}
+      </div>
+      {edit && !!unplaced.length && (
+        <div style={{ ...card, marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', width: '100%' }}>Unplaced · tap one, then tap its spot on the map</span>
+          {unplaced.map((s) => <button key={s.name} style={btn(placing === s.name)} onClick={() => setPlacing(placing === s.name ? '' : s.name)}>{s.name}</button>)}
+        </div>
+      )}
+      {!edit && !!alarmed.length && (
+        <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
+        </div>
+      )}
+      {!edit && !!unplaced.length && <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6 }}>{unplaced.length} station{unplaced.length > 1 ? 's' : ''} not on the map yet — ✏️ Edit pins to place: {unplaced.slice(0, 6).map((s) => s.name).join(' · ')}{unplaced.length > 6 ? ' …' : ''}</div>}
+    </div>
+  );
+}
+
+// ═══ 🌊 Flow river — transactions as moving particles ═══════════════════════════
+// Every station streams sparks into the Pulse core; stream density IS throughput
+// (txns/h from the same roster snapshots the board uses — no extra Looker reads).
+// A dark station's stream stutters red and its node flashes. Tap a node → deep-dive.
+function FlowRiverView({ rows, onSelect }) {
+  const cvRef = useRef(null);
+  const nodesRef = useRef([]);
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return () => {};
+    const ctx = cv.getContext('2d');
+    const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim() || f;
+    const C = { bg: css('--card', '#101418'), text: css('--text', '#e8eef6'), muted: css('--muted', '#8497ad'), line: css('--hairline', 'rgba(140,160,190,.2)'), brand: css('--brand', '#ff385c') };
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const parts = []; let raf = 0; let last = 0; let t = 0;
+    const layout = () => {
+      const sts = []; const seenN = new Set();
+      for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
+      sts.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+      const list = sts.slice(0, 22);
+      for (const s of sts.slice(22)) if (s.status === 'stale') list.push(s);
+      const w = cv.clientWidth || 720;
+      const hgt = Math.max(340, list.length * 30 + 70);
+      if (cv.width !== w * 2 || cv.height !== hgt * 2) { cv.width = w * 2; cv.height = hgt * 2; cv.style.height = hgt + 'px'; ctx.setTransform(2, 0, 0, 2, 0, 0); }
+      const x0 = Math.min(170, Math.max(120, w * 0.3));
+      nodesRef.current = list.map((s, i) => ({ s, x: x0, y: 44 + (hgt - 80) * (list.length === 1 ? 0.5 : i / (list.length - 1)) }));
+      return { w, hgt, x0, cx: w - 84, cy: hgt / 2 };
+    };
+    const isAlarm = (s) => s.status === 'stale' || ((s.off || 0) > 0 && !(s.on || 0));
+    const frame = (ts) => {
+      const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts; t += dt;
+      const { w, hgt, cx, cy } = layout();
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
+      const nodes = nodesRef.current;
+      const maxTx = Math.max(1, ...nodes.map((n) => n.s.txnH || 0));
+      const totTx = nodes.reduce((a, n) => a + (n.s.txnH || 0), 0);
+      // core
+      const rr = 30 + 2.5 * Math.sin(t * 2.2);
+      const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, rr + 22);
+      g.addColorStop(0, C.brand); g.addColorStop(1, 'transparent');
+      ctx.globalAlpha = 0.35; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, rr + 22, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.bg; ctx.strokeStyle = C.brand; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.text; ctx.font = '800 12px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText('PULSE', cx, cy);
+      ctx.fillStyle = C.muted; ctx.font = '9px ui-monospace,monospace'; ctx.fillText(totTx.toLocaleString('en-ZA') + '/h', cx, cy + 13);
+      for (const n of nodes) {
+        const s = n.s; const alarm = isAlarm(s);
+        const col = alarm ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh;
+        ctx.strokeStyle = C.line; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.bezierCurveTo((n.x + cx) / 2, n.y, (n.x + cx) / 2, cy, cx - rr - 3, cy); ctx.stroke(); ctx.globalAlpha = 1;
+        if (alarm) { const fl = (Math.sin(t * 7 + n.y) + 1) / 2; ctx.strokeStyle = `rgba(220,38,38,${0.3 + 0.55 * fl})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(n.x, n.y, 8 + 5 * fl, 0, 7); ctx.stroke(); }
+        ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 7;
+        ctx.beginPath(); ctx.arc(n.x, n.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = C.text; ctx.font = '600 10.5px -apple-system,sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText(s.name.length > 20 ? s.name.slice(0, 19) + '…' : s.name, n.x - 12, n.y + 3.5);
+        ctx.fillStyle = alarm ? STATUS_COLOR.stale : C.muted; ctx.font = '9px ui-monospace,monospace';
+        ctx.fillText(`${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}/h`, n.x - 12, n.y + 14);
+        const stutter = alarm && Math.sin(t * 3 + n.y) > -0.2;
+        const spawn = reduced ? 0 : dt * (1.5 + 11 * ((s.txnH || 0) / maxTx)) * (stutter ? 0.12 : 1);
+        if (Math.random() < spawn) parts.push({ p: 0, sp: 0.28 + Math.random() * 0.3, y0: n.y, x0: n.x, jit: (Math.random() - 0.5) * 12, col: alarm ? STATUS_COLOR.stale : TXN_COL });
+      }
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i]; p.p += dt * p.sp;
+        if (p.p >= 1) { parts.splice(i, 1); continue; }
+        const u = p.p, m = 1 - u, mx = (p.x0 + cx) / 2;
+        const px = m * m * m * p.x0 + 3 * m * m * u * mx + 3 * m * u * u * mx + u * u * u * (cx - rr - 3);
+        const py = m * m * m * p.y0 + 3 * m * m * u * p.y0 + 3 * m * u * u * cy + u * u * u * cy + p.jit * Math.sin(u * Math.PI);
+        ctx.globalAlpha = 0.3 + 0.7 * Math.sin(u * Math.PI); ctx.fillStyle = p.col; ctx.fillRect(px, py, 2.2, 2.2); ctx.globalAlpha = 1;
+      }
+      if (parts.length > 2200) parts.splice(0, parts.length - 2200);
+      if (!reduced) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const pick = (e) => {
+    const b = cvRef.current.getBoundingClientRect();
+    const x = e.clientX - b.left, y = e.clientY - b.top;
+    let best = null, bd = 26;
+    for (const n of nodesRef.current) { const d = Math.hypot(x - n.x, y - n.y); if (d < bd) { bd = d; best = n; } }
+    if (best) onSelect(best.s);
+  };
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      <canvas ref={cvRef} onClick={pick} style={{ display: 'block', width: '100%' }} />
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', padding: '7px 12px', borderTop: '1px solid var(--hairline)', fontSize: 10.5, color: 'var(--muted)' }}>
+        <span>each spark = transactions flowing to Pulse · stream density = throughput</span>
+        <span style={{ color: STATUS_COLOR.stale }}>red stutter = station dark</span>
+        <span>tap a station for its devices &amp; operators</span>
+      </div>
+    </div>
+  );
+}
+
 export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
@@ -1085,6 +1320,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         <button onClick={() => { setView('rhythm'); backToLive(); }} style={chipStyle(view === 'rhythm')}>📈 Rhythm</button>
         <button onClick={() => { setView('stations'); backToLive(); }} style={chipStyle(view === 'stations')}>📶 Stations</button>
         <button onClick={() => { setView('flow'); backToLive(); }} style={chipStyle(view === 'flow')}>🌡️ Flow</button>
+        <button onClick={() => { setView('map'); backToLive(); }} style={chipStyle(view === 'map')}>🗺️ Map</button>
+        <button onClick={() => { setView('river'); backToLive(); }} style={chipStyle(view === 'river')}>🌊 River</button>
       </div>
 
       {allClosed && (
@@ -1104,6 +1341,12 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
       {view === 'flow' && (
         <EventFlow monitors={pick ? monitors.filter((m) => m.id === pick) : monitors} apiBase={apiBase} onSelect={setSel} />
       )}
+
+      {view === 'map' && (
+        <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
+      )}
+
+      {view === 'river' && <FlowRiverView rows={shown} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />

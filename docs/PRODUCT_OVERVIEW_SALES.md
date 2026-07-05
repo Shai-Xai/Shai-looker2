@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-04 (📣 Event Ops device support calls · 🎛️ Event Signal: flow meter, drag-to-replay, journal · 🚨 staff alerts phase 1) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-05 (🗺️ Venue map + 🌊 Flow river on the Signal board) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -785,6 +785,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-05** — **Signal board: 🗺️ Venue map + 🌊 Flow river** 🧪: upload the event's
+  site plan and drag each station's pin onto it once — the map then goes LIVE: healthy
+  pins ripple green, a dark station's pin flashes red, and when several stations in the
+  same corner degrade together a red **"⚠ AREA" halo** blooms over that part of the venue
+  (network failures are usually by area — now you see WHERE, instantly). Tap a pin for
+  that station's devices & operators. The 🌊 River view shows transactions as moving
+  sparks streaming into Pulse — a choking station's stream stutters red. Both self-service
+  (clients manage their own map) and admin-managed.
 - **2026-07-04 (night)** — **Signal board: Stations view + provider report** 🧪: a new
   📶 Stations view puts every station's online/offline-through-the-day strip on one
   screen, grouped by zone, with an average-transactions line overlaid (see throughput
