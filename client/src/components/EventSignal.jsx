@@ -433,20 +433,20 @@ function NeedsEyes({ rows, onSelect }) {
 // draggable strip: the playhead sits at LIVE; drag it back to replay the day
 // (readout shows that moment's online vs offline). Built from the observed
 // offline log — Pulse's own record, no live Looker cost.
-function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
+function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub, day = '' }) {
   const [logs, setLogs] = useState({}); // monitor id -> observed log
   const [journal, setJournal] = useState(false); // 30-min status journal open?
   useEffect(() => {
     let alive = true;
     monitors.forEach((m) => {
       if (logs[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=${day ? 'day:' + day : 'start'}`)
         .then((r) => r.json()).then((d) => { if (alive && d && d.configured) setLogs((p) => ({ ...p, [m.id]: d })); })
         .catch(() => {});
     });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor
-  }, [monitors.map((m) => m.id).join(','), apiBase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor (keyed on day upstream)
+  }, [monitors.map((m) => m.id).join(','), apiBase, day]);
   const BIN = 10 * 60000;
   const bins = new Map(); // binStartMs -> {on, off}
   // ONLY the monitors currently on the board — a filter chip must re-scope
@@ -1599,6 +1599,18 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
   const open = openMons.length ? openMons : (monitors || []);
   const allClosed = !openMons.length && (monitors || []).length > 0;
   const backToLive = () => { setScrubIdx(null); setReplay(null); };
+  // 📅 past festival days with coverage (from the observed log) — one inline picker
+  // beside the view pill, driving Stations/Rhythm/deep-dives AND the Board (via the
+  // replay strip, auto-parked at the day's close). Live-only views ignore it.
+  const dayLbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+  const todaySAST = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10);
+  const dayOpts = [...new Set((monitors || []).flatMap((m) => m.days || []).filter((d) => d < todaySAST))].sort().slice(-7);
+  const dayAware = view === 'board' || view === 'stations' || view === 'rhythm'; // the views a past day applies to
+  useEffect(() => {
+    if (day && view === 'board') setScrubIdx(1e9); // huge → PulseStrip clamps to the day's last bin, board shows its close
+    else if (!day) { setScrubIdx(null); setReplay(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to day / view only
+  }, [day, view]);
 
   const rows = [];
   for (const m of open) {
@@ -1680,6 +1692,14 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
             </button>
           ))}
         </>}
+        <span style={{ flex: 1 }} />
+        {dayOpts.length > 0 && dayAware && (
+          <select value={day} onChange={(e) => { setDay(e.target.value); setSel(null); }} title="Show a past festival day"
+            style={{ border: `1px solid ${day ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: day ? 'var(--brand)' : 'var(--text)', fontWeight: day ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 150 }}>
+            <option value="">📅 LIVE · today</option>
+            {dayOpts.map((d) => <option key={d} value={d}>📅 {dayLbl(d)}</option>)}
+          </select>
+        )}
         <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
       </div>
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
@@ -1698,26 +1718,14 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         );
       })()}
 
-      {/* 📅 Day picker — the event's PAST days that actually have coverage, taken
-          from the observed log (m.days, SAST dates) so it works whether a monitor
-          uses a fixed start or a daily anchor. Applies to Stations, Rhythm and the
-          deep-dives; Board/Map/River/Network stay live. A day runs start → +24h. */}
-      {(view === 'stations' || view === 'rhythm') && (() => {
-        const today = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10); // SAST calendar date
-        const set = new Set();
-        (monitors || []).forEach((m) => (m.days || []).forEach((d) => { if (d < today) set.add(d); }));
-        const days = [...set].sort().slice(-7);
-        if (!days.length) return null;
-        const dChip = (act) => ({ ...chipStyle(act), padding: '3px 10px', fontSize: 11, minHeight: 26, flex: '0 0 auto' });
-        const lbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
-        return (
-          <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto', marginBottom: 10 }}>
-            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--muted)', flex: '0 0 auto' }}>📅</span>
-            <button onClick={() => setDay('')} style={dChip(!day)}>LIVE · today</button>
-            {days.map((d) => <button key={d} onClick={() => { setDay(day === d ? '' : d); setSel(null); }} style={dChip(day === d)}>{lbl(d)}</button>)}
-          </div>
-        );
-      })()}
+      {day && dayAware && (
+        <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
+          <b style={{ fontSize: 12.5 }}>📅 {dayLbl(day)}</b>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>showing that whole festival day{view === 'board' ? ' — the board reflects its closing state; drag the pulse strip to replay it' : ''}</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => { setDay(''); setSel(null); }} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '4px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', minHeight: 30, fontFamily: 'inherit' }}>▶ Back to LIVE</button>
+        </div>
+      )}
 
       {allClosed && (
         <div style={{ ...card, borderLeft: '4px solid var(--muted)', fontSize: 12.5, color: 'var(--muted)', marginBottom: 10, padding: '9px 12px' }}>
@@ -1750,8 +1758,8 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
-      <PulseStrip monitors={picked(open)} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} />
-      {replay && (
+      <PulseStrip key={'ps' + day} monitors={picked(open)} apiBase={apiBase} rows={shown} idx={scrubIdx} setIdx={setScrubIdx} onScrub={setReplay} day={day} />
+      {replay && !day && (
         <div style={{ ...card, borderLeft: '4px solid var(--brand)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', marginBottom: 10 }}>
           <b style={{ fontSize: 12.5 }}>⏪ Replay · {replay.t.toTimeString().slice(0, 5)}</b>
           <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>the whole board shows that moment — <b style={{ color: STATUS_COLOR.fresh }}>{replay.on}</b> on · <b style={{ color: replay.off ? STATUS_COLOR.stale : 'var(--muted)' }}>{replay.off}</b> dark</span>
