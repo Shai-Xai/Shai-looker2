@@ -17,7 +17,7 @@
     font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased; overflow-x:hidden;
   }
-  .wrap{max-width:1320px;margin:0 auto;padding:40px 20px 80px}
+  .wrap{max-width:1400px;margin:0 auto;padding:40px 20px 80px}
 
   /* ---------- header ---------- */
   .eyebrow{
@@ -56,7 +56,7 @@
       #0e0e13;
   }
   #flow{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .cols{position:relative;z-index:1;display:grid;grid-template-columns:218px 1fr 122px 430px;gap:16px;padding:24px;min-height:680px;align-items:center}
+  .cols{position:relative;z-index:1;display:grid;grid-template-columns:198px 1fr 248px 540px;gap:16px;padding:24px;min-height:680px;align-items:center}
 
   .colhead{
     font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
@@ -122,21 +122,21 @@
   }
   .core-cap.answering{color:#22d3ee}
 
-  /* actions column */
-  .actsCol{display:flex;flex-direction:column;align-items:stretch;justify-content:center}
-  .acts{display:flex;flex-direction:column;gap:9px}
+  /* mid column: actions + channels, close to the brain */
+  .midCol{display:flex;flex-direction:column;justify-content:center;gap:14px;min-width:0}
+  .acts{display:flex;flex-wrap:wrap;gap:7px}
   .act{
-    display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
-    border-radius:999px;padding:8px 12px;font-weight:700;font-size:11.5px;color:var(--mut);
+    display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:6px 11px;font-weight:700;font-size:11px;color:var(--mut);
     transition:color .3s,border-color .3s,box-shadow .3s;white-space:nowrap;
   }
-  .act i{font-style:normal;font-size:13px;filter:grayscale(.4);transition:filter .3s}
+  .act i{font-style:normal;font-size:12px;filter:grayscale(.4);transition:filter .3s}
   .act.fire{color:var(--ink);border-color:rgba(255,90,122,.55);box-shadow:0 0 18px rgba(255,56,92,.28)}
   .act.fire i{filter:none;animation:blip .5s}
 
-  /* surfaces / device composition */
+  /* devices column — the hero */
   .surfs{display:flex;flex-direction:column;gap:12px}
-  .devices{position:relative}
+  .devices{position:relative;margin-bottom:26px}
   .desk-frame{
     background:#101016;border:1px solid var(--line2);border-radius:12px;overflow:hidden;
     box-shadow:0 22px 50px -20px rgba(0,0,0,.75);position:relative;
@@ -146,7 +146,7 @@
   .desk-chrome i:first-child{background:#e0556a90}
   .desk-chrome .u{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-left:6px}
   .desk-shot{display:block;width:100%;height:auto}
-  .desk-alerts{position:absolute;left:10px;right:96px;bottom:10px;display:flex;flex-direction:column;gap:6px;pointer-events:none;z-index:2}
+  .desk-alerts{position:absolute;left:12px;right:186px;bottom:12px;display:flex;flex-direction:column;gap:6px;pointer-events:none;z-index:2}
 
   /* desktop demo: nav drawer + simulated cursor */
   .desk-nav{
@@ -176,8 +176,8 @@
   @keyframes ring{to{transform:translate(-50%,-50%) scale(1.5);opacity:0}}
 
   .phone-frame{
-    position:absolute;right:-6px;bottom:-20px;width:126px;
-    background:#0c0c12;border:1.5px solid #3a3a46;border-radius:20px;padding:6px 6px 8px;
+    position:absolute;right:-8px;bottom:-26px;width:168px;
+    background:#0c0c12;border:1.5px solid #3a3a46;border-radius:24px;padding:7px 7px 9px;
     box-shadow:0 26px 54px -16px rgba(0,0,0,.85);overflow:hidden;
   }
   .phone-notch{width:40px;height:4px;border-radius:99px;background:#3a3a46;margin:1px auto 5px}
@@ -192,11 +192,11 @@
     display:flex;flex-direction:column;overflow:hidden;
   }
   .owl-sheet.open{transform:none}
-  .os-head{display:flex;align-items:center;gap:6px;padding:6px 9px;border-bottom:1px solid var(--line);font-size:9px;font-weight:700}
-  .os-head img{width:13px;height:13px;border-radius:99px}
+  .os-head{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700}
+  .os-head img{width:15px;height:15px;border-radius:99px}
   .os-head small{font-family:var(--mono);font-size:7px;color:var(--dim);font-weight:400;margin-left:auto}
   .os-msgs{flex:1;padding:7px;display:flex;flex-direction:column;gap:5px;overflow:hidden;justify-content:flex-end}
-  .os-b{max-width:88%;padding:4px 7px;border-radius:9px;font-size:8.6px;line-height:1.45;animation:pop .3s}
+  .os-b{max-width:88%;padding:5px 8px;border-radius:9px;font-size:10px;line-height:1.45;animation:pop .3s}
   .os-b.me{align-self:flex-end;background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;border-bottom-right-radius:3px}
   .os-b.owl{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-bottom-left-radius:3px}
   .os-dots{display:inline-flex;gap:2px;align-items:center;height:8px}
@@ -205,7 +205,7 @@
   .os-dots i:nth-child(3){animation-delay:.3s}
   @keyframes dots{40%{transform:translateY(-2px);opacity:1}80%{opacity:.4}}
   .os-input{display:flex;gap:5px;padding:5px 7px;border-top:1px solid var(--line);align-items:center}
-  .os-field{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:8px;color:var(--ink);min-height:16px;white-space:nowrap;overflow:hidden}
+  .os-field{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:4px 9px;font-size:9.5px;color:var(--ink);min-height:18px;white-space:nowrap;overflow:hidden}
   .os-field .caret{display:inline-block;width:1px;height:8px;background:#7dd8e8;animation:caret 1s steps(1) infinite;vertical-align:-1px;margin-left:1px}
   @keyframes caret{50%{opacity:0}}
   .os-send{width:18px;height:18px;flex:none;border-radius:99px;background:linear-gradient(90deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff}
@@ -222,29 +222,30 @@
   .phone-alerts .toast small{font-size:7.5px}
   @keyframes pop{from{transform:translateY(8px) scale(.96);opacity:0}}
 
-  .chans{display:flex;flex-direction:column;gap:8px;margin-top:14px}
-  .chan{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:9px 11px}
+  .chans{display:flex;flex-direction:column;gap:7px}
+  .chan{display:flex;gap:9px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:8px 10px;min-width:0}
   .chan-ic{
-    width:28px;height:28px;border-radius:99px;flex:none;display:flex;align-items:center;justify-content:center;
+    width:26px;height:26px;border-radius:99px;flex:none;display:flex;align-items:center;justify-content:center;
     background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);
     border:1px solid color-mix(in srgb,var(--cc) 35%,transparent);overflow:hidden;
   }
-  .chan-ic svg{width:15px;height:15px;fill:currentColor}
+  .chan-ic svg{width:14px;height:14px;fill:currentColor}
   .chan-ic img{width:100%;height:100%;object-fit:cover}
   .chan-body{min-width:0;flex:1}
   .chan-name{font-weight:700;font-size:12px;display:flex;gap:8px;align-items:baseline}
   .chan-name small{font-family:var(--mono);font-size:9px;color:var(--dim);font-weight:400}
-  .chan-msg{font-size:11px;color:var(--mut);line-height:1.5;margin-top:2px;transition:opacity .3s;overflow:hidden}
+  .chan-msg{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:2px;transition:opacity .3s;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .chan-msg .q{color:#7dd8e8;font-style:italic}
   .chan-msg .q::before{content:'you · ';font-family:var(--mono);font-size:9px;font-style:normal;color:var(--dim);letter-spacing:.08em}
   .chan.blip .chan-ic{animation:blip .5s}
 
-  .integr{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .integr .chan{padding:8px 10px}
-  .integr .chan-msg{font-size:10px;line-height:1.45}
+  .integr{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .integr .chan{padding:7px 9px;flex-direction:column;gap:5px}
+  .integr .chan-msg{font-size:9.5px;line-height:1.4;-webkit-line-clamp:3}
+  .integr .chan-name{font-size:11px}
   .ask-hint{
-    font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.04em;
-    margin-top:10px;padding-left:2px;line-height:1.6;
+    font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:.04em;
+    padding-left:2px;line-height:1.6;
   }
   .ask-hint b{color:#7dd8e8;font-weight:600}
 
@@ -263,18 +264,19 @@
   .note b{color:var(--mut);font-weight:600}
 
   /* ---------- responsive ---------- */
-  @media (max-width:1020px){
+  @media (max-width:1120px){
     .cols{grid-template-columns:1fr;min-height:0;gap:28px;padding:20px 16px}
     .srcs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .src-tick{font-size:10px}
     .coreCol{order:2}
-    .actsCol{order:3}
-    .acts{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:8px}
-    .surfs{order:4;max-width:440px;margin:0 auto;width:100%}
-    .phone-frame{width:116px}
+    .midCol{order:3;max-width:440px;margin:0 auto;width:100%}
+    .acts{justify-content:center}
+    .surfs{order:4;max-width:480px;margin:0 auto;width:100%}
+    .phone-frame{width:140px}
+    .desk-alerts{right:150px}
     .uses{grid-template-columns:1fr}
   }
-  @media (max-width:480px){ .desk-alerts{right:66px} .phone-frame{width:100px} .integr{grid-template-columns:1fr} }
+  @media (max-width:480px){ .desk-alerts{right:96px} .phone-frame{width:118px} .integr{grid-template-columns:1fr} }
 
   @media (prefers-reduced-motion:reduce){
     .core-ring{animation:none}
@@ -322,13 +324,24 @@
         <div class="core-cap" id="cap">correlating streams…</div>
       </section>
 
-      <section class="actsCol">
-        <p class="colhead"><b>It acts</b></p>
-        <div class="acts" id="acts"></div>
+      <section class="midCol">
+        <div>
+          <p class="colhead"><b>It acts</b> · insight → action</p>
+          <div class="acts" id="acts"></div>
+        </div>
+        <div>
+          <p class="colhead"><b>On your channels</b></p>
+          <div class="chans" id="chans"></div>
+        </div>
+        <div>
+          <p class="colhead"><b>Ad audiences</b> · auto-synced</p>
+          <div class="integr" id="integr"></div>
+        </div>
+        <div class="ask-hint">💬 <b>ask the Owl anything</b> — plain language, any channel. cyan = your question flowing in; the answer flows back.</div>
       </section>
 
       <section class="surfs">
-        <p class="colhead"><b>Insight out</b> · every surface</p>
+        <p class="colhead"><b>Insight out</b> · the Pulse apps</p>
         <div class="devices">
           <div class="desk-frame">
             <div class="desk-chrome"><i></i><i></i><i></i><span class="u">pulse.howler.co.za/d/kff-live</span></div>
@@ -348,9 +361,6 @@
             </div>
           </div>
         </div>
-        <div class="chans" id="chans"></div>
-        <div class="integr" id="integr"></div>
-        <div class="ask-hint">💬 <b>ask the Owl anything</b> — plain language, any channel. cyan = your question flowing in; the answer flows back.</div>
       </section>
 
     </div>
@@ -405,7 +415,7 @@
     { id:'web',  name:'Web',          color:'#a78bfa' },
     { id:'app',  name:'App',          color:'#60a5fa' },
     { id:'ops',  name:'Event ops',    color:'#a3e635' },
-    { id:'gcp',  name:'Google Cloud', tag:'GA4 · BigQuery', color:'#4285f4', icon:'googlecloud' },
+    { id:'gcp',  name:'Google Cloud', tag:'GA4 · BQ', color:'#4285f4', icon:'googlecloud' },
   ];
 
   const ACTIONS = [
@@ -417,14 +427,14 @@
   ];
 
   const CHANNELS = [
-    { id:'webapp',   name:'Pulse Web App', tag:'pulse.howler.co.za', color:'#ff385c', img:HOWLER_URI, hello:'Dashboards, digests, campaigns — the full OS…' },
+    { id:'webapp',   name:'Pulse Web App', tag:'the OS', color:'#ff385c', img:HOWLER_URI, hello:'Dashboards, digests, campaigns — the full OS…' },
     { id:'whatsapp', name:'WhatsApp',      tag:'digests + alerts',   color:'#25d366', icon:'whatsapp', hello:'Your daily digest arrives here…' },
     { id:'claude',   name:'Claude',        tag:'Owl via MCP',        color:'#d97757', icon:'claude',   hello:'Ask the Owl anything about your event…' },
     { id:'chatgpt',  name:'ChatGPT',       tag:'Owl connector',      color:'#74aa9c', icon:'openai',   hello:'Same brain, your team’s tool of choice…' },
   ];
   const INTEGRATIONS = [
-    { id:'tiktok', name:'TikTok Ads', tag:'audience sync', color:'#69c9d0', icon:'tiktok', hello:'Segments sync here as ad audiences…' },
-    { id:'meta',   name:'Meta Ads',   tag:'audience sync', color:'#0082fb', icon:'meta',   hello:'Retargeting audiences, always fresh…' },
+    { id:'tiktok', name:'TikTok Ads', tag:'', color:'#69c9d0', icon:'tiktok', hello:'Segments sync here as ad audiences…' },
+    { id:'meta',   name:'Meta Ads',   tag:'', color:'#0082fb', icon:'meta',   hello:'Retargeting audiences, always fresh…' },
   ];
 
   const SCENARIOS = {
@@ -531,7 +541,7 @@
   function chanHtml(c) {
     const ic = c.img ? '<img src="' + c.img + '" alt="">' : svgIcon(c.icon);
     return '<div class="chan-ic">' + ic + '</div><div class="chan-body">' +
-      '<div class="chan-name">' + c.name + ' <small>' + c.tag + '</small></div>' +
+      '<div class="chan-name">' + c.name + (c.tag ? ' <small>' + c.tag + '</small>' : '') + '</div>' +
       '<div class="chan-msg" id="m-' + c.id + '">' + c.hello + '</div></div>';
   }
   const chansEl = document.getElementById('chans');
