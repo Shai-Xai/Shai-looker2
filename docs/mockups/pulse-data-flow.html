@@ -56,7 +56,7 @@
       #0e0e13;
   }
   #flow{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .cols{position:relative;z-index:1;display:grid;grid-template-columns:198px 1fr 248px 540px;gap:16px;padding:24px;min-height:680px;align-items:center}
+  .cols{position:relative;z-index:1;display:grid;grid-template-columns:198px 1fr 560px;gap:18px;padding:24px;min-height:680px;align-items:center}
 
   .colhead{
     font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
@@ -122,9 +122,8 @@
   }
   .core-cap.answering{color:#22d3ee}
 
-  /* mid column: actions + channels, close to the brain */
-  .midCol{display:flex;flex-direction:column;justify-content:center;gap:14px;min-width:0}
-  .acts{display:flex;flex-wrap:wrap;gap:7px}
+  /* actions row + channel dock, centred under the Owl */
+  .acts{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;max-width:480px}
   .act{
     display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
     border-radius:999px;padding:6px 11px;font-weight:700;font-size:11px;color:var(--mut);
@@ -133,6 +132,28 @@
   .act i{font-style:normal;font-size:12px;filter:grayscale(.4);transition:filter .3s}
   .act.fire{color:var(--ink);border-color:rgba(255,90,122,.55);box-shadow:0 0 18px rgba(255,56,92,.28)}
   .act.fire i{filter:none;animation:blip .5s}
+
+  .dock{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:4px}
+  .dock-item{display:flex;flex-direction:column;align-items:center;gap:5px;width:62px}
+  .dock-ic{
+    width:38px;height:38px;border-radius:99px;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb,var(--cc) 15%,#14141b);color:var(--cc);
+    border:1px solid color-mix(in srgb,var(--cc) 38%,transparent);overflow:hidden;
+    transition:box-shadow .3s;
+  }
+  .dock-ic svg{width:18px;height:18px;fill:currentColor}
+  .dock-ic img{width:100%;height:100%;object-fit:cover}
+  .dock-item small{font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap;letter-spacing:.03em}
+  .dock-item.blip .dock-ic{animation:blip .5s;box-shadow:0 0 18px color-mix(in srgb,var(--cc) 55%,transparent)}
+
+  .feed{
+    max-width:470px;min-height:46px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:8px 12px;font-size:11.5px;line-height:1.5;color:var(--mut);
+    transition:opacity .3s;text-align:left;width:100%;
+  }
+  .feed b{font-weight:700}
+  .feed .q{color:#7dd8e8;font-style:italic}
+  .feed .q::before{content:'you · ';font-family:var(--mono);font-size:9px;font-style:normal;color:var(--dim);letter-spacing:.08em}
 
   /* devices column — the hero */
   .surfs{display:flex;flex-direction:column;gap:12px}
@@ -222,30 +243,9 @@
   .phone-alerts .toast small{font-size:7.5px}
   @keyframes pop{from{transform:translateY(8px) scale(.96);opacity:0}}
 
-  .chans{display:flex;flex-direction:column;gap:7px}
-  .chan{display:flex;gap:9px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:8px 10px;min-width:0}
-  .chan-ic{
-    width:26px;height:26px;border-radius:99px;flex:none;display:flex;align-items:center;justify-content:center;
-    background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);
-    border:1px solid color-mix(in srgb,var(--cc) 35%,transparent);overflow:hidden;
-  }
-  .chan-ic svg{width:14px;height:14px;fill:currentColor}
-  .chan-ic img{width:100%;height:100%;object-fit:cover}
-  .chan-body{min-width:0;flex:1}
-  .chan-name{font-weight:700;font-size:12px;display:flex;gap:8px;align-items:baseline}
-  .chan-name small{font-family:var(--mono);font-size:9px;color:var(--dim);font-weight:400}
-  .chan-msg{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:2px;transition:opacity .3s;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .chan-msg .q{color:#7dd8e8;font-style:italic}
-  .chan-msg .q::before{content:'you · ';font-family:var(--mono);font-size:9px;font-style:normal;color:var(--dim);letter-spacing:.08em}
-  .chan.blip .chan-ic{animation:blip .5s}
-
-  .integr{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-  .integr .chan{padding:7px 9px;flex-direction:column;gap:5px}
-  .integr .chan-msg{font-size:9.5px;line-height:1.4;-webkit-line-clamp:3}
-  .integr .chan-name{font-size:11px}
   .ask-hint{
     font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:.04em;
-    padding-left:2px;line-height:1.6;
+    line-height:1.6;text-align:center;max-width:440px;
   }
   .ask-hint b{color:#7dd8e8;font-weight:600}
 
@@ -269,14 +269,13 @@
     .srcs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .src-tick{font-size:10px}
     .coreCol{order:2}
-    .midCol{order:3;max-width:440px;margin:0 auto;width:100%}
     .acts{justify-content:center}
     .surfs{order:4;max-width:480px;margin:0 auto;width:100%}
     .phone-frame{width:140px}
     .desk-alerts{right:150px}
     .uses{grid-template-columns:1fr}
   }
-  @media (max-width:480px){ .desk-alerts{right:96px} .phone-frame{width:118px} .integr{grid-template-columns:1fr} }
+  @media (max-width:480px){ .desk-alerts{right:96px} .phone-frame{width:118px} .dock{gap:9px} .dock-item{width:52px} }
 
   @media (prefers-reduced-motion:reduce){
     .core-ring{animation:none}
@@ -322,21 +321,9 @@
         </div>
         <div class="core-name">howler<span>:pulse</span></div>
         <div class="core-cap" id="cap">correlating streams…</div>
-      </section>
-
-      <section class="midCol">
-        <div>
-          <p class="colhead"><b>It acts</b> · insight → action</p>
-          <div class="acts" id="acts"></div>
-        </div>
-        <div>
-          <p class="colhead"><b>On your channels</b></p>
-          <div class="chans" id="chans"></div>
-        </div>
-        <div>
-          <p class="colhead"><b>Ad audiences</b> · auto-synced</p>
-          <div class="integr" id="integr"></div>
-        </div>
+        <div class="acts" id="acts"></div>
+        <div class="dock" id="dock"></div>
+        <div class="feed" id="feed">Insights, digests and Owl answers land on your channels — watch this space…</div>
         <div class="ask-hint">💬 <b>ask the Owl anything</b> — plain language, any channel. cyan = your question flowing in; the answer flows back.</div>
       </section>
 
@@ -427,14 +414,14 @@
   ];
 
   const CHANNELS = [
-    { id:'webapp',   name:'Pulse Web App', tag:'the OS', color:'#ff385c', img:HOWLER_URI, hello:'Dashboards, digests, campaigns — the full OS…' },
-    { id:'whatsapp', name:'WhatsApp',      tag:'digests + alerts',   color:'#25d366', icon:'whatsapp', hello:'Your daily digest arrives here…' },
-    { id:'claude',   name:'Claude',        tag:'Owl via MCP',        color:'#d97757', icon:'claude',   hello:'Ask the Owl anything about your event…' },
-    { id:'chatgpt',  name:'ChatGPT',       tag:'Owl connector',      color:'#74aa9c', icon:'openai',   hello:'Same brain, your team’s tool of choice…' },
+    { id:'webapp',   name:'Pulse Web App', short:'web app',  color:'#ff385c', img:HOWLER_URI },
+    { id:'whatsapp', name:'WhatsApp',      short:'whatsapp', color:'#25d366', icon:'whatsapp' },
+    { id:'claude',   name:'Claude',        short:'claude',   color:'#d97757', icon:'claude' },
+    { id:'chatgpt',  name:'ChatGPT',       short:'chatgpt',  color:'#74aa9c', icon:'openai' },
   ];
   const INTEGRATIONS = [
-    { id:'tiktok', name:'TikTok Ads', tag:'', color:'#69c9d0', icon:'tiktok', hello:'Segments sync here as ad audiences…' },
-    { id:'meta',   name:'Meta Ads',   tag:'', color:'#0082fb', icon:'meta',   hello:'Retargeting audiences, always fresh…' },
+    { id:'tiktok', name:'TikTok Ads', short:'tiktok', color:'#69c9d0', icon:'tiktok' },
+    { id:'meta',   name:'Meta Ads',   short:'meta',   color:'#0082fb', icon:'meta' },
   ];
 
   const SCENARIOS = {
@@ -538,26 +525,16 @@
     d.innerHTML = '<i>' + a.icon + '</i>' + a.name;
     actsEl.appendChild(d);
   }
-  function chanHtml(c) {
+  const dockEl = document.getElementById('dock');
+  const ALL_CHANNELS = [...CHANNELS, ...INTEGRATIONS];
+  for (const c of ALL_CHANNELS) {
+    const d = document.createElement('div');
+    d.className = 'dock-item'; d.id = 'ch-' + c.id; d.style.setProperty('--cc', c.color);
     const ic = c.img ? '<img src="' + c.img + '" alt="">' : svgIcon(c.icon);
-    return '<div class="chan-ic">' + ic + '</div><div class="chan-body">' +
-      '<div class="chan-name">' + c.name + (c.tag ? ' <small>' + c.tag + '</small>' : '') + '</div>' +
-      '<div class="chan-msg" id="m-' + c.id + '">' + c.hello + '</div></div>';
+    d.innerHTML = '<div class="dock-ic">' + ic + '</div><small>' + c.short + '</small>';
+    dockEl.appendChild(d);
   }
-  const chansEl = document.getElementById('chans');
-  for (const c of CHANNELS) {
-    const d = document.createElement('div');
-    d.className = 'chan'; d.id = 'ch-' + c.id; d.style.setProperty('--cc', c.color);
-    d.innerHTML = chanHtml(c);
-    chansEl.appendChild(d);
-  }
-  const integrEl = document.getElementById('integr');
-  for (const c of INTEGRATIONS) {
-    const d = document.createElement('div');
-    d.className = 'chan'; d.id = 'ch-' + c.id; d.style.setProperty('--cc', c.color);
-    d.innerHTML = chanHtml(c);
-    integrEl.appendChild(d);
-  }
+  const feedEl = document.getElementById('feed');
 
   /* ---------------- state ---------------- */
   let scenario = 'onsale';
@@ -744,9 +721,12 @@
   const pendingAnswers = {};
 
   function showChanMsg(chId, html) {
-    const el = document.getElementById('m-' + chId);
-    el.style.opacity = 0;
-    setTimeout(() => { el.innerHTML = html; el.style.opacity = 1; }, 260);
+    const c = ALL_CHANNELS.find(x => x.id === chId);
+    feedEl.style.opacity = 0;
+    setTimeout(() => {
+      feedEl.innerHTML = '<b style="color:' + c.color + '">' + c.name + '</b> · ' + html;
+      feedEl.style.opacity = 1;
+    }, 260);
     const chip = document.getElementById('ch-' + chId);
     chip.classList.remove('blip'); void chip.offsetWidth; chip.classList.add('blip');
   }
