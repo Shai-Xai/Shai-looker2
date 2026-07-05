@@ -6,6 +6,7 @@ import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import InfoTip from './InfoTip.jsx';
+import { useLineup, bandsFor, LineupBands, SetImpact, LineupEditor } from './Lineup.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 
@@ -613,8 +614,10 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub, day = '' })
 // station, one cell per hour, colour depth = how busy (green = transactions,
 // blue = scans), the day's avg/h on the right. The site's stacked total sits
 // on top. Hourly numbers come from each monitor's day timeline (hour blocks).
-function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
+function RhythmView({ monitors, apiBase, rows, onSelect, day = '', suiteId = '' }) {
   const [data, setData] = useState({}); // monitor id -> hourly timeline
+  const { sets, setSets } = useLineup(apiBase, suiteId); // 🎤 artist set schedule (overlay + impact)
+  const [editLineup, setEditLineup] = useState(false);
   const hrs = day ? `day:${day}` : 'start';
   useEffect(() => {
     let alive = true;
@@ -648,17 +651,33 @@ function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
     const act = s.vals.filter((v) => v > 0);
     return { ...s, total: s.vals.reduce((a, b) => a + b, 0), avg: act.length ? Math.round(act.reduce((a, b) => a + b, 0) / act.length) : 0 };
   }).sort((a, b) => b.total - a.total);
-  const hh = (h) => `${h.slice(11, 13)}:00`;
+  // Local hour label (+02:00, the offset the rest of Pulse assumes) so the axis reads
+  // in event time and lines up with the lineup set times entered in local time.
+  const hh = (h) => `${String((Number(h.slice(11, 13)) + 2) % 24).padStart(2, '0')}:00`;
   const totMax = Math.max(1, ...hours.map((_, i) => list.reduce((a, s) => a + s.vals[i], 0)));
+  const hourTx = hours.map((_, i) => list.filter((s) => s.unit === 'transactions').reduce((a, s) => a + s.vals[i], 0));
+  const bands = bandsFor(sets, hours, hourTx); // 🎤 set bands + per-set impact
+  const lineupEls = (
+    <>
+      <SetImpact bands={bands} canEdit={!!suiteId} onEdit={() => setEditLineup(true)} />
+      {editLineup && <LineupEditor apiBase={apiBase} suiteId={suiteId} sets={sets} onClose={() => setEditLineup(false)} onSaved={setSets} />}
+    </>
+  );
   if (!hours.length) {
-    return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>{loaded.length < monitors.length ? 'Reading each monitor’s day timeline…' : 'No hourly data in the window yet.'}</div>;
+    return (
+      <div>
+        <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>{loaded.length < monitors.length ? 'Reading each monitor’s day timeline…' : 'No hourly data in the window yet.'}</div>
+        {suiteId && lineupEls}
+      </div>
+    );
   }
   return (
     <div>
       {/* site total, stacked per hour: green = transactions, blue = scans */}
       <div style={{ ...card, marginBottom: 10 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Whole site · per hour</div>
-        <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 56 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Whole site · per hour{bands.length ? ' · 🎤 set overlay' : ''}</div>
+        <div style={{ position: 'relative', display: 'flex', gap: 2, alignItems: 'flex-end', height: 56 }}>
+          <LineupBands bands={bands} />
           {hours.map((h, i) => {
             const tx = list.filter((s) => s.unit === 'transactions').reduce((a, s) => a + s.vals[i], 0);
             const sc = list.filter((s) => s.unit === 'scans').reduce((a, s) => a + s.vals[i], 0);
@@ -699,6 +718,7 @@ function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
         })}
         {loaded.length < monitors.length && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Still reading {monitors.length - loaded.length} monitor{monitors.length - loaded.length === 1 ? '' : 's'}…</div>}
       </div>
+      {suiteId && lineupEls}
     </div>
   );
 }
@@ -1965,7 +1985,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'rhythm' && (
-        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} />
+        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
       )}
 
       {view === 'stations' && (
