@@ -22,7 +22,7 @@ const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_
 const { CHANNELS: LP_CHANNELS, MAX_BLOCKS: LP_MAX_BLOCKS } = require('./livepulse');
 const reportingTz = require('./timezone');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, getSignalFlow, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -1069,6 +1069,10 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       if (q === 'staff') return { ok: true, staff: api.listStaff(suiteId, { stationName: args.station }) };
       if (q === 'stations') return { ok: true, stations: api.listStations(suiteId) };
       if (q === 'checkpoints') return { ok: true, checkpoints: api.listCheckpoints(suiteId, { stationName: args.station }) };
+      if (q === 'calls') {
+        if (!api.listCalls) return refuse('unavailable', 'Device support calls aren\'t available for this event.');
+        return { ok: true, calls: api.listCalls(suiteId, args.status || 'open', { stationName: args.station }), note: 'Device support calls — an operator tapped a reason on the device\'s pre-bound link asking for help. status open/acked/resolved; eta is what dispatch promised. Times are UTC — present in the client\'s local time.' };
+      }
       return { ok: true, summary: api.suiteSummary(suiteId) };
     } catch (e) {
       return refuse('error', `Couldn't read Event Ops: ${e.message}`);
@@ -1076,15 +1080,15 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   }
   const eventOpsSchema = {
     name: 'eventOps',
-    description: 'Live EVENT OPS state for THIS event — physical devices (handhelds/scanners/radios), the STATIONS they\'re deployed to (bars/gates/booths/top-ups), the STAFF working it, device ISSUES, and station CHECKPOINTS. Use for: "where is device SL005", "how many devices are deployed vs at the Hive", "which devices are at <station>", "what open issues are there / how long open", "who is posted to <station> / how many staff", "were the checkpoints done at <station>". Read-only; returns structured data you then phrase + cite. The Hive = the store/warehouse (in stock).',
+    description: 'Live EVENT OPS state for THIS event — physical devices (handhelds/scanners/radios), the STATIONS they\'re deployed to (bars/gates/booths/top-ups), the STAFF working it, device ISSUES, station CHECKPOINTS, and device support CALLS (operators asking for help from the floor). Use for: "where is device SL005", "how many devices are deployed vs at the Hive", "which devices are at <station>", "what open issues are there / how long open", "who is posted to <station> / how many staff", "were the checkpoints done at <station>", "any open support calls / who needs help". Read-only; returns structured data you then phrase + cite. The Hive = the store/warehouse (in stock).',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', enum: ['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints'], description: 'overview = totals + per-station device counts + open issues + recent checkpoints. locate = find ONE device by code. devices/issues/staff/stations/checkpoints = those lists (optionally filtered).' },
+        query: { type: 'string', enum: ['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints', 'calls'], description: 'overview = totals + per-station device counts + open issues + recent checkpoints. locate = find ONE device by code. devices/issues/staff/stations/checkpoints/calls = those lists (optionally filtered). calls = operator support calls from the floor.' },
         code: { type: 'string', description: 'For query="locate": the device QR code, serial or label (e.g. SL005).' },
         state: { type: 'string', enum: ['in_stock', 'deployed', 'returned', 'lost', 'damaged'], description: 'For query="devices": filter by state (in_stock/returned = at the Hive).' },
-        station: { type: 'string', description: 'Filter by station name (for devices/staff/checkpoints), e.g. "Main Bar" or "Hive".' },
-        status: { type: 'string', enum: ['open', 'resolved', 'all'], description: 'For query="issues": which issues (default open).' },
+        station: { type: 'string', description: 'Filter by station name (for devices/staff/checkpoints/calls), e.g. "Main Bar" or "Hive".' },
+        status: { type: 'string', enum: ['open', 'acked', 'resolved', 'all'], description: 'For query="issues" (open/resolved/all) or query="calls" (open/acked/resolved/all). Default open.' },
       },
     },
   };
@@ -1103,13 +1107,26 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     if (!api || !api.healthSummary) return refuse('unavailable', 'Data health monitoring isn\'t available right now.');
     const isAdmin = user.role === 'admin';
     const mine = user.entityIds || [];
+    const q = args.query || 'overview';
+    if (q === 'signal') {
+      const sf = typeof getSignalFlow === 'function' ? getSignalFlow() : null;
+      if (!sf) return refuse('unavailable', 'Signal flow isn\'t available right now.');
+      if (!suiteId) return refuse('no_event', 'Signal flow is per event — open or pick an event first.');
+      if (!isAdmin && auth && auth.canAccessSuite && !auth.canAccessSuite(user, suiteId)) return refuse('no_access', 'No access to that event.');
+      const f = sf(suiteId, { station: args.station || '', category: args.zone || '' });
+      return {
+        ok: true,
+        signal: { scope: f.scope || 'whole event', onAir: f.on, offAir: f.off, total: f.total, pct: f.pct, targetPct: f.target, station: f.station || null, zone: f.category || null,
+          stations: (f.stations || []).map((s) => ({ station: s.name, zone: s.zone, onAir: s.on, offAir: s.off, pct: s.pct })) },
+        note: 'Signal flow = share of a station\'s devices Pulse saw on-air at the latest checks. pct vs targetPct is the health (below target = degrading). Group stations by zone for a category view; filter with station or zone.',
+      };
+    }
     const list = api.healthSummary({
       entityIds: isAdmin ? null : mine,
       entityId: entityId && (isAdmin || mine.includes(entityId)) ? entityId : '',
       suiteId: suiteId || '',
     }).filter((m) => isAdmin || m.entityId);
     if (!list.length) return { ok: true, monitors: [], message: 'No data-health monitors are set up for this scope yet.' };
-    const q = args.query || 'overview';
     if (q === 'overview') return { ok: true, monitors: list };
     // The deeper reads are per monitor/station — fuzzy match by name/area.
     const want = String(args.monitor || '').trim().toLowerCase();
@@ -1134,6 +1151,8 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
           totalScans: t.grandTotal,
           note: 'activeBlocks is one char per block (1=sent data, 0=silent), oldest→newest; times are UTC — convert to the client\'s local time. ANALYSE, don\'t just list: use coverage to name the exact windows where several devices were silent at the same time and how deep each dip was (X of N). Devices that were active BEFORE a window and went dark TOGETHER = that station\'s connectivity likely degraded then (each station has its own coverage area — no cross-station evidence needed); staggered/isolated silences = device-level; devices with no data yet = ramp-up, not a fault.',
           coverage: t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), activeDevices: t.devices.reduce((n, d) => n + (d.active[i] ? 1 : 0), 0) })),
+          // throughput = transactions/scans per block (the volume line) alongside the online/offline coverage — read them together to see if throughput dips WITH connectivity.
+          throughput: (t.bucketTotals && t.bucketTotals.length === t.buckets.length) ? t.buckets.map((b, i) => ({ atUTC: b.slice(11, 16), count: t.bucketTotals[i] || 0 })) : undefined,
           devicesSeen: t.devices.length, devicesTotal: t.devicesTotal || t.devices.length,
           devices: t.devices.slice(0, 80).map((d) => ({ device: d.device, station: d.station || undefined, operator: d.operator || undefined, totalScans: d.total, activeBlocks: d.active.join('') })),
         };
@@ -1156,15 +1175,16 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   }
   const dataHealthSchema = {
     name: 'dataHealth',
-    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series: analyse it for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up — that window analysis is what the user usually wants. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
+    description: 'LIVE DATA-STREAM HEALTH — is the data pipe from the venue (check-in scanners, bars, vendors) flowing into the platform, per station? Use for: "is the check-in data healthy", "which stations are stale/quiet", "how many devices are offline at <station> and which ones", "WHEN did devices go offline / what were the offline trends", "show the day timeline / gaps", "latest transactions on the feed". query=overview → every monitor: status, per-station lag vs warn/stale thresholds, device roster counts (linked/online/offline). devices → the live roster for ONE monitor incl. WHICH devices are offline and for how long. timeline → per-device activity + a per-block coverage series AND a throughput (transactions/scans per block) series: analyse them together for the WINDOWS where several devices were simultaneously silent (a station\'s own connectivity degrading) vs isolated device faults vs ramp-up, and whether volume dipped with connectivity. signal → signal-flow: the share of devices on-air vs the event\'s flow target, for the whole event / one zone/category / one station. latest → the newest raw records. Read-only; cite the numbers and present UTC times as the client\'s local time.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline".' },
+        query: { type: 'string', enum: ['overview', 'devices', 'timeline', 'observed', 'signal', 'latest'], description: 'What to fetch (default overview). observed = the offline log Pulse recorded at each check — the authoritative connectivity record (late syncs never repaint it); use it for "when was X actually offline". signal = signal-flow: share of devices on-air vs the event target, per zone/category/station (needs an event).' },
         monitor: { type: 'string', description: 'For devices/timeline/latest: the monitor/station name (fuzzy match, e.g. "Gate B").' },
         hours: { type: 'string', description: 'For timeline: "start" (from the roster start time — default when one is set) or rolling hours like "12".' },
         intervalMin: { type: 'number', description: 'For timeline: block size in minutes (5/10/20/30/60; default 10).' },
-        station: { type: 'string', description: 'For timeline: narrow to ONE station name exactly as it appears in the monitor\'s streams — use when a monitor spans many bars/vendors.' },
+        station: { type: 'string', description: 'For timeline/signal: narrow to ONE station name exactly as it appears in the streams — use when a monitor/event spans many bars/vendors.' },
+        zone: { type: 'string', description: 'For signal: narrow to one zone/category (bars, gates, vendors…).' },
         limit: { type: 'number', description: 'For latest: how many records (default 20, max 50).' },
       },
     },

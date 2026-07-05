@@ -1301,6 +1301,16 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
       if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
       return rows.map((c) => ({ checkpoint: c.checkpointName, station: c.stationLabel, by: c.staffLabel, comment: c.comment, hasPhoto: !!c.photo, at: c.at }));
     },
+    // Device support calls: an operator/barman tapped a reason on the device's pre-bound link asking for help.
+    listCalls(suiteId, status = 'open', { stationName } = {}) {
+      const st = ['open', 'acked', 'resolved'].includes(status) ? status : status === 'all' ? null : 'open';
+      const rows = st
+        ? sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? AND status=? ORDER BY created_at DESC').all(suiteId, st)
+        : sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? ORDER BY created_at DESC').all(suiteId);
+      let out = rows.map(callRow);
+      if (stationName) { const n = String(stationName).toLowerCase(); out = out.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
+      return out.map((c) => ({ station: c.stationLabel, device: c.deviceLabel, reason: c.reasonLabel, caller: c.callerName, comment: c.comment, tried: c.tried, status: c.status, calledAt: c.createdAt, ackedBy: c.ackedBy, eta: c.eta, resolvedBy: c.resolvedBy, resolvedAt: c.resolvedAt }));
+    },
   };
   const STATE_LABEL_ = (s) => ({ in_stock: 'Hive', deployed: 'deployed', returned: 'Hive', lost: 'lost', damaged: 'damaged' }[s] || s);
 
