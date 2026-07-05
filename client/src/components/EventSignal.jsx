@@ -1315,11 +1315,16 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     <div style={full ? { position: 'fixed', inset: 0, zIndex: 1300, background: 'var(--bg)', padding: '12px 14px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}>
       <style>{VM_CSS}</style>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
-          {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
-            : mode === 'heat' ? <>Transaction heatmap — how busy each station is. Press ▶ to time-lapse the day; tap a station for its detail.</>
-              : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
-        </span>
+        {/* The descriptive blurb eats a whole row on a phone — on mobile keep only the
+            actionable "tap to place" instruction (and any dark-station count). */}
+        {(!isMobile || (edit && placing) || (!edit && !!alarmed.length)) && (
+          <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: isMobile ? 0 : 160 }}>
+            {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : (isMobile ? '' : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it'))
+              : mode === 'heat' ? (isMobile ? '' : <>Transaction heatmap — how busy each station is. Press ▶ to time-lapse the day; tap a station for its detail.</>)
+                : <>{isMobile ? '' : <>Live site plan — tap a pin for its devices &amp; operators. </>}<b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+          </span>
+        )}
+        {isMobile && <span style={{ flex: 1 }} />}
         {!edit && <>
           <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
@@ -1338,7 +1343,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         {edit && <button style={btn(satOpen)} onClick={() => setSatOpen(!satOpen)}>🛰️ Satellite</button>}
         {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
         {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
-        <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
+        <button style={btn(edit)} title="Edit pins" onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : (isMobile ? '✏️' : '✏️ Edit pins')}</button>
       </div>
       {edit && satOpen && (
         <div style={{ ...card, marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
