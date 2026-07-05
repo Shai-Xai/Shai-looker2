@@ -439,7 +439,7 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub }) {
     let alive = true;
     monitors.forEach((m) => {
       if (logs[m.id]) return;
-      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=${day ? 'day:' + day : 'start'}`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(m.id)}/observed?hours=start`)
         .then((r) => r.json()).then((d) => { if (alive && d && d.configured) setLogs((p) => ({ ...p, [m.id]: d })); })
         .catch(() => {});
     });
