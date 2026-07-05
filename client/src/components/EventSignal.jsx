@@ -1679,7 +1679,6 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
             </button>
           ))}
         </>}
-        <span style={{ flex: 1 }} />
         <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
       </div>
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
