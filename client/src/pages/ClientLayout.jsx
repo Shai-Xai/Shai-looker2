@@ -64,6 +64,7 @@ export default function ClientLayout() {
   // The dashboard page (ViewPage) portals its actions into the menu bar so
   // Summary / Filters / ⋯ sit on the ☰ Menu line, not a separate row below.
   const [actionsSlot, setActionsSlot] = useState(null);
+  const [titleSlot, setTitleSlot] = useState(null); // section pages portal their title into the menu bar
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -780,12 +781,17 @@ export default function ClientLayout() {
                 <path d="M5 9.5V21h5.5v-6h3v6H19V9.5" />
               </svg>
             </button>
-            {activeTitle && <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+            {/* Dashboard pages show their live tile title; section pages (Alerts,
+                Goals, Event Ops…) portal their page title in here via <PageHeader>
+                so there's no second home button and no tall header below. */}
+            {activeTitle
+              ? <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>
+              : <span ref={setTitleSlot} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }} />}
             {/* Page (dashboard) actions portal in here — Summary · Filters · ⋯ */}
             <div ref={setActionsSlot} style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 0 }} />
           </div>
         )}
-        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
+        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot, titleSlot }} />
       </main>
       {(FEATURES.ask || owlNativeChatEnabled(user)) && !askOpen && (
         // Floating owl — quick launcher for the analyst drawer (bottom-right).
