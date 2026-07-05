@@ -1399,7 +1399,10 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health' }) {
         <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
       )}
 
-      {view === 'river' && <FlowRiverView rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {/* key on the filter set: changing chips while drilled into a station's devices
+          resets the river to the (re-filtered) all-stations level — otherwise the
+          drill ignores the new filter and the chips look dead. */}
+      {view === 'river' && <FlowRiverView key={picks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
