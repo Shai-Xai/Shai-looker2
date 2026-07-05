@@ -910,7 +910,7 @@ function ReportPanel({ url, body, title }) {
 
 // Permanent metrics row: fleet + volume headline computed from the stored
 // snapshots (no live queries) — shown on the Admin page and the client tab.
-function HealthMetrics({ monitors: allMonitors }) {
+function HealthMetrics({ monitors: allMonitors, trailing = null }) {
   // Closed stations are intentionally shut — their silence must not drag the
   // fleet numbers (devices/online/offline/flow). Their trading DID happen,
   // though, so the volume totals still count their frozen snapshots.
@@ -969,13 +969,18 @@ function HealthMetrics({ monitors: allMonitors }) {
     .map((m) => ({ name: m.name, s: m.rosterSnapshot }));
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {tiles.map(([l, v, c]) => (
-          <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
-            <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
-          </div>
-        ))}
+      {/* Metrics fill the left and wrap; the page's control cluster (updated · ⓘ ·
+          ⋯) pins to the top-right of the SAME line instead of taking its own row. */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {tiles.map(([l, v, c]) => (
+            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {trailing && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{trailing}</div>}
       </div>
       {offenders.length > 0 && (
         <div style={{ ...card, fontSize: 12, color: 'var(--muted)', marginTop: 8, padding: '9px 13px' }}>
@@ -1659,34 +1664,36 @@ export function DataHealthOps({ entityId, suiteId }) {
     return () => { alive = false; clearInterval(t); };
   }, [entityId, suiteId, tick]);
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
+  // The control cluster (updated · ⓘ · ⋯ menu) rides the top-right of the metrics
+  // row so there's no separate control line. Phones fold the buttons into the ⋯.
+  const controlBits = <>
+    <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+    <InfoTip label="About Data health">Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.</InfoTip>
+    <Suspense fallback={null}>
+      {(() => {
+        const controls = <>
+          <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
+          <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+          <button className="no-print" title="Download this page as PDF" onClick={() => window.print()} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+          <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
+        </>;
+        return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width
+      })()}
+    </Suspense>
+  </>;
   return (
     <div>
-      {/* Compact control row. Phones get ONE ⋯ menu holding Summary/Share/
-          refresh and skip the explainer; desktop keeps the inline buttons. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
-        <InfoTip label="About Data health">Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.</InfoTip>
-        <span style={{ flex: 1 }} />
-        <Suspense fallback={null}>
-          {(() => {
-            const controls = <>
-              <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
-              <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
-              <button className="no-print" title="Download this page as PDF" onClick={() => window.print()} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
-              <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
-            </>;
-            return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width
-          })()}
-        </Suspense>
-      </div>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
-        <div style={card}>
-          <strong style={{ fontSize: 14 }}>No data-health monitors yet</strong>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
-        </div>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>{controlBits}</div>
+          <div style={card}>
+            <strong style={{ fontSize: 14 }}>No data-health monitors yet</strong>
+            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
+          </div>
+        </>
       ) : <>
-        <HealthMetrics monitors={monitors} />
+        <HealthMetrics monitors={monitors} trailing={controlBits} />
         {monitors.map((m) => (
           <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />
         ))}
