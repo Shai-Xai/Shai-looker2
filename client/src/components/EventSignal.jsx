@@ -1860,7 +1860,7 @@ export default function SignalOps({ entityId, suiteId }) {
           return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
         })()}
       </div>
-      {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
+      {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
         Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
       </p>}
       <SignalBoard monitors={data.monitors || []} />

@@ -1677,7 +1677,7 @@ export function DataHealthOps({ entityId, suiteId }) {
           })()}
         </Suspense>
       </div>
-      {!isMobile && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
+      {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
         Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.
       </p>}
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
