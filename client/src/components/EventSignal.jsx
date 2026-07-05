@@ -1594,6 +1594,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
   const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'online' | 'offline' — Map/River/Network
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -1644,6 +1645,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
   const famShown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
   const shown = stPicks.length ? famShown.filter((s) => stPicks.includes(s.name)) : famShown;
+  // Online/offline status filter for the Map / River / Network views: a station is
+  // "online" if any of its devices is sending, "offline" if all are dark.
+  const statusRows = statusFilter === 'all' ? shown : shown.filter((s) => ((s.on || 0) > 0) === (statusFilter === 'online'));
 
   // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
   // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
@@ -1704,6 +1708,14 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
             {dayOpts.map((d) => <option key={d} value={d}>📅 {dayLbl(d)}</option>)}
           </select>
         )}
+        {(view === 'map' || view === 'river' || view === 'network') && (
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Show online or offline stations only"
+            style={{ border: `1px solid ${statusFilter !== 'all' ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: statusFilter !== 'all' ? 'var(--brand)' : 'var(--text)', fontWeight: statusFilter !== 'all' ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 140 }}>
+            <option value="all">◍ All</option>
+            <option value="online">🟢 Online</option>
+            <option value="offline">🔴 Offline</option>
+          </select>
+        )}
         {!onView && <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />}
         {trailing && <>
           <span style={{ flex: 1 }} />
@@ -1754,15 +1766,15 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'map' && (
-        <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
+        <VenueMapView key={'m' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
       )}
 
       {/* key on the filter set: changing chips while drilled into a station's devices
           resets the river to the (re-filtered) all-stations level — otherwise the
           drill ignores the new filter and the chips look dead. */}
-      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
 
-      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
