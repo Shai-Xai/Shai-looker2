@@ -94,17 +94,16 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 
   return (
     <div style={{ position: 'relative', paddingBottom: 88 }}>
-      {/* Event picker */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-        <label style={{ fontSize: 13, color: 'var(--muted)' }}>Event</label>
-        <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={select}>
-          {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </div>
-
-      {/* Desktop: left nav rail (with Scan under it) + full-width content. Mobile: top pills. */}
+      {/* Desktop: left nav rail (Event picker on top, then tabs, Scan/Move) + full-width content. Mobile: top pills. */}
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: 10, width: '100%' } : { display: 'flex', flexDirection: 'column', gap: 8, position: 'sticky', top: 8, width: 170, flexShrink: 0 }}>
+          {/* Event picker — lives in the drawer so the board starts right at the top. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Event</label>
+            <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={{ ...select, width: '100%', boxSizing: 'border-box' }}>
+              {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
           <div style={isMobile ? mobileTabs : leftNav}>
             <button onClick={() => { if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
               style={isMobile ? tabBtn(inHive) : navItem(inHive)}>

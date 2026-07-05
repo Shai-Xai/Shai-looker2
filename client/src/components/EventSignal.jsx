@@ -5,6 +5,7 @@ import SignalReportPanel from './SignalReportPanel.jsx';
 import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
+import InfoTip from './InfoTip.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 
@@ -1582,7 +1583,7 @@ function CascadeView({ rows, apiBase, onSelect }) {
   );
 }
 
-export function SignalBoard({ monitors, apiBase = '/api/my/data-health', view: viewProp, onView }) {
+export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailing = null, view: viewProp, onView }) {
   const [sel, setSel] = useState(null);
   // View is controllable: when the left nav drives it (onView given) we use the
   // prop and hide the in-board pill; standalone, the pill + local state run it.
@@ -1704,6 +1705,10 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', view: v
           </select>
         )}
         {!onView && <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />}
+        {trailing && <>
+          <span style={{ flex: 1 }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{trailing}</span>
+        </>}
       </div>
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
           narrow every view to just those stations; scrolls sideways, never wraps tall. */}
@@ -1854,28 +1859,25 @@ export default function SignalOps({ entityId, suiteId, view, onView }) {
   }, [entityId, suiteId, tick]);
   if (err) return <div style={{ ...card, fontSize: 12.5, color: STATUS_COLOR.stale }}>⚠️ {err}</div>;
   if (!data) return <div style={{ fontSize: 12.5, color: 'var(--muted)', padding: 12 }}>Raising the board…</div>;
+  // The control cluster (updated · ⓘ · ⋯ menu) rides the top-right of the board's
+  // filter-chips row so it doesn't take its own line above the board.
+  const controlBits = <>
+    <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+    <InfoTip label="About the Flow board">Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour&apos;s volume.</InfoTip>
+    {(() => {
+      const controls = <>
+        <OwlSummary entityId={entityId} suiteId={suiteId} title="Flow board" />
+        <ShareMenu variant="header" heading="Flow board — live site status" text={healthShareText(data.monitors)} />
+        {suiteId && <SignalReportPanel suiteId={suiteId} />}
+        <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+        <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
+      </>;
+      return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
+    })()}
+  </>;
   return (
     <div>
-      {/* Compact control row. Phones get ONE ⋯ menu holding Summary/Share/
-          refresh and skip the explainer; desktop keeps the inline buttons. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: isMobile ? '0 0 10px' : '0 0 6px' }}>
-        <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
-        <span style={{ flex: 1 }} />
-        {(() => {
-          const controls = <>
-            <OwlSummary entityId={entityId} suiteId={suiteId} title="Flow board" />
-            <ShareMenu variant="header" heading="Flow board — live site status" text={healthShareText(data.monitors)} />
-            {suiteId && <SignalReportPanel suiteId={suiteId} />}
-            <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
-            <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
-          </>;
-          return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width — keep the row uncluttered above the board
-        })()}
-      </div>
-      {!isMobile && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '0 0 6px' }}>
-        Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour's volume.
-      </p>}
-      <SignalBoard monitors={data.monitors || []} view={view} onView={onView} />
+      <SignalBoard monitors={data.monitors || []} trailing={controlBits} view={view} onView={onView} />
     </div>
   );
 }
