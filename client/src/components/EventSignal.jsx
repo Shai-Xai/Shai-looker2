@@ -1824,6 +1824,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
   const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'online' | 'offline' — Map/River/Network
+  const isMobile = useIsMobile();
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -1921,15 +1922,19 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       {/* monitor filter chips — split the board by station family — and the
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        {chips.length > 1 && <>
-          <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
-          {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
-              {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
-            </button>
-          ))}
-        </>}
-        <span style={{ flex: 1 }} />
+        {chips.length > 1 && (
+          // On mobile the family chips ride in ONE horizontal-scroll strip instead of
+          // wrapping into two or three tall rows — keeps the button count off the screen.
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', ...(isMobile ? { flexWrap: 'nowrap', overflowX: 'auto', width: '100%', paddingBottom: 3, scrollbarWidth: 'none' } : { flexWrap: 'wrap' }) }}>
+            <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(!picks.length), flex: '0 0 auto' }}>All stations · {rows.length}</button>
+            {chips.map((m) => (
+              <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(picks.includes(m.id)), flex: '0 0 auto', whiteSpace: 'nowrap' }}>
+                {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
+              </button>
+            ))}
+          </div>
+        )}
+        {!isMobile && <span style={{ flex: 1 }} />}
         {dayOpts.length > 0 && dayAware && (
           <select value={day} onChange={(e) => { setDay(e.target.value); setSel(null); }} title="Show a past festival day"
             style={{ border: `1px solid ${day ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: day ? 'var(--brand)' : 'var(--text)', fontWeight: day ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 150 }}>
