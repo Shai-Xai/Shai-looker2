@@ -1670,10 +1670,10 @@ export function DataHealthOps({ entityId, suiteId }) {
             const controls = <>
               <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
               <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
-              <button className="no-print" title="Download this page as PDF" onClick={() => window.print()} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>⤓{isMobile ? ' PDF' : ''}</button>
-              <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄{isMobile ? ' Refresh' : ''}</button>
+              <button className="no-print" title="Download this page as PDF" onClick={() => window.print()} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+              <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
             </>;
-            return isMobile ? <ControlKebab>{controls}</ControlKebab> : controls;
+            return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width
           })()}
         </Suspense>
       </div>
