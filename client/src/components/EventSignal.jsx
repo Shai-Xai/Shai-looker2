@@ -1052,6 +1052,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [q, setQ] = useState(''); // unplaced-tray search
   const [zf, setZf] = useState(''); // unplaced-tray zone filter
   const [mode, setMode] = useState('station'); // 'station' pins only | 'operator' fans every device around its pin
+  const [ar, setAr] = useState(4 / 3); // the uploaded plan's aspect ratio — box fits the screen without scrolling
   const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
@@ -1155,11 +1156,14 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
         <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
       </div>
+      {/* The box keeps the image's exact aspect (pins are % of it) but must FIT the
+          viewport with no scrolling — so when the height would overflow, the box
+          narrows itself instead: width = min(100%, available-height × aspect). */}
       <div ref={boxRef} onPointerDown={onMapPointerDown}
-        style={{ position: 'relative', width: '100%', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        style={{ position: 'relative', width: `min(100%, calc((100dvh - 250px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
         {cfg.image
-          ? <img src={cfg.image} alt="venue site plan" style={{ display: 'block', width: '100%', height: 'auto', userSelect: 'none', pointerEvents: 'none' }} />
-          : <div style={{ aspectRatio: '4 / 3', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          ? <img src={cfg.image} alt="venue site plan" onLoad={(e) => { const im = e.target; if (im.naturalWidth && im.naturalHeight) setAr(im.naturalWidth / im.naturalHeight); }} style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }} />
+          : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
               <span style={{ fontSize: 10.5, color: 'var(--muted)', padding: 8 }}>No site plan yet — ✏️ Edit pins → ⬆ Upload site plan (pins work on the blank grid too)</span>
             </div>}
         {halos.map((h2, i) => (
@@ -1170,19 +1174,24 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         {mode === 'operator' && !edit && placed.map((s) => {
           const list = devsFor(s); const p = pins[s.name];
           if (!list) return <span key={'d' + s.name} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + 14px)`, transform: 'translateX(-50%)', fontSize: 8.5, color: 'var(--muted)' }}>…</span>;
-          return list.map((v, i) => {
-            const a = (i / list.length) * Math.PI * 2 - Math.PI / 2;
-            const rr = 24 + (list.length > 14 ? 12 * ((i % 2)) : 0); // second ring when crowded
-            const dx = rr * Math.cos(a), dy = rr * Math.sin(a);
-            const dc = v.isOn ? STATUS_COLOR.fresh : STATUS_COLOR.stale;
-            return (
-              <span key={s.name + v.device} onClick={(e) => { e.stopPropagation(); onSelect(s); }} title={`${v.operator || v.device} · ${v.isOn ? 'online' : 'dark'}`}
-                className={v.isOn ? '' : 'vm-anim'}
-                style={{ position: 'absolute', left: `calc(${p.x * 100}% + ${dx}px)`, top: `calc(${p.y * 100}% + ${dy}px)`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%', background: dc, border: '1.5px solid var(--card)', boxShadow: `0 0 5px ${dc}`, cursor: 'pointer', animation: v.isOn ? 'none' : 'vmFlash 0.9s ease-in-out infinite' }}>
-                {!v.isOn && <i style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8, fontStyle: 'normal', fontWeight: 700, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{(v.operator || v.device).slice(0, 14)}</i>}
-              </span>
-            );
-          });
+          // A tidy dot GRID under the pin (10 per row) — the ring fan collided on dense
+          // stations. No per-dot names (they're in the tap-through deep-dive); one
+          // "n dark" label per station instead of a red name pile-up.
+          const COLS = 10; const dark = list.filter((v) => !v.isOn).length;
+          const rowsN = Math.ceil(list.length / COLS);
+          return [
+            ...list.map((v, i) => {
+              const cols = Math.min(COLS, list.length - Math.floor(i / COLS) * COLS);
+              const dx = ((i % COLS) - (cols - 1) / 2) * 11, dy = 18 + Math.floor(i / COLS) * 11;
+              const dc = v.isOn ? STATUS_COLOR.fresh : STATUS_COLOR.stale;
+              return (
+                <span key={s.name + v.device} onClick={(e) => { e.stopPropagation(); onSelect(s); }} title={`${v.operator || v.device} · ${v.isOn ? 'online' : 'dark'}`}
+                  className={v.isOn ? '' : 'vm-anim'}
+                  style={{ position: 'absolute', left: `calc(${p.x * 100}% + ${dx}px)`, top: `calc(${p.y * 100}% + ${dy}px)`, transform: 'translate(-50%,-50%)', width: 8, height: 8, borderRadius: '50%', background: dc, border: '1.5px solid var(--card)', boxShadow: `0 0 4px ${dc}`, cursor: 'pointer', animation: v.isOn ? 'none' : 'vmFlash 0.9s ease-in-out infinite' }} />
+              );
+            }),
+            dark > 0 && <i key={s.name + '·dark'} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + ${18 + rowsN * 11}px)`, transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8.5, fontStyle: 'normal', fontWeight: 800, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{dark} dark</i>,
+          ];
         })}
         {placed.map((s) => {
           const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);

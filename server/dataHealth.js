@@ -326,12 +326,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // station regardless of how busy the raw table is.
     if (!maxMeasureUnsupported.has(m.id)) {
       try {
-        const rows = await runScoped(m, {
-          ...baseBody(m),
-          fields: [m.stationField, MAX_FIELD],
-          dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]),
-          limit: '500',
-        });
+        const b = { ...baseBody(m), fields: [m.stationField, MAX_FIELD], dynamic_fields: JSON.stringify([{ measure: MAX_FIELD, based_on: m.timeField, type: 'max' }]), limit: '500' };
+        if (!b.filters[m.timeField]) b.filters[m.timeField] = '30 days'; // recycled station names from PAST events must never surface as live streams
+        const rows = await runScoped(m, b);
         return reduceRows(m, rows, MAX_FIELD);
       } catch (e) {
         // Custom-measure rejection is permanent for this field — memoise and fall
@@ -346,12 +343,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
     // so the FIRST time a station appears is its latest record. Stations idle for
     // longer than the window won't appear — the per-station memory keeps evaluating
     // them from their remembered last_event_at, which is exactly the stale signal.
-    const rows = await runScoped(m, {
-      ...baseBody(m),
-      fields: [m.stationField, m.timeField],
-      sorts: [`${m.timeField} desc`],
-      limit: '5000',
-    });
+    const b2 = { ...baseBody(m), fields: [m.stationField, m.timeField], sorts: [`${m.timeField} desc`], limit: '5000' };
+    if (!b2.filters[m.timeField]) b2.filters[m.timeField] = '30 days';
+    const rows = await runScoped(m, b2);
     return reduceRows(m, rows, m.timeField);
   }
 
@@ -899,7 +893,9 @@ function mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, mai
       last_event_at = MAX(last_event_at, excluded.last_event_at), last_seen_at = excluded.last_seen_at`);
     for (const [station, latest] of seen) upStream.run(m.id, station, latest.toISOString(), ts);
 
-    // Evaluate EVERY remembered stream — including ones absent from this pull.
+    // Evaluate EVERY remembered stream — including ones absent from this pull. A stream
+    // whose last record is >30 days old is a past-event ghost: forget it entirely.
+    sql.prepare('DELETE FROM data_monitor_streams WHERE monitor_id=? AND last_event_at < ?').run(m.id, new Date(Date.now() - 30 * 864e5).toISOString());
     const streams = sql.prepare('SELECT * FROM data_monitor_streams WHERE monitor_id=?').all(m.id);
     const nowMs = Date.now();
     const upd = sql.prepare('UPDATE data_monitor_streams SET lag_min=?, status=?, stale_since=? WHERE monitor_id=? AND station=?');
