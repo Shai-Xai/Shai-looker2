@@ -1394,6 +1394,47 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
+      {!edit && mode === 'heat' && heat && heat.axis.length > 0 && (() => {
+        // 🖐 Hand index — every placed station ranked busiest→quietest for the frame
+        // currently on the map (live, or wherever you paused the scrub), colour-coded
+        // by category. Pause the day and this reads the whole venue at a glance.
+        const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+        const T = heat.axis[idx];
+        const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
+        const rank = placed
+          .map((s) => ({ name: s.name, v: Math.round(heat.series.get(s.name)?.get(T) || 0), col: heat.catCol.get(s.name) || [77, 159, 255] }))
+          .filter((r) => r.v > 0).sort((a, b) => b.v - a.v);
+        const rmax = rank.length ? rank[0].v : 1;
+        const rtot = rank.reduce((s2, r) => s2 + r.v, 0);
+        return (
+          <div style={{ ...card, marginTop: 8, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🖐 Hand index · busiest now</span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)' }}>{heatIdx == null ? '● LIVE' : hhmm(T)}</span>
+              <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{rtot.toLocaleString('en-ZA')} txns · {iv < 60 ? iv + 'm' : '1h'}</span>
+            </div>
+            {rank.length === 0
+              ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No transactions in this window.</div>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: full ? '46vh' : 240, overflowY: 'auto' }}>
+                {rank.map((r, i) => {
+                  const c = `rgb(${r.col[0]},${r.col[1]},${r.col[2]})`;
+                  return (
+                    <div key={r.name} onClick={() => { const st = placed.find((s) => s.name === r.name); if (st) onSelect(st); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '2px 0' }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--faint)', width: 20, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: c, flexShrink: 0, boxShadow: `0 0 5px ${c}` }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 0 34%' }}>{r.name}</span>
+                      <span style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}>
+                        <span style={{ display: 'block', height: '100%', width: `${Math.max(4, (r.v / rmax) * 100)}%`, background: c, borderRadius: 4 }} />
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c, width: 52, textAlign: 'right' }}>{r.v.toLocaleString('en-ZA')}</span>
+                    </div>
+                  );
+                })}
+              </div>}
+          </div>
+        );
+      })()}
       {!edit && mode === 'heat' && (
         <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <span>🔥 glow = transactions in the window · number = the count · {scale === 'abs' ? 'each category vs its own busiest all day' : 'each category vs its busiest right now'}</span>
