@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-04 (📣 Event Ops device support calls · 🎛️ Event Signal: flow meter, drag-to-replay, journal · 🚨 staff alerts phase 1) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-05 (🗺️ Venue map + 🌊 Flow river on the Signal board) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -68,6 +68,12 @@ longer they use Pulse, the better it gets."
 - **Live dashboards** — KPIs, tables and charts built on the client's real
   ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
   (no clunky Looker embeds). Drill-through into detail.
+- **One-tap LIVE button** ✅ — set any dashboard as an event's "live" report and a
+  red **LIVE** button appears right on that event's sidebar row, jumping straight
+  to live ticket sales with no drill-down. Great for event day. Configured per
+  event in Admin → the client's Suites (also in the setup wizard).
+- **Double-tap a chart to full-screen it** ✅ (mobile) — and carousels give charts
+  a proper full-width, readable card on phones.
 - **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
   mean in plain English, and answers follow-up questions, grounded in that data.
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
@@ -779,6 +785,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-05** — **Signal board: 🗺️ Venue map + 🌊 Flow river** 🧪: upload the event's
+  site plan and drag each station's pin onto it once — the map then goes LIVE: healthy
+  pins ripple green, a dark station's pin flashes red, and when several stations in the
+  same corner degrade together a red **"⚠ AREA" halo** blooms over that part of the venue
+  (network failures are usually by area — now you see WHERE, instantly). Tap a pin for
+  that station's devices & operators. The 🌊 River view shows transactions as moving
+  sparks streaming into Pulse — a choking station's stream stutters red. Both self-service
+  (clients manage their own map) and admin-managed.
 - **2026-07-04 (night)** — **Signal board: Stations view + provider report** 🧪: a new
   📶 Stations view puts every station's online/offline-through-the-day strip on one
   screen, grouped by zone, with an average-transactions line overlaid (see throughput
@@ -788,6 +802,12 @@ see "The continuous comms loop" above.)*
   provider**, and an **ops digest** that emails them the headline numbers + the link on a
   schedule *and* the moment signal drops below target. Signal flow (all / per category /
   per station) and device online/offline are also blocks you can add to a Live update.
+- **2026-07-04 (night)** — **One-tap LIVE button** ✅: pick an event's live-ticketing
+  dashboard in Admin → Suites (or the setup wizard) and a red **LIVE** pill shows
+  on that event's sidebar row — clients jump straight to live sales, no drill-down.
+  Also: **double-tap a chart to full-screen** it on mobile, carousels give charts a
+  readable full-width card on phones, and setting up a **live update** now shows the
+  actual numbers each block pulls (+ a "send to me" phone preview) before you go live.
 - **2026-07-04 (night)** — **Device support calls** 🧪 (Event Ops §12): the person at a
   bar/booth taps one button on the device's saved link (Stock · Manager · Help · Security
   · Medical) and it reaches dispatch as a live call, **pre-tagged with the station and
