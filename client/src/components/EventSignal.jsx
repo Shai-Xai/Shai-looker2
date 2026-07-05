@@ -158,9 +158,13 @@ function DeepDive({ apiBase, mid, station, unit }) {
       {/* 📈 The station's pulse line — its hourly rate with the peak flagged,
           built from the same 30-min timeline (pairs summed into hours). */}
       {(t.buckets || []).length >= 4 && (() => {
+        // Prefer the server's bucketTotals — on a big fleet the per-device counts are truncated (20k cap),
+        // so summing them here loses the early hours; bucketTotals is the non-truncated line.
+        const bt = (t.bucketTotals && t.bucketTotals.length === t.buckets.length) ? t.bucketTotals : null;
         const hourly = [];
         for (let i = 0; i + 1 < t.buckets.length; i += 2) {
-          hourly.push({ label: String(t.buckets[i]).slice(11, 16), v: devs.reduce((a, d) => a + ((d.counts || [])[i] || 0) + ((d.counts || [])[i + 1] || 0), 0) });
+          const v = bt ? ((bt[i] || 0) + (bt[i + 1] || 0)) : devs.reduce((a, d) => a + ((d.counts || [])[i] || 0) + ((d.counts || [])[i + 1] || 0), 0);
+          hourly.push({ label: String(t.buckets[i]).slice(11, 16), v });
         }
         const max = Math.max(1, ...hourly.map((x) => x.v));
         const pk = hourly.reduce((bi, x, i) => (x.v > hourly[bi].v ? i : bi), 0);
