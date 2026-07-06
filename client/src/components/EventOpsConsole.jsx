@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, lazy, Suspense, Component } from 'react';
+import { createPortal } from 'react-dom';
 import ReactECharts from 'echarts-for-react/lib/core';
 import echarts from '../lib/echarts.js';
 import { api } from '../lib/api.js';
@@ -29,6 +30,19 @@ const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Conne
 // 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
 // Signal board stay top-level. Clicking Hive opens the sub-drawer.
 const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['alerts', '🚨', 'Alerts'], ['calls', '📣', 'Calls'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+
+// 📱 Mobile bottom drawer for the nav pickers (Hive tabs). Portal, backdrop closes.
+function NavSheet({ title, onClose, children }) {
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1400, display: 'flex', alignItems: 'flex-end' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '8px 14px calc(16px + env(safe-area-inset-bottom))', boxShadow: '0 -8px 30px rgba(0,0,0,0.3)' }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--hairline)', margin: '4px auto 12px' }} />
+        {title && <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', marginBottom: 8 }}>{title}</div>}
+        {children}
+      </div>
+    </div>, document.body);
+}
+const sheetRow = (on) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--hairline)', background: 'transparent', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 800 : 600, fontSize: 15, padding: '13px 4px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 48 });
 const TOP_TABS = [['health', '📶', 'Data health']];
 // 🎛️ Flow board views — collapse into the left nav like the Hive sub-drawer.
 const SIGNAL_VIEWS = [['board', '🎛️', 'Board'], ['rhythm', '📈', 'Rhythm'], ['stations', '📶', 'Stations'], ['flow', '🌡️', 'Flow'], ['map', '🗺️', 'Map'], ['river', '🌊', 'River'], ['network', '🕸️', 'Network']];
@@ -42,6 +56,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [canManage, setCanManage] = useState(false);
   const [tab, setTab] = useState('live');
   const [hiveOpen, setHiveOpen] = useState(false); // 🐝 sub-drawer closed until tapped — the landing stays 3 buttons
+  const [hiveSheet, setHiveSheet] = useState(false); // 📱 mobile: Hive opens a bottom drawer instead of an inline sub-drawer
   const inHive = HIVE_TABS.some(([t]) => t === tab);
   const [signalView, setSignalView] = useState('board'); // 🎛️ Flow board view, driven from the nav sub-drawer
   const [signalOpen, setSignalOpen] = useState(false);
@@ -108,22 +123,26 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
             </div>
           )}
           <div style={isMobile ? mobileTabs : leftNav}>
-            {isMobile && (
-              <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} title="Event" aria-label="Event"
-                style={{ ...tabBtn(false), maxWidth: 132, padding: '9px 8px 9px 12px', border: '1px solid var(--hairline)', fontWeight: 700, cursor: 'pointer' }}>
-                {suites.map((s) => <option key={s.id} value={s.id}>🎫 {s.name}</option>)}
-              </select>
+            {/* Mobile event picker = just the 🎫 icon (a transparent native select over
+                it opens the list) so the whole nav fits one row; long names never wrap it. */}
+            {isMobile && suites.length > 0 && (
+              <span title={(suites.find((s) => s.id === suiteId) || {}).name || 'Event'} style={{ ...tabBtn(false), position: 'relative', border: '1px solid var(--hairline)', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '9px 12px' }}>
+                🎫<span style={{ fontSize: 9, opacity: 0.55 }}>▾</span>
+                <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} aria-label="Event"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, border: 'none', cursor: 'pointer' }}>
+                  {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </span>
             )}
-            <button onClick={() => { if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
+            {/* Hive — desktop: inline sub-drawer. Mobile: a bottom drawer like the others. */}
+            <button onClick={() => { if (isMobile) { setHiveSheet(true); return; } if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
               style={isMobile ? tabBtn(inHive) : navItem(inHive)}>
-              <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{hiveOpen ? '▾' : '▸'}</span>
+              <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{isMobile ? '▾' : (hiveOpen ? '▾' : '▸')}</span>
             </button>
-            {hiveOpen && (
-              <div style={isMobile
-                ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
-                : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
+            {hiveOpen && !isMobile && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
                 {HIVE_TABS.map(([t, icon, label]) => (
-                  <button key={t} onClick={() => setTab(t)} style={{ ...(isMobile ? tabBtn(tab === t) : navItem(tab === t)), fontSize: 12.5 }}>
+                  <button key={t} onClick={() => setTab(t)} style={{ ...navItem(tab === t), fontSize: 12.5 }}>
                     <span style={{ fontSize: 13 }}>{icon}</span> {label}
                   </button>
                 ))}
@@ -153,6 +172,16 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
               </div>
             )}
           </div>
+          {isMobile && hiveSheet && (
+            <NavSheet title="🐝 Hive" onClose={() => setHiveSheet(false)}>
+              {HIVE_TABS.map(([t, icon, label]) => (
+                <button key={t} onClick={() => { setTab(t); setHiveSheet(false); }} style={sheetRow(tab === t)}>
+                  <span style={{ fontSize: 17 }}>{icon}</span> {label}
+                  {tab === t && <span style={{ marginLeft: 'auto', color: 'var(--brand)' }}>✓</span>}
+                </button>
+              ))}
+            </NavSheet>
+          )}
           {/* Scan + Move are Hive (device-ops) tools — keep them off the
               read-only Data health / Signal board tabs on every screen. */}
           {canManage && suiteId && inHive && (
