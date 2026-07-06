@@ -1059,6 +1059,27 @@ function ViewPill({ view, setView, open, setOpen }) {
   );
 }
 
+// 📱 A bottom drawer for mobile pickers (station family, view). Tap a row → it fires
+// and the sheet closes. Backdrop tap closes. Renders through a portal above everything.
+function BottomSheet({ title, onClose, children }) {
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1400, display: 'flex', alignItems: 'flex-end' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '8px 14px calc(16px + env(safe-area-inset-bottom))', boxShadow: '0 -8px 30px rgba(0,0,0,0.3)' }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--hairline)', margin: '4px auto 12px' }} />
+        {title && <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', marginBottom: 8 }}>{title}</div>}
+        {children}
+      </div>
+    </div>, document.body);
+}
+// One tappable row inside a BottomSheet.
+function SheetRow({ active, onClick, children, right }) {
+  return (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--hairline)', background: 'transparent', color: active ? 'var(--brand)' : 'var(--text)', fontWeight: active ? 800 : 600, fontSize: 15, padding: '13px 4px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 48 }}>
+      {children}<span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{right}{active && <span style={{ color: 'var(--brand)' }}>✓</span>}</span>
+    </button>
+  );
+}
+
 const VM_CSS = `
 @keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
 @keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
@@ -1825,6 +1846,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const view = viewProp || viewLocal;
   const setView = onView || setViewLocal;
   const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
+  const [sheet, setSheet] = useState(null); // 📱 mobile bottom drawer: 'filter' | 'view' | null
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
   const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
@@ -1927,10 +1949,10 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       {/* monitor filter chips — split the board by station family — and the
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        {chips.length > 1 && (
-          // On mobile the family chips ride in ONE horizontal-scroll strip instead of
-          // wrapping into two or three tall rows — keeps the button count off the screen.
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', ...(isMobile ? { flexWrap: 'nowrap', overflowX: 'auto', width: '100%', paddingBottom: 3, scrollbarWidth: 'none' } : { flexWrap: 'wrap' }) }}>
+        {/* Desktop: the family chips wrap inline. Mobile: one compact button that
+            opens a bottom drawer of families (keeps the header to a single row). */}
+        {chips.length > 1 && !isMobile && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(!picks.length), flex: '0 0 auto' }}>All stations · {rows.length}</button>
             {chips.map((m) => (
               <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(picks.includes(m.id)), flex: '0 0 auto', whiteSpace: 'nowrap' }}>
@@ -1939,11 +1961,17 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
             ))}
           </div>
         )}
+        {chips.length > 1 && isMobile && (
+          <button onClick={() => setSheet('filter')} style={{ ...chipStyle(!!picks.length), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span>🎚️</span>{picks.length ? `${picks.length} famil${picks.length > 1 ? 'ies' : 'y'}` : `All stations · ${rows.length}`}<span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+          </button>
+        )}
         {!isMobile && <span style={{ flex: 1 }} />}
         {dayOpts.length > 0 && dayAware && (
           <select value={day} onChange={(e) => { setDay(e.target.value); setSel(null); }} title="Show a past festival day"
             style={{ border: `1px solid ${day ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: day ? 'var(--brand)' : 'var(--text)', fontWeight: day ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 150 }}>
-            <option value="">📅 LIVE · today</option>
+            {/* Live is just the 📅 icon on mobile — the "LIVE · today" words are noise. */}
+            <option value="">{isMobile ? '📅' : '📅 LIVE · today'}</option>
             {dayOpts.map((d) => <option key={d} value={d}>📅 {dayLbl(d)}</option>)}
           </select>
         )}
@@ -1955,14 +1983,40 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
             <option value="offline">🔴 Offline</option>
           </select>
         )}
-        {/* The inline expanding pill stays alongside the left-nav dropdown — both drive
-            the same view (setView routes to onView when the nav controls it). */}
-        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
+        {/* Desktop: the inline expanding pill. Mobile: a single button → bottom drawer of views. */}
+        {!isMobile
+          ? <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
+          : (() => { const vm = SB_VIEWS.find(([k]) => k === view) || SB_VIEWS[0]; return (
+            <button onClick={() => setSheet('view')} style={{ ...chipStyle(true), marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 14 }}>{vm[1]}</span>{vm[2]}<span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+            </button>
+          ); })()}
         {trailing && <>
           <span style={{ flex: 1 }} />
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{trailing}</span>
         </>}
       </div>
+      {/* 📱 bottom drawers for the two mobile pickers */}
+      {isMobile && sheet === 'filter' && (
+        <BottomSheet title="Filter by station family" onClose={() => setSheet(null)}>
+          <SheetRow active={!picks.length} onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); setSheet(null); }}>All stations<span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {rows.length}</span></SheetRow>
+          {chips.map((m) => (
+            <SheetRow key={m.id} active={picks.includes(m.id)} right={<span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 700 }}>{rows.filter((s) => s.mid === m.id).length}</span>}
+              onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }}>
+              <span>{chipIcon(m)}</span>{m.name}
+            </SheetRow>
+          ))}
+        </BottomSheet>
+      )}
+      {isMobile && sheet === 'view' && (
+        <BottomSheet title="Choose a view" onClose={() => setSheet(null)}>
+          {SB_VIEWS.map(([k, ic, name]) => (
+            <SheetRow key={k} active={view === k} onClick={() => { if (view !== k) { setView(k); backToLive(); } setSheet(null); }}>
+              <span style={{ fontSize: 17 }}>{ic}</span>{name}
+            </SheetRow>
+          ))}
+        </BottomSheet>
+      )}
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
           narrow every view to just those stations; scrolls sideways, never wraps tall. */}
       {!!picks.length && (() => {
@@ -2130,7 +2184,9 @@ export default function SignalOps({ entityId, suiteId, view, onView }) {
   </>;
   return (
     <div>
-      <SignalBoard monitors={data.monitors || []} trailing={controlBits} view={view} onView={onView} />
+      {/* On phones the "updated · auto 60s · ⋯" cluster is noise — refresh is automatic,
+          and the Owl (Summary) is already the floating orb — so drop it on mobile. */}
+      <SignalBoard monitors={data.monitors || []} trailing={isMobile ? null : controlBits} view={view} onView={onView} />
     </div>
   );
 }
