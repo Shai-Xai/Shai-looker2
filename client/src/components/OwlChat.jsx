@@ -406,7 +406,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     : <div style={{ flexShrink: 0 }}>{sidebarInner}</div>);
 
   const panel = (
-    <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
+    // On phones the panel is edge-to-edge (like a native app) — drop the animated
+    // gradient frame so it reads borderless, not a card floating in a window.
+    <div className={isMobile ? undefined : 'ai-glow'} style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Clean header: chats ☰, new chat ✎, title — everything else lives in the ⋯ menu

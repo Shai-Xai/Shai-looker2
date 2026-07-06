@@ -410,6 +410,19 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const qs = fmeta.filter((f) => (f.questions || []).length).map((f) => `${f.label} → ${f.questions.join(' / ')}`);
     if (qs.length) parts.push(`Typical questions by field: ${qs.join(' | ')}.`);
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // Route domain questions (cashless bar/vendor sales, check-ins, spend…) to the
+    // registered EXTRA-EXPLORE tools. Without this the model treats them as "read a
+    // dashboard" and answers off a tile — a dashboard source that can't chart or pin.
+    // Each ask_* breakdown auto-charts and is pinnable exactly like askData, so the
+    // model must run the tool for the breakdown, not reduce it to a plain text table.
+    try {
+      const exNorm = (v) => `ask_${String(v).replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 48)}`;
+      const extras = ((getOwlTools().catalogue || {}).extras || [])
+        .filter((x) => owlCatalogue.exploreEnabledFor(db, `${x.model}::${x.explore}`, scopeEntityId));
+      if (extras.length) {
+        parts.push(`EXTRA DATA EXPLORES (beyond ticketing) available for this client — for any raw figure or breakdown in that domain, use the named tool; it is the ONLY way to get real numbers from that dataset, so do NOT answer from a dashboard tile: ${extras.map((x) => `"${x.label}" → ${exNorm(x.explore)}`).join('; ')}. Their breakdowns AUTO-CHART and are pinnable exactly like askData — always run the tool for the breakdown (then add a one-line takeaway); never reduce it to a text-only table.`);
+      }
+    } catch { /* ignore */ }
     // Reporting currency: write money in the organiser's currency (blank for ZAR).
     try { const cn = currencyNote && currencyNote(scopeEntityId || undefined, suiteId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     // AI content language: write generated prose in the organiser's language (blank for English).
