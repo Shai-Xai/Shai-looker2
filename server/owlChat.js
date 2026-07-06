@@ -176,20 +176,28 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
     if (stopped()) return { text: '', trail, rounds, stopped: true };
     // Tell the user we're working before each model turn (the silent pre-text gap).
     if (onStatus) onStatus(rounds === 0 ? 'Thinking…' : 'Working through it…');
+    // ── Latency trace (Render logs, prefix [owl-trace]) — so a slow answer can be
+    // pinned to the model turn vs a Looker query vs repeated rounds, not guessed.
+    const _mt0 = Date.now();
     const final = await llmTurn({ messages: convo, tools, onText });
+    const _modelMs = Date.now() - _mt0;
     const blocks = final.content || [];
     convo.push({ role: 'assistant', content: blocks });
     const toolUses = blocks.filter((b) => b.type === 'tool_use');
     if (!toolUses.length) {
+      console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → final answer (no tool)`);
       return { text: textOf(blocks), trail, rounds: rounds + 1 };
     }
+    console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → calling ${toolUses.map((t) => t.name).join(', ')}`);
     // About to run tool(s) — say which kind of thing we're fetching.
     if (onStatus) onStatus(statusForTools(toolUses));
     const results = [];
     for (const tu of toolUses) {
       if (stopped()) return { text: '', trail, rounds, stopped: true };
       const tool = toolMap[tu.name];
+      const _tt0 = Date.now();
       const result = tool ? await tool.run(tu.input || {}, ctx) : { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
+      console.log(`[owl-trace]   ${tu.name} ${Date.now() - _tt0}ms ok=${!!result.ok}${result.ok ? ` rows=${Array.isArray(result.rows) ? result.rows.length : '-'}` : ` reason=${result.reason}`} input=${JSON.stringify(tu.input || {}).slice(0, 400)}`);
       trail.push({ name: tu.name, input: tu.input || {}, result });
       // Feed the model a compact result. Pass through whatever the tool returned
       // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
