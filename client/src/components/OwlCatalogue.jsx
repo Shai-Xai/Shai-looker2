@@ -195,6 +195,13 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter fields…" style={{ flex: '1 1 200px', minWidth: 160, padding: '6px 9px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 13 }} />
                 <button onClick={save} disabled={busy || !enabled} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save'}</button>
+                {/* Bulk-clear the dimensions so you can rebuild a FOCUSED set fast — unticking
+                    hundreds by hand (esp. on a phone) is the reason big catalogues never get
+                    trimmed. Measures stay ticked; then tick the ~30 dimensions you actually ask about. */}
+                {enabled && (data.dimensions || []).some((d) => enabled.has(d.name)) && (
+                  <button onClick={() => { if (window.confirm('Untick every dimension on this explore? Your measures stay ticked — then tick just the few dimensions you actually ask about, and Save.')) setEnabled((s) => new Set([...s].filter((n) => (data.measures || []).some((m) => m.name === n)))); }}
+                    style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Untick all dimensions</button>
+                )}
                 {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
                 {err && <span style={{ fontSize: 12.5, color: '#e0414a', fontWeight: 600 }}>⚠ {err}</span>}
               </div>
