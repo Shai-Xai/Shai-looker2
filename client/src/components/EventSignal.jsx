@@ -1624,7 +1624,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
-      {!edit && mode !== 'heat' && !!alarmed.length && (
+      {!edit && mode !== 'heat' && mode !== 'crowd' && !!alarmed.length && (
         <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
         </div>
