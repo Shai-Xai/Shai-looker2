@@ -314,6 +314,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
 
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+  // Round "floating" control — chats/more/close sit as soft circular buttons on the
+  // header row alongside the scope pickers, so there's no separate scope strip.
+  const floatBtn = { border: 'none', background: 'var(--elevated, rgba(128,128,128,0.1))', color: 'var(--text)', cursor: 'pointer', borderRadius: 999, width: 32, height: 32, flexShrink: 0, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   const segBtn = (active) => ({ padding: '4px 10px', fontSize: 11.5, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const menuItem = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600 };
   const selStyle = { padding: '4px 8px', borderRadius: 8, border: 'none', background: 'var(--elevated, rgba(128,128,128,0.08))', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
@@ -411,14 +414,27 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     <div className={isMobile ? undefined : 'ai-glow'} style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Minimal header: just chats ☰, one ⋯ menu holding everything secondary
-          (new chat / full screen / copy / PDF / share / text size / dock) + close ✕,
-          so the bar stays calm and uncluttered. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-        <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
+      {/* Single header row: chats ☰, the scope pickers themselves, then ⋯ + close ✕ —
+          all as soft floating buttons, so scope lives IN the header (no second row). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 8px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
+        <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...floatBtn, fontSize: 15 }}>☰</button>
+        {showPicker && (clients.length > 1 ? (
+          <select value={selEntity} onChange={(e) => { setSelEntity(e.target.value); setSelSuite(''); resetThread(); }} style={{ ...selStyle, padding: '5px 8px', maxWidth: isMobile ? 132 : 200 }} aria-label="Client">
+            <option value="">Pick a client…</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ) : (
+          <strong style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(clients[0] && clients[0].name) || 'Your data'}</strong>
+        ))}
+        {showPicker && selEntity && clientEvents.length > 0 && (
+          <select value={selSuite} onChange={(e) => { setSelSuite(e.target.value); resetThread(); }} style={{ ...selStyle, padding: '5px 8px', maxWidth: isMobile ? 112 : 200 }} aria-label="Event">
+            <option value="">All events</option>
+            {clientEvents.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        )}
         <span style={{ flex: 1 }} />
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...hdrBtn, fontSize: 18, fontWeight: 700, padding: '2px 8px', ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 8 } : null) }}>⋯</button>
+          <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...floatBtn, fontSize: 17, fontWeight: 700, ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.22))' } : null) }}>⋯</button>
           {hdrMenuOpen && (
             <>
               <div onClick={() => setHdrMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
@@ -458,28 +474,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             </>
           )}
         </div>
-        {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>}
+        {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...floatBtn, fontSize: 16 }}>✕</button>}
       </div>
-
-      {showPicker && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0, flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--muted)', fontSize: 12.5 }}>Scope:</span>
-          {clients.length > 1 ? (
-            <select value={selEntity} onChange={(e) => { setSelEntity(e.target.value); setSelSuite(''); resetThread(); }} style={selStyle} aria-label="Client">
-              <option value="">Pick a client…</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          ) : (
-            <strong style={{ fontSize: 12.5 }}>{(clients[0] && clients[0].name) || 'Your data'}</strong>
-          )}
-          {selEntity && clientEvents.length > 0 && (
-            <select value={selSuite} onChange={(e) => { setSelSuite(e.target.value); resetThread(); }} style={selStyle} aria-label="Event">
-              <option value="">All events</option>
-              {clientEvents.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-            </select>
-          )}
-        </div>
-      )}
 
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, fontSize: `${zoom}em` }}>
         {messages.length === 0 && (
