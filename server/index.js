@@ -644,7 +644,7 @@ const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
-const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); require('./signalReport').mount(app, { db, auth, mailer, dataHealth: dataHealthApi, signalFlow: staffAlertsApi.signalFlow }); require('./venueMap').mount(app, { db, auth }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) + shareable print-to-PDF device-health report & scheduled/drop-alert ops digest to the network/ops provider → server/dataHealth.js, server/signalReport.js
+const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); require('./signalReport').mount(app, { db, auth, mailer, dataHealth: dataHealthApi, signalFlow: staffAlertsApi.signalFlow }); require('./venueMap').mount(app, { db, auth }); require('./lineup').mount(app, { db, auth }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) + shareable print-to-PDF device-health report & scheduled/drop-alert ops digest to the network/ops provider → server/dataHealth.js, server/signalReport.js
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing
@@ -2649,10 +2649,10 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // ─── Public platform surface → server/publicSurface.js ─────────────────────────
 // API keys + /api/v1 (read + drafts) + remote MCP server + OAuth connect flow —
 // thin adapters over the SAME service core; the app's scope gates apply.
-require('./publicSurface').mount(app, {
-  db, auth, rateLimit, mailer, currency, language, clientCatalogue,
-  resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
+const publicApi = require('./publicSurface').mount(app, {
+  db, auth, rateLimit, mailer, currency, language, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
 });
+require('./peopleFlow').mount(app, { db, auth, queryData: publicApi.core.queryData }); // 🌊 crowd movement between touchpoints
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.

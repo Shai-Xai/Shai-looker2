@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-05 (📅 Day picker · 🛰️ satellite maps · 30-day ghost guard) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-05 (🔥 transaction heatmap on the Flow board) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -785,6 +785,16 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-05 (late)** — **Flow board: 🔥 transaction heatmap** 🧪: a new 🔥 Heat mode on
+  the venue map turns each station into a heat bloom sized by how much it's *transacting*,
+  colour-coded by category so **bars and gates read at the same time**. A **▶ play-the-day**
+  scrubber time-lapses the night — watch check-ins blaze at the gates at doors, then the heat
+  migrate to the bars at peak and the food court flare late. Toggle **Absolute** (each area vs
+  its own busiest all day) or **Relative** (vs right now), and the **window** (5 / 10 / 20 / 30
+  min / 1 hour) — the number on each station is the transactions in that window. Reads the
+  per-station transaction line we already fetch (no new Looker load); works on light or dark
+  maps. Also: the seven Flow-board views now live BOTH as an expanding pill in the header and
+  as a left-nav dropdown.
 - **2026-07-05 (eve)** — **Signal board: 📅 Day picker · 🛰️ satellite maps · past-event
   ghost guard** 🧪: multi-day events can now flip Stations/Rhythm (and every deep-dive)
   between festival days — a day runs daily-start → +24h so the after-midnight tail stays

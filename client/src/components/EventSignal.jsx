@@ -6,6 +6,7 @@ import EventFlow from './EventFlow.jsx';
 import AiMark from './AiMark.jsx';
 import OwlQuips from './OwlQuips.jsx';
 import InfoTip from './InfoTip.jsx';
+import { useLineup, bandsFor, LineupBands, SetImpact, LineupEditor } from './Lineup.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 
@@ -613,8 +614,10 @@ function PulseStrip({ monitors, apiBase, rows, idx, setIdx, onScrub, day = '' })
 // station, one cell per hour, colour depth = how busy (green = transactions,
 // blue = scans), the day's avg/h on the right. The site's stacked total sits
 // on top. Hourly numbers come from each monitor's day timeline (hour blocks).
-function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
+function RhythmView({ monitors, apiBase, rows, onSelect, day = '', suiteId = '' }) {
   const [data, setData] = useState({}); // monitor id -> hourly timeline
+  const { sets, setSets } = useLineup(apiBase, suiteId); // 🎤 artist set schedule (overlay + impact)
+  const [editLineup, setEditLineup] = useState(false);
   const hrs = day ? `day:${day}` : 'start';
   useEffect(() => {
     let alive = true;
@@ -648,17 +651,33 @@ function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
     const act = s.vals.filter((v) => v > 0);
     return { ...s, total: s.vals.reduce((a, b) => a + b, 0), avg: act.length ? Math.round(act.reduce((a, b) => a + b, 0) / act.length) : 0 };
   }).sort((a, b) => b.total - a.total);
-  const hh = (h) => `${h.slice(11, 13)}:00`;
+  // Local hour label (+02:00, the offset the rest of Pulse assumes) so the axis reads
+  // in event time and lines up with the lineup set times entered in local time.
+  const hh = (h) => `${String((Number(h.slice(11, 13)) + 2) % 24).padStart(2, '0')}:00`;
   const totMax = Math.max(1, ...hours.map((_, i) => list.reduce((a, s) => a + s.vals[i], 0)));
+  const hourTx = hours.map((_, i) => list.filter((s) => s.unit === 'transactions').reduce((a, s) => a + s.vals[i], 0));
+  const bands = bandsFor(sets, hours, hourTx); // 🎤 set bands + per-set impact
+  const lineupEls = (
+    <>
+      <SetImpact bands={bands} canEdit={!!suiteId} onEdit={() => setEditLineup(true)} />
+      {editLineup && <LineupEditor apiBase={apiBase} suiteId={suiteId} sets={sets} onClose={() => setEditLineup(false)} onSaved={setSets} />}
+    </>
+  );
   if (!hours.length) {
-    return <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>{loaded.length < monitors.length ? 'Reading each monitor’s day timeline…' : 'No hourly data in the window yet.'}</div>;
+    return (
+      <div>
+        <div style={{ ...card, fontSize: 12.5, color: 'var(--muted)' }}>{loaded.length < monitors.length ? 'Reading each monitor’s day timeline…' : 'No hourly data in the window yet.'}</div>
+        {suiteId && lineupEls}
+      </div>
+    );
   }
   return (
     <div>
       {/* site total, stacked per hour: green = transactions, blue = scans */}
       <div style={{ ...card, marginBottom: 10 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Whole site · per hour</div>
-        <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 56 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.1, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 4 }}>Whole site · per hour{bands.length ? ' · 🎤 set overlay' : ''}</div>
+        <div style={{ position: 'relative', display: 'flex', gap: 2, alignItems: 'flex-end', height: 56 }}>
+          <LineupBands bands={bands} />
           {hours.map((h, i) => {
             const tx = list.filter((s) => s.unit === 'transactions').reduce((a, s) => a + s.vals[i], 0);
             const sc = list.filter((s) => s.unit === 'scans').reduce((a, s) => a + s.vals[i], 0);
@@ -699,6 +718,7 @@ function RhythmView({ monitors, apiBase, rows, onSelect, day = '' }) {
         })}
         {loaded.length < monitors.length && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Still reading {monitors.length - loaded.length} monitor{monitors.length - loaded.length === 1 ? '' : 's'}…</div>}
       </div>
+      {suiteId && lineupEls}
     </div>
   );
 }
@@ -1039,12 +1059,46 @@ function ViewPill({ view, setView, open, setOpen }) {
   );
 }
 
+// 📱 A bottom drawer for mobile pickers (station family, view). Tap a row → it fires
+// and the sheet closes. Backdrop tap closes. Renders through a portal above everything.
+function BottomSheet({ title, onClose, children }) {
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1400, display: 'flex', alignItems: 'flex-end' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '8px 14px calc(16px + env(safe-area-inset-bottom))', boxShadow: '0 -8px 30px rgba(0,0,0,0.3)' }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--hairline)', margin: '4px auto 12px' }} />
+        {title && <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', marginBottom: 8 }}>{title}</div>}
+        {children}
+      </div>
+    </div>, document.body);
+}
+// One tappable row inside a BottomSheet.
+function SheetRow({ active, onClick, children, right }) {
+  return (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--hairline)', background: 'transparent', color: active ? 'var(--brand)' : 'var(--text)', fontWeight: active ? 800 : 600, fontSize: 15, padding: '13px 4px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 48 }}>
+      {children}<span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{right}{active && <span style={{ color: 'var(--brand)' }}>✓</span>}</span>
+    </button>
+  );
+}
+
 const VM_CSS = `
 @keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
 @keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
 @keyframes vmHalo{0%,100%{opacity:.5}50%{opacity:.95}}
-@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}}`;
+@keyframes vmFlow{to{stroke-dashoffset:-15}}
+.vm-flow{animation:vmFlow .9s linear infinite}
+@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}.vm-flow{animation:none !important}}`;
+// 🔥 Heat category colour by monitor name — bars red, food amber, vendors purple,
+// gates/check-in teal, else blue. Keeps "gates and bars readable at the same time".
+const HEAT_CAT = (name) => {
+  const n = String(name || '').toLowerCase();
+  if (/food|pizza|kosmo|burger|gelat|poke|kebab|snack|hot ?dog/.test(n)) return [255, 157, 30];
+  if (/vendor|merch|store|retail|shop/.test(n)) return [179, 136, 255];
+  if (/check|gate|access|entry|scan|ticket|door|turnstile/.test(n)) return [0, 201, 183];
+  if (/bar|beer|drink|acqua/.test(n)) return [255, 90, 122];
+  return [77, 159, 255];
+};
 function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
+  const isMobile = useIsMobile();
   const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
   const [cfg, setCfg] = useState(null);
   const [pins, setPins] = useState({});
@@ -1058,8 +1112,24 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [ar, setAr] = useState(4 / 3); // the uploaded plan's aspect ratio — box fits the screen without scrolling
   const [satOpen, setSatOpen] = useState(false); const [satPos, setSatPos] = useState(''); const [satW, setSatW] = useState('800'); // 🛰️ fetch-satellite form
   const [devs, setDevs] = useState({}); // mid -> { list, onlineMin } — fetched lazily on first Operator toggle
+  const [iv, setIv] = useState(30); const [scale, setScale] = useState('abs'); // 🔥 Heat: window minutes + Absolute/Relative
+  const [heat, setHeat] = useState(null); const [heatIdx, setHeatIdx] = useState(null); const [playing, setPlaying] = useState(false); const [rez, setRez] = useState(0);
+  const [full, setFull] = useState(false); // ⛶ fullscreen the map (great for Heat on a big screen)
+  const [flow, setFlow] = useState(null); // 🚶 crowd flow: aggregate station→station journeys
+  const [flowLoad, setFlowLoad] = useState(false);
+  const [flowFrame, setFlowFrame] = useState(null); // null = all night · else a time-window frame index
+  const [hideNames, setHideNames] = useState(false); // tap the map to hide station labels for a clean read
+  const heatRef = useRef(null);
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
+  useEffect(() => { // 🚶 crowd flow — pull the aggregate journey graph once on entering the mode
+    if (mode !== 'crowd' || !suiteId) return undefined;
+    let alive = true; setFlowLoad(true); setFlowFrame(null); setHideNames(false);
+    fetch(`${scope}/people-flow/${encodeURIComponent(suiteId)}`)
+      .then((r) => r.json()).then((d) => { if (alive) { setFlow(d && !d.error ? d : null); setFlowLoad(false); } })
+      .catch(() => { if (alive) { setFlow(null); setFlowLoad(false); } });
+    return () => { alive = false; };
+  }, [mode, suiteId, scope]);
   useEffect(() => {
     let alive = true;
     if (!suiteId) { setCfg({ image: '', pins: {} }); return () => {}; }
@@ -1169,26 +1239,150 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
   const unpin = (name) => { setPins((prev) => { const n = { ...prev }; delete n[name]; return n; }); setDirty(true); };
+  // ── 🔥 Heat: per-station transaction volume on ONE shared time axis. Read a rolling
+  // 24h window (NOT each monitor's own roster start — that clipped busy bars whose anchor
+  // is late) then trim to the CURRENT activity run: the last active bucket back to the
+  // last quiet gap of 4h+. Night events cross midnight, so we must NOT clip to calendar
+  // midnight (that hid the whole evening once the clock ticked past 00:00) — a quiet-gap
+  // boundary groups one event night whether or not it spans midnight. Re-pulls every 60s. ──
+  const [heatTick, setHeatTick] = useState(0);
+  useEffect(() => {
+    if (mode !== 'heat' || !suiteId) return undefined;
+    let alive = true;
+    const ivMs = iv * 60000;
+    const mids = [...new Set(sts.map((s) => s.mid))];
+    const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
+    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`)
+      .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
+      .then((packs) => {
+        if (!alive) return;
+        const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const axisSet = new Set();
+        for (const { mid, d } of packs) {
+          if (!d || !d.buckets) continue;
+          const bk = d.buckets.map((b) => Math.floor(Date.parse(b) / ivMs) * ivMs);
+          bk.forEach((b) => { if (Number.isFinite(b)) axisSet.add(b); });
+          const per = {};
+          if (d.stationTotals && Object.keys(d.stationTotals).length) Object.assign(per, d.stationTotals);
+          else for (const dev of (d.devices || [])) { const st = dev.station || ''; if (!per[st]) per[st] = bk.map(() => 0); (dev.counts || []).forEach((c, i) => { if (per[st][i] != null) per[st][i] += (c || 0); }); }
+          const col = HEAT_CAT(monName.get(mid));
+          for (const [st, arr] of Object.entries(per)) {
+            if (!st) continue;
+            if (!series.has(st)) series.set(st, new Map());
+            const m2 = series.get(st);
+            arr.forEach((v, i) => { const b = bk[i]; if (b != null) m2.set(b, (m2.get(b) || 0) + (v || 0)); });
+            catKeyOf.set(st, mid); catCol.set(st, col);
+          }
+        }
+        let axis = [...axisSet].sort((a, b) => a - b);
+        const tot = (b) => { let s2 = 0; for (const m2 of series.values()) s2 += m2.get(b) || 0; return s2; };
+        let hi = axis.length - 1; while (hi > 0 && tot(axis[hi]) === 0) hi--; // last active bucket
+        let lo = hi, zeros = 0; // walk back through the run, stopping at a 4h+ quiet gap
+        for (let i = hi; i >= 0; i--) { if (tot(axis[i]) > 0) { lo = i; zeros = 0; } else { zeros += ivMs; if (zeros >= 4 * 3600000) break; } }
+        axis = axis.slice(lo, hi + 1);
+        // Per-category all-day peak (Absolute scale) computed over just this run.
+        const dayPeak = new Map();
+        for (const [st, m2] of series.entries()) { const mid = catKeyOf.get(st); let mx = dayPeak.get(mid) || 0; for (const b of axis) { const v = m2.get(b) || 0; if (v > mx) mx = v; } dayPeak.set(mid, mx); }
+        setHeat({ axis, series, catKeyOf, catCol, dayPeak });
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval/60s tick
+  }, [mode, iv, suiteId, apiBase, heatTick]);
+  useEffect(() => { if (mode === 'heat') { setHeatIdx(null); setPlaying(false); } }, [iv, mode]); // fresh live view on enter / window change
+  useEffect(() => { if (mode !== 'heat') return undefined; const t = setInterval(() => setHeatTick((n) => n + 1), 60000); return () => clearInterval(t); }, [mode]);
+  useEffect(() => { // play advances the scrub through the day
+    if (!playing || !heat || !heat.axis.length) return undefined;
+    const t = setInterval(() => setHeatIdx((i) => { const cur = i == null ? heat.axis.length - 1 : i; const nx = cur + 1; return nx >= heat.axis.length ? 0 : nx; }), 380);
+    return () => clearInterval(t);
+  }, [playing, heat]);
+  useEffect(() => { // draw the heat canvas on any relevant change
+    const cv = heatRef.current, box = boxRef.current;
+    if (mode !== 'heat' || !cv || !box || !heat || !heat.axis.length) { if (cv) { const c = cv.getContext('2d'); if (c) c.clearRect(0, 0, cv.width, cv.height); } return; }
+    const ctx = cv.getContext('2d');
+    const bgc = getComputedStyle(box).backgroundColor.match(/\d+/g);
+    const dark = bgc ? (0.299 * +bgc[0] + 0.587 * +bgc[1] + 0.114 * +bgc[2]) / 255 < 0.5 : true;
+    const w = box.clientWidth, h = box.clientHeight;
+    if (cv.width !== w * 2 || cv.height !== h * 2) { cv.width = w * 2; cv.height = h * 2; }
+    ctx.setTransform(2, 0, 0, 2, 0, 0); ctx.clearRect(0, 0, w, h);
+    if (!dark) { ctx.fillStyle = 'rgba(10,14,20,0.26)'; ctx.fillRect(0, 0, w, h); } // scrim so heat reads on a light plan
+    const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+    const T = heat.axis[idx];
+    const frameMax = new Map();
+    for (const s of placed) { const v = heat.series.get(s.name)?.get(T) || 0; const k = heat.catKeyOf.get(s.name); if (v > (frameMax.get(k) || 0)) frameMax.set(k, v); }
+    ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+    const R0 = Math.max(w, h) * 0.055;
+    for (const s of placed) {
+      const v = heat.series.get(s.name)?.get(T) || 0; const k = heat.catKeyOf.get(s.name);
+      const denom = scale === 'abs' ? (heat.dayPeak.get(k) || 1) : (frameMax.get(k) || 1);
+      const I = Math.min(1, v / denom); if (I < 0.05) continue;
+      const [r, g, b] = heat.catCol.get(s.name) || [77, 159, 255]; const p = pins[s.name];
+      const x = p.x * w, y = p.y * h, R = R0 * (0.55 + 1.1 * I);
+      const gr = ctx.createRadialGradient(x, y, 2, x, y, R);
+      gr.addColorStop(0, `rgba(${r},${g},${b},${dark ? 0.55 * I + 0.15 : 0.62 * I + 0.12})`);
+      gr.addColorStop(0.5, `rgba(${r},${g},${b},${dark ? 0.22 * I : 0.28 * I})`);
+      gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (const s of placed) {
+      const v = Math.round(heat.series.get(s.name)?.get(T) || 0);
+      const k = heat.catKeyOf.get(s.name); const denom = scale === 'abs' ? (heat.dayPeak.get(k) || 1) : (frameMax.get(k) || 1);
+      const I = Math.min(1, v / denom); if (I < 0.14 && !v) continue;
+      const [r, g, b] = heat.catCol.get(s.name) || [77, 159, 255]; const p = pins[s.name]; const x = p.x * w, y = p.y * h;
+      if (I > 0.14) { ctx.fillStyle = dark ? '#e8eef6' : '#16202c'; ctx.font = '600 10px -apple-system,sans-serif'; ctx.textAlign = 'center'; ctx.fillText(s.name, x, y - 15); }
+      ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.font = '800 11px ui-monospace,monospace'; ctx.textAlign = 'center'; ctx.fillText(v.toLocaleString('en-ZA'), x, y + 4);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- placed/pins read fresh each draw
+  }, [mode, heat, heatIdx, scale, pins, rez]);
+  useEffect(() => {
+    if (mode !== 'heat') return undefined;
+    const box = boxRef.current; if (!box || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => setRez((n) => n + 1)); ro.observe(box); return () => ro.disconnect();
+  }, [mode]);
+  useEffect(() => {
+    if (!full) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
   if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
   const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
   const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
+  // 🚶 the flow graph currently on the map: the whole night, or the scrubbed window frame.
+  const activeFlow = flow && (flowFrame != null && flow.frames && flow.frames[flowFrame]) ? flow.frames[flowFrame] : flow;
   return (
-    <div>
+    <div style={full ? { position: 'fixed', inset: 0, zIndex: 1300, background: 'var(--bg)', padding: '12px 14px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}>
       <style>{VM_CSS}</style>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: 160 }}>
-          {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it')
-            : <>Live site plan — tap a pin for its devices &amp; operators. <b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
-        </span>
+        {/* The descriptive blurb eats a whole row on a phone — on mobile keep only the
+            actionable "tap to place" instruction (and any dark-station count). */}
+        {(!isMobile || (edit && placing) || (!edit && !!alarmed.length)) && (
+          <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: isMobile ? 0 : 160 }}>
+            {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : (isMobile ? '' : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it'))
+              : mode === 'heat' ? (isMobile ? '' : <>Transaction heatmap — how busy each station is. Press ▶ to time-lapse the day; tap a station for its detail.</>)
+                : mode === 'crowd' ? (isMobile ? '' : <>Crowd flow — where wristbands moved between touchpoints. Thicker, brighter lines = more people took that route.</>)
+                  : <>{isMobile ? '' : <>Live site plan — tap a pin for its devices &amp; operators. </>}<b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+          </span>
+        )}
+        {isMobile && <span style={{ flex: 1 }} />}
         {!edit && <>
           <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
+          <button style={btn(mode === 'heat')} onClick={() => setMode('heat')}>🔥 Heat</button>
+          <button style={btn(mode === 'crowd')} onClick={() => setMode('crowd')}>🚶 Flow</button>
+          <button style={btn(full)} onClick={() => setFull(!full)} title={full ? 'Exit fullscreen' : 'Fullscreen'}>{full ? '⛶ Exit' : '⛶'}</button>
+        </>}
+        {!edit && mode === 'heat' && <>
+          <span style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 999, overflow: 'hidden' }}>
+            {[['abs', 'Absolute'], ['rel', 'Relative']].map(([k, l]) => <button key={k} onClick={() => setScale(k)} style={{ border: 'none', background: scale === k ? 'var(--brand)' : 'var(--card)', color: scale === k ? '#fff' : 'var(--text)', fontSize: 11, fontWeight: 700, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 }}>{l}</button>)}
+          </span>
+          <select value={iv} onChange={(e) => setIv(+e.target.value)} title="Transactions per window" style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer' }}>
+            {[5, 10, 20, 30, 60].map((m) => <option key={m} value={m}>{m < 60 ? m + ' min' : '1 hour'}</option>)}
+          </select>
         </>}
         {edit && <label style={{ ...btn(false), display: 'inline-flex', alignItems: 'center' }}>{cfg.image ? 'Replace map' : '⬆ Upload site plan'}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadMap(e.target.files && e.target.files[0])} /></label>}
         {edit && <button style={btn(satOpen)} onClick={() => setSatOpen(!satOpen)}>🛰️ Satellite</button>}
         {edit && cfg.image && <button style={btn(false)} onClick={() => { setSaving(true); fetch(`${scope}/venue-map/${encodeURIComponent(suiteId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '' }) }).then((r) => r.json()).then((d) => d && !d.error && setCfg(d)).finally(() => setSaving(false)); }}>Remove map</button>}
         {edit && dirty && <button style={btn(true)} disabled={saving} onClick={() => savePins(pins)}>{saving ? 'Saving…' : '💾 Save pins'}</button>}
-        <button style={btn(edit)} onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : '✏️ Edit pins'}</button>
+        <button style={btn(edit)} title="Edit pins" onClick={() => { if (edit && dirty) savePins(pins); setEdit(!edit); setPlacing(''); }}>{edit ? '✓ Done' : (isMobile ? '✏️' : '✏️ Edit pins')}</button>
       </div>
       {edit && satOpen && (
         <div style={{ ...card, marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1201,21 +1395,55 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <button style={btn(true)} disabled={saving} onClick={fetchSatellite}>{saving ? 'Fetching…' : 'Fetch & set as map'}</button>
         </div>
       )}
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0, width: isMobile ? '100%' : undefined }}>
       {/* The box keeps the image's exact aspect (pins are % of it) but must FIT the
           viewport with no scrolling — so when the height would overflow, the box
           narrows itself instead: width = min(100%, available-height × aspect). */}
       <div ref={boxRef} onPointerDown={onMapPointerDown}
-        style={{ position: 'relative', width: `min(100%, calc((100dvh - 250px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        onClick={mode === 'crowd' && !edit ? () => setHideNames((v) => !v) : undefined}
+        style={{ position: 'relative', width: `min(100%, calc((100dvh - ${full ? 120 : 250}px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: mode === 'crowd' && !edit ? 'pointer' : (edit && placing ? 'crosshair' : 'default') }}>
         {cfg.image
           ? <img src={cfg.image} alt="venue site plan" onLoad={(e) => { const im = e.target; if (im.naturalWidth && im.naturalHeight) setAr(im.naturalWidth / im.naturalHeight); }} style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }} />
           : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
               <span style={{ fontSize: 10.5, color: 'var(--muted)', padding: 8 }}>No site plan yet — ✏️ Edit pins → ⬆ Upload site plan (pins work on the blank grid too)</span>
             </div>}
-        {halos.map((h2, i) => (
+        {mode === 'heat' && !edit && (
+          <canvas ref={heatRef} onClick={(e) => { const b = boxRef.current.getBoundingClientRect(); const x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height; let best = null, bd = 0.06; for (const s of placed) { const p = pins[s.name]; const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = s; } } if (best) onSelect(best); }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
+        )}
+        {mode !== 'heat' && mode !== 'crowd' && halos.map((h2, i) => (
           <div key={i} className="vm-anim" style={{ position: 'absolute', left: `${h2.x * 100}%`, top: `${h2.y * 100}%`, width: 130 + h2.n * 30, height: 130 + h2.n * 30, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(220,38,38,.30) 0%, transparent 70%)', animation: 'vmHalo 1.6s ease-in-out infinite', pointerEvents: 'none' }}>
             <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
           </div>
         ))}
+        {/* 🚶 Crowd flow — curved, animated lines between pinned stations (dashes flow
+            from→to; thicker/brighter = more people), then node dots sized by footfall. */}
+        {mode === 'crowd' && !edit && activeFlow && (() => {
+          const segs = (activeFlow.edges || []).filter((e) => pins[e.from] && pins[e.to]);
+          const maxE = Math.max(1, ...segs.map((e) => e.count));
+          return (
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+              {segs.map((e, i) => {
+                const a = pins[e.from], b = pins[e.to]; const x1 = a.x * 100, y1 = a.y * 100, x2 = b.x * 100, y2 = b.y * 100;
+                const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1; const off = Math.min(11, len * 0.16);
+                const cx = (x1 + x2) / 2 - (dy / len) * off, cy = (y1 + y2) / 2 + (dx / len) * off; const r = e.count / maxE;
+                return <path key={i} d={`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`} fill="none" stroke="var(--brand)" strokeWidth={1.2 + 5 * r} strokeOpacity={0.28 + 0.5 * r} strokeLinecap="round" vectorEffect="non-scaling-stroke" className="vm-flow" style={{ strokeDasharray: '7 8' }} />;
+              })}
+            </svg>
+          );
+        })()}
+        {mode === 'crowd' && !edit && activeFlow && (activeFlow.nodes || []).filter((n) => pins[n.station]).map((n) => {
+          const p = pins[n.station]; const maxV = Math.max(1, ...(activeFlow.nodes || []).map((x) => x.visits)); const r = n.visits / maxV;
+          const isEntry = n.entries > (n.visits * 0.4); const col = isEntry ? '#00c9b7' : '#5b8def'; const d = 10 + 20 * r;
+          return (
+            <div key={n.station} onClick={(e) => { e.stopPropagation(); const s = placed.find((x) => x.name === n.station); if (s) onSelect(s); }}
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', cursor: 'pointer' }}>
+              <span style={{ display: 'block', width: d, height: d, borderRadius: '50%', background: col, opacity: 0.9, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}` }} />
+              {!hideNames && <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: 'var(--text)', textShadow: '0 1px 3px var(--card),0 -1px 3px var(--card),1px 0 3px var(--card),-1px 0 3px var(--card)' }}>{isEntry ? '🚪 ' : ''}{n.station}</span>}
+            </div>
+          );
+        })}
         {mode === 'operator' && !edit && placed.map((s) => {
           const list = devsFor(s); const p = pins[s.name];
           if (!list) return <span key={'d' + s.name} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + 14px)`, transform: 'translateX(-50%)', fontSize: 8.5, color: 'var(--muted)' }}>…</span>;
@@ -1238,21 +1466,143 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             dark > 0 && <i key={s.name + '·dark'} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + ${18 + rowsN * 11}px)`, transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8.5, fontStyle: 'normal', fontWeight: 800, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{dark} dark</i>,
           ];
         })}
-        {placed.map((s) => {
+        {mode !== 'heat' && (mode !== 'crowd' || edit) && placed.map((s) => {
           const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
           return (
             <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
               onClick={(e) => { e.stopPropagation(); if (edit) return; onSelect(s); }}
-              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
-              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 26, height: 26, borderRadius: '50%', border: `1.5px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
-              <span className={alarm ? 'vm-anim' : ''} style={{ width: 13, height: 13, borderRadius: '50%', background: col, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
-              <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 700, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card)' }}>{s.name}</span>
-              <span style={{ position: 'absolute', bottom: -11, left: '50%', transform: 'translateX(-50%)', fontSize: 9, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
-              {edit && <button onClick={(e) => { e.stopPropagation(); unpin(s.name); }} onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -4, right: -6, width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 9, lineHeight: '15px', padding: 0, cursor: 'pointer' }}>✕</button>}
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: edit ? 'grab' : 'pointer' }}>
+              {!alarm && <span className="vm-anim" style={{ position: 'absolute', left: '50%', top: '50%', width: 30, height: 30, marginLeft: -15, marginTop: -15, borderRadius: '50%', border: `1.5px solid ${col}`, animation: 'vmPing 2.6s ease-out infinite', animationDelay: `${(s.name.length % 7) * 0.35}s` }} />}
+              <span className={alarm ? 'vm-anim' : ''} style={{ width: 15, height: 15, borderRadius: '50%', background: col, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}`, animation: alarm ? 'vmFlash 0.9s ease-in-out infinite' : 'none' }} />
+              <span style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 700, color: 'var(--text)', textShadow: '0 1px 3px var(--card), 0 -1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{s.name}</span>
+              <span style={{ position: 'absolute', bottom: -12, left: '50%', transform: 'translateX(-50%)', fontSize: 11, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: col, textShadow: '0 1px 3px var(--card), 1px 0 3px var(--card), -1px 0 3px var(--card)' }}>{(s.on || 0)}/{(s.on || 0) + (s.off || 0)}</span>
+              {edit && <button onClick={(e) => { e.stopPropagation(); unpin(s.name); }} onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -2, right: -8, width: 18, height: 18, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 9, lineHeight: '15px', padding: 0, cursor: 'pointer' }}>✕</button>}
             </div>
           );
         })}
       </div>
+      {!edit && mode === 'heat' && !heat && <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Reading transactions per {iv < 60 ? iv + ' min' : 'hour'}…</div>}
+      {!edit && mode === 'heat' && heat && heat.axis.length > 1 && (() => {
+        const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+        const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
+        return (
+          <div style={{ ...card, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play the day'} style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>{playing ? '⏸' : '▶'}</button>
+            <input type="range" min={0} max={heat.axis.length - 1} value={idx} onChange={(e) => { setPlaying(false); setHeatIdx(+e.target.value === heat.axis.length - 1 ? null : +e.target.value); }} style={{ flex: 1, accentColor: 'var(--brand)' }} aria-label="Scrub the day" />
+            <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 62, textAlign: 'right' }}>{heatIdx == null ? '● LIVE' : hhmm(heat.axis[idx]) + ' · ' + (iv < 60 ? iv + 'm' : '1h')}</span>
+          </div>
+        );
+      })()}
+      {!edit && mode === 'crowd' && flow && (flow.frames || []).length > 1 && (
+        // 🕒 Scrub the night — All-night aggregate, or step through each time window.
+        <div style={{ ...card, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 15 }}>🕒</span>
+          <input type="range" min={0} max={flow.frames.length} value={flowFrame == null ? 0 : flowFrame + 1}
+            onChange={(e) => { const v = +e.target.value; setFlowFrame(v === 0 ? null : v - 1); }} style={{ flex: 1, accentColor: 'var(--brand)' }} aria-label="Scrub the night" />
+          <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: flowFrame == null ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 96, textAlign: 'right' }}>{flowFrame == null ? '● ALL NIGHT' : (flow.frames[flowFrame] || {}).label}</span>
+        </div>
+      )}
+      {!edit && mode === 'crowd' && !isMobile && <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 6 }}>Tap the map to hide/show station names.</div>}
+      </div>{/* ── left column: map + scrubber ── */}
+      {!edit && mode === 'crowd' && (() => {
+        // 🚶 Crowd flow rail — the busiest routes and entry points, from the aggregate
+        // journey graph. A right rail on desktop, stacks under the map on mobile.
+        const routes = (activeFlow && activeFlow.edges || []).slice(0, 12);
+        const maxE = Math.max(1, ...routes.map((e) => e.count));
+        const railStyle = isMobile ? { height: full ? 320 : 260 } : { maxHeight: full ? '80vh' : 'calc(100dvh - 300px)' };
+        return (
+          <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🚶 Crowd flow</span>
+              {flowFrame != null && <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: 'var(--brand)' }}>{(flow.frames[flowFrame] || {}).label}</span>}
+              {activeFlow && <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{(activeFlow.journeys || 0).toLocaleString('en-ZA')} journeys</span>}
+            </div>
+            {flowLoad ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tracing wristband journeys…</div>
+              : !flow || !routes.length ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Not enough linked journeys to map crowd flow for this event yet.</div>
+                : <div style={{ overflowY: 'auto', ...railStyle }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--faint)', margin: '0 0 6px' }}>Busiest routes</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {routes.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ flex: '0 0 46%', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.from} <span style={{ color: 'var(--faint)' }}>→</span> {e.to}</span>
+                        <span style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${Math.max(5, (e.count / maxE) * 100)}%`, background: 'var(--brand)', borderRadius: 4 }} /></span>
+                        <span style={{ width: 34, textAlign: 'right', fontSize: 11.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--brand)' }}>{e.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {!!(activeFlow.entries || []).length && <>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--faint)', margin: '11px 0 6px' }}>🚪 First stop after entry</div>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                      {activeFlow.entries.slice(0, 8).map((e) => (
+                        <span key={e.station} style={{ fontSize: 11, fontWeight: 700, border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 9px', color: '#00c9b7' }}>{e.station} · {e.count}</span>
+                      ))}
+                    </div>
+                  </>}
+                  <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 9 }}>A sample of wristband journeys between touchpoints — a proxy for movement (only where people tapped), aggregate only.</div>
+                </div>}
+          </div>
+        );
+      })()}
+      {!edit && mode === 'heat' && heat && heat.axis.length > 0 && (() => {
+        // 🖐 Hand index — every placed station ranked busiest→quietest for the frame
+        // currently on the map (live, or wherever you paused the scrub), colour-coded
+        // by category. Sits in a right rail on desktop, stacks under the map on mobile.
+        // Pause the day and this reads the whole venue at a glance.
+        const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
+        const T = heat.axis[idx];
+        const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
+        const rank = placed
+          .map((s) => ({ name: s.name, v: Math.round(heat.series.get(s.name)?.get(T) || 0), col: heat.catCol.get(s.name) || [77, 159, 255] }))
+          .filter((r) => r.v > 0).sort((a, b) => b.v - a.v);
+        const rmax = rank.length ? rank[0].v : 1;
+        const rtot = rank.reduce((s2, r) => s2 + r.v, 0);
+        // Bar scale follows the Absolute/Relative toggle: Relative fills to the busiest
+        // station RIGHT NOW; Absolute measures against the busiest single station all run,
+        // so scrubbing a quiet hour shows genuinely short bars (the toggle visibly bites).
+        const gPeak = Math.max(1, ...heat.dayPeak.values());
+        const barDenom = scale === 'abs' ? gPeak : rmax;
+        // On MOBILE the rail stacks under the map, so a changing height reflows the page and
+        // jumps the aspect-locked map — pin the height off the CONSTANT placed count. On
+        // desktop it's a separate column, so it can hug content up to a cap safely.
+        const listStyle = isMobile
+          ? { height: Math.min(300, Math.max(64, placed.length * 24)) }
+          : { maxHeight: full ? '80vh' : 'calc(100dvh - 300px)' };
+        return (
+          <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🖐 Hand index</span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)' }}>{heatIdx == null ? '● LIVE' : hhmm(T)}</span>
+              <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{rtot.toLocaleString('en-ZA')} · {iv < 60 ? iv + 'm' : '1h'}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', ...listStyle }}>
+              {rank.length === 0
+                ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No transactions in this window.</div>
+                : rank.map((r, i) => {
+                  const c = `rgb(${r.col[0]},${r.col[1]},${r.col[2]})`;
+                  return (
+                    <div key={r.name} onClick={() => { const st = placed.find((s) => s.name === r.name); if (st) onSelect(st); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '2px 0' }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--faint)', width: 18, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: c, flexShrink: 0, boxShadow: `0 0 5px ${c}` }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 0 36%' }}>{r.name}</span>
+                      <span style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}>
+                        <span style={{ display: 'block', height: '100%', width: `${Math.max(4, Math.min(100, (r.v / barDenom) * 100))}%`, background: c, borderRadius: 4 }} />
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c, width: 50, textAlign: 'right' }}>{r.v.toLocaleString('en-ZA')}</span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        );
+      })()}
+      </div>{/* ── map + index row ── */}
+      {!edit && mode === 'heat' && (
+        <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <span>🔥 glow = transactions in the window · number = the count · {scale === 'abs' ? 'each category vs its own busiest all day' : 'each category vs its busiest right now'}</span>
+          <span style={{ color: 'var(--faint)' }}>{[['#ff5a7a', 'Bars'], ['#00c9b7', 'Gates/access'], ['#b388ff', 'Vendors'], ['#ff9d1e', 'Food']].map(([c, l]) => `● ${l}`).join('  ')}</span>
+        </div>
+      )}
       {edit && !!unplaced.length && (() => {
         const zonesU = [...new Set(unplaced.map((s) => s.zone))].sort();
         const list = unplaced
@@ -1274,7 +1624,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
-      {!edit && !!alarmed.length && (
+      {!edit && mode !== 'heat' && mode !== 'crowd' && !!alarmed.length && (
         <div style={{ ...card, marginTop: 8, borderLeft: `4px solid ${STATUS_COLOR.stale}`, fontSize: 11.5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {alarmed.map((s) => <button key={s.name} onClick={() => onSelect(s)} style={{ border: 'none', background: 'none', color: 'var(--text)', fontSize: 11.5, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}><b style={{ color: STATUS_COLOR.stale }}>▲ {s.name}</b> · {(s.on || 0)}/{(s.on || 0) + (s.off || 0)} sending</button>)}
         </div>
@@ -1583,13 +1933,20 @@ function CascadeView({ rows, apiBase, onSelect }) {
   );
 }
 
-export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailing = null }) {
+export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailing = null, view: viewProp, onView }) {
   const [sel, setSel] = useState(null);
-  const [view, setView] = useState('board'); // 'board' | 'rhythm' | 'stations'
+  // View is controllable: when the left nav drives it (onView given) we use the
+  // prop and hide the in-board pill; standalone, the pill + local state run it.
+  const [viewLocal, setViewLocal] = useState('board');
+  const view = viewProp || viewLocal;
+  const setView = onView || setViewLocal;
   const [viewMenu, setViewMenu] = useState(false); // the view pill: true = options slid out inline
+  const [sheet, setSheet] = useState(null); // 📱 mobile bottom drawer: 'filter' | 'view' | null
   const [picks, setPicks] = useState([]); // monitor id filter — MULTI-select ([] = whole site)
   const [stPicks, setStPicks] = useState([]); // station-NAME drill under the family chips (multi-select)
   const [day, setDay] = useState(''); // 📅 '' = LIVE · 'YYYY-MM-DD' = that festival day (Stations/Rhythm/deep-dives)
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'online' | 'offline' — Map/River/Network
+  const isMobile = useIsMobile();
   const picked = (list) => (picks.length ? list.filter((m) => picks.includes(m.id)) : list);
   const [scrubIdx, setScrubIdx] = useState(null); // pulse-strip playhead (null = LIVE)
   const [replay, setReplay] = useState(null); // that moment's dark map — time-travels the WHOLE board
@@ -1640,6 +1997,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const chips = open.filter((m) => rows.some((s) => s.mid === m.id));
   const famShown = picks.length ? rows.filter((s) => picks.includes(s.mid)) : rows;
   const shown = stPicks.length ? famShown.filter((s) => stPicks.includes(s.name)) : famShown;
+  // Online/offline status filter for the Map / River / Network views: a station is
+  // "online" if any of its devices is sending, "offline" if all are dark.
+  const statusRows = statusFilter === 'all' ? shown : shown.filter((s) => ((s.on || 0) > 0) === (statusFilter === 'online'));
 
   // Replaying? Rewrite every station's on/off to THAT moment (from the scrub's
   // dark map) — tiles, zones, dials and the flow meter all time-travel as one.
@@ -1684,28 +2044,74 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       {/* monitor filter chips — split the board by station family — and the
           view toggle: 🎛️ tiles vs 📈 the rate river. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        {chips.length > 1 && <>
-          <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(!picks.length)}>All stations · {rows.length}</button>
-          {chips.map((m) => (
-            <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={chipStyle(picks.includes(m.id))}>
-              {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
-            </button>
-          ))}
-        </>}
-        <span style={{ flex: 1 }} />
+        {/* Desktop: the family chips wrap inline. Mobile: one compact button that
+            opens a bottom drawer of families (keeps the header to a single row). */}
+        {chips.length > 1 && !isMobile && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(!picks.length), flex: '0 0 auto' }}>All stations · {rows.length}</button>
+            {chips.map((m) => (
+              <button key={m.id} onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }} style={{ ...chipStyle(picks.includes(m.id)), flex: '0 0 auto', whiteSpace: 'nowrap' }}>
+                {chipIcon(m)} {m.name} · {rows.filter((s) => s.mid === m.id).length}
+              </button>
+            ))}
+          </div>
+        )}
+        {chips.length > 1 && isMobile && (
+          <button onClick={() => setSheet('filter')} style={{ ...chipStyle(!!picks.length), display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span>🎚️</span>{picks.length ? `${picks.length} famil${picks.length > 1 ? 'ies' : 'y'}` : `All stations · ${rows.length}`}<span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+          </button>
+        )}
+        {!isMobile && <span style={{ flex: 1 }} />}
         {dayOpts.length > 0 && dayAware && (
           <select value={day} onChange={(e) => { setDay(e.target.value); setSel(null); }} title="Show a past festival day"
             style={{ border: `1px solid ${day ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: day ? 'var(--brand)' : 'var(--text)', fontWeight: day ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 150 }}>
-            <option value="">📅 LIVE · today</option>
+            {/* Live is just the 📅 icon on mobile — the "LIVE · today" words are noise. */}
+            <option value="">{isMobile ? '📅' : '📅 LIVE · today'}</option>
             {dayOpts.map((d) => <option key={d} value={d}>📅 {dayLbl(d)}</option>)}
           </select>
         )}
-        <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
+        {(view === 'map' || view === 'river' || view === 'network') && (
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Show online or offline stations only"
+            style={{ border: `1px solid ${statusFilter !== 'all' ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: statusFilter !== 'all' ? 'var(--brand)' : 'var(--text)', fontWeight: statusFilter !== 'all' ? 800 : 600, borderRadius: 999, padding: '5px 8px', fontSize: 12, fontFamily: 'inherit', minHeight: 30, cursor: 'pointer', maxWidth: 140 }}>
+            <option value="all">◍ All</option>
+            <option value="online">🟢 Online</option>
+            <option value="offline">🔴 Offline</option>
+          </select>
+        )}
+        {/* Desktop: the inline expanding pill. Mobile: a single button → bottom drawer of views. */}
+        {!isMobile
+          ? <ViewPill view={view} setView={(v) => { setView(v); backToLive(); }} open={viewMenu} setOpen={setViewMenu} />
+          : (() => { const vm = SB_VIEWS.find(([k]) => k === view) || SB_VIEWS[0]; return (
+            <button onClick={() => setSheet('view')} style={{ ...chipStyle(true), marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 14 }}>{vm[1]}</span>{vm[2]}<span style={{ fontSize: 9, opacity: 0.6 }}>▾</span>
+            </button>
+          ); })()}
         {trailing && <>
           <span style={{ flex: 1 }} />
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>{trailing}</span>
         </>}
       </div>
+      {/* 📱 bottom drawers for the two mobile pickers */}
+      {isMobile && sheet === 'filter' && (
+        <BottomSheet title="Filter by station family" onClose={() => setSheet(null)}>
+          <SheetRow active={!picks.length} onClick={() => { setPicks([]); setStPicks([]); setSel(null); backToLive(); setSheet(null); }}>All stations<span style={{ color: 'var(--muted)', fontWeight: 600 }}> · {rows.length}</span></SheetRow>
+          {chips.map((m) => (
+            <SheetRow key={m.id} active={picks.includes(m.id)} right={<span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 700 }}>{rows.filter((s) => s.mid === m.id).length}</span>}
+              onClick={() => { setPicks((p) => (p.includes(m.id) ? p.filter((x) => x !== m.id) : [...p, m.id])); setStPicks([]); setSel(null); backToLive(); }}>
+              <span>{chipIcon(m)}</span>{m.name}
+            </SheetRow>
+          ))}
+        </BottomSheet>
+      )}
+      {isMobile && sheet === 'view' && (
+        <BottomSheet title="Choose a view" onClose={() => setSheet(null)}>
+          {SB_VIEWS.map(([k, ic, name]) => (
+            <SheetRow key={k} active={view === k} onClick={() => { if (view !== k) { setView(k); backToLive(); } setSheet(null); }}>
+              <span style={{ fontSize: 17 }}>{ic}</span>{name}
+            </SheetRow>
+          ))}
+        </BottomSheet>
+      )}
       {/* station-NAME drill: pick a family above and its stations appear here — tap to
           narrow every view to just those stations; scrolls sideways, never wraps tall. */}
       {!!picks.length && (() => {
@@ -1738,7 +2144,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'rhythm' && (
-        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} />
+        <RhythmView key={'r' + day} monitors={picked(open)} apiBase={apiBase} rows={rows} onSelect={setSel} day={day} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
       )}
 
       {view === 'stations' && (
@@ -1750,15 +2156,15 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'map' && (
-        <VenueMapView rows={shown} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
+        <VenueMapView key={'m' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
       )}
 
       {/* key on the filter set: changing chips while drilled into a station's devices
           resets the river to the (re-filtered) all-stations level — otherwise the
           drill ignores the new filter and the chips look dead. */}
-      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
 
-      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|')} rows={shown} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
@@ -1838,7 +2244,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
 
 // Event Ops wrapper: fetches this event's monitors (entity-scoped, read only)
 // and keeps the board fresh on the same cadence as the health tab.
-export default function SignalOps({ entityId, suiteId }) {
+export default function SignalOps({ entityId, suiteId, view, onView }) {
   const isMobile = useIsMobile();
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -1859,11 +2265,11 @@ export default function SignalOps({ entityId, suiteId }) {
   // filter-chips row so it doesn't take its own line above the board.
   const controlBits = <>
     <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
-    <InfoTip label="About the Signal board">Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour&apos;s volume.</InfoTip>
+    <InfoTip label="About the Flow board">Every zone, station and device, live — green ticks are sending, red are dark; numbers are this hour&apos;s volume.</InfoTip>
     {(() => {
       const controls = <>
-        <OwlSummary entityId={entityId} suiteId={suiteId} title="Signal board" />
-        <ShareMenu variant="header" heading="Signal board — live site status" text={healthShareText(data.monitors)} />
+        <OwlSummary entityId={entityId} suiteId={suiteId} title="Flow board" />
+        <ShareMenu variant="header" heading="Flow board — live site status" text={healthShareText(data.monitors)} />
         {suiteId && <SignalReportPanel suiteId={suiteId} />}
         <button className="no-print" title="Download this view as PDF" onClick={() => window.print()} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
         <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, minWidth: 40, minHeight: 34, cursor: 'pointer', fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
@@ -1873,7 +2279,9 @@ export default function SignalOps({ entityId, suiteId }) {
   </>;
   return (
     <div>
-      <SignalBoard monitors={data.monitors || []} trailing={controlBits} />
+      {/* On phones the "updated · auto 60s · ⋯" cluster is noise — refresh is automatic,
+          and the Owl (Summary) is already the floating orb — so drop it on mobile. */}
+      <SignalBoard monitors={data.monitors || []} trailing={isMobile ? null : controlBits} view={view} onView={onView} />
     </div>
   );
 }
