@@ -142,6 +142,22 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
   // Bulk-clear a set of field names (a whole category, or all dimensions) so a bloated
   // catalogue can be cut to a focused set in a few taps instead of hundreds.
   const clearNames = (names) => setEnabled((s) => { const n = new Set(s); names.forEach((nm) => n.delete(nm)); return n; });
+  // "Suggest a focused set" — the answer to "I can't decide what to keep". Auto-pick the
+  // fields the Owl actually needs by name/label: money & count MEASURES, and the business
+  // DIMENSIONS you break down by (who / where / what / when / which edition), dropping the
+  // technical plumbing (ids, flags, device internals, raw timestamps). A starting point to
+  // review — not perfect — so the admin tweaks from ~40 sensible picks, not 400 blanks.
+  const suggestFocused = () => {
+    if (!data) return;
+    const DROP = /(_id$|_id\b|\buid\b|uuid|_key\b|_pk\b|_fk\b|hash|token|_flag\b|\bis_|\bhas_|latitude|longitude|timezone|_tz\b|device|terminal|reader|serial|firmware|battery|\bversion\b|_url|email|phone|mobile|passport)/i;
+    const KEEP_DIM = /(countr|nationalit|birth|\bage\b|age_?band|gender|\bsex\b|city|region|province|station|\bbar\b|vendor|outlet|booth|zone|\barea\b|product|item|categor|\btype\b|brand|event|edition|festival|\bname\b|\bday\b|date|hour|weekday|payment|method|currency)/i;
+    const KEEP_MEAS = /(sum|avg|average|total|count|amount|spend|revenue|sales|price|value|qty|quantit|transaction|tickets?)/i;
+    const keep = new Set();
+    (data.measures || []).filter((m) => !m.pii && (KEEP_MEAS.test(m.name) || KEEP_MEAS.test(m.label || ''))).slice(0, 15).forEach((m) => keep.add(m.name));
+    if (keep.size === 0) (data.measures || []).filter((m) => !m.pii).slice(0, 8).forEach((m) => keep.add(m.name)); // keep it queryable
+    (data.dimensions || []).filter((d) => !d.pii && (KEEP_DIM.test(d.name) || KEEP_DIM.test(d.label || '')) && !DROP.test(d.name)).slice(0, 30).forEach((d) => keep.add(d.name));
+    setEnabled(keep);
+  };
   const save = async () => {
     setBusy(true); setErr(''); setSaved(false);
     try {
@@ -198,6 +214,10 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter fields…" style={{ flex: '1 1 200px', minWidth: 160, padding: '6px 9px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 13 }} />
                 <button onClick={save} disabled={busy || !enabled} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save'}</button>
+                {data && (data.dimensions || []).length > 40 && (
+                  <button onClick={() => { if (window.confirm('Auto-pick a focused starter set — the money/count measures and the business dimensions you break down by (who / where / what / when), dropping technical fields. This REPLACES the current selection; review and tweak, then Save.')) suggestFocused(); }}
+                    style={{ border: '1px solid var(--brand)', background: 'transparent', color: 'var(--brand)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>✨ Suggest a focused set</button>
+                )}
                 {/* Bulk-clear the dimensions so you can rebuild a FOCUSED set fast — unticking
                     hundreds by hand (esp. on a phone) is the reason big catalogues never get
                     trimmed. Measures stay ticked; then tick the ~30 dimensions you actually ask about. */}
