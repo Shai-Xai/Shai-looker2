@@ -149,13 +149,18 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
   // review — not perfect — so the admin tweaks from ~40 sensible picks, not 400 blanks.
   const suggestFocused = () => {
     if (!data) return;
-    const DROP = /(_id$|_id\b|\buid\b|uuid|_key\b|_pk\b|_fk\b|hash|token|_flag\b|\bis_|\bhas_|latitude|longitude|timezone|_tz\b|device|terminal|reader|serial|firmware|battery|\bversion\b|_url|email|phone|mobile|passport)/i;
-    const KEEP_DIM = /(countr|nationalit|birth|\bage\b|age_?band|gender|\bsex\b|city|region|province|station|\bbar\b|vendor|outlet|booth|zone|\barea\b|product|item|categor|\btype\b|brand|event|edition|festival|\bname\b|\bday\b|date|hour|weekday|payment|method|currency)/i;
-    const KEEP_MEAS = /(sum|avg|average|total|count|amount|spend|revenue|sales|price|value|qty|quantit|transaction|tickets?)/i;
+    // Tuned to the questions Shai actually asks (2026-07): sales split by payment
+    // method/type/time/station/product/producer/operator/customer UID; check-ins by
+    // ticket type/category/station/time/date/operator; demographics. customer_uid is
+    // pseudonymous (per-customer spend without identity) so it's kept; real contact
+    // fields (email/phone/name) stay excluded — they're lock-only anyway.
+    const DROP = /(_id$|_id\b|uuid|_key\b|_pk\b|_fk\b|hash|token|_flag\b|\bis_|\bhas_|latitude|longitude|timezone|_tz\b|device|terminal|reader|serial|firmware|battery|\bversion\b|_url|email|phone|mobile|passport)/i;
+    const KEEP_DIM = /(countr|nationalit|birth|\bage\b|age_?band|gender|\bsex\b|city|region|province|station|\bbar\b|vendor|outlet|booth|zone|\barea\b|product|item|categor|\btype\b|brand|event|edition|festival|\bname\b|\bday\b|date|\btime\b|hour|weekday|payment|method|currency|producer|operator|ticket|check_?in|customer_?uid)/i;
+    const KEEP_MEAS = /(sum|avg|average|total|count|amount|spend|revenue|sales|price|value|qty|quantit|transaction|tickets?|check_?in)/i;
     const keep = new Set();
     (data.measures || []).filter((m) => !m.pii && (KEEP_MEAS.test(m.name) || KEEP_MEAS.test(m.label || ''))).slice(0, 15).forEach((m) => keep.add(m.name));
     if (keep.size === 0) (data.measures || []).filter((m) => !m.pii).slice(0, 8).forEach((m) => keep.add(m.name)); // keep it queryable
-    (data.dimensions || []).filter((d) => !d.pii && (KEEP_DIM.test(d.name) || KEEP_DIM.test(d.label || '')) && !DROP.test(d.name)).slice(0, 30).forEach((d) => keep.add(d.name));
+    (data.dimensions || []).filter((d) => !d.pii && (KEEP_DIM.test(d.name) || KEEP_DIM.test(d.label || '')) && !DROP.test(d.name)).slice(0, 40).forEach((d) => keep.add(d.name));
     setEnabled(keep);
   };
   const save = async () => {
