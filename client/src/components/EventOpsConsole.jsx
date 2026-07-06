@@ -97,14 +97,23 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
       {/* Desktop: left nav rail (Event picker on top, then tabs, Scan/Move) + full-width content. Mobile: top pills. */}
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: 10, width: '100%' } : { display: 'flex', flexDirection: 'column', gap: 8, position: 'sticky', top: 8, width: 170, flexShrink: 0 }}>
-          {/* Event picker — lives in the drawer so the board starts right at the top. */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Event</label>
-            <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={{ ...select, width: '100%', boxSizing: 'border-box' }}>
-              {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
+          {/* Event picker — desktop: labelled select atop the drawer. Mobile: a compact
+              🎫 pill that rides the SAME row as Hive/Data health/Flow board (no full row). */}
+          {!isMobile && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Event</label>
+              <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={{ ...select, width: '100%', boxSizing: 'border-box' }}>
+                {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
           <div style={isMobile ? mobileTabs : leftNav}>
+            {isMobile && (
+              <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} title="Event" aria-label="Event"
+                style={{ ...tabBtn(false), maxWidth: 132, padding: '9px 8px 9px 12px', border: '1px solid var(--hairline)', fontWeight: 700, cursor: 'pointer' }}>
+                {suites.map((s) => <option key={s.id} value={s.id}>🎫 {s.name}</option>)}
+              </select>
+            )}
             <button onClick={() => { if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
               style={isMobile ? tabBtn(inHive) : navItem(inHive)}>
               <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{hiveOpen ? '▾' : '▸'}</span>

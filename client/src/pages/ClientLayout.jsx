@@ -64,6 +64,7 @@ export default function ClientLayout() {
   // The dashboard page (ViewPage) portals its actions into the menu bar so
   // Summary / Filters / ⋯ sit on the ☰ Menu line, not a separate row below.
   const [actionsSlot, setActionsSlot] = useState(null);
+  const [titleSlot, setTitleSlot] = useState(null); // section pages portal their title into the menu bar
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -318,11 +319,14 @@ export default function ClientLayout() {
           const suiteOpen = searching || !!openSuites[su.id];
           return (
             <div key={su.id} style={{ marginBottom: 2 }}>
-              <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
-                <Caret open={suiteOpen} />
-                <Ico v={su.icon} size={22} />
-                <span style={ellip}>{su.name}</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button className="nav-row" style={{ ...rowBtn, fontWeight: 600, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                  <Caret open={suiteOpen} />
+                  <Ico v={su.icon} size={22} />
+                  <span style={ellip}>{su.name}</span>
+                </button>
+                {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+              </div>
               <div className={`collapsey${suiteOpen ? ' open' : ''}`}>
                 <div className="collapsey-inner" style={{ marginTop: 1 }}>
                   {sets === undefined ? (
@@ -540,11 +544,17 @@ export default function ClientLayout() {
                 return (
                   <div key={su.id}>
                     {!single && (
-                      <button className="nav-row" style={mRowSuite} onClick={() => toggleSuite(su.id)}>
-                        <Caret open={suiteOpen} />
-                        <Ico v={su.icon} size={22} />
-                        <span style={ellip}>{su.name}</span>
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button className="nav-row" style={{ ...mRowSuite, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                          <Caret open={suiteOpen} />
+                          <Ico v={su.icon} size={22} />
+                          <span style={ellip}>{su.name}</span>
+                        </button>
+                        {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+                      </div>
+                    )}
+                    {single && su.liveDashboardId && (
+                      <div style={{ padding: '0 12px 6px' }}><LiveBtn wide onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} /></div>
                     )}
                     {suiteOpen && (
                       sets === undefined ? (
@@ -756,27 +766,25 @@ export default function ClientLayout() {
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())} title="Menu" aria-label="Open menu">☰</button>
-            {/* No back button on the client home screen — it's the root, so back
-                would have nowhere meaningful to go (Home already covers it). */}
-            {!(location.pathname === '/' || location.pathname === '/preview') && (
-              <button style={menuBtn} onClick={() => (location.key !== 'default' ? navigate(-1) : navigate(previewMode ? '/preview' : '/'))} title="Back" aria-label="Back">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-            )}
+            {/* No back button — Home (and the phone's own back gesture) cover it, and the
+                extra arrow just crowded the bar. */}
             <button style={menuBtn} onClick={() => vtNavigate(navigate, previewMode ? '/preview' : '/')} title="Home" aria-label="Home">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 10.5 12 3l9 7.5" />
                 <path d="M5 9.5V21h5.5v-6h3v6H19V9.5" />
               </svg>
             </button>
-            {activeTitle && <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+            {/* Dashboard pages show their live tile title; section pages (Alerts,
+                Goals, Event Ops…) portal their page title in here via <PageHeader>
+                so there's no second home button and no tall header below. */}
+            {activeTitle
+              ? <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>
+              : <span ref={setTitleSlot} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }} />}
             {/* Page (dashboard) actions portal in here — Summary · Filters · ⋯ */}
             <div ref={setActionsSlot} style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 0 }} />
           </div>
         )}
-        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
+        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot, titleSlot }} />
       </main>
       {(FEATURES.ask || owlNativeChatEnabled(user)) && !askOpen && (
         // Floating owl — quick launcher for the analyst drawer (bottom-right).
@@ -874,6 +882,22 @@ function Ico({ v, size = 16 }) {
 }
 function Caret({ open, small }) {
   return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
+}
+// One-tap jump to the suite's designated "live" (ticket-sales) dashboard — a
+// small red pill on the event's row so no drill-down is needed. `wide` fills the
+// row on single-suite mobile (where the suite header itself is hidden).
+function LiveBtn({ onClick, title, wide }) {
+  return (
+    <button onClick={onClick} title={title} aria-label={title} style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
+      width: wide ? '100%' : undefined, cursor: 'pointer',
+      background: 'transparent', color: 'var(--success)', border: '1.5px solid var(--success)', borderRadius: 980,
+      padding: '3px 10px', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', '--live-ring': 'color-mix(in srgb, var(--success) 55%, transparent)', animation: 'howlerPulse 1.6s ease-out infinite' }} />
+      LIVE
+    </button>
+  );
 }
 
 const sidebarShell = { width: 264, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 };
