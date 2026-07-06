@@ -630,3 +630,41 @@ test('an explore with a category dimension advertises subset-filtering in its to
   const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat2 });
   assert.doesNotMatch(t2.ask_cashless_y.schema.description, /SUBSET QUESTIONS/);
 });
+
+test('big catalogue: enum dropped past the cap, loose names resolve, ambiguity suggests candidates', async () => {
+  // 80 filler dims push past the 60-dim enum cap; two country fields make "country" ambiguous.
+  const dims = Array.from({ length: 80 }, (_, i) => ({ name: `cashless_x.dim_${i}`, label: `Dim ${i}`, type: 'string' }));
+  dims.push({ name: 'cashless_x.country_of_birth', label: 'Country Of Birth', type: 'string' });
+  dims.push({ name: 'cashless_x.country_of_residence', label: 'Country Of Residence', type: 'string' });
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.avg_spend', label: 'Average Spend', type: 'number' }], dimensions: dims, notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const tool = t.ask_cashless_x;
+  assert.equal(tool.schema.input_schema.properties.dimensions.items.enum, undefined, 'no dimension enum past the cap');
+  assert.match(tool.schema.input_schema.properties.dimensions.description, /resolved server-side/i, 'schema teaches name resolution');
+  assert.ok(Array.isArray(tool.schema.input_schema.properties.measure.enum), 'small measure list keeps its enum');
+  const ent = h.makeEntity('Ultra Big', 'Ultra Big Cat');
+  const user = h.makeClient('owl-big@client.test', [ent.id]);
+  // Plain business names resolve to the real fields (label + name matching).
+  const res = await tool.run({ measure: 'average spend', dimensions: ['country of birth'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.dimensions, ['cashless_x.country_of_birth']);
+  assert.ok(res.queryBody.fields.includes('cashless_x.avg_spend'), 'loose measure resolved');
+  assert.match(res.note || '', /Resolved fields/, 'snapping surfaced in the note');
+  // Ambiguous name → refuse (before Looker) WITH the candidates so one retry fixes it.
+  lookerCalls = 0;
+  const bad = await tool.run({ measure: 'cashless_x.avg_spend', dimensions: ['country'] }, ctx(user));
+  assert.equal(bad.ok, false);
+  assert.match(bad.message, /Closest matches:.*country_of_birth/, 'suggests the real fields');
+  assert.equal(lookerCalls, 0, 'failed closed before querying');
+});
+
+test('a Looker timeout tells the model to change the query shape, not retry it', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const failing = { ...queryEngine, runLookerQuery: async () => { throw new Error('Query timed out after 120s'); } };
+  const t = createOwlTools({ query: failing, auth: h.auth, db: h.db, catalogue: cat });
+  const ent = h.makeEntity('Ultra TO', 'Ultra Timeout');
+  const user = h.makeClient('owl-to@client.test', [ent.id]);
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user));
+  assert.equal(res.ok, false);
+  assert.match(res.message, /do NOT retry the same query/, 'anti-retry guidance on timeouts');
+});

@@ -1228,26 +1228,65 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
   // (applyScope is explore-aware + fails closed), so an explore that can't be bound
   // to the client is refused, never leaked. Read-only; no PII (locked at selection).
   function makeExploreTool(cat) {
-    const mByName = new Map((cat.measures || []).map((m) => [m.name, m]));
-    const groupable = new Set((cat.dimensions || []).map((d) => d.name));
     const dByName = new Map((cat.dimensions || []).map((d) => [d.name, d]));
+    // Loose-name resolution — the key to SUSTAINING a big catalogue (hundreds of
+    // enabled fields). Above the enum caps we stop inlining every field name into
+    // the tool schema (which bloats every model turn); instead the model passes a
+    // plain business name ("country of birth", "payment method") and we snap it to
+    // the real field by exact name, last name-segment, or label (normalised). An
+    // unresolvable name refuses WITH the closest matches so one retry fixes it.
+    const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const makeResolver = (list) => {
+      const exact = new Set(list.map((f) => f.name));
+      const byKey = new Map();
+      const add = (k, name) => { const key = norm(k); if (!key) return; const arr = byKey.get(key) || []; if (!arr.includes(name)) arr.push(name); byKey.set(key, arr); };
+      for (const f of list) { add(f.name, f.name); add(String(f.name).split('.').pop(), f.name); add(f.label, f.name); }
+      return (raw) => {
+        const s = String(raw || '').trim();
+        if (exact.has(s)) return { name: s };
+        const hits = byKey.get(norm(s)) || [];
+        if (hits.length === 1) return { name: hits[0], snapped: s };
+        const q = norm(s);
+        const subs = q.length >= 4 ? list.filter((f) => norm(f.name).includes(q) || norm(f.label).includes(q)).map((f) => f.name) : [];
+        const uniq = [...new Set([...hits, ...subs])];
+        if (uniq.length === 1) return { name: uniq[0], snapped: s };
+        return { candidates: uniq.slice(0, 6) };
+      };
+    };
+    const resolveMeasure = makeResolver(cat.measures || []);
+    const resolveDim = makeResolver(cat.dimensions || []);
+    const retryHint = (r) => (r.candidates && r.candidates.length ? ` Closest matches: ${r.candidates.join(', ')} — retry with one of these exact names.` : '');
     const toolName = `ask_${String(cat.explore).replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 48)}`;
     async function run(args = {}, ctx = {}) {
       const { user, suiteId, entityId } = ctx;
       if (!user) return refuse('no_user', 'No authenticated user in context.');
+      const snapped = []; // loose name → resolved field, surfaced in the note
+      const wantM = [];
+      if (args.measure) wantM.push(args.measure);
+      for (const mm of (Array.isArray(args.measures) ? args.measures : [])) wantM.push(mm);
+      if (!wantM.length) return refuse('unknown_measure', 'No measure specified.');
       const measureList = [];
-      if (args.measure) measureList.push(args.measure);
-      for (const mm of (Array.isArray(args.measures) ? args.measures : [])) if (!measureList.includes(mm)) measureList.push(mm);
-      if (!measureList.length) return refuse('unknown_measure', 'No measure specified.');
-      for (const mm of measureList) if (!mByName.has(mm)) return refuse('unknown_measure', `"${mm}" is not a measure in ${cat.label}.`);
+      for (const mm of wantM) {
+        const r = resolveMeasure(mm);
+        if (!r.name) return refuse('unknown_measure', `"${mm}" is not a measure in ${cat.label}.${retryHint(r)}`);
+        if (!measureList.includes(r.name)) measureList.push(r.name);
+        if (r.snapped) snapped.push(`"${r.snapped}" → ${r.name}`);
+      }
       const measure = measureList[0];
-      const dimensions = Array.isArray(args.dimensions) ? args.dimensions : [];
-      for (const d of dimensions) if (!groupable.has(d)) return refuse('unknown_dimension', `"${d}" is not a groupable dimension in ${cat.label}.`);
+      const dimensions = [];
+      for (const d of (Array.isArray(args.dimensions) ? args.dimensions : [])) {
+        const r = resolveDim(d);
+        if (!r.name) return refuse('unknown_dimension', `"${d}" is not a groupable dimension in ${cat.label}.${retryHint(r)}`);
+        if (!dimensions.includes(r.name)) dimensions.push(r.name);
+        if (r.snapped) snapped.push(`"${r.snapped}" → ${r.name}`);
+      }
       const filters = {};
       for (const [field, val] of Object.entries(args.filters || {})) {
-        if (!groupable.has(field)) return refuse('unfilterable', `I can't filter on "${field}" in ${cat.label}.`);
         if (val == null || String(val).trim() === '') continue;
-        filters[field] = String(val);
+        const r = resolveDim(field);
+        if (!r.name) return refuse('unfilterable', `I can't filter on "${field}" in ${cat.label}.${retryHint(r)}`);
+        filters[r.name] = String(val);
+        if (r.snapped) snapped.push(`"${r.snapped}" → ${r.name}`);
       }
       // Date-filter the MEASURED view's OWN date field when it has one. In a
       // combined explore the catalogue-level dateDimension (e.g. the cashless
@@ -1286,17 +1325,35 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       stampReportingTz(body, { user, suiteId, entityId });
       let rows;
       try { rows = await query.runLookerQuery('/queries/run/json', body); }
-      catch (e) { return refuse('query_failed', `I couldn't run that ${cat.label} query${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ''}.`); }
-      const note = [crossDateNote, resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
+      catch (e) {
+        const msg = e && e.message ? String(e.message).slice(0, 140) : '';
+        // Heavy joins (e.g. every sale × buyer demographics) hit Looker's own timeout;
+        // retrying the identical query just burns minutes (seen live: spend by country
+        // of birth). Tell the model to change shape or answer honestly — never re-run as-is.
+        const timedOut = /time.{0,3}out|deadline|504|502|cancel/i.test(msg);
+        return refuse('query_failed', `I couldn't run that ${cat.label} query${msg ? ` (${msg})` : ''}.${timedOut ? ` This looks like a heavy join timing out on the data platform — do NOT retry the same query. Either narrow it (filter to a subset / top values via a category or country filter) or pair the measure with a dimension from its OWN view family (matching field-name prefix), which avoids the heavy join. If neither fits, tell the user plainly this cut is too heavy to compute live right now and offer those narrower options.` : ''}`);
+      }
+      const note = [crossDateNote, snapped.length ? `Resolved fields: ${snapped.join('; ')}.` : '', resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
       return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
+    // Enum caps: past these we stop inlining every field name into the schema (a
+    // 400-dim enum bloats EVERY model turn and drowns the right field in look-alikes).
+    // The model then passes plain business names and the resolver above snaps them.
+    const MEAS_ENUM_CAP = 48; const DIM_ENUM_CAP = 60;
+    const mEnum = (cat.measures || []).length <= MEAS_ENUM_CAP ? cat.measures.map((m) => m.name) : null;
+    const resolveNote = ' Pass the exact Looker field name if known, or a plain business name ("average spend", "country of birth") — names are resolved server-side, and an unknown name returns the closest matching fields to retry with.';
     const props = {
-      measure: { type: 'string', enum: cat.measures.map((m) => m.name), description: `The number to compute from ${cat.label}. For money totals ("sales", "revenue", "spend") prefer a *sum_credit_amount / *sale_item_total_price measure — a *sum_sale_item_unit_price measure adds up UNIT prices ignoring quantities and understates real takings.` },
-      measures: { type: 'array', items: { type: 'string', enum: cat.measures.map((m) => m.name) }, description: 'Optional: 2+ measures side by side.' },
-      filters: { type: 'object', description: 'Optional {field: value} filters on this data.' },
+      measure: { type: 'string', ...(mEnum ? { enum: mEnum } : {}), description: `The number to compute from ${cat.label}. For money totals ("sales", "revenue", "spend") prefer a *sum_credit_amount / *sale_item_total_price measure — a *sum_sale_item_unit_price measure adds up UNIT prices ignoring quantities and understates real takings.${mEnum ? '' : resolveNote}` },
+      measures: { type: 'array', items: { type: 'string', ...(mEnum ? { enum: mEnum } : {}) }, description: 'Optional: 2+ measures side by side.' },
+      filters: { type: 'object', description: 'Optional {field: value} filters on this data. Field names resolve like dimensions.' },
       limit: { type: 'number', description: 'Max rows (default 500).' },
     };
-    if (cat.dimensions.length) props.dimensions = { type: 'array', items: { type: 'string', enum: cat.dimensions.map((d) => d.name) }, description: `Optional group-by fields in ${cat.label}.` };
+    if (cat.dimensions.length) {
+      const dEnum = cat.dimensions.length <= DIM_ENUM_CAP ? cat.dimensions.map((d) => d.name) : null;
+      props.dimensions = { type: 'array', items: { type: 'string', ...(dEnum ? { enum: dEnum } : {}) }, description: dEnum
+        ? `Optional group-by fields in ${cat.label}.`
+        : `Optional group-by fields in ${cat.label} — ${cat.dimensions.length} available across views: ${[...new Set(cat.dimensions.map((d) => String(d.name).split('.')[0]))].slice(0, 8).join(', ')}. Examples: ${cat.dimensions.slice(0, 5).map((d) => d.name).join(', ')}…${resolveNote}` };
+    }
     // Name the bound field so the model KNOWS which date this rides — and routes a
     // different family's time question (e.g. check-in created-at) via filters instead.
     if (cat.dateDimension) props.dateRange = { type: 'string', description: `Optional Looker date expression applied to ${cat.dateDimension} (e.g. "last 7 days"). To time-filter a DIFFERENT date field, put the date expression in filters under that field's name instead.` };

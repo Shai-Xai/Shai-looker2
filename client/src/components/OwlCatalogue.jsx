@@ -241,12 +241,12 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               {!primary && total > 0 && enabled && !(data.measures || []).some((m) => enabled.has(m.name)) && (
                 <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', margin: '0 0 8px', fontWeight: 600 }}>⚠ Tick at least one <u>measure</u> (a number, e.g. revenue or a count) — without one the Owl can’t query this explore, so it won’t appear in chat.</p>
               )}
-              {/* Too many enabled fields is the #1 cause of slow/unreliable answers: the Owl
-                  carries every ticked field on each turn, so it's both a bigger prompt AND
-                  has to pick the right field out of hundreds of look-alikes — it guesses
-                  wrong and retries. Keep it focused to the fields you actually ask about. */}
-              {onCount > 60 && (
-                <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', margin: '0 0 8px', fontWeight: 600, lineHeight: 1.5 }}>⚠ {onCount} fields enabled — that’s a lot. The Owl reads every ticked field on <em>each</em> turn, so a big set makes answers <u>slower</u> and <u>less accurate</u> (it has to pick the right field out of many look-alikes and often retries). Trim to a focused set — the fields you actually ask about (e.g. the demographics, categories, dates + a few measures) — ideally under ~40.</p>
+              {/* Large sets are supported: past ~60 fields the Owl stops carrying every name
+                  and resolves plain business names server-side ("country of birth" → the real
+                  field), so hundreds of enabled fields no longer slow every turn. A gentle
+                  nudge only appears for very large sets, where extra noise still blurs picks. */}
+              {onCount > 150 && (
+                <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 8px', lineHeight: 1.5 }}>ℹ️ {onCount} fields enabled. That works — the Owl resolves plain field names on demand — but a tighter set still sharpens its choices. ✨ Suggest a focused set gives a quick starting point if answers ever feel off.</p>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
                 <div>
