@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const { db, auth, makeEntity, makeClient, makeAdmin } = require('./helpers');
 const peopleFlow = require('../server/peopleFlow');
 
-const F = { g: 'cashless_open_loop_sales.customer_gtag_id', s: 'cashless_open_loop_sales.station_name', b: 'cashless_open_loop_sales.date_minute10', c: 'cashless_open_loop_sales.transaction_count' };
+const F = { g: 'cashless_open_loop_sales.customer_gtag_id', s: 'cashless_open_loop_sales.station_name', b: 'cashless_open_loop_sales.date_minute10', h: 'cashless_open_loop_sales.date_hour_of_day', c: 'cashless_open_loop_sales.transaction_count' };
 const row = (g, s, b) => ({ [F.g]: g, [F.s]: s, [F.b]: b, [F.c]: 1 });
 const SAMPLE = [
   row(1, 'Gate A', '2026-07-05 18:00'), row(1, 'Nova Bar', '2026-07-05 18:20'), row(1, 'Nova Bar', '2026-07-05 18:30'), row(1, 'Kosmo Bar', '2026-07-05 19:10'),
@@ -51,13 +51,19 @@ const owner = makeClient('owner@flowco.test', [entity.id]);
 const other = makeClient('other@nope.test', [makeEntity('Nope', 'nope').id]);
 const admin = makeAdmin();
 
-test('owner gets the aggregate flow; queryData is called scoped to the suite', async () => {
+test('owner gets the aggregate flow + per-window frames; scoped to the suite', async () => {
   let sawSuite = null;
-  const qd = async (user, args) => { sawSuite = args.suiteId; return { rows: SAMPLE }; };
+  const qd = async (user, args) => {
+    sawSuite = args.suiteId;
+    if ((args.dimensions || []).length === 1 && args.dimensions[0] === F.h) return { rows: [{ [F.h]: 18 }, { [F.h]: 19 }, { [F.h]: 20 }] };
+    return { rows: SAMPLE };
+  };
   const routes = mount(qd);
   const r = await call(routes['GET /api/my/people-flow/:suiteId'], { user: owner, params: { suiteId: suite.id } });
   assert.equal(r.code, 200);
-  assert.equal(r.body.journeys, 3);
+  assert.equal(r.body.journeys, 3); // overall (windows merged)
+  assert.equal(r.body.frames.length, 3); // one frame per active hour
+  assert.equal(r.body.frames[0].label, '18:00–19:00');
   assert.equal(sawSuite, suite.id);
 });
 

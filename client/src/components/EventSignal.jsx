@@ -1117,12 +1117,14 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [full, setFull] = useState(false); // ⛶ fullscreen the map (great for Heat on a big screen)
   const [flow, setFlow] = useState(null); // 🚶 crowd flow: aggregate station→station journeys
   const [flowLoad, setFlowLoad] = useState(false);
+  const [flowFrame, setFlowFrame] = useState(null); // null = all night · else a time-window frame index
+  const [hideNames, setHideNames] = useState(false); // tap the map to hide station labels for a clean read
   const heatRef = useRef(null);
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
   useEffect(() => { // 🚶 crowd flow — pull the aggregate journey graph once on entering the mode
     if (mode !== 'crowd' || !suiteId) return undefined;
-    let alive = true; setFlowLoad(true);
+    let alive = true; setFlowLoad(true); setFlowFrame(null); setHideNames(false);
     fetch(`${scope}/people-flow/${encodeURIComponent(suiteId)}`)
       .then((r) => r.json()).then((d) => { if (alive) { setFlow(d && !d.error ? d : null); setFlowLoad(false); } })
       .catch(() => { if (alive) { setFlow(null); setFlowLoad(false); } });
@@ -1344,6 +1346,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   if (!cfg) return <div style={{ ...card, fontSize: 12, color: 'var(--muted)' }}>Loading the venue map…</div>;
   const btn = (act) => ({ border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`, background: 'var(--card)', color: act ? 'var(--brand)' : 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', minHeight: 30 });
   const pinCol = (s) => (isAlarm(s) ? STATUS_COLOR.stale : (s.off || 0) > 0 ? STATUS_COLOR.warn : STATUS_COLOR.fresh);
+  // 🚶 the flow graph currently on the map: the whole night, or the scrubbed window frame.
+  const activeFlow = flow && (flowFrame != null && flow.frames && flow.frames[flowFrame]) ? flow.frames[flowFrame] : flow;
   return (
     <div style={full ? { position: 'fixed', inset: 0, zIndex: 1300, background: 'var(--bg)', padding: '12px 14px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : undefined}>
       <style>{VM_CSS}</style>
@@ -1397,7 +1401,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           viewport with no scrolling — so when the height would overflow, the box
           narrows itself instead: width = min(100%, available-height × aspect). */}
       <div ref={boxRef} onPointerDown={onMapPointerDown}
-        style={{ position: 'relative', width: `min(100%, calc((100dvh - ${full ? 120 : 250}px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: edit && placing ? 'crosshair' : 'default' }}>
+        onClick={mode === 'crowd' && !edit ? () => setHideNames((v) => !v) : undefined}
+        style={{ position: 'relative', width: `min(100%, calc((100dvh - ${full ? 120 : 250}px) * ${ar}))`, aspectRatio: String(ar), margin: '0 auto', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'var(--card)', touchAction: edit ? 'none' : 'auto', cursor: mode === 'crowd' && !edit ? 'pointer' : (edit && placing ? 'crosshair' : 'default') }}>
         {cfg.image
           ? <img src={cfg.image} alt="venue site plan" onLoad={(e) => { const im = e.target; if (im.naturalWidth && im.naturalHeight) setAr(im.naturalWidth / im.naturalHeight); }} style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none', pointerEvents: 'none' }} />
           : <div style={{ width: '100%', height: '100%', background: 'repeating-linear-gradient(0deg, transparent 0 39px, var(--hairline) 39px 40px), repeating-linear-gradient(90deg, transparent 0 39px, var(--hairline) 39px 40px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -1414,8 +1419,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         ))}
         {/* 🚶 Crowd flow — curved, animated lines between pinned stations (dashes flow
             from→to; thicker/brighter = more people), then node dots sized by footfall. */}
-        {mode === 'crowd' && !edit && flow && (() => {
-          const segs = (flow.edges || []).filter((e) => pins[e.from] && pins[e.to]);
+        {mode === 'crowd' && !edit && activeFlow && (() => {
+          const segs = (activeFlow.edges || []).filter((e) => pins[e.from] && pins[e.to]);
           const maxE = Math.max(1, ...segs.map((e) => e.count));
           return (
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
@@ -1428,14 +1433,14 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             </svg>
           );
         })()}
-        {mode === 'crowd' && !edit && flow && (flow.nodes || []).filter((n) => pins[n.station]).map((n) => {
-          const p = pins[n.station]; const maxV = Math.max(1, ...(flow.nodes || []).map((x) => x.visits)); const r = n.visits / maxV;
+        {mode === 'crowd' && !edit && activeFlow && (activeFlow.nodes || []).filter((n) => pins[n.station]).map((n) => {
+          const p = pins[n.station]; const maxV = Math.max(1, ...(activeFlow.nodes || []).map((x) => x.visits)); const r = n.visits / maxV;
           const isEntry = n.entries > (n.visits * 0.4); const col = isEntry ? '#00c9b7' : '#5b8def'; const d = 10 + 20 * r;
           return (
             <div key={n.station} onClick={(e) => { e.stopPropagation(); const s = placed.find((x) => x.name === n.station); if (s) onSelect(s); }}
               style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', cursor: 'pointer' }}>
               <span style={{ display: 'block', width: d, height: d, borderRadius: '50%', background: col, opacity: 0.9, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}` }} />
-              <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: 'var(--text)', textShadow: '0 1px 3px var(--card),0 -1px 3px var(--card),1px 0 3px var(--card),-1px 0 3px var(--card)' }}>{isEntry ? '🚪 ' : ''}{n.station}</span>
+              {!hideNames && <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: 'var(--text)', textShadow: '0 1px 3px var(--card),0 -1px 3px var(--card),1px 0 3px var(--card),-1px 0 3px var(--card)' }}>{isEntry ? '🚪 ' : ''}{n.station}</span>}
             </div>
           );
         })}
@@ -1488,18 +1493,29 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           </div>
         );
       })()}
+      {!edit && mode === 'crowd' && flow && (flow.frames || []).length > 1 && (
+        // 🕒 Scrub the night — All-night aggregate, or step through each time window.
+        <div style={{ ...card, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 15 }}>🕒</span>
+          <input type="range" min={0} max={flow.frames.length} value={flowFrame == null ? 0 : flowFrame + 1}
+            onChange={(e) => { const v = +e.target.value; setFlowFrame(v === 0 ? null : v - 1); }} style={{ flex: 1, accentColor: 'var(--brand)' }} aria-label="Scrub the night" />
+          <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: flowFrame == null ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 96, textAlign: 'right' }}>{flowFrame == null ? '● ALL NIGHT' : (flow.frames[flowFrame] || {}).label}</span>
+        </div>
+      )}
+      {!edit && mode === 'crowd' && !isMobile && <div style={{ fontSize: 10.5, color: 'var(--faint)', marginTop: 6 }}>Tap the map to hide/show station names.</div>}
       </div>{/* ── left column: map + scrubber ── */}
       {!edit && mode === 'crowd' && (() => {
         // 🚶 Crowd flow rail — the busiest routes and entry points, from the aggregate
         // journey graph. A right rail on desktop, stacks under the map on mobile.
-        const routes = (flow && flow.edges || []).slice(0, 12);
+        const routes = (activeFlow && activeFlow.edges || []).slice(0, 12);
         const maxE = Math.max(1, ...routes.map((e) => e.count));
         const railStyle = isMobile ? { height: full ? 320 : 260 } : { maxHeight: full ? '80vh' : 'calc(100dvh - 300px)' };
         return (
           <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🚶 Crowd flow</span>
-              {flow && <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{(flow.journeys || 0).toLocaleString('en-ZA')} journeys</span>}
+              {flowFrame != null && <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: 'var(--brand)' }}>{(flow.frames[flowFrame] || {}).label}</span>}
+              {activeFlow && <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{(activeFlow.journeys || 0).toLocaleString('en-ZA')} journeys</span>}
             </div>
             {flowLoad ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tracing wristband journeys…</div>
               : !flow || !routes.length ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Not enough linked journeys to map crowd flow for this event yet.</div>
@@ -1514,10 +1530,10 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
                       </div>
                     ))}
                   </div>
-                  {!!(flow.entries || []).length && <>
+                  {!!(activeFlow.entries || []).length && <>
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--faint)', margin: '11px 0 6px' }}>🚪 First stop after entry</div>
                     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                      {flow.entries.slice(0, 8).map((e) => (
+                      {activeFlow.entries.slice(0, 8).map((e) => (
                         <span key={e.station} style={{ fontSize: 11, fontWeight: 700, border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 9px', color: '#00c9b7' }}>{e.station} · {e.count}</span>
                       ))}
                     </div>
