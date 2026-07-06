@@ -497,8 +497,13 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     // timeout is 2 min), which reads as "stuck" and can trip idle-connection proxies.
     // Re-send the latest status every 10s so the stream stays alive + visibly working.
     let lastStatus = 'Thinking…';
-    const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
-    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
+    let phaseAt = Date.now(); // when the CURRENT phase (model turn / a tool) began
+    // After ~8s the heartbeat appends the elapsed seconds, so a long wait shows WHICH
+    // phase is slow ("Reading cashless data… · 52s" vs "Thinking… · 52s") — the fastest
+    // way to see if a stall is the model or a heavy Looker query, no log-diving needed.
+    const stamp = (label) => { const s = Math.round((Date.now() - phaseAt) / 1000); return s >= 8 ? `${label} · ${s}s` : label; };
+    const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); phaseAt = Date.now(); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
+    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + stamp(lastStatus) + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
       const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
         llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model }),
