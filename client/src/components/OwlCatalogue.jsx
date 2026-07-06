@@ -139,6 +139,9 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
   useEffect(() => { if (open && !data) load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (name) => setEnabled((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  // Bulk-clear a set of field names (a whole category, or all dimensions) so a bloated
+  // catalogue can be cut to a focused set in a few taps instead of hundreds.
+  const clearNames = (names) => setEnabled((s) => { const n = new Set(s); names.forEach((nm) => n.delete(nm)); return n; });
   const save = async () => {
     setBusy(true); setErr(''); setSaved(false);
     try {
@@ -199,8 +202,12 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
                     hundreds by hand (esp. on a phone) is the reason big catalogues never get
                     trimmed. Measures stay ticked; then tick the ~30 dimensions you actually ask about. */}
                 {enabled && (data.dimensions || []).some((d) => enabled.has(d.name)) && (
-                  <button onClick={() => { if (window.confirm('Untick every dimension on this explore? Your measures stay ticked — then tick just the few dimensions you actually ask about, and Save.')) setEnabled((s) => new Set([...s].filter((n) => (data.measures || []).some((m) => m.name === n)))); }}
+                  <button onClick={() => { if (window.confirm('Untick every dimension on this explore? Your measures stay ticked — then tick just the few dimensions you actually ask about, and Save.')) clearNames((data.dimensions || []).map((d) => d.name)); }}
                     style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Untick all dimensions</button>
+                )}
+                {enabled && enabled.size > 0 && (
+                  <button onClick={() => { if (window.confirm('Untick EVERY field on this explore (measures and dimensions)? You then rebuild a small, focused set from zero — usually the fastest way. Tick what you need, then Save.')) setEnabled(new Set()); }}
+                    style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Untick all</button>
                 )}
                 {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
                 {err && <span style={{ fontSize: 12.5, color: '#e0414a', fontWeight: 600 }}>⚠ {err}</span>}
@@ -219,11 +226,11 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
                 <div>
                   <div style={colHead}>Measures ({filtered.measures.length})</div>
-                  {groupFields(filtered.measures).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                  {groupFields(filtered.measures).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} onClear={clearNames} />)}
                 </div>
                 <div>
                   <div style={colHead}>Dimensions ({filtered.dimensions.length})</div>
-                  {groupFields(filtered.dimensions).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                  {groupFields(filtered.dimensions).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} onClear={clearNames} />)}
                 </div>
               </div>
             </>
@@ -256,7 +263,7 @@ function groupFields(arr) {
 // One collapsible category. Auto-opens while a filter is active or the group holds
 // ticked fields (so the current selection is always visible), but the admin can still
 // collapse it manually.
-function FieldGroup({ name, fields, enabled, renderRow, forceOpen }) {
+function FieldGroup({ name, fields, enabled, renderRow, forceOpen, onClear }) {
   const [override, setOverride] = useState(null); // null = auto, true/false = manual
   const on = enabled ? fields.filter((f) => enabled.has(f.name)).length : 0;
   const auto = forceOpen || on > 0;
@@ -267,6 +274,9 @@ function FieldGroup({ name, fields, enabled, renderRow, forceOpen }) {
         <span style={{ fontSize: 11, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
         {on > 0 && <span style={badge('#34c759')}>{on} on</span>}
+        {/* Clear a whole category in one tap — the fast way to drop entire groups you
+            never ask about (access control, device internals…) from a bloated explore. */}
+        {on > 0 && onClear && <button onClick={(e) => { e.stopPropagation(); onClear(fields.map((f) => f.name)); }} title={`Untick all ${fields.length} in ${name}`} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '0 4px', fontWeight: 700 }}>untick</button>}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fields.length}</span>
       </div>
       {isOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px' }}>{fields.map(renderRow)}</div>}
