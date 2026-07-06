@@ -911,6 +911,7 @@ function ReportPanel({ url, body, title }) {
 // Permanent metrics row: fleet + volume headline computed from the stored
 // snapshots (no live queries) — shown on the Admin page and the client tab.
 function HealthMetrics({ monitors: allMonitors, trailing = null }) {
+  const isMobile = useIsMobile();
   // Closed stations are intentionally shut — their silence must not drag the
   // fleet numbers (devices/online/offline/flow). Their trading DID happen,
   // though, so the volume totals still count their frozen snapshots.
@@ -972,17 +973,18 @@ function HealthMetrics({ monitors: allMonitors, trailing = null }) {
       {/* Metrics fill the left and wrap; the page's control cluster (updated · ⓘ ·
           ⋯) pins to the top-right of the SAME line instead of taking its own row. */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        {/* Compact tiles so the whole fleet+volume set fits one line before
-            wrapping (no single metric stranded on its own row). */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {/* Desktop: compact tiles wrap. Mobile: ONE horizontal carousel (no six 2-up
+            rows), and the control cluster is dropped as noise (refresh is automatic,
+            the Owl Summary is the floating orb). */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, ...(isMobile ? { flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } : { flexWrap: 'wrap' }) }}>
           {tiles.map(([l, v, c]) => (
-            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '5px 9px', minWidth: 56 }}>
+            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '5px 9px', minWidth: 56, flex: '0 0 auto' }}>
               <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.2, textTransform: 'uppercase', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{l}</div>
               <div style={{ fontSize: 15.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)', whiteSpace: 'nowrap' }}>{v}</div>
             </div>
           ))}
         </div>
-        {trailing && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{trailing}</div>}
+        {trailing && !isMobile && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{trailing}</div>}
       </div>
       {offenders.length > 0 && (
         <div style={{ ...card, fontSize: 12, color: 'var(--muted)', marginTop: 8, padding: '9px 13px' }}>
