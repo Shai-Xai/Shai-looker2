@@ -127,8 +127,12 @@ const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis a
 
 // Each persona is a bundle: reasoning effort + output budget + how many tool rounds it
 // may run + the prompt layer appended to the instructions.
+// Quick lookups run on a FAST model (Sonnet) — Opus per round makes a simple
+// "what's X" answer take many seconds each turn. The deep modes stay on Opus
+// (null → owlTurn falls back to insights.MODEL) where the reasoning is worth it.
+const QUICK_MODEL = 'claude-sonnet-4-6';
 const PERSONAS = {
-  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '' },
+  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '', model: QUICK_MODEL },
   // Analyst/Operator run a multi-cut sweep, so they need a bigger round budget (each
   // round can batch several askData calls) and room for a structured, sectioned answer.
   analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER },
@@ -141,10 +145,10 @@ const personaOf = (m) => PERSONAS[personaKey(m)];
 // instruction layering). Returns the final Message; its content blocks may include
 // tool_use the loop must run. Kept here so insights.js stays a prompt/AI library
 // and this disposable module owns its own conversational turn.
-async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500 }) {
+async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500, model }) {
   const c = insights.requireClient(apiKey);
   const stream = c.messages.stream({
-    model: insights.MODEL,
+    model: model || insights.MODEL,
     max_tokens: maxTokens,
     thinking: { type: 'adaptive' },
     output_config: { effort },
@@ -489,7 +493,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
       const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
+        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model }),
         toolMap,
         tools: toolSchemas,
         messages,
