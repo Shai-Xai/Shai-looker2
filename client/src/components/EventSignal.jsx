@@ -1084,7 +1084,9 @@ const VM_CSS = `
 @keyframes vmPing{0%{transform:translate(-50%,-50%) scale(.5);opacity:.5}100%{transform:translate(-50%,-50%) scale(2.8);opacity:0}}
 @keyframes vmFlash{0%,100%{box-shadow:0 0 0 3px rgba(220,38,38,.15)}50%{box-shadow:0 0 0 9px rgba(220,38,38,.45)}}
 @keyframes vmHalo{0%,100%{opacity:.5}50%{opacity:.95}}
-@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}}`;
+@keyframes vmFlow{to{stroke-dashoffset:-15}}
+.vm-flow{animation:vmFlow .9s linear infinite}
+@media (prefers-reduced-motion:reduce){.vm-anim{animation:none !important}.vm-flow{animation:none !important}}`;
 // 🔥 Heat category colour by monitor name — bars red, food amber, vendors purple,
 // gates/check-in teal, else blue. Keeps "gates and bars readable at the same time".
 const HEAT_CAT = (name) => {
@@ -1113,9 +1115,19 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
   const [iv, setIv] = useState(30); const [scale, setScale] = useState('abs'); // 🔥 Heat: window minutes + Absolute/Relative
   const [heat, setHeat] = useState(null); const [heatIdx, setHeatIdx] = useState(null); const [playing, setPlaying] = useState(false); const [rez, setRez] = useState(0);
   const [full, setFull] = useState(false); // ⛶ fullscreen the map (great for Heat on a big screen)
+  const [flow, setFlow] = useState(null); // 🚶 crowd flow: aggregate station→station journeys
+  const [flowLoad, setFlowLoad] = useState(false);
   const heatRef = useRef(null);
   const boxRef = useRef(null);
   const dragRef = useRef(null); // { name, moved } during a pin drag
+  useEffect(() => { // 🚶 crowd flow — pull the aggregate journey graph once on entering the mode
+    if (mode !== 'crowd' || !suiteId) return undefined;
+    let alive = true; setFlowLoad(true);
+    fetch(`${scope}/people-flow/${encodeURIComponent(suiteId)}`)
+      .then((r) => r.json()).then((d) => { if (alive) { setFlow(d && !d.error ? d : null); setFlowLoad(false); } })
+      .catch(() => { if (alive) { setFlow(null); setFlowLoad(false); } });
+    return () => { alive = false; };
+  }, [mode, suiteId, scope]);
   useEffect(() => {
     let alive = true;
     if (!suiteId) { setCfg({ image: '', pins: {} }); return () => {}; }
@@ -1342,7 +1354,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: 1, minWidth: isMobile ? 0 : 160 }}>
             {edit ? (placing ? <>Tap the map to place <b>{placing}</b></> : (isMobile ? '' : 'Drag pins to move · tap ✕ to unpin · tap a station below to place it'))
               : mode === 'heat' ? (isMobile ? '' : <>Transaction heatmap — how busy each station is. Press ▶ to time-lapse the day; tap a station for its detail.</>)
-                : <>{isMobile ? '' : <>Live site plan — tap a pin for its devices &amp; operators. </>}<b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
+                : mode === 'crowd' ? (isMobile ? '' : <>Crowd flow — where wristbands moved between touchpoints. Thicker, brighter lines = more people took that route.</>)
+                  : <>{isMobile ? '' : <>Live site plan — tap a pin for its devices &amp; operators. </>}<b style={{ color: STATUS_COLOR.stale }}>{alarmed.length ? `${alarmed.length} station${alarmed.length > 1 ? 's' : ''} dark` : ''}</b></>}
           </span>
         )}
         {isMobile && <span style={{ flex: 1 }} />}
@@ -1350,6 +1363,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <button style={btn(mode === 'station')} onClick={() => setMode('station')}>📍 Stations</button>
           <button style={btn(mode === 'operator')} onClick={() => setMode('operator')}>🧑 Operators</button>
           <button style={btn(mode === 'heat')} onClick={() => setMode('heat')}>🔥 Heat</button>
+          <button style={btn(mode === 'crowd')} onClick={() => setMode('crowd')}>🚶 Flow</button>
           <button style={btn(full)} onClick={() => setFull(!full)} title={full ? 'Exit fullscreen' : 'Fullscreen'}>{full ? '⛶ Exit' : '⛶'}</button>
         </>}
         {!edit && mode === 'heat' && <>
@@ -1393,11 +1407,38 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <canvas ref={heatRef} onClick={(e) => { const b = boxRef.current.getBoundingClientRect(); const x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height; let best = null, bd = 0.06; for (const s of placed) { const p = pins[s.name]; const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = s; } } if (best) onSelect(best); }}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
         )}
-        {mode !== 'heat' && halos.map((h2, i) => (
+        {mode !== 'heat' && mode !== 'crowd' && halos.map((h2, i) => (
           <div key={i} className="vm-anim" style={{ position: 'absolute', left: `${h2.x * 100}%`, top: `${h2.y * 100}%`, width: 130 + h2.n * 30, height: 130 + h2.n * 30, transform: 'translate(-50%,-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(220,38,38,.30) 0%, transparent 70%)', animation: 'vmHalo 1.6s ease-in-out infinite', pointerEvents: 'none' }}>
             <span style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: '#ef4444', textShadow: '0 1px 2px rgba(0,0,0,.5)' }}>⚠ AREA · {h2.n} stations</span>
           </div>
         ))}
+        {/* 🚶 Crowd flow — curved, animated lines between pinned stations (dashes flow
+            from→to; thicker/brighter = more people), then node dots sized by footfall. */}
+        {mode === 'crowd' && !edit && flow && (() => {
+          const segs = (flow.edges || []).filter((e) => pins[e.from] && pins[e.to]);
+          const maxE = Math.max(1, ...segs.map((e) => e.count));
+          return (
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+              {segs.map((e, i) => {
+                const a = pins[e.from], b = pins[e.to]; const x1 = a.x * 100, y1 = a.y * 100, x2 = b.x * 100, y2 = b.y * 100;
+                const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1; const off = Math.min(11, len * 0.16);
+                const cx = (x1 + x2) / 2 - (dy / len) * off, cy = (y1 + y2) / 2 + (dx / len) * off; const r = e.count / maxE;
+                return <path key={i} d={`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`} fill="none" stroke="var(--brand)" strokeWidth={1.2 + 5 * r} strokeOpacity={0.28 + 0.5 * r} strokeLinecap="round" vectorEffect="non-scaling-stroke" className="vm-flow" style={{ strokeDasharray: '7 8' }} />;
+              })}
+            </svg>
+          );
+        })()}
+        {mode === 'crowd' && !edit && flow && (flow.nodes || []).filter((n) => pins[n.station]).map((n) => {
+          const p = pins[n.station]; const maxV = Math.max(1, ...(flow.nodes || []).map((x) => x.visits)); const r = n.visits / maxV;
+          const isEntry = n.entries > (n.visits * 0.4); const col = isEntry ? '#00c9b7' : '#5b8def'; const d = 10 + 20 * r;
+          return (
+            <div key={n.station} onClick={(e) => { e.stopPropagation(); const s = placed.find((x) => x.name === n.station); if (s) onSelect(s); }}
+              style={{ position: 'absolute', left: `${p.x * 100}%`, top: `${p.y * 100}%`, transform: 'translate(-50%,-50%)', cursor: 'pointer' }}>
+              <span style={{ display: 'block', width: d, height: d, borderRadius: '50%', background: col, opacity: 0.9, border: '2px solid var(--card)', boxShadow: `0 0 8px ${col}` }} />
+              <span style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, color: 'var(--text)', textShadow: '0 1px 3px var(--card),0 -1px 3px var(--card),1px 0 3px var(--card),-1px 0 3px var(--card)' }}>{isEntry ? '🚪 ' : ''}{n.station}</span>
+            </div>
+          );
+        })}
         {mode === 'operator' && !edit && placed.map((s) => {
           const list = devsFor(s); const p = pins[s.name];
           if (!list) return <span key={'d' + s.name} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + 14px)`, transform: 'translateX(-50%)', fontSize: 8.5, color: 'var(--muted)' }}>…</span>;
@@ -1420,7 +1461,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
             dark > 0 && <i key={s.name + '·dark'} style={{ position: 'absolute', left: `${p.x * 100}%`, top: `calc(${p.y * 100}% + ${18 + rowsN * 11}px)`, transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 8.5, fontStyle: 'normal', fontWeight: 800, color: STATUS_COLOR.stale, textShadow: '0 1px 3px var(--card)' }}>{dark} dark</i>,
           ];
         })}
-        {mode !== 'heat' && placed.map((s) => {
+        {mode !== 'heat' && (mode !== 'crowd' || edit) && placed.map((s) => {
           const p = pins[s.name]; const col = pinCol(s); const alarm = isAlarm(s);
           return (
             <div key={s.name} onPointerDown={onPinPointerDown(s.name)}
@@ -1448,6 +1489,44 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         );
       })()}
       </div>{/* ── left column: map + scrubber ── */}
+      {!edit && mode === 'crowd' && (() => {
+        // 🚶 Crowd flow rail — the busiest routes and entry points, from the aggregate
+        // journey graph. A right rail on desktop, stacks under the map on mobile.
+        const routes = (flow && flow.edges || []).slice(0, 12);
+        const maxE = Math.max(1, ...routes.map((e) => e.count));
+        const railStyle = isMobile ? { height: full ? 320 : 260 } : { maxHeight: full ? '80vh' : 'calc(100dvh - 300px)' };
+        return (
+          <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🚶 Crowd flow</span>
+              {flow && <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{(flow.journeys || 0).toLocaleString('en-ZA')} journeys</span>}
+            </div>
+            {flowLoad ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Tracing wristband journeys…</div>
+              : !flow || !routes.length ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>Not enough linked journeys to map crowd flow for this event yet.</div>
+                : <div style={{ overflowY: 'auto', ...railStyle }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--faint)', margin: '0 0 6px' }}>Busiest routes</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {routes.map((e, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ flex: '0 0 46%', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.from} <span style={{ color: 'var(--faint)' }}>→</span> {e.to}</span>
+                        <span style={{ flex: 1, height: 7, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: `${Math.max(5, (e.count / maxE) * 100)}%`, background: 'var(--brand)', borderRadius: 4 }} /></span>
+                        <span style={{ width: 34, textAlign: 'right', fontSize: 11.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--brand)' }}>{e.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {!!(flow.entries || []).length && <>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--faint)', margin: '11px 0 6px' }}>🚪 First stop after entry</div>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                      {flow.entries.slice(0, 8).map((e) => (
+                        <span key={e.station} style={{ fontSize: 11, fontWeight: 700, border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 9px', color: '#00c9b7' }}>{e.station} · {e.count}</span>
+                      ))}
+                    </div>
+                  </>}
+                  <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 9 }}>A sample of wristband journeys between touchpoints — a proxy for movement (only where people tapped), aggregate only.</div>
+                </div>}
+          </div>
+        );
+      })()}
       {!edit && mode === 'heat' && heat && heat.axis.length > 0 && (() => {
         // 🖐 Hand index — every placed station ranked busiest→quietest for the frame
         // currently on the map (live, or wherever you paused the scrub), colour-coded
