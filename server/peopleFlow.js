@@ -18,11 +18,17 @@ const F = {
   gtag: 'cashless_open_loop_sales.customer_gtag_id',
   station: 'cashless_open_loop_sales.station_name',
   bucket: 'cashless_open_loop_sales.date_minute10', // sortable 'YYYY-MM-DD HH:MM'
+  hod: 'cashless_open_loop_sales.date_hour_of_day', // 0..23 event-local clock hour
   count: 'cashless_open_loop_sales.transaction_count',
 };
-const SAMPLE_ROWS = 5000; // the queryData row ceiling — a truncated-but-representative sample
+const SAMPLE_ROWS = 5000; // the queryData per-query row ceiling
 const MAX_EDGES = 80;
+const MAX_WINDOWS = 7; // parallel time slices — each adds up to SAMPLE_ROWS more taps
 const CACHE_TTL = 3 * 60 * 1000;
+
+// After-midnight clock hours belong at the END of an event night, not the start.
+const chrono = (h) => (h < 6 ? h + 24 : h);
+const hh = (h) => `${String(((h % 24) + 24) % 24).padStart(2, '0')}:00`;
 
 const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
@@ -68,19 +74,33 @@ function buildFlow(rows) {
 function mount(app, { db, auth, queryData }) {
   const cache = new Map(); // suiteId -> { at, data }
 
+  const tapsIn = (user, suiteId, hodFilter) => queryData(user, {
+    source: SRC, suiteId, measure: F.count, dimensions: [F.gtag, F.station, F.bucket],
+    limit: SAMPLE_ROWS, ...(hodFilter ? { filters: { [F.hod]: hodFilter } } : {}),
+  }).then((r) => (r && r.rows) || []).catch(() => []);
+
   async function flowFor(user, suiteId) {
     const hit = cache.get(suiteId);
     if (hit && Date.now() - hit.at < CACHE_TTL) return hit.data;
-    const res = await queryData(user, {
-      source: SRC, suiteId,
-      measure: F.count, dimensions: [F.gtag, F.station, F.bucket], limit: SAMPLE_ROWS,
-    });
-    const rows = (res && res.rows) || [];
-    const flow = buildFlow(rows);
+    // Find the active clock hours, then slice the night into ≤MAX_WINDOWS blocks and pull
+    // each in PARALLEL — every window adds up to SAMPLE_ROWS more taps (many more samples
+    // than one capped query) AND gives the scrubber a per-window movement frame.
+    const hoursRes = await queryData(user, { source: SRC, suiteId, measure: F.count, dimensions: [F.hod], limit: 30 }).catch(() => null);
+    const active = [...new Set(((hoursRes && hoursRes.rows) || []).map((r) => Number(r[F.hod])).filter((h) => Number.isFinite(h)))].sort((a, b) => chrono(a) - chrono(b));
+    const span = Math.max(1, Math.ceil(active.length / MAX_WINDOWS)); // hours per window
+    const windows = [];
+    for (let i = 0; i < active.length; i += span) windows.push(active.slice(i, i + span));
+    const perWindow = await Promise.all(windows.map((hrs) => tapsIn(user, suiteId, hrs.join(','))));
+    const frames = windows.map((hrs, i) => {
+      const last = hrs[hrs.length - 1];
+      return { label: `${hh(hrs[0])}–${hh(chrono(last) + 1)}`, hours: hrs, ...buildFlow(perWindow[i]), sampled: perWindow[i].length };
+    }).filter((f) => f.journeys > 0);
+    // Overall = every window's taps merged (up to MAX_WINDOWS × SAMPLE_ROWS) → deeper sample.
+    const allRows = active.length ? perWindow.flat() : await tapsIn(user, suiteId, '');
+    const overall = buildFlow(allRows);
     const data = {
-      ...flow,
-      sampled: rows.length,
-      truncated: rows.length >= SAMPLE_ROWS, // a bigger crowd than the sample window — flows are a sample
+      ...overall, frames,
+      sampled: allRows.length, windows: frames.length,
       note: 'A sample of wristband journeys between touchpoints (where people tapped). Aggregate only; a proxy for movement, not GPS.',
       asOf: new Date().toISOString(),
     };

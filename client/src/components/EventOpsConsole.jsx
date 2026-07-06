@@ -1824,7 +1824,8 @@ const stationCard = { ...card, display: 'flex', flexDirection: 'column', alignIt
 const select = { padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, maxWidth: '100%' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '11px 12px', fontSize: 15, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' };
 const fieldCol = { display: 'flex', flexDirection: 'column', gap: 10 };
-const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
+// Compact so Event · Hive · Data health · Flow board always fit one mobile row.
+const tabBtn = (on) => ({ padding: '8px 10px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
 const mobileTabs = { display: 'flex', gap: 6, flexWrap: 'wrap' };
 const leftNav = { display: 'flex', flexDirection: 'column', gap: 3, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
 const navScan = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 800, background: 'var(--brand)', color: '#fff', boxShadow: 'var(--shadow-sm)' };
