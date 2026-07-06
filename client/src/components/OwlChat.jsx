@@ -411,12 +411,10 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     <div className={isMobile ? undefined : 'ai-glow'} style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Minimal header: chats ☰, title, then one ⋯ menu holding everything secondary
+      {/* Minimal header: just chats ☰, one ⋯ menu holding everything secondary
           (new chat / full screen / copy / PDF / share / text size / dock) + close ✕,
           so the bar stays calm and uncluttered. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-        <span style={{ fontSize: 16 }}>🦉</span>
-        <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
         <span style={{ flex: 1 }} />
         <div style={{ position: 'relative' }}>
