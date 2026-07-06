@@ -1252,8 +1252,13 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     const ivMs = iv * 60000;
     const mids = [...new Set(sts.map((s) => s.mid))];
     const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
-    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`)
-      .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
+    // Per-request timeout so one slow/hanging monitor timeline can't wedge the whole
+    // heatmap on "Reading transactions…" forever — it resolves to null and the rest draw.
+    const pull = (mid) => Promise.race([
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`).then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null })),
+      new Promise((res) => setTimeout(() => res({ mid, d: null }), 22000)),
+    ]);
+    Promise.all(mids.map(pull))
       .then((packs) => {
         if (!alive) return;
         const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const axisSet = new Set();
@@ -1283,7 +1288,8 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         const dayPeak = new Map();
         for (const [st, m2] of series.entries()) { const mid = catKeyOf.get(st); let mx = dayPeak.get(mid) || 0; for (const b of axis) { const v = m2.get(b) || 0; if (v > mx) mx = v; } dayPeak.set(mid, mx); }
         setHeat({ axis, series, catKeyOf, catCol, dayPeak });
-      });
+      })
+      .catch(() => { if (alive) setHeat({ axis: [], series: new Map(), catKeyOf: new Map(), catCol: new Map(), dayPeak: new Map() }); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval/60s tick
   }, [mode, iv, suiteId, apiBase, heatTick]);
@@ -1482,6 +1488,12 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         })}
       </div>
       {!edit && mode === 'heat' && !heat && <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Reading transactions per {iv < 60 ? iv + ' min' : 'hour'}…</div>}
+      {!edit && mode === 'heat' && heat && !heat.axis.length && (
+        <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          No transactions came back for this window — the feed may be slow or the event is quiet.
+          <button onClick={() => setHeatTick((n) => n + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🔄 Retry</button>
+        </div>
+      )}
       {!edit && mode === 'heat' && heat && heat.axis.length > 1 && (() => {
         const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
         const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
