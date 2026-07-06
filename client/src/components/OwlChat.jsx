@@ -411,23 +411,23 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     <div className={isMobile ? undefined : 'ai-glow'} style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Clean header: chats ☰, new chat ✎, title — everything else lives in the ⋯ menu
-          (copy / PDF / share / text size / overlay-vs-in-app), so the bar stays calm. */}
+      {/* Minimal header: chats ☰, title, then one ⋯ menu holding everything secondary
+          (new chat / full screen / copy / PDF / share / text size / dock) + close ✕,
+          so the bar stays calm and uncluttered. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <span style={{ fontSize: 16 }}>🦉</span>
         <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
         <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
-        <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
         <span style={{ flex: 1 }} />
-        {!isMobile && !embed && (
-          <button onClick={toggleWide} title={wide ? 'Exit full screen' : 'Full screen'} aria-label={wide ? 'Exit full screen' : 'Full screen'} style={{ ...hdrBtn, fontSize: 15, padding: '2px 6px' }}>{wide ? '⤡' : '⤢'}</button>
-        )}
         <div style={{ position: 'relative' }}>
           <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...hdrBtn, fontSize: 18, fontWeight: 700, padding: '2px 8px', ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 8 } : null) }}>⋯</button>
           {hdrMenuOpen && (
             <>
               <div onClick={() => setHdrMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
               <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 91, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: 'var(--shadow-pop, 0 8px 28px rgba(0,0,0,0.18))', minWidth: 210, padding: 6 }}>
+                <button onClick={() => { newChat(); setHdrMenuOpen(false); }} style={menuItem}>✎ New chat</button>
+                {!isMobile && !embed && <button onClick={() => { toggleWide(); setHdrMenuOpen(false); }} style={menuItem}>{wide ? '⤡ Exit full screen' : '⤢ Full screen'}</button>}
+                <div style={{ height: 1, background: 'var(--hairline)', margin: '5px 4px' }} />
                 {messages.some((m) => m.text) && (
                   <>
                     <button onClick={() => { copyChat(); setHdrMenuOpen(false); }} style={menuItem}>{chatCopied ? '✓ Copied' : '📋 Copy chat'}</button>
