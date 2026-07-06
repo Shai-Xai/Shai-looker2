@@ -316,7 +316,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   const segBtn = (active) => ({ padding: '4px 10px', fontSize: 11.5, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const menuItem = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600 };
-  const selStyle = { padding: '4px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
+  const selStyle = { padding: '4px 8px', borderRadius: 8, border: 'none', background: 'var(--elevated, rgba(128,128,128,0.08))', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
 
   const bubble = (m, i) => (
     <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
@@ -493,7 +493,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
               {(starters.length ? starters : FALLBACK_STARTERS).map((s) => (
                 <button key={s.prompt} type="button" onClick={() => send(s.prompt)} disabled={busy || !canAsk}
                   title={s.prompt}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'var(--elevated, rgba(128,128,128,0.08))', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
                   <span style={{ fontSize: 14 }}>{s.icon}</span>{s.label}
                 </button>
               ))}
@@ -564,7 +564,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8 }}>
           {[['quick', '⚡ Quick', 'Fast, grounded answers'], ['analyst', '🔬 Analyst', 'Deeper analysis: multiple cuts, the “so what”, and strategic follow-ups (a little slower)'], ['operator', '🧭 Operator', 'Deep analysis AND proactively drafts the best next action (alert / segment / campaign) for you to confirm']].map(([k, lbl, tip]) => (
             <button key={k} type="button" onClick={() => setPersona(k)} title={tip}
-              style={{ border: '1px solid var(--hairline)', background: persona === k ? 'var(--brand)' : 'var(--card)', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
+              style={{ border: 'none', background: persona === k ? 'var(--brand)' : 'transparent', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
           ))}
           {persona === 'analyst' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deeper · a little slower</span>}
           {persona === 'operator' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deep + proposes an action</span>}
@@ -593,9 +593,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: composerFresh ? 108 : 40, maxHeight: 200, overflowY: 'auto', padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: '1px solid var(--hairline)', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
-            <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
-            {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
+            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: 'none', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.14))' : 'transparent', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
+            <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: 'none', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.14))' : 'transparent', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
+            {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: 'none', background: listening ? '#e0414a' : 'transparent', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
             <span style={{ flex: 1 }} />
             <button onClick={() => send()} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
               style={{ border: 'none', borderRadius: 980, padding: '0 20px', height: 38, fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() || !canAsk ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
