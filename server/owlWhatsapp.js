@@ -471,10 +471,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const r = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model, signal }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
         maxRounds: persona.maxRounds,
+        turnTimeoutMs: persona.turnTimeoutMs, toolTimeoutMs: persona.toolTimeoutMs,
       }));
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }
@@ -737,7 +738,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const { text } = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, signal }),
         toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
         ctx: { user: id.user, entityId: id.entityId },
       }));

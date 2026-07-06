@@ -136,12 +136,15 @@ const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis a
 // "what's X" answer take many seconds each turn. The deep modes stay on Opus
 // (null → owlTurn falls back to insights.MODEL) where the reasoning is worth it.
 const QUICK_MODEL = 'claude-sonnet-4-6';
+// turnTimeoutMs / toolTimeoutMs are per-phase HARD budgets (raced in runOwlLoop) so
+// no persona can hang: Quick answers snappily or says so; the deep modes get room
+// for long Opus turns + heavy Looker queries but still always come back.
 const PERSONAS = {
-  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '', model: QUICK_MODEL },
+  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '', model: QUICK_MODEL, turnTimeoutMs: 60000, toolTimeoutMs: 75000 },
   // Analyst/Operator run a multi-cut sweep, so they need a bigger round budget (each
   // round can batch several askData calls) and room for a structured, sectioned answer.
-  analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER },
-  operator: { effort: 'high', maxTokens: 4096, maxRounds: 16, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}` },
+  analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER, turnTimeoutMs: 240000, toolTimeoutMs: 120000 },
+  operator: { effort: 'high', maxTokens: 4096, maxRounds: 16, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}`, turnTimeoutMs: 240000, toolTimeoutMs: 120000 },
 };
 const personaKey = (m) => (PERSONAS[m] ? m : 'quick');
 const personaOf = (m) => PERSONAS[personaKey(m)];
@@ -150,8 +153,10 @@ const personaOf = (m) => PERSONAS[personaKey(m)];
 // instruction layering). Returns the final Message; its content blocks may include
 // tool_use the loop must run. Kept here so insights.js stays a prompt/AI library
 // and this disposable module owns its own conversational turn.
-async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500, model }) {
+async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500, model, signal }) {
   const c = insights.requireClient(apiKey);
+  // `signal` lets the loop CUT an in-flight stream (⏹ Stop / turn budget) — without
+  // it, an aborted turn kept generating server-side ("stop doesn't actually stop").
   const stream = c.messages.stream({
     model: model || insights.MODEL,
     max_tokens: maxTokens,
@@ -160,7 +165,7 @@ async function owlTurn(insights, { messages, tools, instructions, apiKey, onText
     system: insights.systemWith(OWL_CHAT_SYSTEM, instructions),
     tools: tools || [],
     messages: messages || [],
-  });
+  }, signal ? { signal } : undefined);
   stream.on('text', (delta) => { if (onText) onText(delta); });
   return stream.finalMessage();
 }
@@ -172,19 +177,46 @@ async function owlTurn(insights, { messages, tools, instructions, apiKey, onText
 // `shouldStop` (optional) is polled between rounds/tools — when it returns true (the
 // user tapped Stop, or the socket closed) the loop bails with what it has instead of
 // burning more model/Looker time on an answer nobody is waiting for.
-async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5, shouldStop }) {
+// Every phase is HARD-BOUNDED so a query always gets a response: the model turn is
+// raced against `turnTimeoutMs` and a stop-poll (⏹ Stop cuts INTO an in-flight turn,
+// not just between phases), each tool call is raced against `toolTimeoutMs` and the
+// same stop-poll, a round's tool calls run in PARALLEL (they were sequential), a
+// tool that throws becomes an ok:false result instead of killing the turn, and an
+// identical call that already failed this turn short-circuits (no retry storms).
+// Returns { text, trail, rounds, stopped?, timedOut?, truncated? } — timedOut/
+// truncated with empty text mean the door should add its friendly fallback line.
+async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5, shouldStop, turnTimeoutMs = 120000, toolTimeoutMs = 90000 }) {
   const convo = [...messages];
   const trail = [];
   let rounds = 0;
   const stopped = () => { try { return !!(shouldStop && shouldStop()); } catch { return false; } };
+  const failed = new Map(); // `${name}:${inputJson}` of failed calls → result
   for (; rounds < maxRounds; rounds++) {
     if (stopped()) return { text: '', trail, rounds, stopped: true };
     // Tell the user we're working before each model turn (the silent pre-text gap).
     if (onStatus) onStatus(rounds === 0 ? 'Thinking…' : 'Working through it…');
-    // ── Latency trace (Render logs, prefix [owl-trace]) — so a slow answer can be
-    // pinned to the model turn vs a Looker query vs repeated rounds, not guessed.
+    // ── Model turn, raced against the budget + stop. The losing stream is aborted
+    // via `signal` and late tokens are suppressed so they never reach the user.
     const _mt0 = Date.now();
-    const final = await llmTurn({ messages: convo, tools, onText });
+    const ac = new AbortController();
+    let cut = null; let gateTimer = null; let gatePoll = null;
+    const gate = new Promise((resolve) => {
+      gateTimer = setTimeout(() => { cut = 'timeout'; resolve({ __cut: 'timeout' }); }, turnTimeoutMs);
+      gatePoll = setInterval(() => { if (stopped()) { cut = 'stopped'; resolve({ __cut: 'stopped' }); } }, 300);
+    });
+    const attempt = Promise.resolve()
+      .then(() => llmTurn({ messages: convo, tools, onText: (t) => { if (!cut && onText) onText(t); }, signal: ac.signal }))
+      .catch((e) => ({ __err: e }));
+    const winner = await Promise.race([attempt, gate]);
+    clearTimeout(gateTimer); clearInterval(gatePoll);
+    if (winner && winner.__cut) {
+      try { ac.abort(); } catch { /* stream already finished */ }
+      if (winner.__cut === 'stopped') return { text: '', trail, rounds, stopped: true };
+      console.warn(`[owl-trace] round ${rounds}: model turn CUT after ${Date.now() - _mt0}ms (budget ${turnTimeoutMs}ms)`);
+      return { text: '', trail, rounds, timedOut: true };
+    }
+    if (winner && winner.__err) throw winner.__err;
+    const final = winner;
     const _modelMs = Date.now() - _mt0;
     const blocks = final.content || [];
     convo.push({ role: 'assistant', content: blocks });
@@ -196,17 +228,34 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
     console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → calling ${toolUses.map((t) => t.name).join(', ')}`);
     // About to run tool(s) — say which kind of thing we're fetching.
     if (onStatus) onStatus(statusForTools(toolUses));
-    const results = [];
-    for (const tu of toolUses) {
-      if (stopped()) return { text: '', trail, rounds, stopped: true };
+    const runOne = async (tu) => {
+      const key = `${tu.name}:${JSON.stringify(tu.input || {})}`;
+      const prior = failed.get(key);
+      if (prior) return { ...prior, message: `${prior.message || 'Failed.'} You already made this exact call this turn and it failed — do NOT repeat it; change the query or answer with what you have.` };
       const tool = toolMap[tu.name];
+      if (!tool) return { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
       const _tt0 = Date.now();
-      const result = tool ? await tool.run(tu.input || {}, ctx) : { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
+      const result = await new Promise((resolve) => {
+        let done = false; let tt = null; let sp = null;
+        const finish = (r) => { if (!done) { done = true; clearTimeout(tt); clearInterval(sp); resolve(r); } };
+        tt = setTimeout(() => finish({ ok: false, reason: 'tool_timeout', message: `${tu.name} took longer than ${Math.round(toolTimeoutMs / 1000)}s and was cut off — that cut is too heavy to compute live. Do NOT retry the identical call: narrow it (a filter, top-N, a shorter range) or answer with what you already have and say this cut timed out.` }), toolTimeoutMs);
+        sp = setInterval(() => { if (stopped()) finish({ ok: false, reason: 'stopped', message: 'The user stopped this turn.' }); }, 300);
+        Promise.resolve().then(() => tool.run(tu.input || {}, ctx)).then(
+          (r) => finish(r && typeof r === 'object' ? r : { ok: false, reason: 'tool_error', message: `${tu.name} returned nothing.` }),
+          (e) => finish({ ok: false, reason: 'tool_error', message: `${tu.name} failed internally: ${String((e && e.message) || e).slice(0, 160)}` }),
+        );
+      });
       console.log(`[owl-trace]   ${tu.name} ${Date.now() - _tt0}ms ok=${!!result.ok}${result.ok ? ` rows=${Array.isArray(result.rows) ? result.rows.length : '-'}` : ` reason=${result.reason}`} input=${JSON.stringify(tu.input || {}).slice(0, 400)}`);
-      trail.push({ name: tu.name, input: tu.input || {}, result });
-      // Feed the model a compact result. Pass through whatever the tool returned
-      // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
-      // silently dropped; just strip the bulky queryBody and cap any rows array.
+      if (!result.ok && result.reason !== 'stopped') failed.set(key, result);
+      return result;
+    };
+    const outs = await Promise.all(toolUses.map((tu) => runOne(tu).then((result) => ({ tu, result }))));
+    for (const { tu, result } of outs) trail.push({ name: tu.name, input: tu.input || {}, result });
+    if (stopped()) return { text: '', trail, rounds, stopped: true };
+    // Feed the model compact results. Pass through whatever each tool returned
+    // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
+    // silently dropped; just strip the bulky queryBody and cap any rows array.
+    const results = outs.map(({ tu, result }) => {
       let forModel;
       if (result.ok) {
         const { queryBody, ...rest } = result; // eslint-disable-line no-unused-vars
@@ -215,12 +264,12 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
       } else {
         forModel = { ok: false, reason: result.reason, message: result.message };
       }
-      results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(forModel) });
-    }
+      return { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(forModel) };
+    });
     convo.push({ role: 'user', content: results });
   }
-  // Hit the round cap without a final text answer.
-  return { text: textOf((messages[messages.length - 1] || {}).content || []) || '', trail, rounds, truncated: true };
+  // Hit the round cap without a final text answer — the doors add the friendly line.
+  return { text: '', trail, rounds, truncated: true };
 }
 
 function textOf(blocks) {
@@ -510,14 +559,16 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); phaseAt = Date.now(); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
     const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + stamp(lastStatus) + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
-      const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model }),
+      const { text, trail, stopped, timedOut, truncated } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model, signal }),
         toolMap,
         tools: toolSchemas,
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
         maxRounds: persona.maxRounds,
         shouldStop: () => (stopAsked.get(thread.id) || 0) >= turnStart,
+        turnTimeoutMs: Number(process.env.OWL_TURN_TIMEOUT_MS) || persona.turnTimeoutMs,
+        toolTimeoutMs: Number(process.env.OWL_TOOL_TIMEOUT_MS) || persona.toolTimeoutMs,
         onText: (t) => { if (!clientGone) { try { res.write(t); } catch { /* socket gone */ } } },
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: writeStatus,
@@ -525,7 +576,18 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
       if (stopped) { logToolStop(thread.id, trail); try { res.end(); } catch { /* gone */ } return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
       // ALWAYS — even to a dead socket — so a dropped stream can recover it.
-      const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      let cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      // Every query gets a REAL response: when the loop came back empty (turn budget
+      // hit, or round cap without a final answer), stream + persist an honest line
+      // with a way forward instead of ending silently on "Thinking…".
+      if (!cleanText.trim()) {
+        cleanText = timedOut
+          ? '⏳ That was taking longer than it should, so I stopped this attempt rather than leave you hanging. A narrower version will usually fly — try a shorter date range, top values only, or one breakdown at a time.'
+          : truncated
+            ? 'I ran several queries but couldn\'t land a final answer within my working budget. Try narrowing the question (one breakdown at a time works best) — or ask again and I\'ll pick up from what I found.'
+            : 'I couldn\'t produce an answer for that one — try rephrasing or narrowing the question and I\'ll have another go.';
+        if (!clientGone) { try { res.write(`\n\n${cleanText}`); } catch { /* socket gone */ } }
+      }
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
       if (!clientGone) {
         // Citation chips: stream the sources as a trailing record the client splits off.
