@@ -246,13 +246,25 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       if (fu && fu.length) setFollowups(fu);
     } catch (e) {
       if (e && (e.name === 'AbortError' || ac.signal.aborted)) appendToOwl('⏹ Stopped.');
-      else if (liveTidRef.current) {
-        // The STREAM died (navigated away / phone locked / flaky network) but the
-        // server keeps working and saves the answer to the thread — recover it
-        // instead of failing (the "loading failed after switching screens" bug).
+      else {
+        // The stream died before finishing — phone locked, flaky mobile network, or
+        // Safari's raw "Load failed" (the fetch rejected before we even got the thread
+        // id). The server keeps working and PERSISTS the answer, so recover it instead
+        // of surfacing a fetch error. When we never got the id back, find the just-made
+        // thread by its title (= this question) and recover from that.
         setStatus('Connection dropped — still working…');
-        await recoverAnswer(liveTidRef.current);
-      } else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
+        let tid = liveTidRef.current || threadId;
+        if (!tid) {
+          try {
+            const r = await api.owlThreads();
+            const want = q.trim().slice(0, 80);
+            const hit = (r && r.threads ? r.threads : []).find((t) => String(t.title || '').trim() === want);
+            tid = hit && hit.id;
+          } catch { /* ignore — fall through to the retry note */ }
+        }
+        if (tid) await recoverAnswer(tid);
+        else appendToOwl('⚠ The connection dropped before I could answer that — please tap send to try again.');
+      }
     } finally {
       abortRef.current = null;
       setBusy(false);
