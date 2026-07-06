@@ -766,15 +766,8 @@ export default function ClientLayout() {
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())} title="Menu" aria-label="Open menu">☰</button>
-            {/* No back button on the client home screen — it's the root, so back
-                would have nowhere meaningful to go (Home already covers it). */}
-            {!(location.pathname === '/' || location.pathname === '/preview') && (
-              <button style={menuBtn} onClick={() => (location.key !== 'default' ? navigate(-1) : navigate(previewMode ? '/preview' : '/'))} title="Back" aria-label="Back">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-            )}
+            {/* No back button — Home (and the phone's own back gesture) cover it, and the
+                extra arrow just crowded the bar. */}
             <button style={menuBtn} onClick={() => vtNavigate(navigate, previewMode ? '/preview' : '/')} title="Home" aria-label="Home">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 10.5 12 3l9 7.5" />
