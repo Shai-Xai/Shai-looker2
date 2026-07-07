@@ -166,7 +166,31 @@ test('import preview flags account links as new / imported / removed; selective 
   assert.ok(!links.some((l) => l.chottuLinkId === 'ext-d'), 'unpicked link is not imported');
 });
 
+test('per-link event assignments at import time — each pick lands on its own event', async () => {
+  const suiteA2 = h.db.createSuite({ entityId: entityA.id, name: 'Festival A — Cape Town' });
+  upstream.nextLinks = [
+    { id: 'ext-e', short_url: 'https://howler.chottu.link/e', link_name: 'E', destination_url: 'https://h/5', is_enabled: true },
+    { id: 'ext-f', short_url: 'https://howler.chottu.link/f', link_name: 'F', destination_url: 'https://h/6', is_enabled: true },
+    { id: 'ext-g', short_url: 'https://howler.chottu.link/g', link_name: 'G', destination_url: 'https://h/7', is_enabled: true },
+  ];
+  const r = await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, {
+    as: admin,
+    body: { ids: ['ext-e', 'ext-f', 'ext-g'], assignments: { 'ext-e': suiteA.id, 'ext-f': suiteA2.id, 'ext-g': '' } },
+  });
+  assert.equal(r.body.imported, 3);
+  const links = (await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/links`, { as: admin })).body.links;
+  assert.equal(links.find((l) => l.chottuLinkId === 'ext-e').suiteId, suiteA.id);
+  assert.equal(links.find((l) => l.chottuLinkId === 'ext-f').suiteId, suiteA2.id);
+  assert.equal(links.find((l) => l.chottuLinkId === 'ext-g').suiteId, null);
+  // Another client's suite in an assignment is rejected outright.
+  upstream.nextLinks = [{ id: 'ext-h', short_url: 'https://howler.chottu.link/h', link_name: 'H', destination_url: 'https://h/8', is_enabled: true }];
+  const suiteB = h.db.createSuite({ entityId: entityB.id, name: 'B fest' });
+  const bad = await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: { ids: ['ext-h'], assignments: { 'ext-h': suiteB.id } } });
+  assert.equal(bad.status, 400);
+});
+
 test('delete switches the link off upstream, hides it everywhere, and imports do not resurrect it', async () => {
+  upstream.nextLinks = [{ id: 'ext-c', short_url: 'https://howler.chottu.link/c', link_name: 'C', destination_url: 'https://h/3', is_enabled: true }];
   const links = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
   const victim = links.find((l) => l.chottuLinkId === 'ext-c');
   upstream.calls.length = 0;

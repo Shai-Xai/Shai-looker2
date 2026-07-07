@@ -159,12 +159,12 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
 
 // Choose exactly which ChottuLink links come into Pulse (admin). Everything on
 // the account is listed with its state — new / already in Pulse / deleted in
-// Pulse (re-picking a deleted one restores it). New imports can be attached to
-// an event in the same step.
+// Pulse (re-picking a deleted one restores it). THE USER assigns the event per
+// link as they import: each ticked row gets its own event dropdown, and the
+// "set all ticked" select just pre-fills them in bulk.
 function ImportPicker({ entityId, suites, onDone }) {
   const [preview, setPreview] = useState(null);
-  const [picked, setPicked] = useState({});
-  const [suiteId, setSuiteId] = useState('');
+  const [picked, setPicked] = useState({}); // chottuLinkId -> { on, suiteId }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -172,7 +172,7 @@ function ImportPicker({ entityId, suites, onDone }) {
     api.chottuImportPreview(entityId)
       .then((p) => {
         setPreview(p.links || []);
-        setPicked(Object.fromEntries((p.links || []).filter((l) => l.status === 'new').map((l) => [l.chottuLinkId, true])));
+        setPicked(Object.fromEntries((p.links || []).filter((l) => l.status === 'new').map((l) => [l.chottuLinkId, { on: true, suiteId: '' }])));
       })
       .catch((e) => setError(e.message));
   }, [entityId]);
@@ -181,15 +181,16 @@ function ImportPicker({ entityId, suites, onDone }) {
   if (!preview) return <div style={{ ...card, color: 'var(--muted)', fontSize: 13 }}>Fetching your ChottuLink account…</div>;
 
   const importable = preview.filter((l) => l.status !== 'imported');
-  const nPicked = importable.filter((l) => picked[l.chottuLinkId]).length;
-  const setAll = (on) => setPicked(Object.fromEntries(importable.map((l) => [l.chottuLinkId, on])));
+  const pickedIds = importable.filter((l) => picked[l.chottuLinkId]?.on).map((l) => l.chottuLinkId);
+  const setAll = (on) => setPicked((s) => Object.fromEntries(importable.map((l) => [l.chottuLinkId, { ...(s[l.chottuLinkId] || {}), on }])));
+  const fillAllSuites = (suiteId) => setPicked((s) => Object.fromEntries(Object.entries(s).map(([id, v]) => [id, v.on ? { ...v, suiteId } : v])));
   const label = { new: null, imported: 'in Pulse', removed: 'deleted in Pulse' };
 
   async function runImport() {
     setBusy(true); setError('');
     try {
-      const ids = importable.filter((l) => picked[l.chottuLinkId]).map((l) => l.chottuLinkId);
-      const r = await api.chottuImport(entityId, { ids, ...(suiteId ? { suiteId } : {}) });
+      const assignments = Object.fromEntries(pickedIds.map((id) => [id, picked[id].suiteId || '']));
+      const r = await api.chottuImport(entityId, { ids: pickedIds, assignments });
       onDone(`Imported ${r.imported} link${r.imported === 1 ? '' : 's'}${r.restored ? `, restored ${r.restored}` : ''}.`);
     } catch (e) { setError(e.message); setBusy(false); }
   }
@@ -204,39 +205,55 @@ function ImportPicker({ entityId, suites, onDone }) {
         </div>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '4px 0 10px' }}>
-        {importable.length ? `${importable.length} link${importable.length === 1 ? '' : 's'} on the account aren’t in Pulse — tick the ones to bring in.` : 'Everything on the ChottuLink account is already in Pulse.'}
+        {importable.length ? `${importable.length} link${importable.length === 1 ? '' : 's'} on the account aren’t in Pulse — tick the ones to bring in, and pick which event each belongs to.` : 'Everything on the ChottuLink account is already in Pulse.'}
       </div>
-      <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {preview.map((l) => (
-          <label key={l.chottuLinkId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderTop: '1px solid var(--hairline)', opacity: l.status === 'imported' ? 0.5 : 1 }}>
-            <input
-              type="checkbox" style={{ width: 20, height: 20, marginTop: 2, flexShrink: 0 }}
-              disabled={l.status === 'imported'}
-              checked={l.status === 'imported' || !!picked[l.chottuLinkId]}
-              onChange={(e) => setPicked((s) => ({ ...s, [l.chottuLinkId]: e.target.checked }))}
-            />
-            <span style={{ minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {l.linkName || '(unnamed)'}
-                {label[l.status] && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginLeft: 6 }}>· {label[l.status]}</span>}
-              </span>
-              <span style={{ display: 'block', fontSize: 12, color: 'var(--brand,#ff385c)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.shortUrl.replace(/^https?:\/\//, '')}</span>
-            </span>
-          </label>
-        ))}
-      </div>
-      {importable.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 10 }}>
-          <Field label="Attach imports to an event · optional">
-            <select style={input} value={suiteId} onChange={(e) => setSuiteId(e.target.value)}>
-              <option value="">Leave unassigned (attach later per link)</option>
+      {importable.length > 1 && (
+        <div style={{ marginBottom: 10 }}>
+          <Field label="Set the event for all ticked links" hint="A shortcut — you can still change any link below individually.">
+            <select style={input} value="" onChange={(e) => fillAllSuites(e.target.value)}>
+              <option value="" disabled>Pick an event to fill in…</option>
+              <option value="">(clear — no event)</option>
               {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnPrimary} disabled={busy || !nPicked} onClick={runImport}>{busy ? 'Importing…' : `Import ${nPicked} link${nPicked === 1 ? '' : 's'}`}</button>
-            <button style={btnGhost} disabled={busy} onClick={() => onDone(null)}>Cancel</button>
-          </div>
+        </div>
+      )}
+      <div style={{ maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {preview.map((l) => {
+          const p = picked[l.chottuLinkId];
+          return (
+            <div key={l.chottuLinkId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderTop: '1px solid var(--hairline)', opacity: l.status === 'imported' ? 0.5 : 1 }}>
+              <input
+                type="checkbox" style={{ width: 20, height: 20, marginTop: 2, flexShrink: 0 }}
+                disabled={l.status === 'imported'}
+                checked={l.status === 'imported' || !!p?.on}
+                onChange={(e) => setPicked((s) => ({ ...s, [l.chottuLinkId]: { ...(s[l.chottuLinkId] || {}), on: e.target.checked } }))}
+              />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {l.linkName || '(unnamed)'}
+                  {label[l.status] && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginLeft: 6 }}>· {label[l.status]}</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--brand,#ff385c)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.shortUrl.replace(/^https?:\/\//, '')}</div>
+                {p?.on && (
+                  <select
+                    style={{ ...input, minHeight: 34, padding: '5px 8px', fontSize: 12.5, marginTop: 5, color: p.suiteId ? 'var(--text)' : 'var(--muted)' }}
+                    value={p.suiteId || ''}
+                    onChange={(e) => setPicked((s) => ({ ...s, [l.chottuLinkId]: { ...s[l.chottuLinkId], suiteId: e.target.value } }))}
+                  >
+                    <option value="">No event yet</option>
+                    {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {importable.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, borderTop: '1px solid var(--hairline)', paddingTop: 12 }}>
+          <button style={btnPrimary} disabled={busy || !pickedIds.length} onClick={runImport}>{busy ? 'Importing…' : `Import ${pickedIds.length} link${pickedIds.length === 1 ? '' : 's'}`}</button>
+          <button style={btnGhost} disabled={busy} onClick={() => onDone(null)}>Cancel</button>
         </div>
       )}
     </div>

@@ -254,15 +254,18 @@ function mount(app, { db, auth, rateLimit }) {
   }
 
   // Pull links from the ChottuLink account into Pulse. `ids` narrows to the
-  // picked links (omit = everything); `suiteId` attaches new imports to an
-  // event in the same step. Upsert by ChottuLink id: new rows arrive as
-  // source='imported'; existing rows refresh upstream truth (name/destination/
-  // status) but KEEP their Pulse fields (event, utm…). Archived rows stay
-  // deleted unless explicitly picked, which resurrects them.
-  async function importLinks(entityId, { ids, suiteId } = {}) {
+  // picked links (omit = everything); the user assigns events at import time —
+  // `assignments` maps chottuLinkId → suiteId per link, `suiteId` is the batch
+  // default for anything picked without its own. Upsert by ChottuLink id: new
+  // rows arrive as source='imported'; existing rows refresh upstream truth
+  // (name/destination/status) but KEEP their Pulse fields (event, utm…).
+  // Archived rows stay deleted unless explicitly picked, which resurrects them.
+  async function importLinks(entityId, { ids, suiteId, assignments } = {}) {
     const cfg = configFor(entityId);
     const wanted = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
-    const assignSuite = checkSuite(entityId, suiteId);
+    const batchSuite = checkSuite(entityId, suiteId);
+    const byLink = assignments && typeof assignments === 'object' ? assignments : {};
+    const suiteFor = (chottuId) => (byLink[chottuId] !== undefined ? checkSuite(entityId, byLink[chottuId]) : batchSuite);
     let imported = 0; let refreshed = 0; let restored = 0;
     for (const l of await fetchAllUpstream(cfg)) {
       if (wanted && !wanted.has(String(l.id))) continue;
@@ -271,12 +274,17 @@ function mount(app, { db, auth, rateLimit }) {
         if (existing.archived && !wanted) continue; // tombstone: bulk import never resurrects
         sql.prepare('UPDATE chottu_links SET link_name=?, destination_url=?, short_url=?, is_enabled=?, archived=0, modified_time=? WHERE chottu_link_id=?')
           .run(l.link_name || '', l.destination_url || '', l.short_url, l.is_enabled ? 1 : 0, now(), l.id);
-        if (existing.archived) restored++; else refreshed++;
+        // A restore is a deliberate pick — its chosen event applies; a plain
+        // refresh keeps whatever event the link already sits on.
+        if (existing.archived) {
+          sql.prepare('UPDATE chottu_links SET suite_id=? WHERE chottu_link_id=?').run(suiteFor(l.id), l.id);
+          restored++;
+        } else refreshed++;
       } else {
         sql.prepare(`INSERT INTO chottu_links
             (id, entity_id, suite_id, chottu_link_id, short_url, link_name, destination_url, is_enabled, source, created_time, modified_time)
             VALUES (?,?,?,?,?,?,?,?, 'imported', ?, ?)`)
-          .run(crypto.randomUUID(), entityId, assignSuite, l.id, l.short_url, l.link_name || '', l.destination_url || '',
+          .run(crypto.randomUUID(), entityId, suiteFor(l.id), l.id, l.short_url, l.link_name || '', l.destination_url || '',
             l.is_enabled ? 1 : 0, l.createdTime || now(), now());
         imported++;
       }
@@ -474,7 +482,7 @@ function mount(app, { db, auth, rateLimit }) {
     res.json({ link: await setEnabled(req.params.entityId, req.params.id, !!req.body?.enabled) })));
   app.get(`${A}/import/preview`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await importPreview(req.params.entityId))));
   app.post(`${A}/import`, auth.requireAdmin, asyncHandler(async (req, res) =>
-    res.json(await importLinks(req.params.entityId, { ids: req.body?.ids, suiteId: req.body?.suiteId }))));
+    res.json(await importLinks(req.params.entityId, { ids: req.body?.ids, suiteId: req.body?.suiteId, assignments: req.body?.assignments }))));
   app.delete(`${A}/links/:id`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await deleteLink(req.params.entityId, req.params.id))));
   app.post(`${A}/refresh-stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
