@@ -514,6 +514,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       const b = req.body || {};
       const site = siteByKey.get(String(b.siteKey || '').trim());
       if (!site || !site.enabled) throw new HttpError(404, 'This assistant isn’t available.');
+      // 🚩 fanowl feature flag: OFF for this client = the public widget refuses to
+      // boot (same wording as a disabled site — nothing to probe from outside).
+      if (!require('./flags').enabled(site.entity_id, 'fanowl')) throw new HttpError(404, 'This assistant isn’t available.');
       // Pulse's own /fan-owl-test preview page is always allowed (same host), even
       // once the promoter has locked the domain list down to their site.
       const sameHost = originHost(req.headers.origin || req.headers.referer || '') === String(req.hostname || '').toLowerCase();

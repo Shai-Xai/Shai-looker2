@@ -17,8 +17,8 @@
 //   • Pulse API + MCP: apiKeys' bearer auth consults integrations.api (seeded
 //     from the old api_enabled:<entityId> settings at first boot).
 //   • Nav/UI: the client hides sections via GET /api/my/flags/:entityId.
-// Still on their legacy switches (migrate next): Event Ops pilot, Fan Owl,
-// WhatsApp Owl, per-integration panels. Their flags exist but aren't wired.
+// Still on their legacy switches (migrate next): the per-integration Settings
+// panels (integrations.looker/meta/… are marked LEGACY in the matrix).
 //
 // Module-singleton (like aiUsage): mount() once from index.js; any module may
 // `require('./flags').enabled(entityId, key)` afterwards.
@@ -33,7 +33,7 @@ const REGISTRY = [
     { key: 'alerts.livepulse', name: 'Live updates', def: true, desc: 'Recurring event-day multi-metric snapshots.' },
     { key: 'alerts.templates', name: 'Templates', def: true, desc: 'Reusable alert templates.' },
   ] },
-  { key: 'eventops', emoji: '🎛️', name: 'Event Ops', def: false, beta: true, legacy: true, desc: 'Device/station logistics. NOTE: still gated by the existing per-client pilot switch — flag migrates next.', kids: [
+  { key: 'eventops', emoji: '🎛️', name: 'Event Ops', def: false, beta: true, desc: 'Device/station logistics — the per-client pilot switch (old pilot grants were migrated in).', kids: [
     { key: 'eventops.hive', name: 'Hive', def: true, desc: 'Devices, stations, moves, issues.' },
     { key: 'eventops.health', name: 'Data health', def: true, desc: 'Stream monitors for this event.' },
     { key: 'eventops.signal', name: 'Signal board', def: true, desc: 'The live site board.' },
@@ -66,8 +66,8 @@ const REGISTRY = [
     { key: 'owl.uploads', name: 'File uploads', def: true, desc: 'Grounding files uploaded to the Owl.' },
     { key: 'owl.drive', name: 'Google Drive', def: true, desc: 'Owl reads the linked Drive folder.' },
   ] },
-  { key: 'waowl', emoji: '💬', name: 'WhatsApp Owl', def: false, beta: true, legacy: true, desc: 'The Owl over WhatsApp. Still gated by its own setup — flag migrates next.' },
-  { key: 'fanowl', emoji: '🎪', name: 'Fan Owl', def: false, beta: true, legacy: true, desc: 'Public website ticket assistant. Still gated by its own setup — flag migrates next.' },
+  { key: 'waowl', emoji: '💬', name: 'WhatsApp Owl', def: true, beta: true, desc: 'The Owl over WhatsApp (inert until configured; OFF = the Owl stops engaging on WhatsApp).' },
+  { key: 'fanowl', emoji: '🎪', name: 'Fan Owl', def: true, beta: true, desc: 'Public website ticket assistant (inert until a site is set up; OFF = the widget refuses to boot).' },
   { key: 'integrations', emoji: '🔌', name: 'Integrations', def: true, desc: 'What reaches Pulse from outside.', kids: [
     { key: 'integrations.looker', name: 'Looker', def: true, legacy: true, desc: 'Client’s OWN Looker credential panel (dashboards run on platform credentials either way).' },
     { key: 'integrations.anthropic', name: 'Anthropic key', def: true, legacy: true, desc: 'Client’s own AI key panel.' },
@@ -78,7 +78,7 @@ const REGISTRY = [
     { key: 'integrations.inbox', name: 'CC-the-Owl inbox', def: true, legacy: true, desc: 'The client’s inbound mail address.' },
     { key: 'integrations.api', name: 'API & MCP (agents)', def: false, beta: true, desc: 'Pulse API keys + the MCP connector (Claude/ChatGPT). OFF = keys stop authenticating instantly.' },
   ] },
-  { key: 'selfservice', emoji: '🛠', name: 'Self-service settings', def: true, legacy: true, desc: 'What the CLIENT may manage themselves (Howler admin always can).', kids: [
+  { key: 'selfservice', emoji: '🛠', name: 'Self-service settings', def: true, desc: 'Which Settings sections the CLIENT may manage themselves (Howler admin always can).', kids: [
     { key: 'selfservice.integrations', name: 'Integrations panel', def: true, desc: 'Settings → Integrations.' },
     { key: 'selfservice.branding', name: 'Branding', def: true, desc: 'Logo, colours, sender.' },
     { key: 'selfservice.domain', name: 'Sending domain', def: true, desc: 'Send from their own domain.' },

@@ -17,6 +17,7 @@ import TwoFactorCard from '../components/TwoFactorCard.jsx';
 import TeamManager from '../components/TeamManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useMyFlags, flagOn } from '../lib/flags.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -59,7 +60,10 @@ export default function ClientIntegrationsPage() {
   const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
   // Fan Owl is dogfood-gated to allowlisted accounts (server enforces the same).
-  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)));
+  // 🚩 selfservice.* flags decide which sections a CLIENT may manage themselves.
+  const myFlags = useMyFlags(scopeId);
+  const SECTION_FLAG = { team: 'selfservice.team', integrations: 'selfservice.integrations', email: 'selfservice.branding', fanowl: 'fanowl' };
+  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)) && flagOn(myFlags, SECTION_FLAG[key] || ''));
   // Deep link: /settings?section=integrations|team|notifications|email… opens that
   // section (used by the onboarding "Go" buttons). Falls back to the first allowed.
   const [params] = useSearchParams();

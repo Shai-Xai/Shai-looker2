@@ -214,6 +214,9 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     if (!user) user = (db.listUsers() || []).find((u) => u.mobile && norm(u.mobile) === msisdn) || null;
     if (!user) return null;
     if (!entityId) entityId = (user.entityIds && user.entityIds[0]) || '';
+    // 🚩 waowl feature flag: OFF for this client = the WhatsApp Owl doesn't engage
+    // (the sender falls into the existing unregistered-number path).
+    if (entityId && !require('./flags').enabled(entityId, 'waowl')) return { user: null, entityId: '' };
     return { user, entityId };
   }
 

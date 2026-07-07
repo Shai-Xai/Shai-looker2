@@ -263,14 +263,24 @@ function mount(app, { db, auth, push = require('./push'), messaging = null, mail
   try { sql.exec("ALTER TABLE eventops_device_events ADD COLUMN to_holder TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
-  const entityEnabled = (entityId) => {
-    const r = sql.prepare('SELECT enabled FROM eventops_settings WHERE entity_id=?').get(entityId);
-    return !!(r && r.enabled);
-  };
+  // Backed by the 🚩 eventops feature flag (the old eventops_settings pilot rows
+  // were seeded into it below) — the Admin → Product → Flags matrix and this
+  // module's own toggle are ONE switch.
+  const flags = require('./flags');
+  flags.init(db);
+  try {
+    if (db.getSetting('flags_seeded_eventops', '') !== '1') {
+      const rows = sql.prepare('SELECT entity_id FROM eventops_settings WHERE enabled=1').all();
+      const ins = sql.prepare('INSERT OR IGNORE INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)');
+      for (const r of rows) ins.run(r.entity_id, 'eventops', 'on', 'seed', now());
+      db.setSetting('flags_seeded_eventops', '1');
+    }
+  } catch (e) { console.error('[eventops] flag seed failed', e.message); }
+  const entityEnabled = (entityId) => flags.enabled(entityId, 'eventops');
   const setEntityEnabled = (entityId, on) => {
-    sql.prepare(`INSERT INTO eventops_settings (entity_id, enabled, updated_at) VALUES (?,?,?)
-      ON CONFLICT(entity_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at`)
-      .run(entityId, on ? 1 : 0, now());
+    sql.prepare(`INSERT INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(entity_id, flag) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+      .run(entityId, 'eventops', on ? 'on' : 'off', 'eventops-toggle', now());
   };
   // The entities this user may see Event Ops for AND that are switched on (gates the nav/page).
   const enabledEntitiesFor = (user) => {
