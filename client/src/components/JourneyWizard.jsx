@@ -39,12 +39,17 @@ export default function JourneyWizard({ entityId }) {
     .catch(() => setDrafts([]));
   useEffect(() => { api.journeyRecipes(entityId).then((r) => setRecipes(r.recipes || [])).catch(() => setRecipes([])); loadDrafts(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The Owl's chat card broadcasts every journey draft/update — render it live here.
+  // The Owl's chat card broadcasts every journey draft/update — render it live
+  // here. Arriving late (chat happened on another screen) we ASK for a rebroadcast;
+  // and when the user confirms in CHAT, the created event refreshes our list too.
   useEffect(() => {
     const h = (e) => { if (e.detail?.nodes) { setLive(e.detail); setLiveState(''); setLiveErr(''); } };
+    const created = () => { setLiveState('done'); loadDrafts(); };
     window.addEventListener('howler:journey-draft', h);
-    return () => window.removeEventListener('howler:journey-draft', h);
-  }, []);
+    window.addEventListener('howler:journey-created', created);
+    try { window.dispatchEvent(new Event('howler:journey-request')); } catch { /* ignore */ }
+    return () => { window.removeEventListener('howler:journey-draft', h); window.removeEventListener('howler:journey-created', created); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openOwl = () => { try { window.dispatchEvent(new Event('howler:open-analyst')); } catch { /* ignore */ } };
 
