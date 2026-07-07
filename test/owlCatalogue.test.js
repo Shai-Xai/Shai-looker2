@@ -347,6 +347,35 @@ test('demographic note steers to same-view measures when they exist, warns when 
     { name: 'cashless_x_cust.country_of_birth', label: 'Country Of Birth', kind: 'dimension', type: 'string' },
   ] }));
   note = (cat.effective(db).extras[0].notes || []).join(' ');
-  assert.ok(/TIME OUT/i.test(note), 'warns the cut can time out');
+  assert.ok(/CALL THE TOOL ANYWAY/.test(note), 'never refuse up front — try the tool');
   assert.ok(/auto-chunks/.test(note), 'mentions the chunked fallback');
+});
+
+test('seedAvgSpendFields enables the proven recipe fields; the note teaches the exact shape', async () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
+    { name: 'cashless_check_ins.count', label: 'Check-Ins Count', kind: 'measure', type: 'count' },
+  ] }));
+  const getExploreFields = async () => ({
+    measures: [{ name: 'cashless_sales.sum_credit_amount', label: 'Sale Amount', type: 'number' }],
+    dimensions: [
+      { name: 'core_users.country_of_birth', label: 'Country of Birth', type: 'string' },
+      { name: 'core_users.gender', label: 'Gender', type: 'string' },
+    ],
+  });
+  const r = await cat.seedAvgSpendFields(db, getExploreFields);
+  assert.equal(r.ok, true);
+  assert.equal(r.added, 3, 'country + gender + spend measure added (age not in explore; check-ins already ticked)');
+  const eff = cat.effective(db);
+  const note = (eff.extras[0].notes || []).join(' ');
+  assert.ok(/DEMOGRAPHIC SPEND/.test(note), 'recipe note fires');
+  assert.ok(/cashless_sales\.sum_credit_amount, cashless_check_ins\.count/.test(note), 'names both measures of the proven shape');
+  assert.ok(/core_users\.country_of_birth/.test(note), 'names the proven demographic field');
+  assert.ok(/÷/.test(note), 'teaches average-per-person as the division of the two columns');
+  // Admin unticks one → the seeder never re-adds (flag set).
+  const saved = JSON.parse(db.getSetting('owl_catalogue_expfields', '{}'))[KEY];
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: saved.filter((x) => x.name !== 'core_users.gender') }));
+  const again = await cat.seedAvgSpendFields(db, getExploreFields);
+  assert.equal(again.skipped, 'already seeded');
 });

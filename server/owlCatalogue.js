@@ -145,19 +145,27 @@ function effective(db) {
         exNotes.push(`TIME-FILTERED CHECK-INS ("today", "per hour", "since gates opened"): filter/group ${ciDate.name}${ciCreated ? " — the scan's created-at timestamp, present on every row" : ''}${others.length ? `. Do NOT time-filter on ${others.join(' or ')} — ${others.length > 1 ? 'they are' : 'it is'} sparsely populated and undercounts massively` : ''}. Sanity-check: also run the SAME count without the time filter; if the time-filtered figure is far below the total, report both and say some scans lack that timestamp — never present a time-filtered check-in count alone as the day's attendance.`);
       }
     }
-    // Demographic questions (spend by country/age/gender…) — the heavy-join trap
-    // caught live: pairing a sales line-item measure with a buyer demographic joins
-    // every sale to every buyer and TIMES OUT. When the demographic's own view has a
-    // money/count measure, steer there (single-view = fast); otherwise warn + rely on
-    // the tool's automatic chunking.
+    // Demographic questions (spend by country/age/gender…). The PROVEN fast shape —
+    // read live off the client's own "Average Spend" dashboard tile (which computes
+    // avg spend x country in seconds) — is: sum-of-spend + check-in-count measures
+    // grouped by a core_users.* demographic, with average-per-person as a division
+    // of the two columns. The Owl's timeouts came from picking a DIFFERENT country
+    // field / an avg-style measure, which forces the heavy sale×buyer join.
     const demo = ds.filter((d) => /countr|nationalit|birth|\bage\b|age_?band|gender|city|region|language/i.test(`${d.name} ${d.label}`));
     if (demo.length) {
-      const demoViews = new Set(demo.map((d) => String(d.name).split('.')[0]));
-      const sameViewMoney = ms.filter((m) => demoViews.has(String(m.name).split('.')[0]) && /spend|amount|credit|total|sum|avg|value|revenue|count/i.test(`${m.name} ${m.label}`));
-      if (sameViewMoney.length) {
-        exNotes.push(`DEMOGRAPHIC QUESTIONS (by ${demo.slice(0, 3).map((d) => d.label).join(' / ')}…): use a measure from the demographic's OWN view — ${sameViewMoney.slice(0, 3).map((m) => m.name).join(', ')} — grouped by the demographic field. Do NOT pair a sales line-item measure with a demographic dimension: that joins every sale to every buyer and times out.`);
+      const coreDemo = demo.filter((d) => /^core_users\./i.test(d.name));
+      const spend = ms.find((m) => /sum_credit_amount|sum_credit_spent|sale_item_total_price/i.test(m.name));
+      const heads = ms.find((m) => /check_?ins?\./i.test(m.name) && /count/i.test(m.name));
+      if (coreDemo.length && spend && heads) {
+        exNotes.push(`DEMOGRAPHIC SPEND (by ${coreDemo.slice(0, 3).map((d) => d.label).join(' / ')}…) — the PROVEN fast recipe (mirrors this client's Average Spend dashboard): ONE query with measures [${spend.name}, ${heads.name}] grouped by the core_users field (e.g. ${coreDemo[0].name}). AVERAGE SPEND PER PERSON per row = ${spend.name} ÷ ${heads.name} — compute that from the two columns in your answer/table. Use ONLY core_users.* demographic fields — similarly-named fields on other views force a heavy join that times out — and never an avg-style measure for this.`);
       } else {
-        exNotes.push(`DEMOGRAPHIC breakdowns here require joining every sale to the buyer and can TIME OUT. Ask narrower (specific countries, top values) — the tool auto-chunks when it can, but same-view measures for this demographic aren't enabled in the catalogue.`);
+        const demoViews = new Set(demo.map((d) => String(d.name).split('.')[0]));
+        const sameViewMoney = ms.filter((m) => demoViews.has(String(m.name).split('.')[0]) && /spend|amount|credit|total|sum|avg|value|revenue|count/i.test(`${m.name} ${m.label}`));
+        if (sameViewMoney.length) {
+          exNotes.push(`DEMOGRAPHIC QUESTIONS (by ${demo.slice(0, 3).map((d) => d.label).join(' / ')}…): use a measure from the demographic's OWN view — ${sameViewMoney.slice(0, 3).map((m) => m.name).join(', ')} — grouped by the demographic field. Do NOT pair a sales line-item measure with a demographic dimension: that joins every sale to every buyer and times out.`);
+        } else {
+          exNotes.push(`DEMOGRAPHIC breakdowns can be heavy here. CALL THE TOOL ANYWAY — it auto-chunks heavy cuts; never refuse a demographic question up front. Only if the tool itself fails, offer narrower cuts (specific countries, top values).`);
+        }
       }
     }
     return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: exNotes };
@@ -347,6 +355,40 @@ async function seedCashlessEventName(db, getExploreFields) {
   return { ok: true, explore: key, added };
 }
 
+// The PROVEN average-spend recipe fields (read live off the client's "Average
+// Spend" dashboard, which computes avg spend × country in seconds): spend +
+// check-in COUNT measures grouped by core_users demographics — one fast query,
+// no heavy sale×buyer join. Seed those exact fields once so the recipe note can
+// fire; admin unticks stay respected afterwards (flag set = never re-add).
+const AVGSPEND_SEED_FLAG = 'owl_catalogue_avgspend_seeded';
+async function seedAvgSpendFields(db, getExploreFields) {
+  if (db.getSetting(AVGSPEND_SEED_FLAG, '')) return { ok: true, skipped: 'already seeded' };
+  const target = readExplores(db).find((e) => /cashless/i.test(e.view));
+  if (!target) return { ok: false, skipped: 'no cashless explore registered' };
+  let f;
+  try { f = (await getExploreFields(target.model, target.view)) || {}; }
+  catch (e) { return { ok: false, skipped: `looker unreachable: ${e.message}` }; } // no flag → retried next boot
+  const wantDims = ['core_users.country_of_birth', 'core_users.age', 'core_users.gender'];
+  const wantMeas = ['cashless_sales.sum_credit_amount', 'cashless_check_ins.count'];
+  const key = keyOf(target.model, target.view);
+  const map = readExpFields(db);
+  const current = normalizeExpFields(map[key]);
+  const have = new Set(current.map((x) => x.name));
+  const out = [...current];
+  let added = 0;
+  for (const n of wantDims) {
+    const x = (f.dimensions || []).find((d) => d.name === n);
+    if (x && !have.has(n) && !isPII(n)) { out.push({ name: n, label: x.label_short || x.label || n, kind: 'dimension', type: x.type }); added++; }
+  }
+  for (const n of wantMeas) {
+    const x = (f.measures || []).find((m) => m.name === n);
+    if (x && !have.has(n)) { out.push({ name: n, label: x.label_short || x.label || n, kind: 'measure', type: x.type }); added++; }
+  }
+  if (added) { map[key] = out; db.setSetting(EXPFIELDS_KEY, JSON.stringify(map)); }
+  db.setSetting(AVGSPEND_SEED_FLAG, new Date().toISOString());
+  return { ok: true, explore: key, added };
+}
+
 // Register / unregister an EXTRA explore (the primary can't be removed).
 function registerExplore(db, { model, view, label }) {
   if (!model || !view || isPrimary(model, view)) return { ok: false, error: 'That explore is already available.' };
@@ -421,7 +463,9 @@ function mount(app, { db, auth, getExploreFields, listModels }) {
     .then((r) => { if (r && r.skipped !== 'already seeded') console.log('[owlCatalogue] cashless event-name seed:', JSON.stringify(r)); })
     .then(() => seedCheckinExplore(db, getExploreFields))
     .then((r) => { if (r && r.skipped !== 'already seeded') console.log('[owlCatalogue] check-in explore seed:', JSON.stringify(r)); })
+    .then(() => seedAvgSpendFields(db, getExploreFields))
+    .then((r) => { if (r && r.skipped !== 'already seeded') console.log('[owlCatalogue] avg-spend recipe seed:', JSON.stringify(r)); })
     .catch((e) => console.error('[owlCatalogue] catalogue seed failed:', e.message));
 }
 
-module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore, seedCashlessEventName };
+module.exports = { mount, effective, version, provider, explores, listFields, setEnabled, registerExplore, unregisterExplore, exploreEnabledFor, setAccess, isPII, seedCashlessFields, seedCheckinExplore, seedCashlessEventName, seedAvgSpendFields };
