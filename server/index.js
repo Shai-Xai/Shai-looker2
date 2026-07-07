@@ -2481,7 +2481,7 @@ require('./onboarding').mount(app, { db, auth });
 // Client setup wizard config — lets AMs edit the back-end setup wizard (step
 // wording, order, and their own custom guidance steps) from the admin UI.
 require('./setupWizard').mount(app, { db, auth });
-require('./chottuLink').mount(app, { db, auth, rateLimit }); // ChottuLink deep links — event short links + click counts (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
+require('./chottuLink').mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity, aiUsage }); // ChottuLink deep links — event short links + click counts + ✨ autofill (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
 
 // PWA install tracking — records when a user opens Pulse as an installed app.
 require('./installs').mount(app, { db, auth });

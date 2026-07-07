@@ -16,12 +16,22 @@
 const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
 
+// The one hardcoded system prompt this module owns — the ✨ autofill in the
+// link editor (UTM tags + the social/rich link preview). Kept here (module
+// stays self-contained, like tickets/fanOwl) and exported so
+// insights.promptRegistry() keeps the Admin → AI audit complete.
+const LINK_META_SYSTEM = `You fill in the campaign tags (UTM) and the social link preview for a marketing short link at an events company (tickets, festivals, live events).
+You are given the link's name, its destination URL, the event, the client, and — when available — UTM tags the team already uses on other links, so your tags match their existing conventions instead of inventing new ones.
+UTM rules: infer the traffic source from the link's name/destination when it names a channel (e.g. "Instagram bio" → source instagram, medium social). Values lowercase, url-safe (letters, numbers, dashes), concise.
+Preview rules: the title is what people see when the link is shared in WhatsApp/Instagram/Facebook — the event name, punchy, ≤ 60 chars, no emoji spam (one is fine). The description is one short enticing line (≤ 100 chars) — what/where/when if known, never invented dates or venues.
+Return ONLY a JSON object: {"source": "...", "medium": "...", "campaign": "...", "title": "...", "description": "..."} — no markdown, no prose, no extra keys. Leave a value as "" only when there is genuinely nothing to infer.`;
+
 const API_BASE = 'https://api2.chottulink.com/chotuCore/pa/v1';
 const IMPORT_PAGE_SIZE = 100;
 const IMPORT_MAX_PAGES = 20;      // 2 000 links — far above any real account, bounds a runaway
 const STATS_REFRESH_CAP = 150;    // per refresh call — sequential upstream calls, keep requests snappy
 
-function mount(app, { db, auth, rateLimit }) {
+function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity, aiUsage }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
 
@@ -227,15 +237,20 @@ function mount(app, { db, auth, rateLimit }) {
     return { ok: true };
   }
 
+  // ChottuLink SEGREGATES links by how they were created — /links/page silently
+  // defaults to dashboard-made links (api_user) only, hiding API/SDK-made ones.
+  // Sweep every bucket and dedupe so imports see the whole account.
   async function fetchAllUpstream(cfg) {
-    const all = [];
-    for (let page = 1; page <= IMPORT_MAX_PAGES; page++) {
-      const data = await chottu(cfg, 'GET', `/links/page?page=${page}&size=${IMPORT_PAGE_SIZE}`);
-      const links = data.links || [];
-      all.push(...links.filter((l) => l.id && l.short_url));
-      if (page >= (data.pagination?.total_pages || 1) || !links.length) break;
+    const byId = new Map();
+    for (const createdBy of ['api_user', 'api_rest', 'sdk']) {
+      for (let page = 1; page <= IMPORT_MAX_PAGES; page++) {
+        const data = await chottu(cfg, 'GET', `/links/page?page=${page}&size=${IMPORT_PAGE_SIZE}&createdBy=${createdBy}`);
+        const links = data.links || [];
+        for (const l of links) if (l.id && l.short_url) byId.set(l.id, l);
+        if (page >= (data.pagination?.total_pages || 1) || !links.length) break;
+      }
     }
-    return all;
+    return [...byId.values()];
   }
 
   // Everything on the ChottuLink account, flagged against what Pulse has —
@@ -450,6 +465,43 @@ function mount(app, { db, auth, rateLimit }) {
         JSON.stringify(items), now(), now());
   }
 
+  // ── ✨ AI autofill: UTM tags + social preview for one link ──
+  // Grounded in the team's existing conventions: a sample of UTM sets already
+  // used on this client's links rides along so suggestions stay consistent.
+  async function suggestLinkMeta(entityId, { linkName, destinationUrl, suiteId }) {
+    if (!insights) throw new HttpError(400, 'AI isn’t available on this server.');
+    const apiKey = anthropicKeyForEntity ? anthropicKeyForEntity(entityId) : '';
+    if (!insights.isConfigured(apiKey)) throw new HttpError(400, 'AI isn’t set up for your account yet — ask your Howler contact.');
+    const su = suiteId ? db.getSuite(suiteId) : null;
+    const conventions = sql.prepare("SELECT utm FROM chottu_links WHERE entity_id=? AND archived=0 AND utm != '{}' ORDER BY modified_time DESC LIMIT 10")
+      .all(entityId).map((r) => r.utm);
+    const prompt = [
+      `Link name: ${String(linkName || '').slice(0, 160) || '(none yet)'}`,
+      `Destination URL: ${String(destinationUrl || '').slice(0, 400) || '(none yet)'}`,
+      su ? `Event: ${su.name}` : null,
+      `Client: ${db.getEntity(entityId)?.name || ''}`,
+      conventions.length ? `UTM tags already used on this client's links:\n${conventions.map((c) => `- ${c}`).join('\n')}` : null,
+    ].filter(Boolean).join('\n');
+    const c = insights.requireClient(apiKey);
+    const attributed = aiUsage ? (fn) => aiUsage.run({ entityId, kind: 'chottu_meta' }, fn) : (fn) => fn();
+    const resp = await attributed(() => c.messages.create({
+      model: insights.MODEL, max_tokens: 300, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system: insights.systemWith(LINK_META_SYSTEM, db.getSetting('ai_instructions')),
+      messages: [{ role: 'user', content: prompt }],
+    }));
+    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+    let obj;
+    try { obj = JSON.parse((text.match(/\{[\s\S]*\}/) || [text])[0]); }
+    catch { throw new HttpError(502, 'The AI reply didn’t parse — try again.'); }
+    const clean = (v, n) => String(v || '').trim().slice(0, n);
+    // Belt-and-braces on the model's UTM values: lowercase, url-safe, dashed.
+    const utmSafe = (v) => clean(v, 120).toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '');
+    return {
+      utm: cleanUtm({ source: utmSafe(obj.source), medium: utmSafe(obj.medium), campaign: utmSafe(obj.campaign) }),
+      social: cleanSocial({ title: clean(obj.title, 120), description: clean(obj.description, 200) }),
+    };
+  }
+
   async function testConnection(entityId) {
     const cfg = configFor(entityId);
     if (!cfg.key) return { ok: false, error: 'No API key configured.' };
@@ -485,6 +537,8 @@ function mount(app, { db, auth, rateLimit }) {
     res.json(await importLinks(req.params.entityId, { ids: req.body?.ids, suiteId: req.body?.suiteId, assignments: req.body?.assignments }))));
   app.delete(`${A}/links/:id`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await deleteLink(req.params.entityId, req.params.id))));
+  app.post(`${A}/suggest-meta`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(await suggestLinkMeta(req.params.entityId, req.body || {}))));
   app.post(`${A}/refresh-stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await refreshStats(req.params.entityId, { suiteId: req.body?.suiteId, linkId: req.body?.linkId }))));
   // Templates — admin can also manage the shared platform set ({ platform: true }).
@@ -530,6 +584,9 @@ function mount(app, { db, auth, rateLimit }) {
     res.json({ link: await setEnabled(myEntity(req), req.params.id, !!req.body?.enabled) })));
   app.delete(`${M}/links/:id`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
     res.json(await deleteLink(myEntity(req), req.params.id))));
+  app.post(`${M}/suggest-meta`, auth.requireAuth, canManage,
+    rateLimit({ windowMs: 60_000, max: 12, by: 'user', scope: 'chottu-suggest', message: 'Too many autofills at once — give it a moment.' }),
+    asyncHandler(async (req, res) => res.json(await suggestLinkMeta(myEntity(req), req.body || {}))));
   app.post(`${M}/refresh-stats`, auth.requireAuth, canManage,
     rateLimit({ windowMs: 60_000, max: 4, by: 'user', scope: 'chottu-stats' }),
     asyncHandler(async (req, res) => {
@@ -559,4 +616,4 @@ function mount(app, { db, auth, rateLimit }) {
   return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, refreshStats, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
 }
 
-module.exports = { mount };
+module.exports = { mount, LINK_META_SYSTEM };

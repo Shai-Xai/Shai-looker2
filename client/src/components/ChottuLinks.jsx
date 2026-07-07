@@ -268,19 +268,34 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
   const [path, setPath] = useState('');
   const [openInApp, setOpenInApp] = useState(link ? link.iosBehavior !== 1 : true);
   const [utm, setUtm] = useState(link?.utm || {});
+  const [social, setSocial] = useState(link?.social || {});
   const [busy, setBusy] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState('');
 
   const setU = (k, v) => setUtm((u) => ({ ...u, [k]: v }));
+  const setS = (k, v) => setSocial((s) => ({ ...s, [k]: v }));
   const behavior = openInApp ? 2 : 1;
+
+  // ✨ AI autofill — suggests the UTM tags AND the social preview from the
+  // link's name/destination/event, matching the client's existing conventions.
+  async function autofill() {
+    setSuggesting(true); setError('');
+    try {
+      const s = await api.chottuSuggestMeta(scope, entityId, { linkName: name, destinationUrl: destination, suiteId });
+      setUtm((u) => ({ ...u, ...s.utm }));
+      setSocial((cur) => ({ ...cur, ...(s.social.title ? { title: s.social.title } : {}), ...(s.social.description ? { description: s.social.description } : {}) }));
+    } catch (e) { setError(e.message); }
+    finally { setSuggesting(false); }
+  }
 
   async function save() {
     setBusy(true); setError('');
     try {
       if (link) {
-        await api.chottuUpdateLink(scope, entityId, link.id, { linkName: name, suiteId, destinationUrl: destination, iosBehavior: behavior, androidBehavior: behavior, utm });
+        await api.chottuUpdateLink(scope, entityId, link.id, { linkName: name, suiteId, destinationUrl: destination, iosBehavior: behavior, androidBehavior: behavior, utm, social });
       } else {
-        await api.chottuCreateLink(scope, entityId, { linkName: name, suiteId, destinationUrl: destination, path, iosBehavior: behavior, androidBehavior: behavior, utm });
+        await api.chottuCreateLink(scope, entityId, { linkName: name, suiteId, destinationUrl: destination, path, iosBehavior: behavior, androidBehavior: behavior, utm, social });
       }
       onDone(true);
     } catch (e) { setError(e.message); setBusy(false); }
@@ -312,13 +327,38 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
             <Seg on={!openInApp} onClick={() => setOpenInApp(false)}>Browser</Seg>
           </div>
         </Field>
-        <Field label="Campaign tags (UTM) · optional">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Campaign tags (UTM) &amp; preview · optional</div>
+          <button
+            type="button"
+            style={{ ...btnGhost, minHeight: 32, padding: '5px 12px', fontSize: 12.5, color: 'var(--ai,#6d28d9)', borderColor: 'var(--ai-border,var(--hairline))' }}
+            disabled={suggesting || (!name.trim() && !destination.trim())}
+            title="Fills the UTM tags and social preview from the link's name, destination and event"
+            onClick={autofill}
+          >{suggesting ? '✨ Thinking…' : '✨ Autofill with AI'}</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input style={input} value={utm.source || ''} onChange={(e) => setU('source', e.target.value)} placeholder="source — e.g. instagram" autoComplete="off" />
+          <input style={input} value={utm.medium || ''} onChange={(e) => setU('medium', e.target.value)} placeholder="medium — e.g. social" autoComplete="off" />
+          <input style={input} value={utm.campaign || ''} onChange={(e) => setU('campaign', e.target.value)} placeholder="campaign — e.g. summer-launch" autoComplete="off" />
+        </div>
+        <Field label="Social preview · optional" hint="What people see when the link is shared in WhatsApp, Instagram, Facebook…">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <input style={input} value={utm.source || ''} onChange={(e) => setU('source', e.target.value)} placeholder="source — e.g. instagram" autoComplete="off" />
-            <input style={input} value={utm.medium || ''} onChange={(e) => setU('medium', e.target.value)} placeholder="medium — e.g. social" autoComplete="off" />
-            <input style={input} value={utm.campaign || ''} onChange={(e) => setU('campaign', e.target.value)} placeholder="campaign — e.g. summer-launch" autoComplete="off" />
+            <input style={input} value={social.title || ''} onChange={(e) => setS('title', e.target.value)} placeholder="Preview title — e.g. the event name" autoComplete="off" />
+            <input style={input} value={social.description || ''} onChange={(e) => setS('description', e.target.value)} placeholder="Preview description — one enticing line" autoComplete="off" />
+            <input style={input} value={social.imageUrl || ''} onChange={(e) => setS('imageUrl', e.target.value)} placeholder="Preview image URL — https://… · optional" autoComplete="off" inputMode="url" />
           </div>
         </Field>
+        {(social.title || social.description || social.imageUrl) && (
+          <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', maxWidth: 340 }}>
+            {social.imageUrl && <img src={social.imageUrl} alt="" style={{ width: '100%', height: 120, objectFit: 'cover', display: 'block' }} onError={(e) => { e.target.style.display = 'none'; }} />}
+            <div style={{ padding: '8px 11px', background: 'var(--card)' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{social.title || 'Preview title'}</div>
+              {social.description && <div style={{ fontSize: 12, color: 'var(--muted-2,var(--muted))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{social.description}</div>}
+              <div style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 2 }}>howler.chottu.link</div>
+            </div>
+          </div>
+        )}
         {error && <div style={{ color: 'var(--error,#ef4444)', fontSize: 13 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={btnPrimary} disabled={busy || !name.trim() || !destination.trim()} onClick={save}>

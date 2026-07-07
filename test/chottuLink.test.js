@@ -47,8 +47,19 @@ before(async () => {
   h.db.setSetting('chottu_api_key', 'c_api_platform_key');
   h.db.setSetting('chottu_domain', 'howler.chottu.link');
   mockUpstream();
+  // Stub AI — the ✨ autofill tests target the endpoint contract, not the model.
+  const stubInsights = {
+    isConfigured: (k) => !!k,
+    systemWith: (base) => base,
+    MODEL: 'stub',
+    requireClient: () => ({
+      messages: {
+        create: async () => ({ content: [{ type: 'text', text: '{"source":"Instagram","medium":"social","campaign":"fest-a","title":"Festival A 2026 🎉","description":"Tickets are live — grab yours.","junk":"dropped"}' }] }),
+      },
+    }),
+  };
   app = await startApp((a) => {
-    chottu = require('../server/chottuLink').mount(a, { db: h.db, auth: h.auth, rateLimit });
+    chottu = require('../server/chottuLink').mount(a, { db: h.db, auth: h.auth, rateLimit, insights: stubInsights, anthropicKeyForEntity: () => 'test-key' });
     a.use(require('../server/http').errorMiddleware);
   });
 });
@@ -213,6 +224,18 @@ test('delete switches the link off upstream, hides it everywhere, and imports do
   // Another client can't delete A's links.
   const someA = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links[0];
   assert.equal((await app.req('DELETE', `/api/my/chottu/${entityA.id}/links/${someA.id}`, { as: ownerB })).status, 403);
+});
+
+test('✨ autofill suggests cleaned UTM tags + social preview; permission-gated', async () => {
+  const r = await app.req('POST', `/api/my/chottu/${entityA.id}/suggest-meta`, {
+    as: ownerA, body: { linkName: 'Tickets — Instagram bio', destinationUrl: 'https://howler.co.za/event/1', suiteId: suiteA.id },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.utm, { source: 'instagram', medium: 'social', campaign: 'fest-a' }); // cleaned via cleanUtm (junk keys dropped, values kept)
+  assert.equal(r.body.social.title, 'Festival A 2026 🎉');
+  assert.ok(r.body.social.description);
+  assert.equal((await app.req('POST', `/api/my/chottu/${entityA.id}/suggest-meta`, { as: viewerA, body: {} })).status, 403);
+  assert.equal((await app.req('POST', `/api/my/chottu/${entityA.id}/suggest-meta`, { as: ownerB, body: {} })).status, 403);
 });
 
 // ── Phase 2: templates ──
