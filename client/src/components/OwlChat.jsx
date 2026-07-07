@@ -3,7 +3,7 @@ import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import ChartTile from './tiles/ChartTile.jsx';
 import ShareMenu from './ShareMenu.jsx';
-import JourneyTree, { countDecisions, journeyDraftBody } from './JourneyTree.jsx';
+import JourneyTree, { countDecisions } from './JourneyTree.jsx';
 
 // Prompt-starter pills shown on the empty state before /api/owl/starters loads (which
 // also returns the user's own most-asked questions). A small mirror so it never opens
@@ -973,7 +973,7 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'createLiveUpdate') return <LivePulseActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
-  if (action.kind === 'draftJourney') return <JourneyActionCard action={action} />;
+  if (action.kind === 'draftJourney') return <JourneyActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
   if (action.kind === 'draftReport') return <ReportActionCard action={action} />;
   if (action.kind === 'createChottuLink') return <ChottuLinkActionCard action={action} />;
@@ -985,7 +985,7 @@ function ActionCard({ action, suiteId }) {
 // tool); the decision tree renders right in the chat and tapping creates a DRAFT
 // sequence campaign in Engage → Campaigns (permission re-checked server-side by
 // the create route). The user finishes audience + copy there; nothing sends.
-function JourneyActionCard({ action }) {
+function JourneyActionCard({ action, suiteId }) {
   const [state, setState] = useState('');
   const [err, setErr] = useState('');
   const decisions = countDecisions(action.nodes);
@@ -993,7 +993,9 @@ function JourneyActionCard({ action }) {
   const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
   const create = async () => {
     setState('busy'); setErr('');
-    try { await api.createAction(action.entityId, journeyDraftBody(action)); setState('done'); }
+    // The server saves a new chat cohort as a reusable segment first, then creates
+    // the draft sequence campaign — same auto-save behaviour as draftCampaign.
+    try { await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName }); setState('done'); }
     catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
   };
   return (

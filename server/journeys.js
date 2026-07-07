@@ -60,11 +60,25 @@ function validateJourney(j = {}) {
   };
 }
 
+// The opening (pre-decision) message sequence → drip-engine steps. What the
+// linear engine can run as a draft today, until branch execution ships.
+function openingSteps(nodes) {
+  const trunk = [];
+  for (const n of nodes || []) {
+    if (n.type === 'message') trunk.push(n);
+    else { if (trunk.length) break; const b = (n.branches || [])[0]; return b ? openingSteps(b.nodes) : trunk; }
+  }
+  return trunk;
+}
+
 // The Owl act-tool ({ schema, run } — registered in owlTools.js next to
-// draftCampaign). The NORMAL Owl writes the tree (copy included) as tool input;
-// this validates it, optionally grounds targeting in a saved segment, and
-// returns a confirm-card action. No model call in here.
-function owlTool({ db, getSegmentsApi }) {
+// draftCampaign, which injects the shared cohort machinery: the curated
+// catalogue's dimension index + the query-audience resolver). The NORMAL Owl
+// writes the tree (copy included) as tool input; this validates it, grounds
+// targeting in a saved segment OR a new cohort (auto-saved as a segment on
+// confirm, exactly like draftCampaign), and returns a confirm-card action.
+// No model call in here.
+function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, resolveQueryAudience }) {
   const refuse = (reason, message) => ({ ok: false, reason, message });
   async function run(args = {}, ctx = {}) {
     const { user, suiteId } = ctx;
@@ -73,7 +87,8 @@ function owlTool({ db, getSegmentsApi }) {
     if (!entityId) return refuse('no_client', 'Open or pick a client first — a journey belongs to a client.');
     let journey;
     try { journey = validateJourney(args); } catch (e) { return refuse('bad_journey', e.message); }
-    // Optional audience grounding: a saved segment by name (same matching as draftCampaign).
+    // Audience grounding: a saved segment by name, OR a new cohort from curated
+    // filters (same validation as createSegment/draftCampaign; PII refused).
     let audience = null; let audienceName = ''; let reach = null;
     const segName = String(args.segmentName || '').trim();
     if (segName) {
@@ -84,19 +99,34 @@ function owlTool({ db, getSegmentsApi }) {
         || list.find((s) => s.name.toLowerCase().includes(lc) || lc.includes(s.name.toLowerCase()));
       if (!seg) {
         return refuse('no_segment', list.length
-          ? `No saved segment called "${segName}". You have: ${list.map((s) => `"${s.name}"`).join(', ')}.`
-          : 'There are no saved segments for this client yet — the journey can be created without one, and the audience picked in Engage.');
+          ? `No saved segment called "${segName}". You have: ${list.map((s) => `"${s.name}"`).join(', ')}. Pick one, or give a cohort as filters instead.`
+          : 'There are no saved segments for this client yet — give the cohort as filters instead (e.g. buyer country Spain) and it will be saved as a segment.');
       }
       audience = { mode: 'segment', segmentId: seg.id };
       audienceName = seg.name;
       try { if (segApi.resolveSegment) { const r = await segApi.resolveSegment(entityId, seg.id, user); if (r && r.reach) reach = r.reach; } } catch { /* best-effort preview */ }
+    } else if (args.filters && Object.keys(args.filters).length) {
+      if (!dimByName || !catalogue) return refuse('unavailable', 'Cohort targeting isn\'t available right now — name a saved segment instead.');
+      const filters = {}; const desc = [];
+      for (const [field, val] of Object.entries(args.filters)) {
+        const d = dimByName.get(field);
+        if (!d) return refuse('unknown_filter', `"${field}" isn't a field I can target by.`);
+        if (d.filterOnly || !filterableDims.has(field)) return refuse('pii_filter', `"${field}" is contact data — it can't define an audience.`);
+        if (val == null || String(val).trim() === '') continue;
+        filters[field] = String(val);
+        desc.push(`${d.label} = ${val}`);
+      }
+      if (!Object.keys(filters).length) return refuse('no_cohort', 'The cohort filters were empty — give at least one, e.g. buyer country Spain.');
+      audience = { mode: 'query', model: catalogue.model, view: catalogue.explore, queryFilters: filters, suiteId: suiteId || '' };
+      audienceName = desc.join(' · ');
+      try { if (resolveQueryAudience) { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } } catch { /* best-effort preview */ }
     }
     return { ok: true, confirm: true, action: { kind: 'draftJourney', entityId, ...journey, audience, audienceName, reach } };
   }
   const schema = {
     name: 'draftJourney',
     description:
-      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label (e.g. "Opened" / "No response" / "Bought"), nodes:[...]}]}. Decisions branch on opened / clicked / bought / no response; 2-3 branches each; nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. Optionally pass segmentName to target a saved segment (when the user names one). The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human picks/confirms the audience, reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it, give one line on the flow and tell the user to tap the button.',
+      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label (e.g. "Opened" / "No response" / "Bought"), nodes:[...]}]}. Decisions branch on opened / clicked / bought / no response; 2-3 branches each; nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. TARGETING: pass segmentName for an EXISTING saved segment, OR filters to build a NEW cohort from curated dimensions (e.g. {"core_purchasers.country":"Spain"}) — on confirm the cohort is auto-SAVED as a reusable segment and the journey pointed at it, so tell the user the segment gets saved too. Provide at most ONE of segmentName/filters; contact/PII fields cannot define the audience. The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it, give one line on the flow + audience and tell the user to tap the button.',
     input_schema: {
       type: 'object',
       properties: {
@@ -104,7 +134,8 @@ function owlTool({ db, getSegmentsApi }) {
         goal: { type: 'string', description: 'One sentence: the outcome this journey drives.' },
         summary: { type: 'string', description: '2-3 plain sentences a non-technical promoter reads to understand what happens and how it branches.' },
         nodes: { type: 'array', description: 'The ordered tree of message/decision nodes (see tool description for the exact node shapes).', items: { type: 'object' } },
-        segmentName: { type: 'string', description: 'OPTIONAL: target an existing saved segment by name (only when the user names an audience).' },
+        segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (only when the user names one).' },
+        filters: { type: 'object', description: 'OR build a NEW cohort as {dimension: value} over curated dimensions, e.g. {"core_purchasers.country":"Spain","core_ticket_types.name":"VIP"}. Auto-saved as a segment on confirm. Contact/PII fields are NOT allowed.' },
       },
       required: ['name', 'nodes'],
     },
@@ -126,4 +157,4 @@ function mount(app, { auth }) {
   });
 }
 
-module.exports = { mount, owlTool, validateJourney, promptRegistry };
+module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry };

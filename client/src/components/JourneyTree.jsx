@@ -101,24 +101,5 @@ export function countDecisions(nodes) {
   for (const n of nodes || []) if (n.type === 'decision') { c += 1; for (const b of n.branches || []) c += countDecisions(b.nodes); }
   return c;
 }
-// The opening (pre-decision) message sequence — what the linear drip engine can
-// run as a draft today, until branch execution ships.
-export function openingMessages(nodes) {
-  const trunk = [];
-  for (const n of nodes || []) {
-    if (n.type === 'message') trunk.push(n);
-    else { if (trunk.length) break; const b = (n.branches || [])[0]; return b ? openingMessages(b.nodes) : trunk; }
-  }
-  return trunk;
-}
-// Map a journey onto a draft sequence campaign (no `master` — a master group
-// renders collapsed in Campaigns and hides a single fresh draft).
-export function journeyDraftBody(journey) {
-  const opening = openingMessages(journey.nodes);
-  const channels = [...new Set(opening.map((s) => (s.channel === 'sms' ? 'sms' : 'email')))];
-  const channel = channels.length > 1 ? 'both' : (channels[0] || 'email');
-  const steps = opening.map((s) => ({ delayHours: Number(s.delayHours) || 0, subject: s.subject || '', body: s.body || '', ctaText: s.ctaText || '' }));
-  const body = { title: journey.name, channel, campaignMode: 'sequence', dripStart: 'send', subject: steps[0]?.subject || journey.name, body: steps[0]?.body || '', ctaText: steps[0]?.ctaText || '', steps };
-  if (journey.audience) body.audience = journey.audience;
-  return body;
-}
+// (Creating the draft happens server-side — POST /api/owl/act/draft-journey —
+// which also auto-saves a new chat cohort as a reusable segment first.)
