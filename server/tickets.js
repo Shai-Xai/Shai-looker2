@@ -129,6 +129,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     // Which environment this ticket is built into: 'staging' (test first, then
     // promote) or 'production' (straight to main). Legacy rows default to production.
     add('target', "target TEXT NOT NULL DEFAULT 'production'");
+    // A parked "go test it" notification waiting for the deploy to land (JSON:
+    // {env, since, base}) — see the deploy-aware notify sweep below.
+    add('notify_wait', "notify_wait TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
   // Comments gained a visibility flag (internal dev note vs public reply the
   // reporter sees + gets notified about) after launch — ALTER for existing DBs.
@@ -692,6 +695,62 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     res.json({ ticket: myTicketRow(getTicket(t.id)) });
   });
 
+  // ── Deploy-aware notifications ──────────────────────────────────────────────
+  // A merged PR flips the ticket on the board immediately, but the reporter's
+  // "go test it" message would point at the OLD build — Render still needs a few
+  // minutes to deploy. So the notify is PARKED (tickets.notify_wait) and this
+  // sweep releases it once the target environment really runs newer code:
+  // staging is polled via its public /health/build stamp (commit changed or it
+  // rebooted after the merge); production = this very process restarted after
+  // the merge (the deploy replaced us — restart-safe because the flag is in the
+  // DB). A hard timeout sends anyway: late beats never.
+  const BOOT_AT = new Date().toISOString();
+  const NOTIFY_TIMEOUT_MS = 25 * 60_000;     // give up confirming, send anyway
+  const NO_URL_FALLBACK_MS = 5 * 60_000;     // no staging URL configured → short grace
+  async function stagingBuild() {
+    const url = (github?.stagingUrl?.() || '').replace(/\/$/, '');
+    if (!url) return null;
+    try {
+      const r = await fetch(`${url}/health/build`, { signal: AbortSignal.timeout(6000) });
+      return r.ok ? await r.json() : null; // { commit, startedAt }
+    } catch { return null; }
+  }
+  // Fire-and-forget from the (sync) webhook path — never throws.
+  function deferNotify(id, env) {
+    (env === 'staging' ? stagingBuild() : Promise.resolve(null))
+      .then((b) => sql.prepare('UPDATE tickets SET notify_wait=? WHERE id=?')
+        .run(JSON.stringify({ env, since: now(), base: b?.commit || '' }), id))
+      .catch((e) => console.error('[tickets] deferNotify failed:', e.message));
+  }
+  async function sweepDeferred() {
+    const rows = sql.prepare("SELECT id, notify_wait FROM tickets WHERE notify_wait != ''").all();
+    if (!rows.length) return;
+    const waits = rows.map((r) => ({ id: r.id, w: JSON.parse(r.notify_wait) }));
+    const sb = waits.some(({ w }) => w.env === 'staging') ? await stagingBuild() : null;
+    for (const { id, w } of waits) {
+      const age = Date.now() - new Date(w.since).getTime();
+      let how = age > NOTIFY_TIMEOUT_MS ? 'timed out — sent anyway' : '';
+      if (!how) {
+        if (w.env === 'production') { if (BOOT_AT > w.since) how = 'deploy confirmed'; }
+        else if (sb) { if ((w.base && sb.commit && sb.commit !== w.base) || sb.startedAt > w.since) how = 'deploy confirmed'; }
+        else if (!(github?.stagingUrl?.()) && age > NO_URL_FALLBACK_MS) how = 'no staging URL to confirm — sent after a grace period';
+      }
+      if (!how) continue;
+      sql.prepare("UPDATE tickets SET notify_wait='' WHERE id=?").run(id);
+      const t = getTicket(id);
+      if (!t) continue;
+      // The world may have moved on while we waited (reporter already approved
+      // from the app, admin re-routed the ticket) — a stale ask helps no one.
+      if ((w.env === 'staging' && (t.status !== 'staging' || t.client_verdict === 'approved'))
+        || (w.env === 'production' && !['shipped', 'approved'].includes(t.status))) continue;
+      notifyReporter(t, '');
+      logComment(t.id, { authorEmail: 'system', authorRole: 'system', kind: 'system', body: `🔔 Reporter notified (${w.env} ${how}).` });
+    }
+  }
+  const notifyTimer = setInterval(() => sweepDeferred().catch(() => {}), 45_000);
+  if (notifyTimer.unref) notifyTimer.unref();
+  setTimeout(() => sweepDeferred().catch(() => {}), 30_000); // shortly after boot — catches production deploys
+
   // ── GitHub webhook: PR events → auto-update the linked ticket ──────────────────
   // A merged PR auto-Ships its ticket (and notifies the reporter); an opened PR
   // links it + nudges the board forward. Verified by HMAC (github.verifyWebhook)
@@ -727,7 +786,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
         const note = (t.ship_note || '').trim() || `Verified on staging, promoted to production via release PR #${pr.number}.`;
         sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run(verified ? 'approved' : 'shipped', note.slice(0, 8000), now(), t.id);
         logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `Release PR #${pr.number} merged — live in production${verified ? ' (reporter verified on staging — done)' : ', awaiting the reporter’s review'}.` });
-        notifyReporter(getTicket(t.id), t.status);
+        deferNotify(t.id, 'production'); // notify once the production deploy has actually landed
       }
       return;
     }
@@ -747,13 +806,13 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
           // point the test link at the staging site (unless a dev set one already).
           const testUrl = (t.test_url || '').trim() || (github?.stagingUrl?.() || '');
           sql.prepare("UPDATE tickets SET status='staging', client_verdict='', client_verdict_note='', client_verdict_at='', test_url=?, updated_at=? WHERE id=?").run(testUrl, now(), t.id);
-          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — on staging, reporter asked to verify.` });
-          notifyReporter(getTicket(t.id), t.status);
+          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — on staging, reporter asked to verify once it deploys.` });
+          deferNotify(t.id, 'staging'); // "go test it" waits for the staging deploy to land
         } else {
           const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);
           sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note, now(), t.id);
           logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — auto-shipped.` });
-          notifyReporter(getTicket(t.id), t.status);
+          deferNotify(t.id, 'production'); // review ask waits for the production deploy to land
         }
       } else if (action === 'closed' && !pr.merged) {
         logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} closed without merging.` });
