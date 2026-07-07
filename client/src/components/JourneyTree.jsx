@@ -55,21 +55,32 @@ function statChips(node, stats) {
     </div>
   );
 }
-function MessageCard({ node, stats }) {
+function MessageCard({ node, stats, onEdit }) {
+  const editIn = { width: '100%', boxSizing: 'border-box', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--bg)', color: 'var(--text)', padding: '5px 8px', fontSize: 12.5, fontFamily: 'inherit' };
   return (
     <div style={{ padding: 13, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         {channelChip(node.channel)}
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>{fmtDelay(node.delayHours)}</span>
       </div>
-      {node.channel === 'email' && node.subject && <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{node.subject}</div>}
-      {node.body && <div style={{ fontSize: 12.5, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{node.body}</div>}
-      {node.ctaText && <div style={{ marginTop: 8 }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 8, padding: '3px 9px' }}>{node.ctaText} →</span></div>}
+      {onEdit ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {node.channel === 'email' && <input style={{ ...editIn, fontWeight: 700 }} value={node.subject} placeholder="Subject" onChange={(e) => onEdit(node.id, { subject: e.target.value })} />}
+          <textarea style={{ ...editIn, resize: 'vertical', lineHeight: 1.45 }} rows={4} value={node.body} placeholder={node.channel === 'sms' ? 'SMS message' : 'Email body'} onChange={(e) => onEdit(node.id, { body: e.target.value })} />
+          <input style={{ ...editIn, maxWidth: 160 }} value={node.ctaText} placeholder="Button label" onChange={(e) => onEdit(node.id, { ctaText: e.target.value })} />
+        </div>
+      ) : (
+        <>
+          {node.channel === 'email' && node.subject && <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{node.subject}</div>}
+          {node.body && <div style={{ fontSize: 12.5, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{node.body}</div>}
+          {node.ctaText && <div style={{ marginTop: 8 }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 8, padding: '3px 9px' }}>{node.ctaText} →</span></div>}
+        </>
+      )}
       {statChips(node, stats)}
     </div>
   );
 }
-function DecisionSplit({ node, stats }) {
+function DecisionSplit({ node, stats, onEdit }) {
   const waiting = (stats && node.id && stats.atNode && stats.atNode[node.id]) || 0;
   return (
     <div className="jt-col">
@@ -89,7 +100,7 @@ function DecisionSplit({ node, stats }) {
                 <span style={{ opacity: 0.85 }}>if</span> {b.label}
               </span>
               <div className="jt-link" />
-              <NodeColumn nodes={b.nodes || []} stats={stats} />
+              <NodeColumn nodes={b.nodes || []} stats={stats} onEdit={onEdit} />
             </div>
           );
         })}
@@ -97,13 +108,13 @@ function DecisionSplit({ node, stats }) {
     </div>
   );
 }
-function NodeColumn({ nodes, stats }) {
+function NodeColumn({ nodes, stats, onEdit }) {
   return (
     <div className="jt-col">
       {(nodes || []).map((n, i) => (
         <Fragment key={i}>
           {i > 0 && <div className="jt-link" />}
-          {n.type === 'decision' ? <DecisionSplit node={n} stats={stats} /> : <div className="jt-card"><MessageCard node={n} stats={stats} /></div>}
+          {n.type === 'decision' ? <DecisionSplit node={n} stats={stats} onEdit={onEdit} /> : <div className="jt-card"><MessageCard node={n} stats={stats} onEdit={onEdit} /></div>}
         </Fragment>
       ))}
     </div>
@@ -111,8 +122,28 @@ function NodeColumn({ nodes, stats }) {
 }
 // stats (optional): { byStep: {step:{opened,clicked}}, atNode: {nodeId:count} } —
 // overlays live funnel chips on the design (see /api/journeys/:e/:id/stats).
-export default function JourneyTree({ nodes, stats }) {
-  return <div className="jt-scroll"><style>{TREE_CSS}</style><NodeColumn nodes={nodes} stats={stats} /></div>;
+// onEdit (optional): (nodeId, patch) — message copy becomes editable in place.
+export default function JourneyTree({ nodes, stats, onEdit }) {
+  return <div className="jt-scroll"><style>{TREE_CSS}</style><NodeColumn nodes={nodes} stats={stats} onEdit={onEdit} /></div>;
+}
+
+// Immutably apply a copy patch to one message node (by id) anywhere in the tree.
+export function patchNode(nodes, id, patch) {
+  return (nodes || []).map((n) => {
+    if (n.id === id) return { ...n, ...patch };
+    if (n.type === 'decision') return { ...n, branches: n.branches.map((b) => ({ ...b, nodes: patchNode(b.nodes, id, patch) })) };
+    return n;
+  });
+}
+// The opening (pre-decision) messages — mirrored into the classic `steps` so
+// previews + the linear fallback stay coherent with tree edits.
+export function openingMessages(nodes) {
+  const trunk = [];
+  for (const n of nodes || []) {
+    if (n.type === 'message') trunk.push(n);
+    else { if (trunk.length) break; const b = (n.branches || [])[0]; return b ? openingMessages(b.nodes) : trunk; }
+  }
+  return trunk;
 }
 
 export function countDecisions(nodes) {

@@ -5,7 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
-import JourneyTree, { countDecisions as journeyDecisions } from './JourneyTree.jsx';
+import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1030,15 +1030,24 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
 
           {isSequence && f.journey?.nodes?.length > 0 && (
-            <Field label="🧭 Journey design (the full branching tree)">
+            <Field label="🧭 Journey (every message is editable — branches included)">
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. The steps below are the opening sequence this campaign sends today; the branches route people once the journey engine ships. To change the design, ask the Owl (it appears on the Journeys tab too).
+                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, button — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
               </div>
-              <JourneyTree nodes={f.journey.nodes} />
+              <JourneyTree
+                nodes={f.journey.nodes}
+                onEdit={(id, patch) => setF((s) => {
+                  const nodes = journeyPatch(s.journey.nodes, id, patch);
+                  // Mirror the opening (pre-decision) trunk into `steps` so the email
+                  // preview + the linear fallback stay coherent with tree edits.
+                  const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText }));
+                  return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
+                })}
+              />
             </Field>
           )}
 
-          {isSequence && (
+          {isSequence && !(f.journey?.nodes?.length > 0) && (
             <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
