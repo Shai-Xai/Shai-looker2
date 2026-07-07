@@ -147,6 +147,50 @@ test('stats refresh writes the click counters', async () => {
   assert.ok(links[0].clicks.at, 'stats timestamp recorded');
 });
 
+test('import preview flags account links as new / imported / removed; selective import honours the picks', async () => {
+  upstream.nextLinks = [
+    { id: 'ext-c', short_url: 'https://howler.chottu.link/c', link_name: 'C', destination_url: 'https://h/3', is_enabled: true },
+    { id: 'ext-d', short_url: 'https://howler.chottu.link/d', link_name: 'D', destination_url: 'https://h/4', is_enabled: true },
+    { id: 'ext-a', short_url: 'https://howler.chottu.link/a', link_name: 'A renamed', destination_url: 'https://h/1', is_enabled: true },
+  ];
+  const p = await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/import/preview`, { as: admin });
+  assert.equal(p.status, 200);
+  assert.equal(p.body.links.find((l) => l.chottuLinkId === 'ext-c').status, 'new');
+  assert.equal(p.body.links.find((l) => l.chottuLinkId === 'ext-a').status, 'imported');
+  // Pick ONLY ext-c and attach it to the event in the same step.
+  const r = await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: { ids: ['ext-c'], suiteId: suiteA.id } });
+  assert.equal(r.body.imported, 1);
+  const links = (await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/links`, { as: admin })).body.links;
+  const c = links.find((l) => l.chottuLinkId === 'ext-c');
+  assert.equal(c.suiteId, suiteA.id, 'picked import lands on the chosen event');
+  assert.ok(!links.some((l) => l.chottuLinkId === 'ext-d'), 'unpicked link is not imported');
+});
+
+test('delete switches the link off upstream, hides it everywhere, and imports do not resurrect it', async () => {
+  const links = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
+  const victim = links.find((l) => l.chottuLinkId === 'ext-c');
+  upstream.calls.length = 0;
+  const del = await app.req('DELETE', `/api/my/chottu/${entityA.id}/links/${victim.id}`, { as: ownerA });
+  assert.equal(del.status, 200);
+  assert.match(upstream.calls.at(-1).path, /\/links\/change-status\/ext-c/, 'deleted link is switched off upstream');
+  const after = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
+  assert.ok(!after.some((l) => l.id === victim.id), 'deleted link is hidden');
+  assert.equal((await app.req('PATCH', `/api/my/chottu/${entityA.id}/links/${victim.id}`, { as: ownerA, body: { linkName: 'x' } })).status, 404);
+  // Bulk import (no ids) skips the tombstone…
+  const bulk = await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: {} });
+  assert.equal(bulk.body.restored, 0);
+  assert.ok(!(await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links.some((l) => l.chottuLinkId === 'ext-c'));
+  // …its preview status is 'removed', and explicitly re-picking it restores it.
+  const p = await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/import/preview`, { as: admin });
+  assert.equal(p.body.links.find((l) => l.chottuLinkId === 'ext-c').status, 'removed');
+  const restore = await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: { ids: ['ext-c'] } });
+  assert.equal(restore.body.restored, 1);
+  assert.ok((await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links.some((l) => l.chottuLinkId === 'ext-c'));
+  // Another client can't delete A's links.
+  const someA = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links[0];
+  assert.equal((await app.req('DELETE', `/api/my/chottu/${entityA.id}/links/${someA.id}`, { as: ownerB })).status, 403);
+});
+
 // ── Phase 2: templates ──
 
 test('starter template is seeded and visible to clients; platform templates are not client-editable', async () => {

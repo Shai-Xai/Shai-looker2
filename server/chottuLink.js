@@ -45,6 +45,7 @@ function mount(app, { db, auth, rateLimit }) {
       clicks_7d       INTEGER NOT NULL DEFAULT 0,     -- (history/snapshots are Phase 3)
       clicks_30d      INTEGER NOT NULL DEFAULT 0,
       stats_at        TEXT NOT NULL DEFAULT '',
+      archived        INTEGER NOT NULL DEFAULT 0, -- deleted in Pulse; tombstone so imports don't resurrect it
       created_time    TEXT NOT NULL,
       modified_time   TEXT NOT NULL
     );
@@ -60,6 +61,10 @@ function mount(app, { db, auth, rateLimit }) {
     );
     CREATE INDEX IF NOT EXISTS idx_chottu_templates_entity ON chottu_templates(entity_id);
   `);
+  // Additive migration for databases created before the delete feature shipped.
+  if (!sql.prepare('PRAGMA table_info(chottu_links)').all().some((c) => c.name === 'archived')) {
+    sql.exec('ALTER TABLE chottu_links ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+  }
 
   // ── credentials: client override → platform default ──
   function configFor(entityId) {
@@ -109,7 +114,7 @@ function mount(app, { db, auth, rateLimit }) {
   });
   const getRow = (entityId, id) => {
     const r = sql.prepare('SELECT * FROM chottu_links WHERE id=?').get(id);
-    if (!r || r.entity_id !== entityId) throw new HttpError(404, 'Link not found');
+    if (!r || r.entity_id !== entityId || r.archived) throw new HttpError(404, 'Link not found');
     return r;
   };
   function checkSuite(entityId, suiteId) {
@@ -145,7 +150,7 @@ function mount(app, { db, auth, rateLimit }) {
 
   // ── service functions (shared by both surfaces) ──
   const listLinks = (entityId) =>
-    sql.prepare('SELECT * FROM chottu_links WHERE entity_id=? ORDER BY created_time DESC').all(entityId).map(rowToLink);
+    sql.prepare('SELECT * FROM chottu_links WHERE entity_id=? AND archived=0 ORDER BY created_time DESC').all(entityId).map(rowToLink);
 
   async function createLink(entityId, body, userEmail) {
     const cfg = configFor(entityId);
@@ -210,34 +215,73 @@ function mount(app, { db, auth, rateLimit }) {
     return rowToLink(sql.prepare('SELECT * FROM chottu_links WHERE id=?').get(id));
   }
 
-  // Pull every link on the ChottuLink account into Pulse. Upsert by ChottuLink id:
-  // new rows arrive as source='imported' (unassigned to an event); existing rows
-  // refresh name/destination/status but KEEP their Pulse fields (event, utm…).
-  async function importLinks(entityId) {
-    const cfg = configFor(entityId);
-    let page = 1; let imported = 0; let refreshed = 0;
-    for (; page <= IMPORT_MAX_PAGES; page++) {
+  // "Delete" — ChottuLink's API has no delete, so the link is switched off
+  // upstream (best-effort: a dead connection must not block cleanup in Pulse)
+  // and archived locally. The archived row is a tombstone: it hides from every
+  // list and a later import will NOT resurrect it (unless explicitly re-picked).
+  async function deleteLink(entityId, id) {
+    const r = getRow(entityId, id);
+    try { await chottu(configFor(entityId), 'PATCH', `/links/change-status/${r.chottu_link_id}`, { is_enabled: false }); }
+    catch { /* upstream off is courtesy; the Pulse delete still stands */ }
+    sql.prepare('UPDATE chottu_links SET archived=1, is_enabled=0, modified_time=? WHERE id=?').run(now(), id);
+    return { ok: true };
+  }
+
+  async function fetchAllUpstream(cfg) {
+    const all = [];
+    for (let page = 1; page <= IMPORT_MAX_PAGES; page++) {
       const data = await chottu(cfg, 'GET', `/links/page?page=${page}&size=${IMPORT_PAGE_SIZE}`);
       const links = data.links || [];
-      for (const l of links) {
-        if (!l.id || !l.short_url) continue;
-        const existing = sql.prepare('SELECT id FROM chottu_links WHERE chottu_link_id=?').get(l.id);
-        if (existing) {
-          sql.prepare('UPDATE chottu_links SET link_name=?, destination_url=?, short_url=?, is_enabled=?, modified_time=? WHERE chottu_link_id=?')
-            .run(l.link_name || '', l.destination_url || '', l.short_url, l.is_enabled ? 1 : 0, now(), l.id);
-          refreshed++;
-        } else {
-          sql.prepare(`INSERT INTO chottu_links
-              (id, entity_id, suite_id, chottu_link_id, short_url, link_name, destination_url, is_enabled, source, created_time, modified_time)
-              VALUES (?,?,?,?,?,?,?,?, 'imported', ?, ?)`)
-            .run(crypto.randomUUID(), entityId, '', l.id, l.short_url, l.link_name || '', l.destination_url || '',
-              l.is_enabled ? 1 : 0, l.createdTime || now(), now());
-          imported++;
-        }
-      }
+      all.push(...links.filter((l) => l.id && l.short_url));
       if (page >= (data.pagination?.total_pages || 1) || !links.length) break;
     }
-    return { imported, refreshed };
+    return all;
+  }
+
+  // Everything on the ChottuLink account, flagged against what Pulse has —
+  // powers the import picker: 'new' (not in Pulse), 'imported', 'removed'
+  // (deleted in Pulse earlier; picking it again resurrects it).
+  async function importPreview(entityId) {
+    const upstream = await fetchAllUpstream(configFor(entityId));
+    const known = new Map(sql.prepare('SELECT chottu_link_id, archived FROM chottu_links WHERE entity_id=?').all(entityId).map((r) => [r.chottu_link_id, r]));
+    return {
+      links: upstream.map((l) => ({
+        chottuLinkId: l.id, shortUrl: l.short_url, linkName: l.link_name || '',
+        destinationUrl: l.destination_url || '', enabled: !!l.is_enabled, createdTime: l.createdTime || '',
+        status: !known.has(l.id) ? 'new' : known.get(l.id).archived ? 'removed' : 'imported',
+      })),
+    };
+  }
+
+  // Pull links from the ChottuLink account into Pulse. `ids` narrows to the
+  // picked links (omit = everything); `suiteId` attaches new imports to an
+  // event in the same step. Upsert by ChottuLink id: new rows arrive as
+  // source='imported'; existing rows refresh upstream truth (name/destination/
+  // status) but KEEP their Pulse fields (event, utm…). Archived rows stay
+  // deleted unless explicitly picked, which resurrects them.
+  async function importLinks(entityId, { ids, suiteId } = {}) {
+    const cfg = configFor(entityId);
+    const wanted = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
+    const assignSuite = checkSuite(entityId, suiteId);
+    let imported = 0; let refreshed = 0; let restored = 0;
+    for (const l of await fetchAllUpstream(cfg)) {
+      if (wanted && !wanted.has(String(l.id))) continue;
+      const existing = sql.prepare('SELECT id, archived FROM chottu_links WHERE chottu_link_id=?').get(l.id);
+      if (existing) {
+        if (existing.archived && !wanted) continue; // tombstone: bulk import never resurrects
+        sql.prepare('UPDATE chottu_links SET link_name=?, destination_url=?, short_url=?, is_enabled=?, archived=0, modified_time=? WHERE chottu_link_id=?')
+          .run(l.link_name || '', l.destination_url || '', l.short_url, l.is_enabled ? 1 : 0, now(), l.id);
+        if (existing.archived) restored++; else refreshed++;
+      } else {
+        sql.prepare(`INSERT INTO chottu_links
+            (id, entity_id, suite_id, chottu_link_id, short_url, link_name, destination_url, is_enabled, source, created_time, modified_time)
+            VALUES (?,?,?,?,?,?,?,?, 'imported', ?, ?)`)
+          .run(crypto.randomUUID(), entityId, assignSuite, l.id, l.short_url, l.link_name || '', l.destination_url || '',
+            l.is_enabled ? 1 : 0, l.createdTime || now(), now());
+        imported++;
+      }
+    }
+    return { imported, refreshed, restored };
   }
 
   // Refresh click counters from ChottuLink — sequential (their rate limits are
@@ -413,7 +457,7 @@ function mount(app, { db, auth, rateLimit }) {
     const cfg = configFor(entityId);
     return {
       configured: !!(cfg.key && cfg.domain), source: cfg.source, domain: cfg.domain,
-      linkCount: sql.prepare('SELECT COUNT(*) n FROM chottu_links WHERE entity_id=?').get(entityId).n,
+      linkCount: sql.prepare('SELECT COUNT(*) n FROM chottu_links WHERE entity_id=? AND archived=0').get(entityId).n,
     };
   };
 
@@ -428,7 +472,11 @@ function mount(app, { db, auth, rateLimit }) {
     res.json({ link: await updateLink(req.params.entityId, req.params.id, req.body || {}) })));
   app.patch(`${A}/links/:id/status`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json({ link: await setEnabled(req.params.entityId, req.params.id, !!req.body?.enabled) })));
-  app.post(`${A}/import`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await importLinks(req.params.entityId))));
+  app.get(`${A}/import/preview`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await importPreview(req.params.entityId))));
+  app.post(`${A}/import`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(await importLinks(req.params.entityId, { ids: req.body?.ids, suiteId: req.body?.suiteId }))));
+  app.delete(`${A}/links/:id`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(await deleteLink(req.params.entityId, req.params.id))));
   app.post(`${A}/refresh-stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await refreshStats(req.params.entityId, { suiteId: req.body?.suiteId, linkId: req.body?.linkId }))));
   // Templates — admin can also manage the shared platform set ({ platform: true }).
@@ -472,6 +520,8 @@ function mount(app, { db, auth, rateLimit }) {
     res.json({ link: await updateLink(myEntity(req), req.params.id, req.body || {}) })));
   app.patch(`${M}/links/:id/status`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
     res.json({ link: await setEnabled(myEntity(req), req.params.id, !!req.body?.enabled) })));
+  app.delete(`${M}/links/:id`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.json(await deleteLink(myEntity(req), req.params.id))));
   app.post(`${M}/refresh-stats`, auth.requireAuth, canManage,
     rateLimit({ windowMs: 60_000, max: 4, by: 'user', scope: 'chottu-stats' }),
     asyncHandler(async (req, res) => {
@@ -498,7 +548,7 @@ function mount(app, { db, auth, rateLimit }) {
       res.json(await applyTemplate(myEntity(req), req.params.tid, req.body || {}, req.user?.email))));
 
   console.log('[chottuLink] deep-link management mounted');
-  return { createLink, listLinks, updateLink, setEnabled, importLinks, refreshStats, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
+  return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, refreshStats, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
 }
 
 module.exports = { mount };

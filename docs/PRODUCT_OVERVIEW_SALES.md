@@ -425,8 +425,12 @@ one-by-one in the ChottuLink dashboard.
   and shows its **click counts** (total / 7 / 30 days).
 - **UTM tags & app behaviour** built in — every link can carry campaign tags and
   choose app-vs-browser opening per platform.
-- **Import** — one tap pulls in everything already created in ChottuLink, so the
-  existing links show up in Pulse and get attached to their events.
+- **Import (pick & choose)** — the import screen lists everything on the
+  ChottuLink account, flagged new / already in Pulse / previously deleted; tick
+  the ones to bring in and optionally attach them to an event in the same step.
+- **Delete** — removing a link takes it out of Pulse *and* switches it off in
+  ChottuLink (their API has no true delete), so the short URL stops redirecting;
+  re-imports won't resurrect it unless you pick it on purpose.
 - **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
   the connection (API key + domain) layers platform-default → per-client override.
 - **⚡ Templates — every link in one click** ✅ — pick a template, pick the event,
@@ -811,6 +815,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07 (later)** — **Deep links: pick-and-choose import + delete** ✅: the
+  import screen now lists the whole ChottuLink account (new / in Pulse / previously
+  deleted) so you tick exactly what comes in, optionally attached to an event in the
+  same step; links can be deleted (removed from Pulse + switched off in ChottuLink,
+  tombstoned so re-imports don't resurrect them).
 - **2026-07-07 (late)** — **Deep-link templates: every link in one click** ✅: apply a
   template to an event and Pulse creates the whole link set (main + ticket wallet +
   lineup + map + feed + chat) against ChottuLink in one go — placeholders fill the
