@@ -252,6 +252,9 @@ function TicketDetail({ id, onClose, onChange }) {
   const load = useCallback(() => {
     api.adminTicket(id).then((r) => {
       setD(r); setAiEdit(r.ticket.aiSummary || ''); setShipNote(r.ticket.shipNote || ''); setTestUrl(r.ticket.testUrl || '');
+      // A dispatched ticket keeps its chosen environment (re-sends reuse it);
+      // an un-sent one stays on the safe default (staging).
+      if (r.ticket.githubIssue > 0) setTarget(r.ticket.target === 'production' ? 'production' : 'staging');
     }).catch((e) => setErr(e.message));
   }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -290,6 +293,11 @@ function TicketDetail({ id, onClose, onChange }) {
         else setErr('Set a GitHub repo in the GitHub panel (top of the board) to link issues.');
       } else { await load(); onChange?.(); }
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  }
+  async function redispatch() {
+    setBusy('redis'); setErr('');
+    try { await api.adminTicketRedispatch(id, target); await load(); onChange?.(); }
+    catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
   async function promote() {
     if (!window.confirm('Promote to production?\n\nThis opens a release PR that merges the staging branch into production. Merging it ships EVERY ticket currently on staging — not just this one. (It only opens if every staged ticket has been approved by its reporter.)')) return;
@@ -338,6 +346,14 @@ function TicketDetail({ id, onClose, onChange }) {
             {t.clientVerdict === 'rejected' && (
               <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.1)', border: '1px solid var(--brand)' }}>
                 <strong>↩️ Sent back by the reporter.</strong> They said: “{t.clientVerdictNote}”. Fix it and move it back through the board — the Copy-for-Claude brief leads with this.
+                {/* One-tap rework: the refreshed brief (leading with their notes) rides
+                    an @claude comment on the SAME issue — no duplicate issue. */}
+                {t.status === 'rejected' && t.githubIssue > 0 && (
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button onClick={redispatch} disabled={!!busy} style={primaryBtn}>{busy === 'redis' ? 'Re-sending…' : '🔁 Re-send to Claude'}</button>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>Posts the updated brief on issue #{t.githubIssue} → {t.target === 'production' ? '🚀 production' : '🧪 staging'}</span>
+                  </div>
+                )}
               </div>
             )}
             {t.clientVerdict === 'approved' && (
