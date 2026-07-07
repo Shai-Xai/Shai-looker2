@@ -422,16 +422,7 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
             <input style={input} value={social.imageUrl || ''} onChange={(e) => setS('imageUrl', e.target.value)} placeholder="Preview image URL — https://… · optional" autoComplete="off" inputMode="url" />
           </div>
         </Field>
-        {(social.title || social.description || social.imageUrl) && (
-          <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', maxWidth: 340 }}>
-            {social.imageUrl && <img src={social.imageUrl} alt="" style={{ width: '100%', height: 120, objectFit: 'cover', display: 'block' }} onError={(e) => { e.target.style.display = 'none'; }} />}
-            <div style={{ padding: '8px 11px', background: 'var(--card)' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{social.title || 'Preview title'}</div>
-              {social.description && <div style={{ fontSize: 12, color: 'var(--muted-2,var(--muted))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{social.description}</div>}
-              <div style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', marginTop: 2 }}>howler.chottu.link</div>
-            </div>
-          </div>
-        )}
+        {(social.title || social.description || social.imageUrl) && <SharePreviewPhone social={social} />}
         {error && <div style={{ color: 'var(--error,#ef4444)', fontSize: 13 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={btnPrimary} disabled={busy || !name.trim() || !destination.trim()} onClick={save}>
@@ -463,6 +454,36 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
           )}
         </div>
         {link && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>The short URL and path can’t change after creation — switch this link off and create a new one instead.</div>}
+      </div>
+    </div>
+  );
+}
+
+// Live share preview inside a little phone — what the link looks like when it
+// lands in a chat (the ChottuLink-dashboard-style preview, in Pulse's skin).
+// Pure tokens, so it follows the app's light/dark theme automatically.
+function SharePreviewPhone({ social }) {
+  return (
+    <div style={{ width: 260, maxWidth: '100%', border: '1px solid var(--hairline)', borderRadius: 28, background: 'var(--bg)', boxShadow: 'var(--shadow-sm,none)', overflow: 'hidden', margin: '2px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 16px 0', fontSize: 10.5, fontWeight: 700, color: 'var(--muted)' }}>
+        <span>9:41</span><span>5G 🔋</span>
+      </div>
+      <div style={{ padding: '10px 12px 14px' }}>
+        <div style={{ background: 'var(--brand,#ff385c)', color: '#fff', borderRadius: '14px 14px 4px 14px', padding: '7px 11px', fontSize: 12, maxWidth: '80%', marginLeft: 'auto', marginBottom: 8 }}>
+          Sharing the link now 👇
+        </div>
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', background: 'var(--card)', maxWidth: '88%' }}>
+          {social.imageUrl ? (
+            <img src={social.imageUrl} alt="" style={{ width: '100%', height: 96, objectFit: 'cover', display: 'block' }} onError={(e) => { e.target.style.display = 'none'; }} />
+          ) : (
+            <div style={{ height: 56, display: 'grid', placeItems: 'center', fontSize: 20, background: 'var(--bg)', color: 'var(--muted)' }}>🔗</div>
+          )}
+          <div style={{ padding: '7px 10px' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{social.title || 'Preview title'}</div>
+            {social.description && <div style={{ fontSize: 11.5, color: 'var(--muted-2,var(--muted))', lineHeight: 1.35, marginTop: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{social.description}</div>}
+            <div style={{ fontSize: 9.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 3 }}>howler.chottu.link</div>
+          </div>
+        </div>
       </div>
     </div>
   );

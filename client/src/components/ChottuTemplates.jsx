@@ -219,7 +219,13 @@ function TemplateEditor({ template, entityId, scope, onDone }) {
             <input style={input} value={it.name} onChange={(e) => setItem(ix, { name: e.target.value })} placeholder="Name — e.g. {{event.name}} (lineup)" autoComplete="off" />
             <input style={input} value={it.destination} onChange={(e) => setItem(ix, { destination: e.target.value })} placeholder="Destination — e.g. {{base}}?dest=my-lineup" autoComplete="off" />
             <input style={input} value={it.path} onChange={(e) => setItem(ix, { path: e.target.value })} placeholder="Path — e.g. {{event.slug}}-lineup" autoComplete="off" />
-            <input style={input} value={it.utm?.campaign || ''} onChange={(e) => setItem(ix, { utm: { ...it.utm, campaign: e.target.value } })} placeholder="UTM campaign — e.g. {{event.slug}} · optional" autoComplete="off" />
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 2 }}>Campaign tags (UTM) · optional</div>
+            <input style={input} value={it.utm?.source || ''} onChange={(e) => setItem(ix, { utm: { ...it.utm, source: e.target.value } })} placeholder="source — e.g. instagram" autoComplete="off" />
+            <input style={input} value={it.utm?.medium || ''} onChange={(e) => setItem(ix, { utm: { ...it.utm, medium: e.target.value } })} placeholder="medium — e.g. social" autoComplete="off" />
+            <input style={input} value={it.utm?.campaign || ''} onChange={(e) => setItem(ix, { utm: { ...it.utm, campaign: e.target.value } })} placeholder="campaign — e.g. {{event.slug}}" autoComplete="off" />
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 2 }}>Social preview · optional</div>
+            <input style={input} value={it.social?.title || ''} onChange={(e) => setItem(ix, { social: { ...it.social, title: e.target.value } })} placeholder="Preview title — e.g. {{event.name}} 🎟️" autoComplete="off" />
+            <input style={input} value={it.social?.description || ''} onChange={(e) => setItem(ix, { social: { ...it.social, description: e.target.value } })} placeholder="Preview description — one enticing line" autoComplete="off" />
           </div>
         ))}
         <button style={btnGhost} onClick={() => setItems((arr) => [...arr, blankItem()])}>＋ Add a link</button>
