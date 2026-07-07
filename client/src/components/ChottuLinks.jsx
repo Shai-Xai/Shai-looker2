@@ -72,10 +72,11 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
     catch { window.prompt('Copy the link:', url); }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
-      {/* Connection / setup state */}
-      <div style={card}>
+  // The ChottuLink connection card — the plumbing belongs INSIDE the App category
+  // (its links are what the connection powers). Only the unconfigured state shows
+  // up front: without a connection nothing else here works yet.
+  const connCard = (
+    <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: data.configured ? 'var(--success,#10b981)' : 'var(--muted)' }} />
           <div style={{ fontSize: 13.5, minWidth: 0, flex: 1 }}>
@@ -121,16 +122,14 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
           </div>
         )}
       </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
+      {!data.configured && connCard}
 
       {(notice || error) && (
         <div style={{ fontSize: 13, fontWeight: 600, color: error ? 'var(--error,#ef4444)' : 'var(--success,#10b981)' }}>{error || notice}</div>
-      )}
-
-      {importing && scope === 'admin' && (
-        <ImportPicker
-          entityId={entityId} suites={suites}
-          onDone={async (msg) => { setImporting(false); if (msg) { flash(msg); await load(); } }}
-        />
       )}
 
       {/* LANDING: category tiles are the front door — always shown (App exists
@@ -156,6 +155,14 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
           <button style={{ ...linkBtn, minHeight: 40, fontSize: 13.5 }} onClick={() => setCategory(null)}>← All categories</button>
           <span style={{ fontWeight: 700, fontSize: 14.5 }}>{category === 'App' ? '📱' : '🔗'} {category}</span>
         </div>
+      )}
+
+      {category === 'App' && data.configured && connCard}
+      {importing && scope === 'admin' && category === 'App' && (
+        <ImportPicker
+          entityId={entityId} suites={suites}
+          onDone={async (msg) => { setImporting(false); if (msg) { flash(msg); await load(); } }}
+        />
       )}
 
       {category !== null && data.configured && (editing === 'new'
