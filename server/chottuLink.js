@@ -15,6 +15,7 @@
 
 const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
+const aiUsage = require('./aiUsage'); // AI token metering (the ✨ autofill records as chottu_meta)
 
 // The one hardcoded system prompt this module owns — the ✨ autofill in the
 // link editor (UTM tags + the social/rich link preview). Kept here (module
@@ -31,7 +32,7 @@ const IMPORT_PAGE_SIZE = 100;
 const IMPORT_MAX_PAGES = 20;      // 2 000 links — far above any real account, bounds a runaway
 const STATS_REFRESH_CAP = 150;    // per refresh call — sequential upstream calls, keep requests snappy
 
-function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity, aiUsage }) {
+function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
 
@@ -483,8 +484,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity, aiUs
       conventions.length ? `UTM tags already used on this client's links:\n${conventions.map((c) => `- ${c}`).join('\n')}` : null,
     ].filter(Boolean).join('\n');
     const c = insights.requireClient(apiKey);
-    const attributed = aiUsage ? (fn) => aiUsage.run({ entityId, kind: 'chottu_meta' }, fn) : (fn) => fn();
-    const resp = await attributed(() => c.messages.create({
+    const resp = await aiUsage.run({ entityId, kind: 'chottu_meta' }, () => c.messages.create({
       model: insights.MODEL, max_tokens: 300, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system: insights.systemWith(LINK_META_SYSTEM, db.getSetting('ai_instructions')),
       messages: [{ role: 'user', content: prompt }],
