@@ -117,6 +117,7 @@ export default function JourneyWizard({ entityId }) {
                     {d > 0 && <span style={{ fontSize: 11.5, color: '#b45309', fontWeight: 700 }}>◆ {d}</span>}
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDate(a.updatedAt || a.createdAt)}</span>
                     <span style={{ flex: 1 }} />
+                    <button onClick={() => setOpenDraft(open ? null : a.id)} style={{ ...smallBtn, ...(open ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : {}) }}>{open ? 'Hide tree' : '🧭 View tree'}</button>
                     <button onClick={() => duplicate(a)} style={smallBtn}>Duplicate</button>
                     <a href={`/engage/campaigns?action=${a.id}`} style={{ ...smallBtn, textDecoration: 'none', display: 'inline-block' }}>Edit in Campaigns</a>
                   </div>
