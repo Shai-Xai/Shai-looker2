@@ -486,7 +486,7 @@ require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey, ge
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
-require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth })); // Product help knowledge: grounds the Owl's productHelp tool (published articles + release notes only) + admin curation → server/helpBot.js; kill switch help_enabled
+require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); // Product help knowledge: grounds the Owl's productHelp tool (published articles + release notes only) + admin curation + auto-drafts from published release notes → server/helpBot.js; kill switches help_enabled / help_draft_auto
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved

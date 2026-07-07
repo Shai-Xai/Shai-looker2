@@ -17,6 +17,7 @@ export default function HelpBotAdmin() {
   const [settings, setSettings] = useState(null);
   const [editing, setEditing] = useState(null); // article being edited/created (or null)
   const [err, setErr] = useState('');
+  const [gen, setGen] = useState({ busy: false, msg: '' }); // ✨ draft-from-release-notes state
 
   const load = () => {
     api.adminHelpArticles().then(setArticles).catch((e) => setErr(e.message));
@@ -66,10 +67,27 @@ export default function HelpBotAdmin() {
       </div>
 
       {/* Article list */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '18px 0 10px', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Knowledge ({articles.length})</div>
-        <button onClick={() => setEditing({ ...BLANK })} style={primaryBtn}>+ New article</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={async () => {
+              setGen({ busy: true, msg: '' });
+              try {
+                const r = await api.adminDraftHelpArticles();
+                load();
+                setGen({ busy: false, msg: r.created ? `Drafted ${r.created} article${r.created === 1 ? '' : 's'} from published release notes — review + publish below.` : (r.message || 'Nothing new to draft.') });
+              } catch (e) { setGen({ busy: false, msg: e.message }); }
+            }}
+            style={miniOutline} disabled={gen.busy}
+            title="Draft new articles from recently published release notes (drafts also appear automatically as notes get published)"
+          >
+            {gen.busy ? 'Drafting…' : '✨ Draft from release notes'}
+          </button>
+          <button onClick={() => setEditing({ ...BLANK })} style={primaryBtn}>+ New article</button>
+        </div>
       </div>
+      {gen.msg && <p style={hint}>{gen.msg}</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {articles.map((a) => (
           <div key={a.id} style={{ ...card, marginBottom: 0, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -78,6 +96,7 @@ export default function HelpBotAdmin() {
                 {a.title}
                 {!a.published && <span style={pill}>draft</span>}
                 {a.source === 'seed' && <span style={{ ...pill, background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>seed</span>}
+                {a.source === 'auto' && <span style={{ ...pill, background: 'rgba(120,90,230,0.14)', color: 'var(--muted)' }}>✨ AI draft</span>}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.body}</div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap' }}>

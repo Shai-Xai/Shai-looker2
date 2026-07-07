@@ -102,6 +102,22 @@ test('productHelp tool: only PUBLISHED articles + PUBLISHED release notes can re
   db.deleteReleaseNote(noteDraft.id);
 });
 
+test('sanitizeProposals(): drops malformed + duplicate slugs, caps at 5, never touches existing articles', () => {
+  const existing = ['getting-started'];
+  const out = helpBot.sanitizeProposals([
+    { slug: 'getting-started', title: 'Dupe of existing', body: 'x' },        // existing slug → dropped
+    { slug: 'new-links', title: 'Create deep links', body: 'Open Engage → Links…', tags: 'links', deepLink: '/engage/links' },
+    { slug: 'new-links', title: 'Same slug twice', body: 'y' },               // dupe within batch → dropped
+    { slug: 'no-body', title: 'Missing body' },                               // malformed → dropped
+    { slug: 'a1', title: 't', body: 'b' }, { slug: 'a2', title: 't', body: 'b' }, { slug: 'a3', title: 't', body: 'b' },
+    { slug: 'a4', title: 't', body: 'b' }, { slug: 'a5', title: 't', body: 'b' },
+  ], existing);
+  assert.ok(out.every((p) => p.slug !== 'getting-started'), 'existing article never overwritten');
+  assert.equal(out.filter((p) => p.slug === 'new-links').length, 1, 'batch-deduped');
+  assert.ok(!out.some((p) => p.slug === 'no-body'), 'malformed dropped');
+  assert.equal(out.length, 5, 'capped at 5 per run');
+});
+
 test('applySeed() plants the starter corpus once (idempotent, no duplicates)', () => {
   const store = new Map();
   const fakeApi = {

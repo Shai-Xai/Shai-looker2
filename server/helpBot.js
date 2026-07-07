@@ -23,6 +23,32 @@ const crypto = require('crypto');
 const owlCatalogue = require('./owlCatalogue');
 const roles = require('./roles');
 
+// Drafts help-knowledge articles from recently PUBLISHED release notes — the
+// self-maintaining half of the knowledge (same rhythm as release notes: AI
+// drafts, a human reviews + publishes). Registered in promptRegistry (AI audit).
+const HELP_DRAFT_SYSTEM = `You draft help-knowledge articles for Pulse (Howler's Experience OS for event organisers). INPUT: recently PUBLISHED release notes (title, client-facing summary, how-to, screen path) plus the list of existing article slugs/titles. OUTPUT: strict JSON only — {"articles":[{"slug","title","body","tags","roles","features","deepLink"}]} — no prose around it.
+RULES:
+- Propose an article ONLY for a client-facing capability a user would ask "how do I…" about. Skip internal/dev/admin-only changes, fixes with nothing for a user to do, and minor polish.
+- NEVER duplicate: if an existing article already covers the topic (check the slugs/titles), skip it — an admin updates that one by hand.
+- body: plain, concrete steps a client can follow, grounded ONLY in what the release notes actually say. Never invent screens, buttons or steps that aren't in the notes.
+- slug: short-kebab-case; tags: the words a user would search; roles: csv from owner/manager/marketing/finance/viewer/ops ONLY when clearly role-specific, else empty; features: csv ONLY when the capability needs an optional feature (e.g. cashless), else empty; deepLink: the screen path given in the note, else empty.
+- At most 5 articles per run; an empty list is a fine answer.`;
+
+// Validate + dedupe the model's proposals against the existing corpus. Pure
+// (unit-tested): drops malformed entries and any slug already present.
+function sanitizeProposals(proposals, existingSlugs) {
+  const have = new Set(existingSlugs || []);
+  const out = [];
+  for (const p of Array.isArray(proposals) ? proposals : []) {
+    const slug = String(p?.slug || '').trim().toLowerCase();
+    if (!slug || !String(p?.title || '').trim() || !String(p?.body || '').trim() || have.has(slug)) continue;
+    have.add(slug);
+    out.push({ slug, title: String(p.title).slice(0, 160), body: String(p.body).slice(0, 4000), tags: String(p.tags || '').slice(0, 300), roles: String(p.roles || '').slice(0, 120), features: String(p.features || '').slice(0, 120), deepLink: String(p.deepLink || '').slice(0, 200) });
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 // The grounding brief the productHelp tool hands the Owl WITH its result — the
 // rules for answering product questions. Grounded, role/tenant aware, declines.
 const HELP_SYSTEM = `PRODUCT-HELP GROUNDING — how to use this result. The user asked about Pulse ITSELF (the product), not their event data. Answer ONLY from the "articles" and "whatsNew" entries in this result: they are the curated, PUBLISHED knowledge and the single source of truth about the product. NEVER invent or assume features, screens, steps or settings — if these entries don't cover the question, say plainly that you don't have it in your help notes yet, offer the closest thing you DO know, and point the user to their Howler contact or the in-app "Report an issue" button. Do not guess. Respect the user context in this result: don't walk the user through something their role can't do (say who can instead), and don't pitch features listed under featuresMissing — at most, if directly asked, note the feature exists but isn't enabled for their account. When an entry carries a "screen" path, tell the user where to go in plain words (e.g. "open Engage → Campaigns") and be concrete about the steps. For what's-new questions use only the dated "whatsNew" entries — cite each item's date and never fabricate a change or a date. Keep it concise, warm and mobile-friendly: lead with the direct answer, then the steps.`;
@@ -139,7 +165,7 @@ function createOwlTool({ db, auth }) {
   return { schema, run, menu: { cmd: 'help', label: 'Pulse help', icon: '💬', example: "What's new — or how do I set something up?" } };
 }
 
-function mountHelpBot(app, { db, auth }) {
+function mountHelpBot(app, { db, auth, insights, adminAnthropicKey }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS help_articles (
@@ -174,7 +200,7 @@ function mountHelpBot(app, { db, auth }) {
         .run(a.slug ?? cur.slug, a.title ?? cur.title, a.body ?? cur.body, a.tags ?? cur.tags, a.roles ?? cur.roles, a.features ?? cur.features, a.deepLink ?? cur.deep_link, (a.published === undefined ? cur.published : (a.published ? 1 : 0)), ts, id);
     } else {
       sql.prepare('INSERT INTO help_articles (id,slug,title,body,tags,roles,features,deep_link,published,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(id, a.slug || '', a.title || '', a.body || '', a.tags || '', a.roles || '', a.features || '', a.deepLink || '', (a.published === false ? 0 : 1), (a.source === 'seed' ? 'seed' : 'manual'), ts, ts);
+        .run(id, a.slug || '', a.title || '', a.body || '', a.tags || '', a.roles || '', a.features || '', a.deepLink || '', (a.published === false ? 0 : 1), (['seed', 'auto'].includes(a.source) ? a.source : 'manual'), ts, ts);
     }
     return getArticle(id);
   }
@@ -194,8 +220,52 @@ function mountHelpBot(app, { db, auth }) {
     res.json({ enabled: db.getSetting('help_enabled', '1') !== '0' });
   });
 
+  // ── Auto-drafting: propose articles from newly PUBLISHED release notes ───────
+  // Same rhythm as release notes themselves: AI drafts (unpublished, source
+  // 'auto'), a human reviews + publishes. The `help_draft_last_note` marker
+  // tracks the newest release-note updatedAt already processed, so a run costs
+  // nothing (no AI call) unless something new was published since.
+  async function draftFromReleaseNotes({ force = false } = {}) {
+    const apiKey = adminAnthropicKey && adminAnthropicKey();
+    if (!insights || !insights.isConfigured(apiKey)) return { created: 0, message: 'AI not configured.' };
+    const marker = db.getSetting('help_draft_last_note', '');
+    const published = db.listReleaseNotes().filter((n) => n.published);
+    const fresh = (force ? published : published.filter((n) => (n.updatedAt || '') > marker)).slice(0, 20);
+    if (!fresh.length) return { created: 0, message: 'No newly published release notes to learn from.' };
+    const existing = listArticles();
+    const user = `EXISTING ARTICLES (do not duplicate):\n${existing.map((a) => `- ${a.slug}: ${a.title}`).join('\n') || '(none)'}\n\nPUBLISHED RELEASE NOTES:\n${fresh.map((n) => `## ${n.date} — ${n.title}\n${n.body}${n.howTo ? `\nHow-to: ${n.howTo}` : ''}${n.deepLink ? `\nScreen: ${n.deepLink}` : ''}`).join('\n\n')}`;
+    const c = insights.requireClient(apiKey);
+    const resp = await require('./aiUsage').run({ entityId: null, kind: 'help_draft' }, () => c.messages.create({
+      model: insights.MODEL, max_tokens: 3000, output_config: { effort: 'low' },
+      system: insights.systemWith(HELP_DRAFT_SYSTEM, db.getSetting('ai_instructions')),
+      messages: [{ role: 'user', content: user }],
+    }));
+    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    let proposals = [];
+    try { const m = text.replace(/```json|```/g, '').match(/\{[\s\S]*\}/); proposals = JSON.parse(m ? m[0] : '{}').articles; } catch { proposals = []; }
+    const created = sanitizeProposals(proposals, existing.map((a) => a.slug)).map((p) => upsertArticle({ ...p, published: false, source: 'auto' }));
+    db.setSetting('help_draft_last_note', published.reduce((m, n) => ((n.updatedAt || '') > m ? n.updatedAt : m), marker));
+    return { created: created.length, items: created };
+  }
+  app.post('/api/admin/help/draft', auth.requireAdmin, async (_req, res) => {
+    try { res.json(await draftFromReleaseNotes({ force: true })); }
+    catch (err) { console.error('[help-draft]', err.message); res.status(500).json({ error: err.message }); }
+  });
+  // Tick: piggybacks on publishing — checks 6-hourly, only calls the AI when a
+  // release note was published since the last run. Kill switch: help_draft_auto.
+  async function helpDraftTick() {
+    try {
+      if (db.getSetting('help_draft_auto', '1') === '0') return;
+      const r = await draftFromReleaseNotes();
+      if (r.created) console.log(`[help-draft] proposed ${r.created} article(s) from published release notes — awaiting review`);
+    } catch (e) { console.error('[help-draft] tick failed:', e.message); }
+  }
+  const helpDraftTimer = setInterval(() => helpDraftTick().catch(() => {}), 6 * 60 * 60 * 1000);
+  if (helpDraftTimer.unref) helpDraftTimer.unref();
+  setTimeout(() => helpDraftTick().catch(() => {}), 30000); // shortly after boot
+
   // Handed back so the seed can plant the starter corpus + tests can drive it.
-  return { listArticles, upsertArticle, retrieve: (opts) => retrieve(listArticles(), opts), tenantFeatures: (eid) => tenantFeatures(db, eid) };
+  return { listArticles, upsertArticle, retrieve: (opts) => retrieve(listArticles(), opts), tenantFeatures: (eid) => tenantFeatures(db, eid), draftFromReleaseNotes };
 }
 
-module.exports = { mount: mountHelpBot, createOwlTool, HELP_SYSTEM, retrieve, tenantFeatures, terms };
+module.exports = { mount: mountHelpBot, createOwlTool, HELP_SYSTEM, HELP_DRAFT_SYSTEM, sanitizeProposals, retrieve, tenantFeatures, terms };
