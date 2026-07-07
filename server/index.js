@@ -2486,8 +2486,7 @@ require('./onboarding').mount(app, { db, auth });
 require('./setupWizard').mount(app, { db, auth });
 const chottuApi = require('./chottuLink').mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }); // ChottuLink deep links — event short links + click counts + ✨ autofill (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
 
-// PWA install tracking — records when a user opens Pulse as an installed app.
-require('./installs').mount(app, { db, auth });
+require('./installs').mount(app, { db, auth }); // PWA install tracking — opens of Pulse as an installed app
 
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
@@ -2539,7 +2538,7 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
-const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); // AI token metering (Admin → AI → Usage) + per-client custom sending domains
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); require('./journeys').mount(app, { auth, db, resolveContext: (entityId) => { const ent = db.getEntity(entityId); return { apiKey: anthropicKeyForEntity(entityId), clientName: ent?.name, clientContext: ent?.aiContext || '', instructions: aiInstructionsFor(null) }; } }); // AI usage metering + custom sending domains + Journeys Owl builder (disposable modules)
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).

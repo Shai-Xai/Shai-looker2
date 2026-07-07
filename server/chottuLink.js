@@ -80,10 +80,16 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
       PRIMARY KEY (link_id, captured_on)
     );
   `);
-  // Additive migration for databases created before the delete feature shipped.
-  if (!sql.prepare('PRAGMA table_info(chottu_links)').all().some((c) => c.name === 'archived')) {
-    sql.exec('ALTER TABLE chottu_links ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
-  }
+  // Additive migrations for databases created before these features shipped.
+  const linkCols = sql.prepare('PRAGMA table_info(chottu_links)').all().map((c) => c.name);
+  if (!linkCols.includes('archived')) sql.exec('ALTER TABLE chottu_links ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+  // Category: a Pulse-only grouping layer over the links (the Links landing shows
+  // category tiles → drill in). '' displays as the default 'App' category — every
+  // chottu link opens the Howler app, so that's every link's natural home until
+  // someone files it somewhere more specific ("Socials", "Website"…).
+  if (!linkCols.includes('category')) sql.exec("ALTER TABLE chottu_links ADD COLUMN category TEXT NOT NULL DEFAULT ''");
+  const DEFAULT_CATEGORY = 'App';
+  const cleanCategory = (v) => String(v || '').trim().replace(/\s+/g, ' ').slice(0, 40);
 
   // ── credentials: client override → platform default ──
   function configFor(entityId) {
@@ -127,6 +133,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     chottuLinkId: r.chottu_link_id, shortUrl: r.short_url, linkName: r.link_name,
     destinationUrl: r.destination_url, iosBehavior: r.ios_behavior, androidBehavior: r.android_behavior,
     utm: JSON.parse(r.utm || '{}'), social: JSON.parse(r.social || '{}'),
+    category: r.category || DEFAULT_CATEGORY,
     enabled: !!r.is_enabled, source: r.source,
     clicks: { total: r.total_clicks, last7: r.clicks_7d, last30: r.clicks_30d, at: r.stats_at || null },
     createdTime: r.created_time, modifiedTime: r.modified_time,
@@ -196,6 +203,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     const path = String(body.path || '').trim().replace(/^\//, '').slice(0, 80);
     if (path && !/^[\w-]+$/.test(path)) throw new HttpError(400, 'The short-URL path can only use letters, numbers and dashes.');
     const utm = cleanUtm(body.utm); const social = cleanSocial(body.social);
+    const category = cleanCategory(body.category);
     const ios = behavior(body.iosBehavior); const android = behavior(body.androidBehavior);
 
     const created = await chottu(cfg, 'POST', '/create-link', {
@@ -211,10 +219,10 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     const id = crypto.randomUUID();
     sql.prepare(`INSERT INTO chottu_links
         (id, entity_id, suite_id, chottu_link_id, short_url, link_name, destination_url,
-         ios_behavior, android_behavior, utm, social, is_enabled, source, created_by, created_time, modified_time)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,1,'pulse',?,?,?)`)
+         ios_behavior, android_behavior, utm, social, category, is_enabled, source, created_by, created_time, modified_time)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,'pulse',?,?,?)`)
       .run(id, entityId, suiteId, info.id || `unknown:${id}`, shortUrl, linkName, destinationUrl,
-        ios, android, JSON.stringify(utm), JSON.stringify(social), String(userEmail || ''), now(), now());
+        ios, android, JSON.stringify(utm), JSON.stringify(social), category, String(userEmail || ''), now(), now());
     learnHowlerId(suiteId, destinationUrl);
     return rowToLink(sql.prepare('SELECT * FROM chottu_links WHERE id=?').get(id));
   }
@@ -234,6 +242,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     if (body.social !== undefined) { const s = cleanSocial(body.social); local.social = JSON.stringify(s); Object.assign(patch, upstreamFields({}, s)); }
     if (Object.keys(patch).length) await chottu(configFor(entityId), 'PATCH', `/update-link/${r.chottu_link_id}`, patch);
     if (body.suiteId !== undefined) { local.suite_id = checkSuite(entityId, body.suiteId); learnHowlerId(local.suite_id, local.destination_url || r.destination_url); } // Pulse-only field — no upstream call
+    if (body.category !== undefined) local.category = cleanCategory(body.category); // Pulse-only grouping — no upstream call
     if (Object.keys(local).length) {
       local.modified_time = now();
       sql.prepare(`UPDATE chottu_links SET ${Object.keys(local).map((k) => `${k}=?`).join(', ')} WHERE id=?`)

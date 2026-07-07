@@ -63,6 +63,19 @@ function deleteUser(id) { db.deleteUser(id); invalidateUser(id); }
 
 // Seed an admin on first run so the app is usable out of the box.
 function seedAdmin() {
+  // Break-glass: with ADMIN_RESET=1 (+ ADMIN_EMAIL + ADMIN_PASSWORD), on boot
+  // CREATE that admin if missing, or RESET its password if it already exists —
+  // even when other users exist. Recovers a locked-out admin (or a fresh staging
+  // box) without needing the email reset flow (which staging disables). Runs only
+  // when explicitly asked; REMOVE ADMIN_RESET after you're back in so it doesn't
+  // reset the password on every deploy.
+  if (process.env.ADMIN_RESET === '1' && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    const email = process.env.ADMIN_EMAIL.trim().toLowerCase();
+    const existing = db.getUserByEmail(email);
+    if (existing) { db.updateUser(existing.id, { password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ADMIN_RESET: reset password for ${email}`); }
+    else { db.createUser({ email, password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ADMIN_RESET: created admin ${email}`); }
+    return;
+  }
   if (db.listUsers().length > 0) return;
   const email = process.env.ADMIN_EMAIL || 'admin@howler.local';
   // Never seed a KNOWN password in production: if ADMIN_PASSWORD is unset there,

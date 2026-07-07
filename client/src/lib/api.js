@@ -423,6 +423,7 @@ export const api = {
   createCampaignTemplate: (entityId, b) => fetch(`/api/campaign-templates/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateCampaignTemplate: (entityId, id, b) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteCampaignTemplate: (entityId, id) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'DELETE' }).then(json),
+  // Engage Links — per-client links grouped into typed categories (dual-surface)
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
@@ -703,6 +704,8 @@ export const api = {
   syncSegmentTikTok: (entityId, id) => fetch(`/api/segments/${entityId}/${id}/sync/tiktok`, { method: 'POST' }).then(json),
   actionFieldValues: (entityId, b) => fetch(`/api/actions/${entityId}/field-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  journeyRecipes: (entityId) => fetch(`/api/journeys/${entityId}/recipes`).then(json),
+  owlDraftJourney: (body) => fetch('/api/owl/act/draft-journey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   designImage: (entityId, b) => fetch(`/api/actions/${entityId}/design-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   actionTestSend: (entityId, b) => fetch(`/api/actions/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

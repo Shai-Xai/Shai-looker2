@@ -6,6 +6,7 @@ const VIEW_PATHS = {
   createLiveUpdate: '/alerts?tab=live',
   createSegment: '/engage/segments',
   draftCampaign: '/engage/campaigns',
+  draftJourney: '/engage/campaigns',
   createChottuLink: '/engage/links',
   applyChottuTemplate: '/engage/links',
 };

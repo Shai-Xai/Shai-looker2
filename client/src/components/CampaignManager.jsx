@@ -5,6 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
+import JourneyTree, { countDecisions as journeyDecisions } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -121,6 +122,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
           <ChannelChip channel={a.config?.channel} />
+          {a.config?.journey?.nodes?.length > 0 && <span title="Built as a journey with the Owl — the full branching tree lives on the Journeys tab" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#b45309', background: 'rgba(245,158,11,0.14)' }}>🧭 Journey</span>}
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
           {a.config?.source === 'owl-whatsapp' && <span title="Drafted by the Owl from a WhatsApp chat" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#1d8a4f', background: 'rgba(37,211,102,0.14)' }}>💬 via WhatsApp</span>}
           {viaBadge(a.createdVia) && a.config?.source !== 'owl-whatsapp' && <span title="Where this draft was created" style={viaChipStyle}>{viaBadge(a.createdVia).icon} via {viaBadge(a.createdVia).label}</span>}
@@ -329,6 +331,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const ta = tpl?.audience || {};        // the template's pre-resolved audience source
   const [f, setF] = useState(() => ({
     title: action?.title || (tpl ? tpl.label : ''),
+    journey: cfg.journey || null, // full branching tree when this campaign was built as a journey
     goal: cfg.goal || tp.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
     recurring: action?.recurring || false,
     channel: cfg.channel || 'email', // email | sms
@@ -472,6 +475,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
     channel: f.channel,
     campaignMode: f.campaignMode, steps: f.steps,
+    journey: f.journey || undefined, // journey campaigns: keep the full branching tree through editor saves
     dripStart: f.dripStart, freshHours: f.freshHours,
     sample: aud?.sample?.[0] || null, // a real recipient for merge-field previews (ignored on save)
     ignoreConsent: f.ignoreConsent,
@@ -1022,6 +1026,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
               ) : (
                 <div style={hintS}>Ignores when they abandoned — the drip runs forward from when each person is enrolled (step 1 now, then your delays: 2h, 4h…). Use this for an existing/old list.</div>
               )}
+            </Field>
+          )}
+
+          {isSequence && f.journey?.nodes?.length > 0 && (
+            <Field label="🧭 Journey design (the full branching tree)">
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
+                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. The steps below are the opening sequence this campaign sends today; the branches route people once the journey engine ships. To change the design, ask the Owl (it appears on the Journeys tab too).
+              </div>
+              <JourneyTree nodes={f.journey.nodes} />
             </Field>
           )}
 

@@ -89,6 +89,7 @@ ACTING (tools that DO something, not just read):
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
 - Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
 - The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
+- A multi-step automated flow with conditions over time ("email, then SMS if they don't open", "follow up non-buyers after 2 days") is a JOURNEY — call draftJourney (you author the whole branching tree, copy included), not draftCampaign (a single blast). AUDIENCE FIRST, always: the audience is the heart of a journey (it shapes tone, channels, timing and the branches), so before drafting, pin down WHO it's for. If the user didn't name an audience, ask ONE short question first — "Who should this go to — one of your saved segments, or a cohort (e.g. Spanish buyers, VIPs, lapsed customers)?" — and only author the tree once you know. Pass it as segmentName (saved segment) or filters (new cohort — auto-saved as a reusable segment on confirm, so say the segment gets saved too). In the SAME setup round (not extra rounds), also confirm what to CALL the campaign and whether it belongs to a MASTER campaign group (e.g. "part of your Bushfire 2026 launch?") — pass the name as name and the group as master; skip master silently if they say no. CONFIRM THE AUDIENCE OUT LOUD: after drafting with a new cohort, your reply MUST state the audience size from the tool's reach (e.g. "that's 87 people — 80 emailable"), say the cohort will be saved as a segment you'll find in Engage → Segments, and ask them to confirm it looks right — or offer the alternatives: a different saved segment, refined filters, or building the audience another way (the 🎯 Create segment button on any dashboard tile that lists people, or pasting/uploading a list in Engage → Segments) and then targeting that segment here by name. If reach comes back zero or missing, do NOT shrug — say the cohort matched nobody, check the field's real values (e.g. group by buyer country) and retry. The tree renders in the chat; the user taps "Create draft journey".
 - After calling createLink or applyLinkTemplate, do NOT say the link(s) exist yet. State what will be created (the short URL shape(s), tags, any warnings the tool returned) and tell the user to tap the button — the links only go live on ChottuLink when they confirm.
 - After calling draftCampaign, do NOT say it's sent or scheduled. Say you've DRAFTED the campaign, give the audience (size + reach) and the subject line, and tell them to tap "Create draft campaign" then review, approve and send it in Engage — you never send anything to customers. If it returns ok:false, relay why.
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
@@ -889,6 +890,51 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const r = actionsApi.createDraftCampaign({ entityId, title: name, config, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the campaign.' });
     res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
+  });
+
+  // POST /api/owl/act/draft-journey — the user tapping "Create draft journey" on the
+  // chat's journey tree card. Mirrors draft-campaign: a NEW chat cohort is SAVED as a
+  // reusable segment first (so the audience exists visibly in Engage), then the
+  // journey's opening (pre-decision) sequence lands as a DRAFT sequence campaign a
+  // human finishes and approves. Permission is re-checked in createDraftCampaign.
+  app.post('/api/owl/act/draft-journey', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const journeys = require('./journeys');
+    const { entityId, suiteId, audienceName, master } = req.body || {};
+    let { audience } = req.body || {};
+    let journey;
+    try { journey = journeys.validateJourney(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+    if (!entityId) return res.status(400).json({ error: 'entityId is required.' });
+    const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
+    if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
+    let savedSegment = null; // set when a new chat cohort is persisted as a segment below
+    if (audience && audience.mode === 'query') {
+      const cat = getOwlTools().catalogue;
+      if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) {
+        return res.status(400).json({ error: "I can only build an audience from your ticket data, not this dashboard's own data." });
+      }
+      const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      if (segmentsApi && segmentsApi.createSegment) {
+        const segName = String(audienceName || journey.name || 'Journey audience').slice(0, 120);
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '', via: 'owl' });
+        if (sr.ok) { audience = { mode: 'segment', segmentId: sr.segment.id }; savedSegment = { id: sr.segment.id, name: sr.segment.name }; } // reference the saved segment
+      }
+    }
+    const steps = journeys.openingSteps(journey.nodes).map((s) => ({ delayHours: s.delayHours, subject: s.subject, body: s.body, ctaText: s.ctaText }));
+    const chans = [...new Set(journeys.openingSteps(journey.nodes).map((s) => s.channel))];
+    const config = {
+      channel: chans.length > 1 ? 'both' : (chans[0] || 'email'),
+      audience: audience || {}, campaignMode: 'sequence', dripStart: 'send', steps,
+      subject: steps[0]?.subject || journey.name, body: steps[0]?.body || '', ctaText: steps[0]?.ctaText || '',
+      goal: journey.goal, eventSuiteId: String(suiteId || ''),
+      master: String(master || '').slice(0, 80), // optional master-campaign group (user's call)
+      // Persist the FULL branching tree — the Journeys page lists drafts by it,
+      // and the branch-execution engine will run it. Steps above are the opening.
+      journey: { name: journey.name, goal: journey.goal, summary: journey.summary, nodes: journey.nodes },
+    };
+    const r = actionsApi.createDraftCampaign({ entityId, title: journey.name, config, user: req.user, via: 'owl' });
+    if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the journey.' });
+    res.status(201).json({ ok: true, journey: { id: r.action.id, title: r.action.title }, segment: savedSegment, url: actionViewPath('draftJourney') });
   });
 
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js

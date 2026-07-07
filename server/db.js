@@ -1514,35 +1514,11 @@ function updateDocument(id, patch) {
 }
 function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHERE id=?').run(id).changes > 0; }
 
-// ─── Full backup / restore (export to JSON, import to replace) ────────────────
-// alerts/live_pulses (+ children) added so the JSON backup round-trips a client's watchers too (tableExists guards keep it safe if a module is absent).
-const EXPORT_TABLES =['entities', 'users', 'user_entities', 'sets', 'set_dashboards', 'suites', 'suite_sets', 'dashboards', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks', 'alerts', 'alert_events', 'live_pulses', 'live_pulse_runs'];
-function exportAll() {
-  const out = { _version: 1, exportedAt: now() };
-  for (const t of EXPORT_TABLES) out[t] = tableExists(t) ? db.prepare(`SELECT * FROM ${t}`).all() : [];
-  return out;
-}
-function insertRow(name, row) {
-  const valid = new Set(db.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name));
-  const cols = Object.keys(row).filter((c) => valid.has(c));
-  if (!cols.length) return;
-  const sql = `INSERT OR REPLACE INTO ${name} (${cols.map((c) => `"${c}"`).join(',')}) VALUES (${cols.map(() => '?').join(',')})`;
-  db.prepare(sql).run(...cols.map((c) => row[c]));
-}
-// Replace ALL data with the contents of an export. Deletes children first
-// (FK-safe), then inserts parents first.
-const importAll = db.transaction((data) => {
-  const delOrder = ['alert_events', 'live_pulse_runs', 'alerts', 'live_pulses', 'user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks', 'user_entities', 'suite_sets', 'set_dashboards', 'suites', 'sets', 'dashboards', 'users', 'settlements', 'event_documents', 'entities', 'settings', 'tile_library'];
-  const insOrder = ['entities', 'dashboards', 'users', 'sets', 'suites', 'set_dashboards', 'suite_sets', 'user_entities', 'settings', 'tile_library', 'settlements', 'event_documents', 'user_views', 'user_actions', 'user_prefs', 'tile_marks', 'briefing_feedback', 'share_links', 'os_threads', 'os_messages', 'os_receipts', 'scheduled_jobs', 'actions', 'action_suppressions', 'action_clicks', 'alerts', 'alert_events', 'live_pulses', 'live_pulse_runs'];
-  for (const t of delOrder) { if (tableExists(t)) db.prepare(`DELETE FROM ${t}`).run(); }
-  let counts = {};
-  for (const t of insOrder) {
-    if (!Array.isArray(data[t])) continue;
-    for (const row of data[t]) insertRow(t, row);
-    counts[t] = data[t].length;
-  }
-  return counts;
-});
+// Full backup / restore (export whole DB to JSON, import to replace) lives in
+// its own module — a factory over this db handle. See server/transfer.js.
+// (Kept over main's inline table list: transfer.js enumerates every table from
+// sqlite_master, so the backup stays complete as new feature tables are added.)
+const { exportAll, importAll } = require('./transfer')(db, now);
 
 module.exports = {
   db,
