@@ -149,7 +149,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'approved', 'rejected', 'declined'];
   const STATUS_LABELS = {
     inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress',
-    staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined',
+    staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Live 🚀', rejected: 'Rejected — reopen', declined: 'Declined',
   };
   const clamp = (s, n) => String(s || '').slice(0, n);
 
