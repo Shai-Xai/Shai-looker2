@@ -14,9 +14,9 @@ const URGENCY_STYLE = {
   normal: { color: 'var(--muted)', background: 'rgba(128,128,128,0.12)' },
   low: { color: 'var(--muted)', background: 'rgba(128,128,128,0.08)' },
 };
-const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'rejected', 'approved'];
-const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'approved', 'rejected', 'declined'];
-const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
+const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'rejected', 'approved'];
+const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'approved', 'rejected', 'declined'];
+const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
 
 export default function TicketBoard() {
   const isMobile = useIsMobile();
@@ -111,13 +111,15 @@ function GithubConfig() {
   const [repo, setRepo] = useState('');
   const [token, setToken] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
+  const [stagingBranch, setStagingBranch] = useState('');
+  const [prodBranch, setProdBranch] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); }).catch(() => {});
+  const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); setStagingBranch(c.stagingBranch || 'staging'); setProdBranch(c.prodBranch || 'main'); }).catch(() => {});
   useEffect(() => { refresh(); }, []);
   async function save() {
     setBusy(true); setMsg('');
-    try { const c = await api.saveGithubConfig({ repo, ...(token ? { token } : {}) }); setCfg(c); setToken(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); }
+    try { const c = await api.saveGithubConfig({ repo, stagingBranch, prodBranch, ...(token ? { token } : {}) }); setCfg(c); setToken(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   }
   if (!cfg) return null;
@@ -135,8 +137,20 @@ function GithubConfig() {
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 7, maxWidth: 460 }}>
           <label style={ctlLbl}>Repository (owner/name)</label>
           <input className="fld" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo" />
-          <label style={ctlLbl}>Access token {cfg.tokenSet ? `(set: ${cfg.tokenMask} — blank keeps it)` : '(fine-grained PAT · Issues: write)'}</label>
+          <label style={ctlLbl}>Access token {cfg.tokenSet ? `(set: ${cfg.tokenMask} — blank keeps it)` : '(fine-grained PAT · Issues + Pull requests: write)'}</label>
           <input className="fld" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={cfg.tokenSet ? '•••• leave blank to keep' : 'github_pat_…'} autoComplete="off" />
+          {/* Two-environment deploy: staging branch → staging server; production branch → live. */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 150 }}>
+              <label style={ctlLbl}>Staging branch (→ staging server)</label>
+              <input className="fld" value={stagingBranch} onChange={(e) => setStagingBranch(e.target.value)} placeholder="staging" style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 150 }}>
+              <label style={ctlLbl}>Production branch (→ live)</label>
+              <input className="fld" value={prodBranch} onChange={(e) => setProdBranch(e.target.value)} placeholder="main" style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>Tickets sent to <b>staging</b> get a PR against the staging branch (it deploys to the staging server to test); <b>Promote to production</b> opens a release PR merging staging → production.</p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             {cfg.tokenSet && <button onClick={async () => { await api.saveGithubConfig({ clearToken: true }); refresh(); }} style={miniBtn}>Remove token</button>}
@@ -213,6 +227,7 @@ function TicketDetail({ id, onClose, onChange }) {
   const [copied, setCopied] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
+  const [target, setTarget] = useState('staging'); // where "Send to GitHub" builds it
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
@@ -251,11 +266,20 @@ function TicketDetail({ id, onClose, onChange }) {
   async function sendToGithub(mode) {
     setBusy(mode === 'plan' ? 'plan' : 'gh'); setErr('');
     try {
-      const r = await api.adminTicketGithubIssue(id, mode);
+      const r = await api.adminTicketGithubIssue(id, mode, target);
       if (r.needsConfig) {
         if (r.prefillUrl) window.open(r.prefillUrl, '_blank', 'noopener');
         else setErr('Set a GitHub repo in the GitHub panel (top of the board) to link issues.');
       } else { await load(); onChange?.(); }
+    } catch (e) { setErr(e.message); } finally { setBusy(''); }
+  }
+  async function promote() {
+    if (!window.confirm('Promote to production?\n\nThis opens a release PR that merges the staging branch into production. Merging it ships EVERY ticket currently on staging — not just this one.')) return;
+    setBusy('promote'); setErr('');
+    try {
+      const r = await api.adminPromoteTicket(id);
+      if (r.nothingToPromote) setErr('Nothing to promote — staging matches production already.');
+      else if (r.releasePr?.url) { window.open(r.releasePr.url, '_blank', 'noopener'); await load(); onChange?.(); }
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
   async function del() {
@@ -395,19 +419,42 @@ function TicketDetail({ id, onClose, onChange }) {
               )}
             </Section>
 
-            {/* Hand-off: copy the brief, or file it as a GitHub issue */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '4px 0 16px' }}>
+            {/* Hand-off: pick where it builds (staging vs production), then copy the
+                brief or file it as a GitHub issue. Once on staging + verified, promote. */}
+            {!t.githubUrl && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '4px 0 8px' }}>
+                <span style={ctlLbl}>Build into</span>
+                <div style={{ display: 'inline-flex', border: '1px solid var(--hairline)', borderRadius: 8, overflow: 'hidden' }}>
+                  {[['staging', '🧪 Staging (test first)'], ['production', '🚀 Production (live)']].map(([v, lbl]) => (
+                    <button key={v} onClick={() => setTarget(v)} style={{
+                      padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                      background: target === v ? 'var(--brand)' : 'transparent', color: target === v ? '#fff' : 'var(--text)',
+                    }}>{lbl}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '0 0 16px' }}>
               <button onClick={copyBrief} style={primaryBtn}>{copied ? '✓ Copied build brief' : '📋 Copy for Claude'}</button>
               {t.githubUrl ? (
-                <a href={t.githubUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🐙 Issue #{t.githubIssue} ↗</a>
+                <a href={t.githubUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🐙 Issue #{t.githubIssue} · {t.target === 'production' ? '🚀 prod' : '🧪 staging'} ↗</a>
               ) : (
                 <>
-                  <button onClick={() => sendToGithub()} disabled={!!busy} style={ghBtn}>{busy === 'gh' ? 'Creating…' : '🐙 Send to GitHub'}</button>
+                  <button onClick={() => sendToGithub()} disabled={!!busy} style={ghBtn}>{busy === 'gh' ? 'Creating…' : `🐙 Send to ${target === 'production' ? 'production' : 'staging'}`}</button>
                   <button onClick={() => sendToGithub('plan')} disabled={!!busy} style={ghBtn} title="Claude posts an implementation plan + questions first and waits for your go-ahead — good for big/fuzzy tickets">{busy === 'plan' ? 'Creating…' : '🧭 Plan with Claude first'}</button>
                 </>
               )}
               {t.prUrl && <a href={t.prUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🔀 PR #{t.prNumber} ↗</a>}
             </div>
+
+            {/* On staging → verified → promote. Release-train: ships everything on staging. */}
+            {t.status === 'staging' && (
+              <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.06)', border: '1px solid var(--hairline)' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🧪 On staging — verify, then promote</div>
+                <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>Test it on the staging server. When it's good, promote to production — this opens a release PR that ships <b>everything</b> currently on staging.</p>
+                <button onClick={promote} disabled={busy === 'promote'} style={primaryBtn}>{busy === 'promote' ? 'Opening release…' : '🚀 Promote to production'}</button>
+              </div>
+            )}
 
             {/* Ship to the reporter: the overview + test link that ride the "Shipped"
                 notification. Fill these, then set Status → Shipped to send it. */}

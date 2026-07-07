@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (🦉 Owl product help: ask the Owl how-to / what's new — grounded in published release notes + curated knowledge) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (test-first staging → production releases) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -850,6 +850,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
+  can now be built to a **staging** environment first, checked there, then **promoted to
+  production** — so changes are verified before they hit the live app. In your **My reports**
+  view a new **Testing** step appears in the journey (Building → Testing → Ready for you), and
+  you're notified when your request is previewing on staging and again when it goes live.
 - **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
   answers product questions — *how do I…*, *what's new*, *what can I do* — right in
   Owl chat, grounded in a curated, **versioned knowledge base** (editable with no

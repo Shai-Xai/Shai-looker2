@@ -22,6 +22,7 @@ const JOURNEY = [
   ['triaged', 'Reviewing'],
   ['accepted', 'Accepted'],
   ['in_progress', 'Building'],
+  ['staging', 'Testing'],
   ['shipped', 'Ready for you'],
   ['approved', 'Done'],
 ];
