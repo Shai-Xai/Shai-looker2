@@ -52,6 +52,10 @@ export default function ViewPage() {
   const [daysToGo, setDaysToGo] = useState(null);           // live days-before-event (from the source tile)
   const [refreshKey, setRefreshKey] = useState(0);          // bump → all tiles re-fetch live (cache-bypassing)
   const refreshNow = () => setRefreshKey((k) => k + 1);
+  // One button does it all: admins also wipe the server's query cache first, so
+  // "Refresh" is always the clean-slate pull; clients refresh live (per-tile
+  // cache-busted) without the platform-wide wipe.
+  const hardRefresh = async () => { if (isAdmin) { try { await api.clearQueryCache(); } catch { /* refresh regardless */ } } refreshNow(); };
   const [softKey, setSoftKey] = useState(0);                // bump → silent, cache-friendly re-fetch (focus/interval)
 
   // Build filter values from the dashboard defaults + suite locks, with an
@@ -351,7 +355,7 @@ export default function ViewPage() {
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
             {hasTiles && !isMobile && (
-              <button className="btn-key no-print" style={summaryBtn} onClick={refreshNow} title="Refresh — pull the latest data now (bypasses cache)" aria-label="Refresh data">↻ Refresh</button>
+              <button className="btn-key no-print" style={summaryBtn} onClick={hardRefresh} title={isAdmin ? 'Refresh — clear the server cache and pull everything live' : 'Refresh — pull the latest data now (bypasses cache)'} aria-label="Refresh data">↻ Refresh</button>
             )}
             {canSummarize && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
@@ -389,7 +393,7 @@ export default function ViewPage() {
               <button className="btn-key" style={iconAction} onClick={() => setSummaryOpen(true)} title="AI summary" aria-label="AI summary"><AiMark size={20} /></button>
             )}
             {/* Filters now live inside the ⋯ menu alongside Share / Download PDF. */}
-            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} onRefresh={refreshNow} />
+            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} onRefresh={hardRefresh} />
           </>,
           actionsSlot
         )}

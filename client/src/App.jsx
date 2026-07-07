@@ -21,6 +21,7 @@ import MyReportsPage from './pages/MyReportsPage.jsx';
 // bundle — they load on first navigation (and clients never download the admin +
 // editor surfaces at all). The common client path stays eager for instant paint.
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const SplitPage = lazy(() => import('./pages/SplitPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
 const ClonePage = lazy(() => import('./pages/ClonePage.jsx'));
 const EngagePage = lazy(() => import('./pages/EngagePage.jsx'));
@@ -104,10 +105,14 @@ function Header() {
           account actions live in the sidebar's bottom-left profile menu. */}
       {isAdmin && !inClientView ? (
         // On the desktop Admin console these controls live in the left rail's
-        // bottom profile menu, so drop them from the top bar there. Elsewhere
-        // (Dashboards, editor) and on mobile, keep them in the top bar.
-        (!isMobile && location.pathname === '/admin') ? null : (
+        // bottom profile menu, so drop them from the top bar there (keep Split —
+        // it has no rail equivalent). Elsewhere (Dashboards, editor) and on
+        // mobile, keep them in the top bar.
+        (!isMobile && location.pathname === '/admin') ? (
+          window.self === window.top && <button onClick={() => navigate('/split')} title="Admin + client portal side by side" style={navLink}>⿲ Split view</button>
+        ) : (
         <>
+          {!isMobile && window.self === window.top && <button onClick={() => navigate('/split')} title="Admin + client portal side by side" style={navLink}>⿲ Split</button>}
           <Link to="/admin" style={navLink}>Admin</Link>
           <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
           {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
@@ -116,6 +121,15 @@ function Header() {
         )
       ) : inClientView && (
         <>
+          {/* Admin in a client experience: one-click back doors to the backend —
+              no profile switching. Hidden inside split panes (window.top check)
+              where they'd nest views. */}
+          {isAdmin && window.self === window.top && (
+            <>
+              <button onClick={goConsole} title="Open the Howler admin console" style={navLink}>🛠 {isMobile ? '' : 'Howler Admin'}</button>
+              {!isMobile && <button onClick={() => { enterConsole(); navigate('/split'); }} title="Admin + client portal side by side" style={navLink}>⿲ Split</button>}
+            </>
+          )}
           <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
             <Logo size={22} radius={6} />
             {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
@@ -280,6 +294,8 @@ function Shell() {
               <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
               <Route path="/clone" element={<ClonePage />} />
               <Route path="/admin" element={<AdminPage />} />
+              {/* Admin + client portal side by side (desktop). */}
+              <Route path="/split" element={<SplitPage />} />
               {/* Preview the client experience without logging in as them. */}
               <Route element={<ClientLayout />}>
                 <Route path="/preview" element={<ClientHome />} />

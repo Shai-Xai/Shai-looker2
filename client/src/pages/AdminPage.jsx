@@ -9,9 +9,11 @@ import { useProfile } from '../lib/profile.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
 import MailLogView from '../components/MailLogView.jsx';
+import SendingDomainCard from '../components/SendingDomainCard.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
+import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -19,6 +21,7 @@ import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
+import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
@@ -28,6 +31,7 @@ import OwlMemoryEditor from '../components/OwlMemoryEditor.jsx';
 import WhatsAppOwl from '../components/WhatsAppOwl.jsx';
 import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
+import SkillsAdmin, { SkillDefaultsEditor } from '../components/SkillsAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
@@ -147,6 +151,7 @@ const ADMIN_NAV = [
   ['integrations', 'Integrations', '🔌'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
+  ['datahealth', 'Data health', '📡'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
@@ -171,6 +176,7 @@ export default function AdminPage() {
       {tab === 'integrations' && <AdminIntegrations />}
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
+      {tab === 'datahealth' && <DataHealthAdmin />}
       {tab === 'product' && <Product />}
       {tab === 'backup' && <BackupRestore />}
     </>
@@ -1214,7 +1220,7 @@ function SetupWizard({ fields }) {
               <div style={{ marginTop: 6 }}><LogoPicker value={logo} onChange={setLogo} /></div>
             </div>
             {entity
-              ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /></>
+              ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /><div data-tour="client-sending-domain" style={{ marginTop: 12 }}><L>Custom sending domain · optional</L><div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div></div></>
               : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
@@ -1334,6 +1340,7 @@ const CLIENT_TOUR = [
   { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
   { tour: 'client-loginbg', icon: '🖼️', title: 'Login background image', body: 'Upload a full-screen background for that vanity login page. A dark scrim is added automatically so the sign-in card stays readable.' },
+  { tour: 'client-sending-domain', icon: '✉️', title: 'Custom sending domain (optional)', body: 'Let this client send campaigns and digests from THEIR own domain (e.g. events@mail.brand.com). Enter the domain, hand the DNS records to their IT, then Verify — until it verifies, emails safely keep sending from the platform address. Clients can also set this up themselves under Settings → Email.' },
 ];
 const SCOPE_TOUR = [
   { tour: 'scope-org', icon: '🔒', title: 'Pick their organiser', body: 'Choose the organiser(s) this client owns. Every dashboard is then force-filtered to only their data on the server — this is what keeps clients apart.' },
@@ -2691,7 +2698,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2706,6 +2713,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
           {section === 'checklist' && <ClientSetupChecklist entity={entity} suites={suites} users={users} allUsers={allUsers} go={goSection} preview={previewAccount} />}
           {section === 'settings' && <ClientSettings entity={entity} suites={suites} fields={fields} onChange={onChange} onBack={onBack} />}
           {section === 'fanowl' && showFanOwl && <div style={cardStyle}><FanOwlAdmin scope="admin-client" entityId={entity.id} /></div>}
+          {section === 'skills' && <div style={cardStyle}><SkillsAdmin entityId={entity.id} suites={suites} /></div>}
           {section === 'suites' && <ClientSuites entity={entity} suites={suites} allEntities={allEntities} allSets={allSets} dashTitle={dashTitle} fields={fields} onChange={onChange} />}
           {section === 'sets' && <CustomSets entity={entity} />}
           {section === 'briefing' && (
@@ -3032,6 +3040,10 @@ function ClientSettings({ entity, suites, fields, onChange, onBack }) {
       <CurrencyField entityId={entity.id} />
       <LanguageField entityId={entity.id} />
       <AudienceCapField entityId={entity.id} />
+      <div style={{ marginTop: 14 }}>
+        <L>Custom sending domain</L>
+        <div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div>
+      </div>
       <SlugField entityId={entity.id} />
       <LoginBackgroundField entityId={entity.id} />
       <SaveRow onSave={save} saved={saved} id={entity.id} />
@@ -4349,6 +4361,9 @@ function AISettings() {
         <p style={hint}>Steers the agentic Owl (the data chat assistant) — how it should read your data: which measure to use, how to split add-ons, what “revenue”/“today” mean. Separate from the instructions above (which drive tile insights & briefings). Takes effect immediately.</p>
         <OwlGuidanceEditor scope="global" />
       </Section>
+      <Section title="Skill playbooks (platform defaults)">
+        <SkillDefaultsEditor />
+      </Section>
       <Section title="Owl field dictionary">
         <OwlFieldDictionary />
       </Section>
@@ -5061,6 +5076,7 @@ function ClientIntegrations({ entity }) {
         onSave={async (p) => setValue(await api.saveEntityIntegrations(entity.id, p))}
       />
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
+      <MetaConnectCard entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );

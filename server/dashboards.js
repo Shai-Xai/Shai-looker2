@@ -14,8 +14,27 @@ const fx = require('./filterExpression'); // combined-field OR → Looker filter
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
 }) {
+// Admin: hard-wipe the server's query cache (all dashboards). The client's
+// "Clear cache" refresh calls this first, then re-fetches its tiles live.
+app.post('/api/admin/clear-query-cache', auth.requireAdmin, (req, res) => {
+  res.json({ cleared: clearCache ? clearCache() : 0 });
+});
+// Per-user, per-tile chart zoom ("show the last N points") — a PERSONAL view
+// preference stored in user_prefs so it follows the user across devices, and
+// never changes what anyone else sees.
+app.get('/api/my/tile-zoom/:dashboardId', auth.requireAuth, (req, res) => {
+  let zoom = {}; try { zoom = JSON.parse(db.getUserPref(req.user.id, `tile_zoom:${String(req.params.dashboardId).slice(0, 80)}`) || '{}'); } catch { zoom = {}; }
+  res.json({ zoom });
+});
+app.put('/api/my/tile-zoom/:dashboardId', auth.requireAuth, (req, res) => {
+  const raw = (req.body || {}).zoom || {};
+  const zoom = {};
+  for (const [k, v] of Object.entries(raw).slice(0, 200)) { const n = parseInt(v, 10); if (Number.isFinite(n) && n > 0 && n <= 3650) zoom[String(k).slice(0, 80)] = n; }
+  db.setUserPref(req.user.id, `tile_zoom:${String(req.params.dashboardId).slice(0, 80)}`, JSON.stringify(zoom));
+  res.json({ zoom });
+});
 app.get('/api/dashboards', auth.requireAuth, (req, res) => {
   res.json(store.list().filter((d) => auth.canAccessDashboard(req.user, d)));
 });

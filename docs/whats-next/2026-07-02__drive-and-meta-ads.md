@@ -45,6 +45,24 @@ Full suite green throughout; client build green; server smoke-booted clean.
 Sales overview updated (new "Owl reads your Google Drive" + "5f Paid ads"
 sections + changelog); roadmap 4.8/4.9 statuses updated.
 
+## Addendum (later same day): one-click OAuth shipped for both
+
+- **Google:** `Connect with Google` — OAuth (`drive.file`, non-sensitive → no
+  Google review) + the **Google Picker** in `DriveSourcesCard`; refresh token
+  sealed per entity; `invalid_grant` → Reconnect state; SA path kept as
+  fallback. New shared `server/oauthState.js` (signed, TTL'd state).
+- **Meta:** `server/metaConnect.js` + `MetaConnectCard` — "Continue with
+  Facebook" → short→long token exchange (~60 days interim), ad-account picker
+  (auto-pick when one), writes the SAME `metaAccessToken`/`metaAdAccountId`
+  fields so meta.js + metaAds.js work unchanged; expiry + reconnect surfaced.
+- Platform setup steps documented in `docs/DRIVE_META_SETUP.md` §0 (Google
+  OAuth client + API key; Meta app redirect URI + id/secret env vars).
+- 5 new tests (`test/oauthConnect.test.js`); suite 432 green.
+- **Verify-live checklist for the picker flow:** confirm folder children sync
+  under `drive.file` when a FOLDER is picked (Google's per-file grant model —
+  if children 404, fall back to picking files individually or the SA path);
+  confirm the Picker loads with the restricted API key.
+
 ## What's next (this thread)
 
 1. **Live verification (the gating step for both):**

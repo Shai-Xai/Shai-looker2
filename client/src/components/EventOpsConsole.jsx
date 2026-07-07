@@ -10,6 +10,9 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // service, /event-ops). Access is enforced server-side; the only scope difference here is
 // copy. All writes go through the suite-scoped /api/eventops routes (see server/eventops.js).
 const EventOpsScanner = lazy(() => import('./EventOpsScanner.jsx'));
+// 📶 Data health tab: read-only stream monitors for this entity/event — lazy so
+// the console doesn't pay for the Data health module until the tab is opened.
+const DataHealthOps = lazy(() => import('./DataHealthAdmin.jsx').then((m) => ({ default: m.DataHealthOps })));
 
 const STATE_LABEL = { in_stock: 'Hive', deployed: 'Deployed', returned: 'Returned', lost: 'Lost', damaged: 'Damaged' };
 const STATE_ORDER = ['deployed', 'in_stock', 'returned', 'lost', 'damaged'];
@@ -18,7 +21,7 @@ const STATION_KINDS = ['bar', 'gate', 'booth', 'topup', 'vendor', 'other'];
 const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', vendor: '🍔', other: '📍' };
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
-const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity'], ['health', '📶', 'Data health']];
 // Quick-pick resolutions (staff can also type a custom comment).
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 
@@ -114,6 +117,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           {suiteId && tab === 'checks' && <ChecksTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
+          {suiteId && tab === 'health' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Loading data health…</div>}><DataHealthOps entityId={entityId} suiteId={suiteId} /></Suspense>}
         </div>
       </div>
 
