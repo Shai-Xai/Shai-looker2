@@ -988,6 +988,7 @@ function ActionCard({ action, suiteId }) {
 function JourneyActionCard({ action, suiteId }) {
   const [state, setState] = useState('');
   const [err, setErr] = useState('');
+  const [savedSeg, setSavedSeg] = useState(null);
   const decisions = countDecisions(action.nodes);
   // Broadcast the draft so the Engage → Journeys page (the live canvas) renders
   // the tree full-size in the main body while the chat stays the assistant.
@@ -1001,7 +1002,7 @@ function JourneyActionCard({ action, suiteId }) {
     setState('busy'); setErr('');
     // The server saves a new chat cohort as a reusable segment first, then creates
     // the draft sequence campaign — same auto-save behaviour as draftCampaign.
-    try { await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName, master: action.master || undefined }); setState('done'); }
+    try { const r = await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName, master: action.master || undefined }); setSavedSeg(r?.segment || null); setState('done'); }
     catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
   };
   return (
@@ -1018,7 +1019,7 @@ function JourneyActionCard({ action, suiteId }) {
       <JourneyTree nodes={action.nodes} />
       {state === 'done' ? (
         <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>
-          ✓ Draft created — finish the audience and approve it in Campaigns.
+          ✓ Draft created{savedSeg ? <> — audience saved as segment “{savedSeg.name}”<ViewLink url="/engage/segments" label="Segments →" /></> : ' — finish the audience and approve it in Campaigns.'}
           <ViewLink url="/engage/campaigns" label="Open Campaigns →" />
         </div>
       ) : (
