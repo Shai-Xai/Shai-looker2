@@ -113,9 +113,19 @@ Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
 wizard automatically; the tour copy is the part that still needs a manual update.
 
 ## Git
-- **`main` is the single source of truth** — Render deploys from it, and ALL
-  work ships there. Develop on the assigned `claude/*` branch; push to it AND
-  to `main` (`git push -u origin <branch> && git push origin <branch>:main`).
-  If `main` has moved, fetch + rebase onto `origin/main` before pushing.
-- No other branch needs syncing. (The old rule about mirroring to the Ecstatic
-  session's branch is retired — that session ships to `main` like everyone else.)
+- **`main` is production's source of truth** — the production Render service
+  deploys from it, and interactive session work ships there. Develop on the
+  assigned `claude/*` branch; push to it AND to `main`
+  (`git push -u origin <branch> && git push origin <branch>:main`). If `main`
+  has moved, fetch + rebase onto `origin/main` before pushing.
+- **Two-environment deploy (product board tickets).** A `staging` branch feeds
+  a separate staging Render service; `main` feeds production. When a product-board
+  ticket is dispatched to Claude for **staging**, its build brief tells you to open
+  the PR against `staging` (NOT main) — follow the brief; the ticket's target wins
+  over the "always main" default above. Merging that PR lands the ticket "on
+  staging" to verify; the admin later hits **Promote to production**, which opens a
+  release PR merging `staging` → `main` (a release train — it ships everything on
+  staging at once). Tickets dispatched to **production** still PR straight to `main`.
+  The GitHub webhook + ticket DB live on **production Pulse only** (staging is just
+  where code gets tested), so point the repo webhook at the production URL.
+- No other branch needs syncing.
