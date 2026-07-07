@@ -305,6 +305,18 @@ export const api = {
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
   adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
+  // In-app help bot (server/helpBot.js). Client self-service: config + ask. The ask
+  // carries the user's tenant/event so the answer is scoped to their role + setup;
+  // the server re-authorises whatever ids are passed (can't reach another client).
+  helpConfig: () => fetch('/api/help/config').then(json),
+  helpChat: ({ message, entityId, suiteId }) => fetch('/api/help/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, entityId, suiteId }) }).then(json),
+  // Admin — Product → Help bot: curate the versioned knowledge + availability.
+  adminHelpArticles: () => fetch('/api/admin/help/articles').then(json),
+  adminCreateHelpArticle: (a) => fetch('/api/admin/help/articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminUpdateHelpArticle: (id, a) => fetch(`/api/admin/help/articles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminDeleteHelpArticle: (id) => fetch(`/api/admin/help/articles/${id}`, { method: 'DELETE' }),
+  adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
+  adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

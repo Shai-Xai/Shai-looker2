@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (💬 Pulse Help: in-app help chatbot about the product itself — role/tenant/event aware, retrieval-grounded) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -249,6 +249,27 @@ shoulder when it's worth your time."
 
 **Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
 on top of the event without logging in."
+
+## 2b. Pulse Help — the in-app help chatbot  🧪
+- A persistent **💬 help widget** on every screen (mobile-first) that answers
+  questions about **Pulse itself** — *how do I do this*, *what's new*, *what can I
+  do with my access* — not the client's sales data (that's the Owl).
+- **Tailored to the user:** answers respect their **role** (won't walk a Viewer
+  through something only an Owner can do), their **tenant setup** and their
+  **current event** — e.g. it won't pitch cashless features to a non-cashless
+  event.
+- **"What's new"** pulls the latest, correctly-dated release notes.
+- **Deep-links** the user straight to the right screen ("open Engage →
+  Campaigns"), and **declines gracefully** when the answer isn't in its knowledge
+  — it never invents behaviour.
+- **Curated & versioned:** Howler staff maintain the knowledge in **Admin →
+  Product → 💬 Help bot** (add/edit/remove articles, tag them by role + required
+  feature, set deep-links, toggle the whole assistant on/off) — **no deploy
+  needed**. The chatbot itself is the client's self-service surface.
+
+**Pitch:** "Every user gets an always-on guide to Pulse that already knows who
+they are and what their account can do — self-serve answers instead of a support
+ticket."
 
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
@@ -769,6 +790,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **💬 Pulse Help — in-app help chatbot** 🧪 (new): a persistent,
+  mobile-first help widget on every screen that answers questions about the product
+  itself (how-to, what's new, what you can do), **grounded** in a curated,
+  **versioned knowledge base** (editable with no deploy) plus recent release notes,
+  and **tailored to the user's role, tenant and event** (e.g. omits cashless help
+  for non-cashless events). Deep-links to the right screen, and **declines** rather
+  than inventing when it doesn't know. Dual-surface: Howler curates the knowledge in
+  **Admin → Product → Help bot**; the chatbot is the client's self-service surface.
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
