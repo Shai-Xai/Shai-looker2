@@ -327,3 +327,26 @@ test('listFields surfaces hidden fields flagged so an admin can tick them', asyn
   assert.ok(hiddenRow, 'hidden dimension is listed');
   assert.equal(hiddenRow.hidden, true, 'and flagged as hidden');
 });
+
+test('demographic note steers to same-view measures when they exist, warns when not', () => {
+  const db = fakeDb();
+  cat.registerExplore(db, { model: 'combined', view: 'cashless_x', label: 'Cashless' });
+  // Same-view money measure available → steer there (single-view query, no heavy join).
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
+    { name: 'cashless_x_cust.avg_credit_spent', label: 'Avg Spend Per Head', kind: 'measure', type: 'number' },
+    { name: 'cashless_x_sales.revenue', label: 'Sales Revenue', kind: 'measure', type: 'number' },
+    { name: 'cashless_x_cust.country_of_birth', label: 'Country Of Birth', kind: 'dimension', type: 'string' },
+  ] }));
+  let note = (cat.effective(db).extras[0].notes || []).join(' ');
+  assert.ok(/DEMOGRAPHIC QUESTIONS/.test(note), 'demographic guidance present');
+  assert.ok(/cashless_x_cust\.avg_credit_spent/.test(note), 'names the same-view measure');
+  assert.ok(/times out/i.test(note), 'warns about the heavy-join trap');
+  // No same-view measure → honest warning + narrow guidance instead.
+  db.setSetting('owl_catalogue_expfields', JSON.stringify({ [KEY]: [
+    { name: 'cashless_x_sales.revenue', label: 'Sales Revenue', kind: 'measure', type: 'number' },
+    { name: 'cashless_x_cust.country_of_birth', label: 'Country Of Birth', kind: 'dimension', type: 'string' },
+  ] }));
+  note = (cat.effective(db).extras[0].notes || []).join(' ');
+  assert.ok(/TIME OUT/i.test(note), 'warns the cut can time out');
+  assert.ok(/auto-chunks/.test(note), 'mentions the chunked fallback');
+});

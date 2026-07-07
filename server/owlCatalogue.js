@@ -145,6 +145,21 @@ function effective(db) {
         exNotes.push(`TIME-FILTERED CHECK-INS ("today", "per hour", "since gates opened"): filter/group ${ciDate.name}${ciCreated ? " — the scan's created-at timestamp, present on every row" : ''}${others.length ? `. Do NOT time-filter on ${others.join(' or ')} — ${others.length > 1 ? 'they are' : 'it is'} sparsely populated and undercounts massively` : ''}. Sanity-check: also run the SAME count without the time filter; if the time-filtered figure is far below the total, report both and say some scans lack that timestamp — never present a time-filtered check-in count alone as the day's attendance.`);
       }
     }
+    // Demographic questions (spend by country/age/gender…) — the heavy-join trap
+    // caught live: pairing a sales line-item measure with a buyer demographic joins
+    // every sale to every buyer and TIMES OUT. When the demographic's own view has a
+    // money/count measure, steer there (single-view = fast); otherwise warn + rely on
+    // the tool's automatic chunking.
+    const demo = ds.filter((d) => /countr|nationalit|birth|\bage\b|age_?band|gender|city|region|language/i.test(`${d.name} ${d.label}`));
+    if (demo.length) {
+      const demoViews = new Set(demo.map((d) => String(d.name).split('.')[0]));
+      const sameViewMoney = ms.filter((m) => demoViews.has(String(m.name).split('.')[0]) && /spend|amount|credit|total|sum|avg|value|revenue|count/i.test(`${m.name} ${m.label}`));
+      if (sameViewMoney.length) {
+        exNotes.push(`DEMOGRAPHIC QUESTIONS (by ${demo.slice(0, 3).map((d) => d.label).join(' / ')}…): use a measure from the demographic's OWN view — ${sameViewMoney.slice(0, 3).map((m) => m.name).join(', ')} — grouped by the demographic field. Do NOT pair a sales line-item measure with a demographic dimension: that joins every sale to every buyer and times out.`);
+      } else {
+        exNotes.push(`DEMOGRAPHIC breakdowns here require joining every sale to the buyer and can TIME OUT. Ask narrower (specific countries, top values) — the tool auto-chunks when it can, but same-view measures for this demographic aren't enabled in the catalogue.`);
+      }
+    }
     return { model: e.model, explore: e.view, label: e.label, measures: ms, dimensions: ds, dateDimension: dateDim ? dateDim.name : '', notes: exNotes };
   }).filter(Boolean);
   // NB: no global "you also have these sources" note here — each extra explore's tool
