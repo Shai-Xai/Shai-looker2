@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🔗 Links: a new Engage → Links tab that groups a client's useful links into typed categories, seeded with App → Chotulink) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -410,6 +410,20 @@ new to set up).
 **Pitch:** "Your ad account and your ticket data finally in one place — see the
 spend, the return, and ask the Owl which campaign is worth more budget."
 
+### 5g. Links — useful links, grouped by category  ✅
+A tidy home for a client's useful links (their app, dashboards, docs, socials…),
+grouped into **typed categories** so a growing list stays easy to navigate.
+- **Landing shows category tiles** (Engage → Links); tap one to drill into just
+  that category's links, with a clear **← All categories** back link. Mobile-first
+  (single-column tiles that stack, big tap targets).
+- Ships with an **"App"** category seeded with **Chotulink**; add your own links and
+  categories any time.
+- **Dual-surface** ✅ — a client manages their own links in Engage → Links, and
+  Howler staff can manage them on the client's behalf from the same place in preview.
+
+**Pitch:** "One tidy place for every link that matters — grouped so the right one is
+a tap away, on the phone."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client — sent from Howler's verified domain by
@@ -769,6 +783,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **🔗 Links, grouped by category** ✅ (new): a new **Engage →
+  Links** tab keeps a client's useful links in one place, grouped into typed
+  categories. Landing shows category tiles → tap to drill into that category's
+  links → clear back link. Mobile-first; ships with an **"App"** category seeded
+  with **Chotulink**. Dual-surface (client self-service + admin-on-behalf). (§5g)
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
