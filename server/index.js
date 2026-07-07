@@ -2493,7 +2493,6 @@ require('./telemetry').mount(app, { db, auth, rateLimit });
 
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });
-require('./engageLinks').mount(app, { db, auth }); // Engage → Links: per-client links in typed categories
 
 // Campaign billing — per-channel rate card (master + per-client) + cost math.
 // Mounted before the action engine so its cost helpers can be passed in.

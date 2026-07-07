@@ -424,10 +424,6 @@ export const api = {
   updateCampaignTemplate: (entityId, id, b) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteCampaignTemplate: (entityId, id) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   // Engage Links — per-client links grouped into typed categories (dual-surface)
-  listEngageLinks: (entityId) => fetch(`/api/engage-links/${entityId}`).then(json),
-  createEngageLink: (entityId, b) => fetch(`/api/engage-links/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
-  updateEngageLink: (entityId, id, b) => fetch(`/api/engage-links/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
-  deleteEngageLink: (entityId, id) => fetch(`/api/engage-links/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
