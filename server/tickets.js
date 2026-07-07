@@ -476,6 +476,38 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     }
   });
 
+  // Re-send a ticket to Claude on its EXISTING issue — the rework path. When the
+  // reporter sends work back (or a build stalled), this posts the refreshed brief
+  // (it leads with what still needs fixing) plus an @claude ask as an issue
+  // comment, so the Action rebuilds on the same thread instead of a duplicate
+  // issue. `target` may switch staging ↔ production for the rework.
+  app.post('/api/admin/tickets/:id/redispatch', auth.requireAdmin, requireOn, async (req, res) => {
+    let t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (!t.github_issue_number) return res.status(400).json({ error: 'This ticket has no GitHub issue yet — use Send to GitHub first.' });
+    if (!github?.isConfigured?.()) return res.status(400).json({ error: 'Connect GitHub (token + repo) to re-send.' });
+    const reqTarget = (req.body || {}).target;
+    const target = reqTarget === 'production' || reqTarget === 'staging' ? reqTarget : t.target;
+    if (target !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(target, now(), t.id); t = getTicket(t.id); }
+    const base = baseBranchFor(t);
+    const body = `${claudeBrief(t)}\n\n@claude please rework this ticket — the **Sent back by the reporter** section above is what still needs fixing. Open a NEW pull request against the \`${base}\` branch.`;
+    try {
+      const c = await github.createIssueComment(t.github_issue_number, body);
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Re-sent to Claude on issue #${t.github_issue_number} → ${target} (\`${base}\`): ${c.url}` });
+      // A rejected (or still-early) ticket goes back in the build queue.
+      if (['rejected', 'inbox', 'triaged'].includes(t.status)) {
+        const prev = t.status;
+        sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
+        logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[prev] || prev} → ${STATUS_LABELS.accepted} (re-sent to Claude)` });
+        notifyReporter(getTicket(t.id), prev);
+      }
+      res.json({ ticket: ticketRow(getTicket(t.id)), comment: c });
+    } catch (e) {
+      console.error('[tickets] redispatch failed:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Delete a ticket for good — its comments + attachment files too. (For clearing
   // test tickets / spam; the reporter's My-reports view drops it as well.)
   app.delete('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
