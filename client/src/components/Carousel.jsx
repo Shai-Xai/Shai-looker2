@@ -30,15 +30,26 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
   // shrink with the window) so they resize to fit the screen — on mobile too,
   // with a smaller min so several KPI cards still fit a phone instead of jumping
   // to one big card. They only scroll once they hit that min. Grid sections keep
-  // their fixed wrapping size.
-  const cardSizeStyle = (w) => {
+  // their fixed wrapping size. EXCEPT: a card whose width was hand-set with the
+  // drag handle (t.cw) is RIGID — it keeps its width (up to the full row) and the
+  // row scrolls, so a chart CAN be made wider than its equal-share slot.
+  const cardSizeStyle = (w, custom, kpi) => {
     if (isGrid) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: cardH };
     if (isMobile) {
-      // Fit 4 KPI cards across the phone width; a 5th+ scrolls into view.
-      const basis = `calc((100% - ${3 * GAP}px) / 4)`;
+      // KPI number cards fit 4 across the phone (a 5th+ scrolls into view);
+      // charts/tables would be unreadable at that size, so they get a
+      // near-full-width card each — swipe between them.
+      const basis = kpi ? `calc((100% - ${3 * GAP}px) / 4)` : '82vw';
       return { flex: `0 0 ${basis}`, width: basis, height: '100%', scrollSnapAlign: 'start' };
     }
+    if (custom) return { flex: `0 0 ${cardBasis(w)}`, width: cardBasis(w), height: '100%' };
     return { flex: `1 1 ${w}px`, minWidth: Math.min(w, 150), height: '100%' };
+  };
+  // "KPI-shaped" = a single number (or text) card — happy tiny. Anything with
+  // axes needs real width on a phone.
+  const isKpiTile = (t) => {
+    const v = t.vis?.type || '';
+    return t.type === 'text' || v === 'single_value' || v === 'single_value_period_over_period' || v.includes('bar_gauge');
   };
   // A brand insertion bar on the card we'd drop before (or the row's end).
   const dropAccent = (tid, isLast) => {
@@ -75,7 +86,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
     e.preventDefault();
     e.stopPropagation();
     const sx = e.clientX, sw = curW;
-    const mv = (ev) => onChangeTileW?.(tileId, Math.max(140, Math.min(720, Math.round((sw + (ev.clientX - sx)) / 10) * 10)));
+    const mv = (ev) => onChangeTileW?.(tileId, Math.max(140, Math.min(2000, Math.round((sw + (ev.clientX - sx)) / 10) * 10)));
     const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); document.body.style.userSelect = ''; };
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', mv);
@@ -163,7 +174,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                   key={t.id}
                   onDragOver={onCardDragOver(i)}
                   onDragEnd={() => { setDropBefore(null); setDragOver(false); }}
-                  style={{ ...cardSizeStyle(w), position: 'relative', borderRadius: 8, boxShadow: dropAccent(t.id, i === tiles.length - 1) }}
+                  style={{ ...cardSizeStyle(w, !!t.cw, isKpiTile(t)), position: 'relative', borderRadius: 8, boxShadow: dropAccent(t.id, i === tiles.length - 1) }}
                 >
                   <TileFrame
                     tile={t}
@@ -178,7 +189,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                   />
                   {/* Per-card width handle (desktop scroller only — grid/mobile size themselves). */}
                   {editable && onChangeTileW && !isGrid && !isMobile && (
-                    <div onMouseDown={startTileResize(t.id, w)} title="Drag to resize this tile" style={tileResizeHandle} />
+                    <div onMouseDown={startTileResize(t.id, w)} onDoubleClick={() => onChangeTileW(t.id, 0)} title="Drag to resize this tile (it keeps that width and the row scrolls) · double-click to reset to auto" style={tileResizeHandle} />
                   )}
                 </div>
               );

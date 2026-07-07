@@ -8,12 +8,13 @@ const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const createBriefingCache = require('../server/briefingCache');
 
-function setup({ getUser } = {}) {
+function setup({ getUser, currentSegment } = {}) {
   const sql = new Database(':memory:');
   const calls = [];
   const store = createBriefingCache({
     sql,
     getUser: getUser || ((id) => ({ id })),
+    currentSegment,
     regenerate: async (user, entityId, segment) => { calls.push([user.id, entityId, segment]); },
     log: { log() {}, error() {} },
   });
@@ -44,16 +45,27 @@ test('warm() regenerates only active+stale briefings, dedupes per (user,entity,s
   const { sql, store, calls } = setup({ getUser: (id) => (id === 'gone' ? null : { id }) });
   const now = Date.now();
   const ins = sql.prepare('INSERT INTO briefing_cache (key, payload, at, last_used) VALUES (?,?,?,?)');
-  ins.run('u1:e1:morning', '{}', now - 20 * 60e3, now - 60e3);              // active + stale → warm
-  ins.run('u1:e1:morning:overall:s1', '{}', now - 20 * 60e3, now - 60e3);  // same (u,e,seg) → deduped
+  ins.run('u1:e1:morning', '{}', now - 2 * 3600e3, now - 60e3);             // active + stale → warm
+  ins.run('u1:e1:morning:overall:s1', '{}', now - 2 * 3600e3, now - 60e3); // same (u,e,seg) → deduped
   ins.run('u2:e2:midday', '{}', now - 60e3, now - 60e3);                   // FRESH (just generated) → skip
-  ins.run('u3:e3:evening', '{}', now - 20 * 60e3, now - 48 * 3600e3);      // INACTIVE (old last_used) → skip
-  ins.run('gone:e9:morning', '{}', now - 20 * 60e3, now - 60e3);           // user no longer exists → skip
+  ins.run('u3:e3:evening', '{}', now - 2 * 3600e3, now - 48 * 3600e3);     // INACTIVE (old last_used) → skip
+  ins.run('gone:e9:morning', '{}', now - 2 * 3600e3, now - 60e3);          // user no longer exists → skip
 
   await store.warm();
 
   assert.deepEqual(calls.sort(), [['u1', 'e1', 'morning']],
     'exactly one regen: the active + stale briefing, deduped across its overall key, user present');
+});
+
+test('warm() only regenerates the CURRENT time-of-day segment (others refresh on demand)', async () => {
+  const { sql, store, calls } = setup({ currentSegment: () => 'morning' });
+  const now = Date.now();
+  const ins = sql.prepare('INSERT INTO briefing_cache (key, payload, at, last_used) VALUES (?,?,?,?)');
+  ins.run('u1:e1:morning', '{}', now - 2 * 3600e3, now - 60e3);  // current segment → warm
+  ins.run('u1:e1:midday', '{}', now - 2 * 3600e3, now - 60e3);   // other segment → skip (not burned all day)
+  ins.run('u1:e1:evening', '{}', now - 2 * 3600e3, now - 60e3);  // other segment → skip
+  await store.warm();
+  assert.deepEqual(calls, [['u1', 'e1', 'morning']], 'only the current segment was regenerated');
 });
 
 test('warm() prunes briefings unused for over 30 days', async () => {

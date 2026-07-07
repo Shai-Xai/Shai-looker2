@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (🔗 Links: a new Engage → Links tab that groups a client's useful links into typed categories, seeded with App → Chotulink) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (test-first staging → production releases) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -68,6 +68,12 @@ longer they use Pulse, the better it gets."
 - **Live dashboards** — KPIs, tables and charts built on the client's real
   ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
   (no clunky Looker embeds). Drill-through into detail.
+- **One-tap LIVE button** ✅ — set any dashboard as an event's "live" report and a
+  red **LIVE** button appears right on that event's sidebar row, jumping straight
+  to live ticket sales with no drill-down. Great for event day. Configured per
+  event in Admin → the client's Suites (also in the setup wizard).
+- **Double-tap a chart to full-screen it** ✅ (mobile) — and carousels give charts
+  a proper full-width, readable card on phones.
 - **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
   mean in plain English, and answers follow-up questions, grounded in that data.
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
@@ -250,6 +256,31 @@ shoulder when it's worth your time."
 **Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
 on top of the event without logging in."
 
+## 2b. Ask the Owl about Pulse itself (product help)  🧪
+- The **same Owl chat** now also answers questions about **Pulse itself** — *how
+  do I do this*, *what's new*, *what can I do with my access* — alongside its
+  usual data answers. One door for everything; the Owl routes the question.
+- **Only released features, ever:** answers are grounded strictly in Howler's
+  curated help knowledge plus **published release notes** — drafts and unshipped
+  work can never surface. If it isn't published, the Owl doesn't know it.
+- **Tailored to the user:** answers respect their **role** (won't walk a Viewer
+  through something only an Owner can do), their **tenant setup** and their
+  **current event** — e.g. it won't pitch cashless features to a non-cashless
+  event.
+- **"What's new"** pulls the latest, correctly-dated published release notes; a
+  ✨ starter pill on the Owl chat asks it in one tap.
+- **Deep-links** the user straight to the right screen ("open Engage →
+  Campaigns"), and **declines gracefully** when the answer isn't in its knowledge
+  — it never invents behaviour.
+- **Curated & versioned:** Howler staff maintain the knowledge in **Admin →
+  Product → 💬 Help knowledge** (add/edit/publish articles, tag them by role +
+  required feature, set deep-links, toggle product help on/off) — **no deploy
+  needed**. The Owl chat itself is the client's self-service surface.
+
+**Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
+who you are and what your account can do, and it only ever describes features
+that have actually shipped."
+
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
   and **must-acknowledge** messages for things that need sign-off.
@@ -410,19 +441,45 @@ new to set up).
 **Pitch:** "Your ad account and your ticket data finally in one place — see the
 spend, the return, and ask the Owl which campaign is worth more budget."
 
-### 5g. Links — useful links, grouped by category  ✅
-A tidy home for a client's useful links (their app, dashboards, docs, socials…),
-grouped into **typed categories** so a growing list stays easy to navigate.
-- **Landing shows category tiles** (Engage → Links); tap one to drill into just
-  that category's links, with a clear **← All categories** back link. Mobile-first
-  (single-column tiles that stack, big tap targets).
-- Ships with an **"App"** category seeded with **Chotulink**; add your own links and
-  categories any time.
-- **Dual-surface** ✅ — a client manages their own links in Engage → Links, and
-  Howler staff can manage them on the client's behalf from the same place in preview.
+### 5g. Deep links into the Howler app  🟡 (needs connection)
+Short, branded **`howler.chottu.link` URLs** that open the right place in the
+Howler app (tickets, lineup, map, chat…) — created **from Pulse** instead of
+one-by-one in the ChottuLink dashboard.
+- **Engage → Links** — clients create and manage their own links: name it, pick
+  the event, paste the destination, done. Each link is **tied to a Pulse event**
+  and shows its **click counts** (total / 7 / 30 days).
+- **UTM tags & app behaviour** built in — every link can carry campaign tags and
+  choose app-vs-browser opening per platform.
+- **Import (pick & choose)** — the import screen lists everything on the
+  ChottuLink account, flagged new / already in Pulse / previously deleted; tick
+  the ones to bring in and optionally attach them to an event in the same step.
+- **Delete** — removing a link takes it out of Pulse *and* switches it off in
+  ChottuLink (their API has no true delete), so the short URL stops redirecting;
+  re-imports won't resurrect it unless you pick it on purpose.
+- **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
+  the connection (API key + domain) layers platform-default → per-client override.
+- **⚡ Templates — every link in one click** ✅ — pick a template, pick the event,
+  paste the event page URL, done: the whole standard set (main + ticket wallet +
+  lineup + map + event feed + chat) is created in one go, named and tagged per
+  event automatically. Preview first (untick / tweak paths inline, collisions
+  flagged); anything that fails can be retried individually. A Howler-managed
+  starter template ships built in; clients can save their own sets too.
+- **📈 Click trends & source split** ✅ — Pulse snapshots every link's clicks
+  nightly and charts **clicks per day** per event, plus a **by-source** split
+  (instagram vs whatsapp vs email…) from the links' UTM tags — history
+  ChottuLink's own API doesn't offer. Tap 📈 on any event's link card.
+- **🦉 Owl does links too** ✅ — ask the Owl "make me a tickets link for the
+  Instagram bio" or "set up the standard links for this event"; it drafts the
+  link(s) with tags + preview and you confirm with one tap. Draft-only, same
+  permissions as doing it by hand.
+- **✨ AI autofill** ✅ — one tap fills a link's UTM tags and social share
+  preview from its name, destination and event, matching the client's existing
+  tag conventions.
+- **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
+  covers all clients by default).
 
-**Pitch:** "One tidy place for every link that matters — grouped so the right one is
-a tap away, on the phone."
+**Pitch:** "Every link your event needs — created in one click from Pulse, tracked
+per event, and ready to drop into posts, bios, emails and QR codes."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -618,7 +675,10 @@ client's* numbers.
   the gates with the **+change since the last update** and the **pace per hour**, bar
   revenue, a **top-3 bars/vendors** list read off any breakdown tile, and (for Event
   Ops clients) **device health** (deployed devices + open issues). A block can also
-  show **"% of last year"** against a chosen past event. Press **Go live** when doors
+  show **"% of last year — by this point"**: a true **like-for-like** comparison that
+  cuts the past event to the **same day of the event at the same clock time** (fair
+  whether the event is one day or five; a "final number" mode is there too). Press
+  **Go live** when doors
   open (or set a start/end window and it runs itself); it lands in the **inbox** (the
   whole night in one thread) plus **app push, email, SMS** and **WhatsApp** — WhatsApp
   reaches anyone who's messaged the Owl in the last 24h (WhatsApp's own service-window
@@ -680,6 +740,13 @@ WhatsApp thread with one phone-first console.
 - **Liaison checks & issues** 🧪 — scan a device, log an issue from a quick list
   (damaged, battery, connectivity…) and record **how it was resolved**. Open issues
   surface on the live overview.
+- **Device support calls** 🧪 — the person at a bar/booth taps **one button on the
+  device's saved link** (Stock · Manager · Help · Security · Medical) and it lands with
+  dispatch as a live **call** — pre-tagged with **which station and which device**, so
+  they never pick where they are. No app to install; the link works from any phone, so a
+  frozen device never blocks a call for help. Dispatch **acknowledges (with an ETA)** and
+  **resolves** from the Hive → **Calls** queue. Ships in test mode (calls reach your test
+  inbox only) until you go live.
 - **Live overview** 🧪 — device counts by state, per-station counts, open issues and a
   recent-activity feed — the "where is everything right now" board.
 - **Dual-surface + per-client pilot** — Howler staff run it in **Admin → a client →
@@ -783,27 +850,144 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-07-07** — **🔗 Links, grouped by category** ✅ (new): a new **Engage →
-  Links** tab keeps a client's useful links in one place, grouped into typed
-  categories. Landing shows category tiles → tap to drill into that category's
-  links → clear back link. Mobile-first; ships with an **"App"** category seeded
-  with **Chotulink**. Dual-surface (client self-service + admin-on-behalf). (§5g)
-- **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
-  page gains a **Live updates** tab — while the event runs, Pulse sends the team a
-  compact multi-metric snapshot every 15–120 min (gates in with **+change** and
-  **pace/hr**, bar revenue, **top-3 bars/vendors**, Event Ops device health, optional
-  **"% of last year"** vs a chosen past event). Manual **Go live** switch or a
-  scheduled window; delivered to the inbox (one thread for the whole night) + app
-  push, email, SMS and **WhatsApp** (24h service-window rule respected). The **Owl
-  can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`
-  permission as Alerts.
-- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+- **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
+  can now be built to a **staging** environment first, checked there, then **promoted to
+  production** — so changes are verified before they hit the live app. In your **My reports**
+  view a new **Testing** step appears in the journey (Building → Testing → Ready for you).
+  **You're the tester**: when your request lands on staging you get a link to try it and an
+  **Approve / Send back** choice — nothing goes live until you (and every other reporter with
+  work on staging) approve it, and you're notified the moment it's in production.
+- **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
+  answers product questions — *how do I…*, *what's new*, *what can I do* — right in
+  Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
+  deploy) plus **published release notes only** (nothing unreleased can surface),
+  and **tailored to the user's role, tenant and event** (e.g. omits cashless help
+  for non-cashless events). Deep-links to the right screen and **declines** rather
+  than inventing. Dual-surface: Howler curates + publishes the knowledge in
+  **Admin → Product → 💬 Help knowledge**; the Owl chat (with a ✨ What's-new starter
+  pill) is the client's self-service surface.
+- **2026-07-07 (evening)** — **Deep links: click trends, Owl link tools & ✨ autofill** ✅:
+  nightly click snapshots now power a per-event **clicks-per-day chart + by-source
+  split** (📈 on the Links tab); the **Owl** drafts single links or the whole
+  template set from chat (confirm-button, draft-only); and **✨ Autofill with AI**
+  fills a link's UTM tags + social share preview (rich link previews now editable
+  in Pulse, with a live share-card preview). Completes Phase 3 of the ChottuLink
+  integration.
+- **2026-07-07 (later)** — **Deep links: pick-and-choose import + delete** ✅: the
+  import screen now lists the whole ChottuLink account (new / in Pulse / previously
+  deleted) so you tick exactly what comes in, optionally attached to an event in the
+  same step; links can be deleted (removed from Pulse + switched off in ChottuLink,
+  tombstoned so re-imports don't resurrect them).
+- **2026-07-07 (late)** — **Deep-link templates: every link in one click** ✅: apply a
+  template to an event and Pulse creates the whole link set (main + ticket wallet +
+  lineup + map + feed + chat) against ChottuLink in one go — placeholders fill the
+  event's name/slug into names, paths and UTMs; preview with per-link tick/tweak and
+  collision warnings; per-link retry on failure. Howler starter template built in;
+  clients can save their own sets (Engage → Links → ⚡ Templates).
+- **2026-07-07** — **Deep links into the Howler app (ChottuLink)** 🟡: short branded
+  `howler.chottu.link` URLs created **from Pulse** (Engage → Links + Admin → 🔗 Deep
+  links) instead of one-by-one in the ChottuLink dashboard — tied to events, with UTM
+  tags, app-vs-browser behaviour, click counts and one-tap import of existing links.
+  Needs the ChottuLink API key + domain (platform default, per-client override).
+  Templates (one click = the whole standard link set for an event) are next.
+- **2026-07-05 (late)** — **Flow board: 🔥 transaction heatmap** 🧪: a new 🔥 Heat mode on
+  the venue map turns each station into a heat bloom sized by how much it's *transacting*,
+  colour-coded by category so **bars and gates read at the same time**. A **▶ play-the-day**
+  scrubber time-lapses the night — watch check-ins blaze at the gates at doors, then the heat
+  migrate to the bars at peak and the food court flare late. Toggle **Absolute** (each area vs
+  its own busiest all day) or **Relative** (vs right now), and the **window** (5 / 10 / 20 / 30
+  min / 1 hour) — the number on each station is the transactions in that window. Reads the
+  per-station transaction line we already fetch (no new Looker load); works on light or dark
+  maps. Also: the seven Flow-board views now live BOTH as an expanding pill in the header and
+  as a left-nav dropdown.
+- **2026-07-05 (eve)** — **Signal board: 📅 Day picker · 🛰️ satellite maps · past-event
+  ghost guard** 🧪: multi-day events can now flip Stations/Rhythm (and every deep-dive)
+  between festival days — a day runs daily-start → +24h so the after-midnight tail stays
+  with its party. The venue map can fetch **real aerial imagery** (Esri, licence-safe)
+  for typed coordinates as an alternative to uploading a site plan, fits the screen
+  without scrolling, and Operator mode now lays devices out in tidy rows. Monitors
+  ignore stations silent >30 days, so recycled station names from LAST YEAR's edition
+  can never appear as live streams. The Owl/API can read one festival day too
+  (hours="day:YYYY-MM-DD").
+- **2026-07-05 (pm)** — **Signal board: 🕸️ Network view + one-button view switcher** 🧪:
+  the Network view draws the whole event as a river delta — every OPERATOR pours into
+  their station, stations merge into their type (bars/vendors/gates), types merge into
+  Pulse, with live sparks travelling the full chain and dark operators flashing at the
+  exact tier the blockage lives in. The board's six views now sit behind ONE control
+  that opens a slide-in drawer (Apple-style). Also: the Map gained a Stations/Operators
+  toggle (every device fanned around its station's pin), and the device support-call
+  page now offers the event's device issue categories as tap-to-send reasons.
+- **2026-07-05** — **Signal board: 🗺️ Venue map + 🌊 Flow river** 🧪: upload the event's
+  site plan and drag each station's pin onto it once — the map then goes LIVE: healthy
+  pins ripple green, a dark station's pin flashes red, and when several stations in the
+  same corner degrade together a red **"⚠ AREA" halo** blooms over that part of the venue
+  (network failures are usually by area — now you see WHERE, instantly). Tap a pin for
+  that station's devices & operators. The 🌊 River view shows transactions as moving
+  sparks streaming into Pulse — a choking station's stream stutters red. Both self-service
+  (clients manage their own map) and admin-managed.
+- **2026-07-04 (night)** — **Signal board: Stations view + provider report** 🧪: a new
+  📶 Stations view puts every station's online/offline-through-the-day strip on one
+  screen, grouped by zone, with an average-transactions line overlaid (see throughput
+  track connectivity per station), closed stations greyed, and Online/Offline/Txns/Closed
+  layer toggles + a station filter. Plus a **shareable device-health report** — a
+  print-to-PDF page (📤 on the board) you can send to your **network / operations
+  provider**, and an **ops digest** that emails them the headline numbers + the link on a
+  schedule *and* the moment signal drops below target. Signal flow (all / per category /
+  per station) and device online/offline are also blocks you can add to a Live update.
+- **2026-07-04 (night)** — **One-tap LIVE button** ✅: pick an event's live-ticketing
+  dashboard in Admin → Suites (or the setup wizard) and a red **LIVE** pill shows
+  on that event's sidebar row — clients jump straight to live sales, no drill-down.
+  Also: **double-tap a chart to full-screen** it on mobile, carousels give charts a
+  readable full-width card on phones, and setting up a **live update** now shows the
+  actual numbers each block pulls (+ a "send to me" phone preview) before you go live.
+- **2026-07-04 (night)** — **Device support calls** 🧪 (Event Ops §12): the person at a
+  bar/booth taps one button on the device's saved link (Stock · Manager · Help · Security
+  · Medical) and it reaches dispatch as a live call, **pre-tagged with the station and
+  device** so nothing is filled in but the reason (+ their name, an optional note, and
+  what they've already tried). No app install; the link works from any phone, so a frozen
+  device never blocks a call. Dispatch acknowledges (ETA) + resolves from the new Hive →
+  **Calls** queue. Test mode until go-live (calls reach the test inbox only).
+- **2026-07-04 (night)** — **Alerts reach the person on the ground** 🧪: staff can
+  now opt their own phone into station alerts straight from the public staff
+  portal (🔔 Alerts — web push, no app install, no account), and once an event is
+  live a dark station pushes the assigned crew directly, not just the manager.
+  Hive → Alerts shows a 🔔 next to reachable staff, a **Pause alerts** switch per
+  event, a settable dark **threshold**, status/name **filters**, and a storm
+  guard that folds a site-wide pipe wobble into one note. (WhatsApp session
+  channel + Ops Owl are the next phase.)
+- **2026-07-04 (evening)** — **The board learns to time-travel — and to call for help** 🧪:
+  📶 Signal flow meter with a settable per-event target (default 95% of devices
+  online; green/amber/red); dragging the Event pulse replays the WHOLE board at
+  that moment (tiles, zones, dials); a 30-min status journal (who came back, who
+  went dark, window by window); the last-60-min verdict now follows the dark
+  count (150→51 dark reads "Big improvement"); station on/off follows the device
+  roster's lag truth so a data-pipe stall can no longer paint a trading site
+  black; and 🚨 **staff alerts phase 1**: Hive → Alerts bridges board stations to
+  Event Ops stations (auto name-match + manual mapping) and, when half a
+  station's devices go dark, alerts the staff assigned to it — 🧪 test-mode only
+  (emails the test address with the would-be recipients; staff aren't contacted
+  until Go live). Push/SMS/WhatsApp escalation is the next phase.
+- **2026-07-04 (later)** — **Event Signal grows up in a day** 🧪: station family
+  filter chips (Bars / Vendors / Check-in); tap a station for a centred pop-up
+  deep dive — per-device day timeline with the 🚦 three-colour robot view
+  (online+data / offline-but-synced-later / offline+no data) and a stacked
+  online-vs-offline day graph; 🦉 Owl summary and ↗ Share on both the board and
+  the client Data health tab; gates now count real check-in scans; Event Ops nav
+  tidied into a 🐝 Hive drawer (Live, Devices, Stations, Map, Staff, Checks,
+  Issues, Activity) with Data health and the Signal board alongside.
+- **2026-07-04** — **🎛️ Event Signal — the event as a live site board** 🧪: a map-style
+  view of the whole event in Event Ops: stations grouped into their real venue
+  zones, every device a countable tick (green = sending, red = dark), this hour's
+  scans/transactions per station with a mini trend. Runs off the Data health
+  checks already in place — no extra load — and admins get the same board per
+  event on the Data health page. Floorplan overlay and day-replay are next.- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
   Tune now always feed the briefing — a phase-scoped pick (e.g. "gates board on
   Event Day") whose event has **no dates/phase set** feeds anyway instead of
   silently vanishing, and the Tune modal warns to set the key dates. A
   whole-dashboard pick no longer crowds out the reader's other picks, and admins
   get a **🔍 Diagnose focus tiles** panel on the home briefing showing why each
   pick did or didn't make that briefing.
+
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking
@@ -811,6 +995,13 @@ see "The continuous comms loop" above.)*
   monitors report **transactions** and check-in monitors **scans** — separate
   metrics, never summed — and closed stations keep their day totals. Roster and
   count reads are aggregation-backed so busy sales days no longer under-count.
+- **2026-07-03** — **Pinpoint the tile + record your screen when reporting** 🧪: filing a
+  bug from a dashboard now lets you say **exactly which tile** is affected (a "which tile
+  is this about?" picker listing that dashboard's tiles) — the tile flows into the ticket,
+  the AI draft, the Copy-for-Claude brief and the triage board, so nobody has to guess.
+  You can also **record your screen** (desktop) as an alternative to a screenshot — perfect
+  for intermittent or interaction bugs — alongside the existing screenshot/video upload
+  (on a phone, attach a video recorded with your camera). Mobile-first, self-service.
 - **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
   per station now has a read-only client tab in Event Ops (streams, device roster,
   day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data

@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { api } from '../lib/api.js';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 
 // Inventive conversational AI analyst. We get a server-proxied, authorized URL
 // (the API key never touches the browser). Three display modes — switchable for
@@ -79,13 +79,7 @@ export default function InventiveAskPage() {
   const embed = mode === 'embed';
   return (
     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', boxSizing: 'border-box', ...(embed ? { padding: isMobile ? '10px 10px 0' : '14px 16px 0' } : { padding: isMobile ? '14px 12px 0' : '20px 22px 0', maxWidth: 1080, margin: '0 auto' }) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Ask</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your AI analyst</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Ask" title="Your AI analyst" />
       {isAdmin && (
         // Admin-only A/B toggle. On its own row so it's never clipped on narrow widths.
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>

@@ -44,6 +44,13 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const pivots = data.pivots || [];
   const primaryCell = resolvePivotCell(rows[0][primaryField.name], pivots);
   const primaryValue = cellText(primaryCell);
+  // Big figures don't need cents: ≥1000 drops the decimals everywhere
+  // (1,882,360.00 → 1,882,360); small numbers (36.50, 3.1 — averages) and
+  // percentages keep their precision. 📱 Phones additionally abbreviate
+  // (2,701,926 → 2.7M) so the number never outgrows its tile; any currency
+  // prefix survives. Tap-to-drill still shows every digit.
+  const plainValue = stripBigDecimals(primaryValue, primaryCell?.value);
+  const shownValue = isMobile ? compactNumber(plainValue, primaryCell?.value) : plainValue;
 
   // Comparison against a second measure, when present and not disabled.
   const compField = measures[1] || null;
@@ -111,7 +118,7 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
           ...(drillable ? { textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 4 } : null),
         }}
       >
-        <CountUpValue text={primaryValue} />
+        <CountUpValue text={shownValue} />
       </AutoFitText>
       {comparison && (
         <div className="chip-in" style={{ fontSize: isMobile ? 11 : 12.5, marginTop: 2, fontWeight: 600, color: comparison.color, flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', animationDelay: '420ms' }}>
@@ -126,6 +133,31 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
       )}
     </div>
   );
+}
+
+// 1,882,360.00 → 1,882,360. Only for values ≥1000 (where cents are noise);
+// smaller numbers and percentages keep Looker's rendered precision.
+function stripBigDecimals(txt, raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.abs(n) < 1000) return txt;
+  const s = String(txt);
+  if (s.trim().endsWith('%')) return txt;
+  return s.replace(/\.\d+(?=\s*[^\d]*$)/, '');
+}
+
+// 2,701,926.00 → 2.7M · 896,486.00 → 896K · 48,469.00 → 48.5K. Keeps a
+// currency/unit prefix ("€", "R "), leaves percentages and small numbers
+// exactly as Looker rendered them.
+function compactNumber(txt, raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.abs(n) < 10000) return txt;
+  const s = String(txt);
+  if (s.trim().endsWith('%')) return txt;
+  const pre = (s.match(/^\s*([^0-9\-+.]*)/) || [])[1] || '';
+  const abs = Math.abs(n);
+  const one = (v) => (v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, ''));
+  const body = abs >= 1e9 ? `${one(abs / 1e9)}B` : abs >= 1e6 ? `${one(abs / 1e6)}M` : `${one(abs / 1e3)}K`;
+  return `${pre.trim()}${pre.trim() ? ' ' : ''}${n < 0 ? '-' : ''}${body}`.trim();
 }
 
 // Evaluate Looker conditional_formatting rules against the primary value.

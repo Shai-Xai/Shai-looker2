@@ -4,7 +4,7 @@ import { useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -44,6 +44,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [slackBotToken, setSlackBotToken] = useState('');
   const [clearSlackBot, setClearSlackBot] = useState(false);
   const [slackChannel, setSlackChannel] = useState(value?.slack?.channel || '');
+  const [chottuKey, setChottuKey] = useState('');
+  const [clearChottuKey, setClearChottuKey] = useState(false);
+  const [chottuDomain, setChottuDomain] = useState(value?.chottu?.domain || '');
   const [testState, setTestState] = useState('');
   const [slackTestState, setSlackTestState] = useState('');
   const [busyKey, setBusyKey] = useState('');
@@ -101,6 +104,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (slackBotToken) p.slack.botToken = slackBotToken;
       if (clearSlackBot) p.slack.clearBotToken = true;
     }
+    if (showChottu && want('chottu')) {
+      p.chottu = { domain: chottuDomain };
+      if (chottuKey) p.chottu.apiKey = chottuKey;
+      if (clearChottuKey) p.chottu.clearApiKey = true;
+    }
     return p;
   }
 
@@ -116,6 +124,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
+      if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusyKey(''); }
@@ -283,6 +292,35 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             </div>
           )}
           <SaveRow k="slack" />
+        </Section>
+      )}
+
+      {/* ChottuLink — deep links (howler.chottu.link short links) */}
+      {showChottu && (
+        <Section title="🔗 ChottuLink (deep links)" collapsible={collapsible} {...lockProps('chottu')} guide={<>
+          <div style={note}>
+            Powers the <b>Links</b> area (Engage → Links): short <code>chottu.link</code> URLs into the Howler app, created from Pulse and tracked per event. Blank fields inherit the platform account.
+          </div>
+          <HowTo title="How to get a ChottuLink API key" steps={[
+            <>Sign in at <b>app.chottulink.com</b> and open <b>Dashboard → Keys</b>.</>,
+            <>Create a <b>REST API integration key</b> (it starts with <code>c_api_</code>) and paste it into <b>API key</b> above.</>,
+            <>Set <b>Domain</b> to the link domain configured in ChottuLink (e.g. <code>howler.chottu.link</code>).</>,
+          ]} />
+        </>}>
+          <Lbl>API key</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={chottuKey} onChange={(e) => setChottuKey(e.target.value)}
+            placeholder={value?.chottu?.keySet ? `Set (${value.chottu.keyHint || '••••'}) — leave blank to keep` : 'c_api_…'}
+            style={input} disabled={clearChottuKey}
+          />
+          {value?.chottu?.keySet && (
+            <label style={clearRow}><input type="checkbox" checked={clearChottuKey} onChange={(e) => setClearChottuKey(e.target.checked)} /> Remove this key</label>
+          )}
+          <Lbl>Domain</Lbl>
+          <input value={chottuDomain} onChange={(e) => setChottuDomain(e.target.value)} placeholder="howler.chottu.link" style={input} autoComplete="off" />
+          {value?.chottu?.keySet && value?.chottu?.domain && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — manage links in Engage → Links.</div>}
+          <SaveRow k="chottu" />
         </Section>
       )}
 

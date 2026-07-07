@@ -20,9 +20,9 @@ const DEFAULT_CAP = 1500; // any new/untracked server file must stay under this
 
 // Per-file ceilings (lines). Lower these as files shrink; never raise them.
 const BUDGETS = {
-  'index.js': 3000,    // composition root — keep extracting; ratchet down (living docs → productSite.js)
+  'index.js': 2950,    // composition root — keep extracting; ratchet down (integrations patch/views → integrationsConfig.js)
   'actions.js': 1875,   // tracking routes extracted to actionTracking.js
-  'db.js': 1700,     // user-activity cluster extracted to activity.js — locked in lower
+  'db.js': 1620,     // tile-library cluster extracted to tileLibrary.js — locked in lower
   'insights.js': 1150,
   'goals.js': 1100,
 };
@@ -45,6 +45,18 @@ test('no server file exceeds its line budget (extract a module instead of growin
     }
   }
   assert.deepEqual(offenders, [], `\n${offenders.join('\n')}\n`);
+});
+
+test('index.js still mounts every critical disposable module (a merge must not silently drop one)', () => {
+  // Regression guard: a parallel-session merge once concatenated a new mount onto
+  // an existing line and deleted the whole `livepulse` mount with it — every Live
+  // Pulse route 404'd in prod and the data looked "lost" (it wasn't; the routes
+  // were just gone). A dropped mount is invisible in review, so assert the load-
+  // bearing modules are still wired into the composition root.
+  const src = fs.readFileSync(path.join(SERVER_DIR, 'index.js'), 'utf8');
+  const mustMount = ['alerts', 'livepulse', 'eventops', 'staffAlerts', 'os', 'digests', 'goals', 'actions', 'segments', 'flags'];
+  const missing = mustMount.filter((m) => !new RegExp(`require\\('\\./${m}'\\)\\.mount`).test(src) && !new RegExp(`require\\('\\./${m}'\\).*\\.mount`).test(src));
+  assert.deepEqual(missing, [], `index.js is no longer mounting: ${missing.join(', ')} — restore the mount line`);
 });
 
 test('budgets ratchet down: no budget has slack to grow a file >150 lines', () => {
