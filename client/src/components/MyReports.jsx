@@ -24,7 +24,7 @@ const JOURNEY = [
   ['in_progress', 'Building'],
   ['staging', 'Testing'],
   ['shipped', 'Ready for you'],
-  ['approved', 'Done'],
+  ['approved', 'Live'],
 ];
 
 export default function MyReports() {
@@ -160,7 +160,7 @@ function ReportCard({ t, open, onToggle, onChange }) {
       )}
 
       {stagingApproved && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this on staging — we're pushing it live. You'll be told the moment it's in production.</p>}
-      {t.status === 'approved' && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.</p>}
+      {t.status === 'approved' && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>🚀 Live in production — you approved this{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.</p>}
       {t.status === 'rejected' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>↩️ Sent back to the team{t.clientVerdictNote ? `: “${t.clientVerdictNote}”` : ''}.</p>}
       {t.status === 'declined' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>🚫 Not going forward{t.declineReason ? `: “${t.declineReason}”` : '.'}</p>}
 

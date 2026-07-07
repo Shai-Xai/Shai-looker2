@@ -16,7 +16,7 @@ const URGENCY_STYLE = {
 };
 const BOARD_LANES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'rejected', 'approved'];
 const ALL_STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'approved', 'rejected', 'declined'];
-const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined' };
+const STATUS_LABEL = { inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress', staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Live 🚀', rejected: 'Rejected — reopen', declined: 'Declined' };
 
 export default function TicketBoard() {
   const isMobile = useIsMobile();
@@ -212,10 +212,13 @@ function Card({ t, onOpen }) {
         <span>{TYPE_ICON[t.type] || '📝'}</span>
         {t.type === 'bug' && <span style={{ ...chip, ...u }}>{t.urgency}</span>}
         {t.aiStatus === 'ready' && <span style={{ ...chip, color: 'var(--muted)', background: 'rgba(128,128,128,0.1)' }}>AI ✓</span>}
-        {/* Environment: only meaningful once the ticket has been sent to GitHub. */}
-        {t.githubIssue > 0 && (t.target === 'production'
-          ? <span style={{ ...chip, color: '#fff', background: '#16a34a', textTransform: 'none' }}>🚀 prod</span>
-          : <span style={{ ...chip, color: 'var(--brand)', background: 'rgba(var(--brand-rgb), 0.12)', textTransform: 'none' }}>🧪 staging</span>)}
+        {/* Environment: only meaningful once the ticket has been sent to GitHub.
+            A Live ticket shows where it IS (production) — not where it was built. */}
+        {t.status === 'approved'
+          ? <span style={{ ...chip, color: '#fff', background: '#16a34a', textTransform: 'none' }}>🚀 live</span>
+          : t.githubIssue > 0 && (t.target === 'production'
+            ? <span style={{ ...chip, color: '#fff', background: '#16a34a', textTransform: 'none' }}>🚀 prod</span>
+            : <span style={{ ...chip, color: 'var(--brand)', background: 'rgba(var(--brand-rgb), 0.12)', textTransform: 'none' }}>🧪 staging</span>)}
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.3 }}>
         {t.aiTitle || t.title || '(untitled)'}
@@ -334,7 +337,7 @@ function TicketDetail({ id, onClose, onChange }) {
               <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 24, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-              {t.screen || 'unknown screen'} · {t.type} · {t.urgency} urgency{t.githubIssue > 0 ? ` · ${t.target === 'production' ? '🚀 production' : '🧪 staging'}` : ''} · by {t.reporterName || t.reporterEmail}
+              {t.screen || 'unknown screen'} · {t.type} · {t.urgency} urgency{t.status === 'approved' ? ' · 🚀 live in production' : t.githubIssue > 0 ? ` · ${t.target === 'production' ? '🚀 production' : '🧪 staging'}` : ''} · by {t.reporterName || t.reporterEmail}
               {t.entityName ? ` (${t.entityName})` : ''}
             </p>
             {t.tileName && (
