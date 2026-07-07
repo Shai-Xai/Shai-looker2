@@ -1001,7 +1001,7 @@ function JourneyActionCard({ action, suiteId }) {
     setState('busy'); setErr('');
     // The server saves a new chat cohort as a reusable segment first, then creates
     // the draft sequence campaign — same auto-save behaviour as draftCampaign.
-    try { await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName }); setState('done'); }
+    try { await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName, master: action.master || undefined }); setState('done'); }
     catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
   };
   return (
@@ -1012,7 +1012,7 @@ function JourneyActionCard({ action, suiteId }) {
         <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
         {decisions > 0 && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>◆ {decisions} decision{decisions === 1 ? '' : 's'}</span>}
       </div>
-      <div style={{ fontSize: 13, marginBottom: 2 }}><strong>{action.name}</strong></div>
+      <div style={{ fontSize: 13, marginBottom: 2 }}><strong>{action.name}</strong>{action.master ? <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 400 }}> · in “{action.master}”</span> : null}</div>
       {action.audienceName && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 2 }}>→ “{action.audienceName}”{reachLine ? ` · ${reachLine}` : ''}</div>}
       {action.summary && <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.45, marginBottom: 6 }}>{action.summary}</div>}
       <JourneyTree nodes={action.nodes} />

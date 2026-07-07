@@ -121,7 +121,7 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
       audienceName = desc.join(' · ');
       try { if (resolveQueryAudience) { const r = await resolveQueryAudience({ entityId, definition: audience, user, suiteId }); if (r && !r.error) reach = r.reach; } } catch { /* best-effort preview */ }
     }
-    return { ok: true, confirm: true, action: { kind: 'draftJourney', entityId, ...journey, audience, audienceName, reach } };
+    return { ok: true, confirm: true, action: { kind: 'draftJourney', entityId, ...journey, audience, audienceName, reach, master: String(args.master || '').slice(0, 80) } };
   }
   const schema = {
     name: 'draftJourney',
@@ -136,6 +136,7 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
         nodes: { type: 'array', description: 'The ordered tree of message/decision nodes (see tool description for the exact node shapes).', items: { type: 'object' } },
         segmentName: { type: 'string', description: 'Target an EXISTING saved segment by name (only when the user names one).' },
         filters: { type: 'object', description: 'OR build a NEW cohort as {dimension: value} over curated dimensions, e.g. {"core_purchasers.country":"Spain","core_ticket_types.name":"VIP"}. Auto-saved as a segment on confirm. Contact/PII fields are NOT allowed.' },
+        master: { type: 'string', description: 'OPTIONAL master-campaign group name, when the user says this journey belongs to a broader campaign (e.g. "Bushfire 2026 launch"). Groups it with sibling campaigns for combined reporting in Engage.' },
       },
       required: ['name', 'nodes'],
     },

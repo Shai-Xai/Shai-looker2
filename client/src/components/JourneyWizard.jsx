@@ -48,7 +48,7 @@ export default function JourneyWizard({ entityId }) {
     if (!live) return;
     setLiveState('busy'); setLiveErr('');
     try {
-      await api.owlDraftJourney({ entityId: live.entityId || entityId, name: live.name, goal: live.goal, summary: live.summary, nodes: live.nodes, audience: live.audience, audienceName: live.audienceName });
+      await api.owlDraftJourney({ entityId: live.entityId || entityId, name: live.name, goal: live.goal, summary: live.summary, nodes: live.nodes, audience: live.audience, audienceName: live.audienceName, master: live.master || undefined });
       setLiveState('done'); loadDrafts();
     } catch (e) { setLiveState('error'); setLiveErr((e && e.message) || 'Could not create the draft.'); }
   };
