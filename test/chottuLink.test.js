@@ -147,6 +147,94 @@ test('stats refresh writes the click counters', async () => {
   assert.ok(links[0].clicks.at, 'stats timestamp recorded');
 });
 
+// ── Phase 2: templates ──
+
+test('starter template is seeded and visible to clients; platform templates are not client-editable', async () => {
+  const r = await app.req('GET', `/api/my/chottu/${entityA.id}/templates`, { as: ownerA });
+  assert.equal(r.status, 200);
+  const starter = r.body.templates.find((t) => t.platform);
+  assert.ok(starter, 'seeded platform starter template is listed');
+  assert.equal(starter.items.length, 6);
+  const edit = await app.req('PATCH', `/api/my/chottu/${entityA.id}/templates/${starter.id}`, { as: ownerA, body: { name: 'hijack', items: starter.items } });
+  assert.equal(edit.status, 403);
+  const del = await app.req('DELETE', `/api/my/chottu/${entityA.id}/templates/${starter.id}`, { as: ownerA });
+  assert.equal(del.status, 403);
+});
+
+test('preview resolves placeholders per event and flags problems instead of blanking them', async () => {
+  const starter = (await app.req('GET', `/api/my/chottu/${entityA.id}/templates`, { as: ownerA })).body.templates.find((t) => t.platform);
+  const p = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, {
+    as: ownerA, body: { suiteId: suiteA.id, base: 'https://www.howler.co.za/event/40848/' },
+  });
+  assert.equal(p.status, 200);
+  const main = p.body.items.find((i) => i.key === 'main');
+  assert.equal(main.name, 'Festival A 2026');
+  assert.equal(main.path, 'Festival-A-2026');                                  // slugified event name
+  assert.equal(main.destination, 'https://www.howler.co.za/event/40848');     // trailing slash trimmed
+  assert.deepEqual(main.utm, { campaign: 'Festival-A-2026' });
+  const wallet = p.body.items.find((i) => i.key === 'ticketwallet');
+  assert.equal(wallet.destination, 'https://www.howler.co.za/event/40848?dest=my-tickets');
+  assert.deepEqual(main.warnings, []);
+  // Without the base URL, every {{base}} item warns rather than silently blanking.
+  const noBase = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: suiteA.id } });
+  assert.ok(noBase.body.items.every((i) => i.warnings.some((w) => /\{\{base\}\}/.test(w))));
+  // Another client's event is rejected outright.
+  const wrongSuite = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: 'nope', base: 'https://h' } });
+  assert.equal(wrongSuite.status, 400);
+});
+
+test('apply creates the ticked links, survives per-item failures, and honours overrides', async () => {
+  const starter = (await app.req('GET', `/api/my/chottu/${entityA.id}/templates`, { as: ownerA })).body.templates.find((t) => t.platform);
+  upstream.failCreateWith = null;
+  // Make exactly one item fail upstream (path collision on 'map'), keep the rest fine.
+  const realFail = upstream.failCreateWith;
+  const origFetch = global.fetch;
+  global.fetch = async (url, opts = {}) => {
+    if (String(url).includes('/create-link') && opts.body && JSON.parse(opts.body).selected_path === 'Festival-A-2026-map') {
+      return { ok: false, status: 400, json: async () => ({ error: { errorMessage: "Path 'Festival-A-2026-map' is already in use or conflicts with an existing link." } }) };
+    }
+    return origFetch(url, opts);
+  };
+  const r = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/apply`, {
+    as: ownerA,
+    body: {
+      suiteId: suiteA.id, base: 'https://www.howler.co.za/event/40848',
+      items: [
+        { key: 'main', path: 'fest-a-main-override' },   // path override from the preview UI
+        { key: 'ticketwallet' }, { key: 'map' },
+      ],
+    },
+  });
+  global.fetch = origFetch;
+  upstream.failCreateWith = realFail;
+  assert.equal(r.status, 200);
+  assert.deepEqual({ created: r.body.created, failed: r.body.failed }, { created: 2, failed: 1 });
+  const main = r.body.results.find((x) => x.key === 'main');
+  assert.ok(main.ok);
+  assert.equal(main.link.shortUrl, 'https://howler.chottu.link/fest-a-main-override');
+  assert.equal(main.link.suiteId, suiteA.id, 'template links land on the event');
+  const map = r.body.results.find((x) => x.key === 'map');
+  assert.equal(map.ok, false);
+  assert.match(map.error, /already in use/);
+  // Unticked items were not created.
+  const links = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
+  assert.ok(!links.some((l) => l.shortUrl.endsWith('-lineup')), 'unticked lineup item must not be created');
+});
+
+test('clients manage their own templates; other clients cannot see or touch them', async () => {
+  const created = await app.req('POST', `/api/my/chottu/${entityA.id}/templates`, {
+    as: ownerA,
+    body: { name: 'A-only set', items: [{ key: 'x', name: '{{event.name}} promo', destination: 'https://h/x', path: '{{event.slug}}-promo' }] },
+  });
+  assert.equal(created.status, 201);
+  const tid = created.body.template.id;
+  assert.equal(created.body.template.platform, false);
+  const forB = await app.req('GET', `/api/my/chottu/${entityB.id}/templates`, { as: ownerB });
+  assert.ok(!forB.body.templates.some((t) => t.id === tid), 'entity template hidden from other clients');
+  assert.equal((await app.req('POST', `/api/my/chottu/${entityB.id}/templates/${tid}/apply`, { as: ownerB, body: { suiteId: suiteA.id } })).status, 404);
+  assert.equal((await app.req('DELETE', `/api/my/chottu/${entityA.id}/templates/${tid}`, { as: ownerA })).status, 204);
+});
+
 test('unconfigured client gets a clear 400, not an upstream call', async () => {
   h.db.setEntityIntegrations(entityB.id, {}); // still has its own key — clear it
   h.db.setEntityIntegrations(entityB.id, { chottuApiKey: '', chottuDomain: '' });

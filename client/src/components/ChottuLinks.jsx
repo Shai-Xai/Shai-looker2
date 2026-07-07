@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
+import ChottuTemplates from './ChottuTemplates.jsx';
 
 // ChottuLink deep links — the Links area, dual-surface (see server/chottuLink.js).
 // `scope`: 'admin' (Admin → client → 🔗 Deep links) | 'my' (Engage → Links).
@@ -103,6 +104,8 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
         ? <LinkEditor scope={scope} entityId={entityId} suites={suites} onDone={async (changed) => { setEditing(null); if (changed) { flash('Link created — the short URL is live.'); await load(); } }} />
         : <button style={btnPrimary} onClick={() => setEditing('new')}>＋ New link</button>
       )}
+
+      {data.configured && <ChottuTemplates entityId={entityId} scope={scope} suites={suites} onLinksChanged={load} />}
 
       {groups.length === 0 && data.configured && (
         <p style={{ color: 'var(--muted)', fontSize: 14 }}>

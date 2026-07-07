@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (🔗 deep links into the Howler app) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (⚡ one-click deep-link templates) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -429,13 +429,17 @@ one-by-one in the ChottuLink dashboard.
   existing links show up in Pulse and get attached to their events.
 - **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
   the connection (API key + domain) layers platform-default → per-client override.
+- **⚡ Templates — every link in one click** ✅ — pick a template, pick the event,
+  paste the event page URL, done: the whole standard set (main + ticket wallet +
+  lineup + map + event feed + chat) is created in one go, named and tagged per
+  event automatically. Preview first (untick / tweak paths inline, collisions
+  flagged); anything that fails can be retried individually. A Howler-managed
+  starter template ships built in; clients can save their own sets too.
 - **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
   covers all clients by default).
-- **🔜 Next:** link **templates** — one click creates the whole standard set for a
-  new event (main + ticket wallet + lineup + map + feed + chat) — then click
-  **trends** per source.
+- **🔜 Next:** click **trends** per source (nightly history).
 
-**Pitch:** "Every link your event needs — created in seconds from Pulse, tracked
+**Pitch:** "Every link your event needs — created in one click from Pulse, tracked
 per event, and ready to drop into posts, bios, emails and QR codes."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
@@ -807,6 +811,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07 (late)** — **Deep-link templates: every link in one click** ✅: apply a
+  template to an event and Pulse creates the whole link set (main + ticket wallet +
+  lineup + map + feed + chat) against ChottuLink in one go — placeholders fill the
+  event's name/slug into names, paths and UTMs; preview with per-link tick/tweak and
+  collision warnings; per-link retry on failure. Howler starter template built in;
+  clients can save their own sets (Engage → Links → ⚡ Templates).
 - **2026-07-07** — **Deep links into the Howler app (ChottuLink)** 🟡: short branded
   `howler.chottu.link` URLs created **from Pulse** (Engage → Links + Admin → 🔗 Deep
   links) instead of one-by-one in the ChottuLink dashboard — tied to events, with UTM

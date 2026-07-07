@@ -49,6 +49,16 @@ function mount(app, { db, auth, rateLimit }) {
       modified_time   TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_chottu_links_entity ON chottu_links(entity_id, suite_id);
+    CREATE TABLE IF NOT EXISTS chottu_templates (
+      id            TEXT PRIMARY KEY,
+      entity_id     TEXT NOT NULL DEFAULT '',   -- '' = platform template, usable by every client
+      name          TEXT NOT NULL,
+      description   TEXT NOT NULL DEFAULT '',
+      items         TEXT NOT NULL DEFAULT '[]', -- [{key,name,destination,path,utm,social,iosBehavior,androidBehavior}]
+      created_time  TEXT NOT NULL,
+      modified_time TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chottu_templates_entity ON chottu_templates(entity_id);
   `);
 
   // ── credentials: client override → platform default ──
@@ -250,6 +260,144 @@ function mount(app, { db, auth, rateLimit }) {
     return { updated, failed };
   }
 
+  // ── templates: one click creates every link an event needs ──
+  // An item's strings may carry placeholders, resolved at preview/apply time:
+  //   {{event.name}} {{event.slug}} {{event.id}} {{client.name}}
+  //   {{base}} — the event's page URL, typed once when applying
+  // Anything unresolved is a warning in the preview, never a silent blank.
+  const MAX_TEMPLATE_ITEMS = 20;
+  const slugify = (s) => String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'event';
+
+  function fill(str, ctx) {
+    const missing = new Set();
+    const out = String(str || '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, token) => {
+      const v = ctx[token];
+      if (v === undefined || v === '') { missing.add(token); return ''; }
+      return v;
+    });
+    return { out: out.trim(), missing: [...missing] };
+  }
+
+  const cleanItem = (raw) => ({
+    key: String(raw.key || '').trim().slice(0, 60) || crypto.randomUUID().slice(0, 8),
+    name: String(raw.name || '').trim().slice(0, 160),
+    destination: String(raw.destination || '').trim().slice(0, 600),
+    path: String(raw.path || '').trim().replace(/^\//, '').slice(0, 120),
+    utm: cleanUtm(raw.utm), social: cleanSocial(raw.social),
+    iosBehavior: behavior(raw.iosBehavior), androidBehavior: behavior(raw.androidBehavior),
+  });
+  const rowToTemplate = (r) => ({
+    id: r.id, entityId: r.entity_id || null, platform: !r.entity_id,
+    name: r.name, description: r.description, items: JSON.parse(r.items || '[]'),
+    createdTime: r.created_time, modifiedTime: r.modified_time,
+  });
+  // A client sees platform templates + their own; edits only their own.
+  const listTemplates = (entityId) =>
+    sql.prepare("SELECT * FROM chottu_templates WHERE entity_id='' OR entity_id=? ORDER BY entity_id='' DESC, name").all(entityId).map(rowToTemplate);
+  function getTemplate(entityId, id, { forEdit = false } = {}) {
+    const r = sql.prepare('SELECT * FROM chottu_templates WHERE id=?').get(id);
+    if (!r || (r.entity_id && r.entity_id !== entityId)) throw new HttpError(404, 'Template not found');
+    if (forEdit && !r.entity_id) throw new HttpError(403, 'This is a platform template — Howler manages it.');
+    return r;
+  }
+  function saveTemplate(entityId, id, body, { platform = false } = {}) {
+    const name = String(body.name || '').trim().slice(0, 120);
+    if (!name) throw new HttpError(400, 'Give the template a name.');
+    const items = (Array.isArray(body.items) ? body.items : []).slice(0, MAX_TEMPLATE_ITEMS).map(cleanItem);
+    if (!items.length) throw new HttpError(400, 'Add at least one link to the template.');
+    const description = String(body.description || '').trim().slice(0, 400);
+    if (id) {
+      getTemplate(entityId, id, { forEdit: !platform });
+      sql.prepare('UPDATE chottu_templates SET name=?, description=?, items=?, modified_time=? WHERE id=?')
+        .run(name, description, JSON.stringify(items), now(), id);
+    } else {
+      id = crypto.randomUUID();
+      sql.prepare('INSERT INTO chottu_templates (id, entity_id, name, description, items, created_time, modified_time) VALUES (?,?,?,?,?,?,?)')
+        .run(id, platform ? '' : entityId, name, description, JSON.stringify(items), now(), now());
+    }
+    return rowToTemplate(sql.prepare('SELECT * FROM chottu_templates WHERE id=?').get(id));
+  }
+
+  // Resolve a template against one event → the exact links it would create,
+  // each with its warnings. Shared by preview (dry run) and apply.
+  function resolveTemplate(entityId, templateId, { suiteId, base }) {
+    const t = rowToTemplate(getTemplate(entityId, templateId));
+    if (!suiteId) throw new HttpError(400, 'Pick the event to create links for.');
+    checkSuite(entityId, suiteId);
+    const su = db.getSuite(suiteId);
+    const baseUrl = String(base || '').trim().replace(/\/$/, '');
+    const ctx = {
+      base: baseUrl,
+      'event.name': su.name, 'event.slug': slugify(su.name), 'event.id': su.id,
+      'client.name': db.getEntity(entityId)?.name || '',
+    };
+    const fillClean = (v) => fill(v, ctx);
+    const items = t.items.map((item) => {
+      const warnings = []; const missing = new Set();
+      const take = (v) => { const f = fillClean(v); f.missing.forEach((m) => missing.add(m)); return f.out; };
+      const name = take(item.name) || item.key;
+      const destination = take(item.destination);
+      const path = take(item.path).replace(/^\//, '');
+      const utm = Object.fromEntries(Object.entries(item.utm || {}).map(([k, v]) => [k, take(v)]).filter(([, v]) => v));
+      const social = Object.fromEntries(Object.entries(item.social || {}).map(([k, v]) => [k, take(v)]).filter(([, v]) => v));
+      if (missing.size) warnings.push(`Missing ${[...missing].map((m) => `{{${m}}}`).join(', ')}${missing.has('base') ? ' — paste the event page URL' : ''}`);
+      if (destination && !/^https?:\/\/\S+$/i.test(destination)) warnings.push('Destination isn’t a full URL');
+      if (path && !/^[\w-]+$/.test(path)) warnings.push('Path can only use letters, numbers and dashes');
+      if (path && sql.prepare("SELECT 1 FROM chottu_links WHERE entity_id=? AND short_url LIKE '%/' || ?").get(entityId, path)) {
+        warnings.push('A link with this path already exists in Pulse');
+      }
+      return { key: item.key, name, destination, path, utm, social, iosBehavior: item.iosBehavior, androidBehavior: item.androidBehavior, warnings };
+    });
+    return { template: { id: t.id, name: t.name }, suiteId, items };
+  }
+
+  // Create the selected items SEQUENTIALLY, recording each success/failure —
+  // a failed path collision must not sink the rest, and nothing is retried
+  // blindly (rate limits are unpublished). `overrides` lets the preview's edits
+  // (path/name tweaks, unticked items) carry into the real run.
+  async function applyTemplate(entityId, templateId, { suiteId, base, items: overrides }, userEmail) {
+    const resolved = resolveTemplate(entityId, templateId, { suiteId, base });
+    const byKey = new Map((overrides || []).map((o) => [o.key, o]));
+    const wanted = (overrides || []).length ? resolved.items.filter((i) => byKey.has(i.key)) : resolved.items;
+    if (!wanted.length) throw new HttpError(400, 'Nothing to create — tick at least one link.');
+    const results = [];
+    for (const item of wanted) {
+      const o = byKey.get(item.key) || {};
+      try {
+        const link = await createLink(entityId, {
+          linkName: o.name !== undefined ? o.name : item.name,
+          destinationUrl: o.destination !== undefined ? o.destination : item.destination,
+          path: o.path !== undefined ? o.path : item.path,
+          suiteId, utm: item.utm, social: item.social,
+          iosBehavior: item.iosBehavior, androidBehavior: item.androidBehavior,
+        }, userEmail);
+        results.push({ key: item.key, ok: true, link });
+      } catch (e) {
+        results.push({ key: item.key, ok: false, error: e.expose ? e.message : 'ChottuLink did not respond — try this one again.' });
+      }
+    }
+    return { created: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results };
+  }
+
+  // First run: seed the platform starter template — the exact per-event set the
+  // team has been creating by hand (main + wallet + lineup + map + feed + chat).
+  if (!sql.prepare('SELECT COUNT(*) n FROM chottu_templates').get().n) {
+    const dest = (q) => `{{base}}?dest=${q}`;
+    const items = [
+      { key: 'main', name: '{{event.name}}', destination: '{{base}}', path: '{{event.slug}}' },
+      { key: 'ticketwallet', name: '{{event.name}} (ticket wallet)', destination: dest('my-tickets'), path: '{{event.slug}}-ticketwallet' },
+      { key: 'lineup', name: '{{event.name}} (lineup)', destination: dest('my-lineup'), path: '{{event.slug}}-lineup' },
+      { key: 'map', name: '{{event.name}} (map)', destination: dest('my-map'), path: '{{event.slug}}-map' },
+      { key: 'eventfeed', name: '{{event.name}} (event feed)', destination: dest('feed'), path: '{{event.slug}}-eventfeed' },
+      { key: 'chat', name: '{{event.name}} (chat)', destination: dest('my-chat'), path: '{{event.slug}}-chat' },
+    ].map((i) => ({ ...i, utm: { campaign: '{{event.slug}}' }, social: {}, iosBehavior: 2, androidBehavior: 2 }));
+    sql.prepare('INSERT INTO chottu_templates (id, entity_id, name, description, items, created_time, modified_time) VALUES (?,?,?,?,?,?,?)')
+      .run(crypto.randomUUID(), '', 'Standard event set',
+        'The full link set for a new event — main link plus ticket wallet, lineup, map, event feed and chat. Paste the event page URL when applying.',
+        JSON.stringify(items), now(), now());
+  }
+
   async function testConnection(entityId) {
     const cfg = configFor(entityId);
     if (!cfg.key) return { ok: false, error: 'No API key configured.' };
@@ -283,6 +431,21 @@ function mount(app, { db, auth, rateLimit }) {
   app.post(`${A}/import`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await importLinks(req.params.entityId))));
   app.post(`${A}/refresh-stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await refreshStats(req.params.entityId, { suiteId: req.body?.suiteId, linkId: req.body?.linkId }))));
+  // Templates — admin can also manage the shared platform set ({ platform: true }).
+  app.get(`${A}/templates`, auth.requireAdmin, (req, res) => res.json({ templates: listTemplates(req.params.entityId) }));
+  app.post(`${A}/templates`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.status(201).json({ template: saveTemplate(req.params.entityId, null, req.body || {}, { platform: !!req.body?.platform }) })));
+  app.patch(`${A}/templates/:tid`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json({ template: saveTemplate(req.params.entityId, req.params.tid, req.body || {}, { platform: true }) })));
+  app.delete(`${A}/templates/:tid`, auth.requireAdmin, asyncHandler(async (req, res) => {
+    getTemplate(req.params.entityId, req.params.tid); // platform templates are admin-deletable too
+    sql.prepare('DELETE FROM chottu_templates WHERE id=?').run(req.params.tid);
+    res.status(204).end();
+  }));
+  app.post(`${A}/templates/:tid/preview`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(resolveTemplate(req.params.entityId, req.params.tid, req.body || {}))));
+  app.post(`${A}/templates/:tid/apply`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(await applyTemplate(req.params.entityId, req.params.tid, req.body || {}, req.user?.email))));
 
   // ── routes: client self-service (Engage → Links) ──
   const myEntity = (req) => {
@@ -315,9 +478,27 @@ function mount(app, { db, auth, rateLimit }) {
       const entityId = myEntity(req);
       res.json(await refreshStats(entityId, { suiteId: req.body?.suiteId, linkId: req.body?.linkId }));
     }));
+  // Templates — clients manage their own; platform templates are read/apply-only.
+  app.get(`${M}/templates`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.json({ templates: listTemplates(myEntity(req)) })));
+  app.post(`${M}/templates`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.status(201).json({ template: saveTemplate(myEntity(req), null, req.body || {}) })));
+  app.patch(`${M}/templates/:tid`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.json({ template: saveTemplate(myEntity(req), req.params.tid, req.body || {}) })));
+  app.delete(`${M}/templates/:tid`, auth.requireAuth, canManage, asyncHandler(async (req, res) => {
+    getTemplate(myEntity(req), req.params.tid, { forEdit: true });
+    sql.prepare('DELETE FROM chottu_templates WHERE id=?').run(req.params.tid);
+    res.status(204).end();
+  }));
+  app.post(`${M}/templates/:tid/preview`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.json(resolveTemplate(myEntity(req), req.params.tid, req.body || {}))));
+  app.post(`${M}/templates/:tid/apply`, auth.requireAuth, canManage,
+    rateLimit({ windowMs: 60_000, max: 6, by: 'user', scope: 'chottu-apply', message: 'Too many template runs at once — give it a minute.' }),
+    asyncHandler(async (req, res) =>
+      res.json(await applyTemplate(myEntity(req), req.params.tid, req.body || {}, req.user?.email))));
 
   console.log('[chottuLink] deep-link management mounted');
-  return { createLink, listLinks, updateLink, setEnabled, importLinks, refreshStats, configFor, testConnection };
+  return { createLink, listLinks, updateLink, setEnabled, importLinks, refreshStats, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
 }
 
 module.exports = { mount };

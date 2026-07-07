@@ -564,6 +564,11 @@ export const api = {
   chottuRefreshStats: (scope, entityId, body = {}) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/refresh-stats` : `/api/my/chottu/${entityId}/refresh-stats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   chottuImport: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/import`, { method: 'POST' }).then(json),
   chottuTest: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/test`, { method: 'POST' }).then(json),
+  chottuTemplates: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`).then(json),
+  chottuSaveTemplate: (scope, entityId, id, t) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + (id ? `/${id}` : ''), { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  chottuDeleteTemplate: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}`, { method: 'DELETE' }),
+  chottuPreviewTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuApplyTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
