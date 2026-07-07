@@ -2,13 +2,13 @@ import { useParams, useSearchParams, useNavigate, useOutletContext } from 'react
 import { useAuth } from '../lib/auth.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
 import JourneyWizard from '../components/JourneyWizard.jsx';
-import EngageLinks from '../components/EngageLinks.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -20,8 +20,8 @@ const TABS = [
   { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
-  { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'links', label: 'Links', icon: '🔗', ready: true },
+  { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
 
@@ -52,13 +52,7 @@ export default function EngagePage() {
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Engage</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Turn data into action</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Engage" title="Turn data into action" />
 
       {/* Tab bar — scrolls horizontally on small screens (mobile-first) and
           sticks to the top of the scroll area so it stays in reach while the
@@ -106,15 +100,15 @@ export default function EngagePage() {
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Every audience Pulse mirrors to your Meta &amp; TikTok ad accounts — connection health, live size and status, all in one place.</p>
           <AudienceHub entityId={entityId} />
         </>
+      ) : active === 'links' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Short links into the Howler app — created from Pulse, tied to your events, with click counts. Share them in posts, bios, emails and QR codes.</p>
+          <ChottuLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
       ) : active === 'templates' ? (
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Create reusable email templates, then apply them when building a campaign.</p>
           <TemplateManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
-        </>
-      ) : active === 'links' ? (
-        <>
-          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Keep your useful links in one place, grouped into categories so the right one is easy to find.</p>
-          <EngageLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : (
         <>

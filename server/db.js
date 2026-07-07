@@ -199,7 +199,7 @@ addColumn('set_dashboards', 'display_name', "TEXT NOT NULL DEFAULT ''");
 // instructions, phaseOverrides: {phaseKey: text} } — drives the home briefing.
 addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('suites', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-event branding override (logo/colour/sender/wording); blank inherits the client
-addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's ticket/checkout link — default CTA for campaigns
+addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); addColumn('suites', 'howler_event_id', "TEXT NOT NULL DEFAULT ''"); // ticket/checkout link (default campaign CTA) + the event's howler.co.za id (deep links; manual until the Howler integration fills it)
 // Per-suite dashboard tweaks layered over the bundled sets:
 //   excluded_dashboards — dashboard ids hidden from THIS suite even though their
 //     set includes them (so an admin can pick a subset of a set per client).
@@ -207,10 +207,9 @@ addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's tic
 //     applied to one dashboard within this suite, on top of the suite-wide locks.
 addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
-// Per-tile lock overrides for THIS suite (one client): { tileId: { filterName:
-// value } } — forces a single tile's filter to a value for this client, on top
-// of the dashboard/suite locks. Applied to that tile's query only.
+// Per-tile lock overrides for THIS suite: { tileId: { filterName: value } } forces one tile's filter, atop the dashboard/suite locks.
 addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('suites', 'live_dashboard_id', "TEXT NOT NULL DEFAULT ''"); // sidebar LIVE button → live-ticketing dashboard
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -1201,7 +1200,7 @@ function setIdsForSuites(suiteIds) {
   return map;
 }
 function rowToSuite(r, setIds) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', howlerEventId: r.howler_event_id || '', liveDashboardId: r.live_dashboard_id || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() {
   const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
@@ -1236,10 +1235,12 @@ function updateSuite(id, patch) {
   const pos = patch.position ?? cur.position;
   const ent = patch.entityId ?? cur.entity_id;
   const eventUrl = patch.eventUrl !== undefined ? String(patch.eventUrl || '') : (cur.event_url || '');
+  const howlerId = patch.howlerEventId !== undefined ? ((String(patch.howlerEventId || '').match(/event\/(\d+)/) || [])[1] || (String(patch.howlerEventId || '').match(/(\d+)/) || [])[1] || '') : (cur.howler_event_id || ''); // digits only — accepts "40848" or a pasted event URL
   const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
   const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
   const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, id);
+  const liveDash = patch.liveDashboardId !== undefined ? String(patch.liveDashboardId || '') : (cur.live_dashboard_id || ''); // sidebar LIVE button target
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, howler_event_id=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=?, live_dashboard_id=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, howlerId, excluded, dashLocks, tileLocks, liveDash, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
@@ -1372,110 +1373,8 @@ function revertForkToTemplate(suiteId, forkId) {
   return templateId;
 }
 
-// ─── Tile library ─────────────────────────────────────────────────────────────
-// A stable signature for a tile's underlying query + visualization, used to
-// dedupe the same tile imported from many dashboards.
-function tileSignature(tile) {
-  const q = tile.query || {};
-  const parts = [
-    q.model || '', q.view || '',
-    (q.fields || []).slice().sort().join(','),
-    (q.pivots || []).join(','),
-    tile.vis?.type || '',
-  ];
-  return crypto.createHash('sha1').update(parts.join('|')).digest('hex');
-}
-
-// Friendly defaults derived from the query, used until a human/AI improves them.
-const VIS_LABELS = {
-  looker_column: 'Column chart', looker_bar: 'Bar chart', looker_line: 'Line chart',
-  looker_area: 'Area chart', looker_scatter: 'Scatter chart', looker_pie: 'Pie chart',
-  looker_donut_multiples: 'Donut chart', looker_grid: 'Table', table: 'Table',
-  looker_single_record: 'Record', single_value: 'Single value', looker_funnel: 'Funnel',
-  looker_map: 'Map', looker_geo_choropleth: 'Map', looker_timeline: 'Timeline', text: 'Text',
-};
-function shortField(f) { const i = f.indexOf('.'); return i >= 0 ? f.slice(i + 1).replace(/_/g, ' ') : f; }
-function deriveFieldsSummary(tile) {
-  const fields = (tile.query?.fields || []).map(shortField);
-  return fields.join(', ');
-}
-function deriveName(tile) {
-  if (tile.title && tile.title.trim()) return tile.title.trim();
-  const vis = VIS_LABELS[tile.vis?.type] || 'Visualization';
-  const fs = deriveFieldsSummary(tile);
-  return fs ? `${vis}: ${fs}` : vis;
-}
-function deriveDescription(tile) {
-  const vis = VIS_LABELS[tile.vis?.type] || 'Visualization';
-  const fs = deriveFieldsSummary(tile);
-  return fs ? `${vis} showing ${fs}.` : `${vis}.`;
-}
-
-function rowToLibraryTile(r) {
-  if (!r) return null;
-  return {
-    id: r.id, signature: r.signature, name: r.name, description: r.description,
-    category: r.category, visType: r.vis_type, fieldsSummary: r.fields_summary,
-    model: r.model, explore: r.explore, def: J(r.def, {}),
-    sourceDashboardId: r.source_dashboard_id, sourceTitle: r.source_title,
-    usageCount: r.usage_count, createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-function listLibraryTiles({ search, category } = {}) {
-  let rows = db.prepare('SELECT * FROM tile_library ORDER BY usage_count DESC, name').all();
-  if (category) rows = rows.filter((r) => r.category === category);
-  if (search) {
-    const q = search.toLowerCase();
-    rows = rows.filter((r) => `${r.name} ${r.description} ${r.fields_summary} ${r.category}`.toLowerCase().includes(q));
-  }
-  return rows.map(rowToLibraryTile);
-}
-function listLibraryCategories() {
-  return db.prepare("SELECT DISTINCT category FROM tile_library WHERE category != '' ORDER BY category").all().map((r) => r.category);
-}
-function getLibraryTile(id) { return rowToLibraryTile(db.prepare('SELECT * FROM tile_library WHERE id=?').get(id)); }
-
-// Harvest a single tile into the library. Skips non-query tiles. Returns the
-// library row (existing or newly created); never overwrites a curated label.
-function harvestTile(tile, { sourceDashboardId, sourceTitle } = {}) {
-  if (!tile || tile.type === 'text' || !tile.query?.model) return null;
-  const signature = tileSignature(tile);
-  const existing = db.prepare('SELECT * FROM tile_library WHERE signature=?').get(signature);
-  if (existing) return rowToLibraryTile(existing);
-  const ts = now();
-  const id = uuid();
-  // Store a clean, position-free copy of the tile to stamp into new dashboards.
-  const { id: _i, layout: _l, ...tileDef } = tile;
-  db.prepare(`INSERT INTO tile_library
-    (id,signature,name,description,category,vis_type,fields_summary,model,explore,def,source_dashboard_id,source_title,usage_count,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`).run(
-    id, signature, deriveName(tile), deriveDescription(tile), '', tile.vis?.type || '',
-    deriveFieldsSummary(tile), tile.query?.model || null, tile.query?.view || null,
-    JSON.stringify(tileDef), sourceDashboardId || null, sourceTitle || null, ts, ts,
-  );
-  return getLibraryTile(id);
-}
-// Harvest all tiles of a dashboard definition. Returns how many were newly added.
-function harvestDashboardTiles(def, { sourceDashboardId } = {}) {
-  let added = 0;
-  const all = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-  const before = db.prepare('SELECT COUNT(*) c FROM tile_library').get().c;
-  for (const t of all) harvestTile(t, { sourceDashboardId, sourceTitle: def.title });
-  added = db.prepare('SELECT COUNT(*) c FROM tile_library').get().c - before;
-  return added;
-}
-function updateLibraryTile(id, patch) {
-  const cur = db.prepare('SELECT * FROM tile_library WHERE id=?').get(id);
-  if (!cur) return null;
-  const name = patch.name ?? cur.name;
-  const description = patch.description ?? cur.description;
-  const category = patch.category ?? cur.category;
-  db.prepare('UPDATE tile_library SET name=?, description=?, category=?, updated_at=? WHERE id=?')
-    .run(name, description, category, now(), id);
-  return getLibraryTile(id);
-}
-function deleteLibraryTile(id) { return db.prepare('DELETE FROM tile_library WHERE id=?').run(id).changes > 0; }
-function bumpLibraryUsage(id) { db.prepare('UPDATE tile_library SET usage_count = usage_count + 1 WHERE id=?').run(id); }
+// ─── Tile library — harvest + curation lives in server/tileLibrary.js ─────────
+const { tileSignature, listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage } = require('./tileLibrary')(db, { uuid, now, J });
 
 // ─── Settlements ──────────────────────────────────────────────────────────────
 // Lightweight summary for lists: pull the headline numbers out of the JSON so
@@ -1617,6 +1516,8 @@ function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHE
 
 // Full backup / restore (export whole DB to JSON, import to replace) lives in
 // its own module — a factory over this db handle. See server/transfer.js.
+// (Kept over main's inline table list: transfer.js enumerates every table from
+// sqlite_master, so the backup stays complete as new feature tables are added.)
 const { exportAll, importAll } = require('./transfer')(db, now);
 
 module.exports = {

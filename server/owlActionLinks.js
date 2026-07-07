@@ -6,6 +6,8 @@ const VIEW_PATHS = {
   createLiveUpdate: '/alerts?tab=live',
   createSegment: '/engage/segments',
   draftCampaign: '/engage/campaigns',
+  createChottuLink: '/engage/links',
+  applyChottuTemplate: '/engage/links',
 };
 
 // The in-app path for an action kind (e.g. '/alerts'), or '' if unknown.

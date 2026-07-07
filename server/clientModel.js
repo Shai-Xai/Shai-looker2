@@ -143,6 +143,9 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
         id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
         entityName: ent?.name || '', entityLogo: ent?.logo || '',
         setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
+        // One-tap LIVE button target — only surfaced if it's still a dashboard in
+        // the suite (a deleted/removed one silently drops the button).
+        liveDashboardId: (su.liveDashboardId && db.dashboardsInSuite(su.id).some((d) => (d.id || d) === su.liveDashboardId)) ? su.liveDashboardId : '',
         onSale: suiteOnSale(su), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
       };
     }));

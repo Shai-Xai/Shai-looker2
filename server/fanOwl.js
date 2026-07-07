@@ -69,6 +69,19 @@ Rules:
 - pages (max 12) = one entry per distinct page/section identifiable from the URLs and text: a urlPattern (a distinctive path fragment such as "/artists/" or "faq" — matched as a substring, * allowed as a wildcard), its pageType, a one-line note saying what the page is, "content" — the useful PAGE-SPECIFIC information from that page, distilled (up to ~250 words), closely following the site's wording — and "starters": up to 3 SHORT (≤6 words) questions a fan on that page would most likely tap, answerable from that page's content (e.g. on accommodation: "What are the glamping options?"). Page detail (e.g. everything about accommodation options) belongs in that page's content, not in knowledge.
 - Do NOT suggest ticket prices or checkout links — the catalogue comes from the ticketing system, not the website.`;
 
+// Tolerant JSON extraction for the ingest output: models sometimes wrap the JSON
+// in ```fences``` or prefix a sentence, so strip a fenced block if present and
+// otherwise slice from the first { to the last } before parsing. Throws on genuinely
+// unparseable text (e.g. a max_tokens truncation).
+function coerceOwlJson(text) {
+  let t = String(text || '').trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  const s = t.indexOf('{'); const e = t.lastIndexOf('}');
+  if (s >= 0 && e > s) t = t.slice(s, e + 1);
+  return JSON.parse(t);
+}
+
 // The pitch writer (spec §2.2b voice, applied to the ribbon): drafts ONE salesy
 // teaser line per page from that page's approved info + mapped items. Generated on
 // demand in the editor, reviewed by a human, then served deterministically — the
@@ -323,13 +336,21 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     const corpus = crawled.map((p) => `=== PAGE: ${p.url} ===\n${p.text}`).join('\n\n').slice(0, 45000);
     const client = insights.requireClient(apiKey);
     const msg = await require('./aiUsage').run({ entityId, kind: 'fan_owl' }, () => client.messages.create({
-      model: insights.MODEL, max_tokens: 3500, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      model: insights.MODEL, max_tokens: 8000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       system: FAN_INGEST_SYSTEM, messages: [{ role: 'user', content: corpus }],
     }));
     const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
     let parsed = {};
-    try { parsed = JSON.parse(rawText.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim()); }
-    catch { throw new HttpError(502, 'The Owl’s suggestions came back malformed — try again.'); }
+    try { parsed = coerceOwlJson(rawText); }
+    catch {
+      // A big multilingual site can overrun even a generous token budget → the JSON
+      // truncates. Tell the promoter to point at a narrower page rather than "try again".
+      const truncated = msg.stop_reason === 'max_tokens';
+      console.warn('[fan-owl ingest] parse failed', { stop: msg.stop_reason, len: rawText.length, tail: rawText.slice(-300) });
+      throw new HttpError(502, truncated
+        ? 'That site was too large to read in one pass. Point the Owl at a specific page (e.g. the FAQ, line-up or accommodation URL) and read those one at a time.'
+        : 'The Owl’s suggestions came back malformed — try again.');
+    }
     res.json({
       crawled: crawled.map((p) => p.url),
       knowledge: (Array.isArray(parsed.knowledge) ? parsed.knowledge : []).slice(0, 20)
@@ -493,6 +514,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       const b = req.body || {};
       const site = siteByKey.get(String(b.siteKey || '').trim());
       if (!site || !site.enabled) throw new HttpError(404, 'This assistant isn’t available.');
+      // 🚩 fanowl feature flag: OFF for this client = the public widget refuses to
+      // boot (same wording as a disabled site — nothing to probe from outside).
+      if (!require('./flags').enabled(site.entity_id, 'fanowl')) throw new HttpError(404, 'This assistant isn’t available.');
       // Pulse's own /fan-owl-test preview page is always allowed (same host), even
       // once the promoter has locked the domain list down to their site.
       const sameHost = originHost(req.headers.origin || req.headers.referer || '') === String(req.hostname || '').toLowerCase();
@@ -761,4 +785,4 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   return { saveConfig, configView }; // exposed for tests
 }
 
-module.exports = { mount, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };
+module.exports = { mount, coerceOwlJson, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };

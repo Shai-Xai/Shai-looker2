@@ -10,6 +10,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { useSheetDrag } from '../lib/useSheetDrag.js';
 import { applyBrand, resetBrand, useBrandLogo } from '../lib/brand.js';
 import { useAccess, PERMS } from '../lib/access.js';
+import { useMyFlags, flagOn } from '../lib/flags.js';
 import { FEATURES, owlNativeChatEnabled } from '../lib/features.js';
 import AnalystDrawer from '../components/AnalystDrawer.jsx';
 import OwlChat from '../components/OwlChat.jsx';
@@ -64,6 +65,7 @@ export default function ClientLayout() {
   // The dashboard page (ViewPage) portals its actions into the menu bar so
   // Summary / Filters / ⋯ sit on the ☰ Menu line, not a separate row below.
   const [actionsSlot, setActionsSlot] = useState(null);
+  const [titleSlot, setTitleSlot] = useState(null); // section pages portal their title into the menu bar
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -189,6 +191,9 @@ export default function ClientLayout() {
     ? (previewMode ? (suiteEntityId || previewEntityId) : (suiteEntityId || profileEntityId))
     : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
+  // 🚩 Per-client feature flags drive which workspace sections show (server routes enforce too).
+  const myFlags = useMyFlags(activeEntityId);
+  const fl = (k) => flagOn(myFlags, k);
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
   // Show the Event Ops nav only when the active client has the pilot switched on AND the
   // user may operate it (admins always pass `can`). Server enforces the real boundary.
@@ -318,11 +323,14 @@ export default function ClientLayout() {
           const suiteOpen = searching || !!openSuites[su.id];
           return (
             <div key={su.id} style={{ marginBottom: 2 }}>
-              <button className="nav-row" style={{ ...rowBtn, fontWeight: 600 }} onClick={() => toggleSuite(su.id)}>
-                <Caret open={suiteOpen} />
-                <Ico v={su.icon} size={22} />
-                <span style={ellip}>{su.name}</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button className="nav-row" style={{ ...rowBtn, fontWeight: 600, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                  <Caret open={suiteOpen} />
+                  <Ico v={su.icon} size={22} />
+                  <span style={ellip}>{su.name}</span>
+                </button>
+                {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+              </div>
               <div className={`collapsey${suiteOpen ? ' open' : ''}`}>
                 <div className="collapsey-inner" style={{ marginTop: 1 }}>
                   {sets === undefined ? (
@@ -376,7 +384,7 @@ export default function ClientLayout() {
                 arrow lives), so surface the collapse control here for them. */}
             {opsOnly && !isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
           </div>
-          {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
+          {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onGoals ? activeRef : null}
             className={`nav-row${onGoals ? ' active' : ''}`}
@@ -387,7 +395,7 @@ export default function ClientLayout() {
             <span style={ellip}>Goals</span>
           </button>
           )}
-          {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
+          {!opsOnly && fl('alerts') && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onAlerts ? activeRef : null}
             className={`nav-row${onAlerts ? ' active' : ''}`}
@@ -409,7 +417,7 @@ export default function ClientLayout() {
             <span style={ellip}>Event Ops</span>
           </button>
           )}
-          {!opsOnly && can(PERMS.DIGESTS_MANAGE) && (
+          {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
             className={`nav-row${onDigests ? ' active' : ''}`}
@@ -420,7 +428,7 @@ export default function ClientLayout() {
             <span style={ellip}>Digests</span>
           </button>
           )}
-          {!opsOnly && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
+          {!opsOnly && fl('settlements') && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
             className={`nav-row${onSettlements ? ' active' : ''}`}
@@ -444,6 +452,7 @@ export default function ClientLayout() {
             </button>
           )}
           {/* Product — report bugs/ideas and track them (everyone, incl. ops-only). */}
+          {fl('report') && (<>
           <button
             ref={onProduct ? activeRef : null}
             className={`nav-row${onProduct ? ' active' : ''}`}
@@ -462,10 +471,12 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>💬</span>
             <span style={ellip}>Report an issue</span>
           </button>
-          {!opsOnly && (can(PERMS.CAMPAIGNS_VIEW)) && (
+          </>)}
+          {!opsOnly && fl('engage') && (can(PERMS.CAMPAIGNS_VIEW)) && (
           <>
           <div style={{ borderTop: '1px solid var(--hairline)', margin: '12px 6px 10px' }} />
           <div style={{ padding: '0 8px 8px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
+          {fl('engage.campaigns') && (
           <button
             ref={onActions ? activeRef : null}
             className={`nav-row${onActions ? ' active' : ''}`}
@@ -475,6 +486,8 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📣</span>
             <span style={ellip}>Campaigns</span>
           </button>
+          )}
+          {fl('engage.segments') && (
           <button
             ref={onSegments ? activeRef : null}
             className={`nav-row${onSegments ? ' active' : ''}`}
@@ -484,6 +497,8 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🥧</span>
             <span style={ellip}>Segments</span>
           </button>
+          )}
+          {fl('social') && (
           <button
             ref={onSocial ? activeRef : null}
             className={`nav-row${onSocial ? ' active' : ''}`}
@@ -493,6 +508,7 @@ export default function ClientLayout() {
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
             <span style={ellip}>Social</span>
           </button>
+          )}
           </>
           )}
         </>
@@ -540,11 +556,17 @@ export default function ClientLayout() {
                 return (
                   <div key={su.id}>
                     {!single && (
-                      <button className="nav-row" style={mRowSuite} onClick={() => toggleSuite(su.id)}>
-                        <Caret open={suiteOpen} />
-                        <Ico v={su.icon} size={22} />
-                        <span style={ellip}>{su.name}</span>
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button className="nav-row" style={{ ...mRowSuite, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
+                          <Caret open={suiteOpen} />
+                          <Ico v={su.icon} size={22} />
+                          <span style={ellip}>{su.name}</span>
+                        </button>
+                        {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
+                      </div>
+                    )}
+                    {single && su.liveDashboardId && (
+                      <div style={{ padding: '0 12px 6px' }}><LiveBtn wide onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} /></div>
                     )}
                     {suiteOpen && (
                       sets === undefined ? (
@@ -581,7 +603,7 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
-                  {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
+                  {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onGoals ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onGoals ? 700 : 500 }}
@@ -591,7 +613,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Goals</span>
                   </button>
                   )}
-                  {!opsOnly && (visibleSuites.length > 0 || isAdmin) && (
+                  {!opsOnly && fl('alerts') && (visibleSuites.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onAlerts ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onAlerts ? 700 : 500 }}
@@ -611,7 +633,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Event Ops</span>
                   </button>
                   )}
-                  {!opsOnly && can(PERMS.DIGESTS_MANAGE) && (
+                  {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (
                   <button
                     className={`nav-row${onDigests ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onDigests ? 700 : 500 }}
@@ -621,7 +643,7 @@ export default function ClientLayout() {
                     <span style={ellip}>Digests</span>
                   </button>
                   )}
-                  {!opsOnly && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
+                  {!opsOnly && fl('settlements') && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onSettlements ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSettlements ? 700 : 500 }}
@@ -643,6 +665,7 @@ export default function ClientLayout() {
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
                   )}
+                  {fl('report') && (<>
                   <button
                     className={`nav-row${onProduct ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onProduct ? 700 : 500 }}
@@ -659,9 +682,11 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>💬</span>
                     <span style={ellip}>Report an issue</span>
                   </button>
-                  {can(PERMS.CAMPAIGNS_VIEW) && (
+                  </>)}
+                  {fl('engage') && can(PERMS.CAMPAIGNS_VIEW) && (
                   <>
                   <div style={{ padding: '8px 8px 6px 14px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Engage</div>
+                  {fl('engage.campaigns') && (
                   <button
                     className={`nav-row${onActions ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onActions ? 700 : 500 }}
@@ -670,6 +695,8 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📣</span>
                     <span style={ellip}>Campaigns</span>
                   </button>
+                  )}
+                  {fl('engage.segments') && (
                   <button
                     className={`nav-row${onSegments ? ' active' : ''}`}
                     style={{ ...mRowSuite, fontWeight: onSegments ? 700 : 500 }}
@@ -678,6 +705,7 @@ export default function ClientLayout() {
                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>🥧</span>
                     <span style={ellip}>Segments</span>
                   </button>
+                  )}
                   </>
                   )}
                 </>
@@ -756,27 +784,25 @@ export default function ClientLayout() {
         {(isMobile || collapsed) && (
           <div style={menuBar}>
             <button style={menuBtn} onClick={() => (isMobile ? setNavOpen(true) : toggleCollapsed())} title="Menu" aria-label="Open menu">☰</button>
-            {/* No back button on the client home screen — it's the root, so back
-                would have nowhere meaningful to go (Home already covers it). */}
-            {!(location.pathname === '/' || location.pathname === '/preview') && (
-              <button style={menuBtn} onClick={() => (location.key !== 'default' ? navigate(-1) : navigate(previewMode ? '/preview' : '/'))} title="Back" aria-label="Back">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-            )}
+            {/* No back button — Home (and the phone's own back gesture) cover it, and the
+                extra arrow just crowded the bar. */}
             <button style={menuBtn} onClick={() => vtNavigate(navigate, previewMode ? '/preview' : '/')} title="Home" aria-label="Home">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 10.5 12 3l9 7.5" />
                 <path d="M5 9.5V21h5.5v-6h3v6H19V9.5" />
               </svg>
             </button>
-            {activeTitle && <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>}
+            {/* Dashboard pages show their live tile title; section pages (Alerts,
+                Goals, Event Ops…) portal their page title in here via <PageHeader>
+                so there's no second home button and no tall header below. */}
+            {activeTitle
+              ? <span style={{ flex: 1, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeTitle}</span>
+              : <span ref={setTitleSlot} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }} />}
             {/* Page (dashboard) actions portal in here — Summary · Filters · ⋯ */}
             <div ref={setActionsSlot} style={{ display: 'flex', alignItems: 'center', gap: 7, marginLeft: 'auto', flexShrink: 0 }} />
           </div>
         )}
-        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot }} />
+        <Outlet context={{ previewEntityId: activeEntityId, actionsSlot, titleSlot }} />
       </main>
       {(FEATURES.ask || owlNativeChatEnabled(user)) && !askOpen && (
         // Floating owl — quick launcher for the analyst drawer (bottom-right).
@@ -874,6 +900,22 @@ function Ico({ v, size = 16 }) {
 }
 function Caret({ open, small }) {
   return <span className="nav-caret" style={{ display: 'inline-block', width: 12, fontSize: small ? 8 : 9, color: '#b0b0b6', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>;
+}
+// One-tap jump to the suite's designated "live" (ticket-sales) dashboard — a
+// small red pill on the event's row so no drill-down is needed. `wide` fills the
+// row on single-suite mobile (where the suite header itself is hidden).
+function LiveBtn({ onClick, title, wide }) {
+  return (
+    <button onClick={onClick} title={title} aria-label={title} style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, flexShrink: 0,
+      width: wide ? '100%' : undefined, cursor: 'pointer',
+      background: 'transparent', color: 'var(--success)', border: '1.5px solid var(--success)', borderRadius: 980,
+      padding: '3px 10px', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.04em',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', '--live-ring': 'color-mix(in srgb, var(--success) 55%, transparent)', animation: 'howlerPulse 1.6s ease-out infinite' }} />
+      LIVE
+    </button>
+  );
 }
 
 const sidebarShell = { width: 264, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 };

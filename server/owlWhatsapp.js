@@ -54,7 +54,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
+function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound = null }) {
   const owlMemory = require('./owlMemory'); // memoryNote + rememberFact tool (durable client memory)
   const sql = db.db;
   sql.exec(`
@@ -214,6 +214,9 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     if (!user) user = (db.listUsers() || []).find((u) => u.mobile && norm(u.mobile) === msisdn) || null;
     if (!user) return null;
     if (!entityId) entityId = (user.entityIds && user.entityIds[0]) || '';
+    // 🚩 waowl feature flag: OFF for this client = the WhatsApp Owl doesn't engage
+    // (the sender falls into the existing unregistered-number path).
+    if (entityId && !require('./flags').enabled(entityId, 'waowl')) return { user: null, entityId: '' };
     return { user, entityId };
   }
 
@@ -423,6 +426,15 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   }
 
   async function handleInbound(msisdn, rawText) {
+    // Staff-alerts intercept: a message from a known Event Ops staff number is
+    // captured for ops and answered simply — it must NEVER reach the client
+    // Owl. Fully guarded: any non-staff number (or an error) falls straight
+    // through to the normal Owl flow below.
+    const staffInbound = getStaffInbound && getStaffInbound();
+    if (staffInbound) {
+      try { if (await staffInbound(msisdn, rawText)) { logEvent(msisdn, 'staff-alert', 'captured (kept off the Owl)'); return; } }
+      catch (e) { console.error('[owlWhatsapp] staffInbound failed', e && e.message); }
+    }
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
@@ -462,10 +474,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const r = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model, signal }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
         maxRounds: persona.maxRounds,
+        turnTimeoutMs: persona.turnTimeoutMs, toolTimeoutMs: persona.toolTimeoutMs,
       }));
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }
@@ -728,7 +741,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const { text } = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, signal }),
         toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
         ctx: { user: id.user, entityId: id.entityId },
       }));

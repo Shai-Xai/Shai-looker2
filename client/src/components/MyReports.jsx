@@ -22,6 +22,7 @@ const JOURNEY = [
   ['triaged', 'Reviewing'],
   ['accepted', 'Accepted'],
   ['in_progress', 'Building'],
+  ['staging', 'Testing'],
   ['shipped', 'Ready for you'],
   ['approved', 'Done'],
 ];
@@ -108,7 +109,11 @@ function ReportCard({ t, open, onToggle, onChange }) {
     catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
 
-  const awaitingReview = t.status === 'shipped';
+  // Two review moments: on STAGING (verify the preview → approve unlocks the push
+  // to production) and on SHIPPED (final sign-off once it's live).
+  const onStaging = t.status === 'staging';
+  const stagingApproved = onStaging && t.clientVerdict === 'approved';
+  const awaitingReview = t.status === 'shipped' || (onStaging && !stagingApproved);
 
   return (
     <div style={{ border: `1px solid ${awaitingReview ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 12, padding: 14, background: 'var(--card)' }}>
@@ -119,23 +124,25 @@ function ReportCard({ t, open, onToggle, onChange }) {
         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 7, whiteSpace: 'nowrap', ...statusStyle(t.status) }}>{t.statusLabel}</span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-        {t.screen || 'unknown screen'} · {new Date(t.createdAt).toLocaleDateString()}
+        {t.screen || 'unknown screen'}{t.tileName ? ` · ▦ ${t.tileName}` : ''} · {new Date(t.createdAt).toLocaleDateString()}
         {(t.attachments || []).length > 0 ? ` · 📎 ${t.attachments.length}` : ''}
         {(t.comments || []).length > 0 ? ` · 💬 ${t.comments.length}` : ''}
       </div>
 
       <StatusTrack status={t.status} />
 
-      {/* Ship review: the payoff — overview, test link, approve / reject */}
+      {/* Review moments: verify on staging (approve → we push it live), or the final
+          sign-off once shipped. Same approve / send-back verbs both times. */}
       {awaitingReview && (
         <div style={{ background: 'rgba(var(--brand-rgb), 0.06)', border: '1px solid rgba(var(--brand-rgb), 0.2)', borderRadius: 10, padding: 12, marginBottom: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>🎉 This shipped — does it work for you?</div>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{onStaging ? '🧪 Built — please test it before we push it live' : '🎉 This shipped — does it work for you?'}</div>
+          {onStaging && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>It's running on our staging site (a safe preview, not the live app yet). Once you approve, we'll push it to production.</p>}
           {(t.shipNote || t.aiSummary) && <p style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.5, marginBottom: 8 }}>{t.shipNote || t.aiSummary}</p>}
           {t.testUrl && <a href={t.testUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', fontSize: 13, fontWeight: 600, color: 'var(--brand)', marginBottom: 10 }}>🔗 Open it to test →</a>}
           {err && <p style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 8 }}>{err}</p>}
           {!rejecting ? (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => verdict('approved')} disabled={!!busy} style={approveBtn}>{busy === 'approved' ? 'Saving…' : '✓ Approve'}</button>
+              <button onClick={() => verdict('approved')} disabled={!!busy} style={approveBtn}>{busy === 'approved' ? 'Saving…' : onStaging ? '✓ Approve — push it live' : '✓ Approve'}</button>
               <button onClick={() => setRejecting(true)} disabled={!!busy} style={rejectBtn}>Send back</button>
             </div>
           ) : (
@@ -152,6 +159,7 @@ function ReportCard({ t, open, onToggle, onChange }) {
         </div>
       )}
 
+      {stagingApproved && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this on staging — we're pushing it live. You'll be told the moment it's in production.</p>}
       {t.status === 'approved' && <p style={{ fontSize: 12.5, color: '#16a34a', marginBottom: 8 }}>✓ You approved this{t.clientVerdictAt ? ` on ${new Date(t.clientVerdictAt).toLocaleDateString()}` : ''}.</p>}
       {t.status === 'rejected' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>↩️ Sent back to the team{t.clientVerdictNote ? `: “${t.clientVerdictNote}”` : ''}.</p>}
       {t.status === 'declined' && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>🚫 Not going forward{t.declineReason ? `: “${t.declineReason}”` : '.'}</p>}

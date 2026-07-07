@@ -197,6 +197,8 @@ export const api = {
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
   owlCreateSegment: (body) => fetch('/api/owl/act/create-segment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlCreateChottuLink: (body) => fetch('/api/owl/act/create-chottu-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlApplyChottuTemplate: (body) => fetch('/api/owl/act/apply-chottu-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Act layer: commit a drafted campaign (the "Create draft campaign" tap). Creates a
   // DRAFT only — a human reviews/approves/sends in Engage. Never carries PII.
   owlDraftCampaign: (body) => fetch('/api/owl/act/draft-campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
@@ -305,6 +307,16 @@ export const api = {
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
   adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
+  // Admin — Product → Help knowledge: curate + publish what the Owl may say about
+  // Pulse itself (server/helpBot.js — grounds the Owl's productHelp tool). The
+  // client self-service surface is the Owl chat itself; there's no separate bot.
+  adminHelpArticles: () => fetch('/api/admin/help/articles').then(json),
+  adminCreateHelpArticle: (a) => fetch('/api/admin/help/articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminUpdateHelpArticle: (id, a) => fetch(`/api/admin/help/articles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminDeleteHelpArticle: (id) => fetch(`/api/admin/help/articles/${id}`, { method: 'DELETE' }),
+  adminDraftHelpArticles: () => fetch('/api/admin/help/draft', { method: 'POST' }).then(json),
+  adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
+  adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -313,7 +325,8 @@ export const api = {
   adminTickets: (params = {}) => fetch(`/api/admin/tickets?${new URLSearchParams(params)}`).then(json),
   adminTicket: (id) => fetch(`/api/admin/tickets/${id}`).then(json),
   adminTicketAssignees: () => fetch('/api/admin/tickets/assignees').then(json),
-  adminTicketGithubIssue: (id, mode) => fetch(`/api/admin/tickets/${id}/github-issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mode ? { mode } : {}) }).then(json),
+  adminTicketGithubIssue: (id, mode, target) => fetch(`/api/admin/tickets/${id}/github-issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(mode ? { mode } : {}), ...(target ? { target } : {}) }) }).then(json),
+  adminPromoteTicket: (id) => fetch(`/api/admin/tickets/${id}/promote`, { method: 'POST' }).then(json),
   adminDeleteTicket: (id) => fetch(`/api/admin/tickets/${id}`, { method: 'DELETE' }).then(json),
   getGithubConfig: () => fetch('/api/admin/github').then(json),
   saveGithubConfig: (b) => fetch('/api/admin/github', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -527,6 +540,11 @@ export const api = {
   getTileZoom: (dashboardId) => fetch(`/api/my/tile-zoom/${dashboardId}`).then(json),
   saveTileZoom: (dashboardId, zoom) => fetch(`/api/my/tile-zoom/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zoom }) }).then(json),
   clearQueryCache: () => fetch('/api/admin/clear-query-cache', { method: 'POST' }).then(json),
+  // 🚩 Feature flags (Admin → Product → Flags) + the client's own effective map.
+  adminFlags: () => fetch('/api/admin/flags').then(json),
+  setFlagDefault: (key, value) => fetch('/api/admin/flags/default', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
+  setFlagOverride: (entityId, key, value) => fetch(`/api/admin/flags/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
+  myFlags: (entityId) => fetch(`/api/my/flags/${entityId}`).then(json),
   getSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`).then(json),
   saveSendingDomain: (entityId, body, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   verifySendingDomain: (entityId, scope = 'admin') => fetch(`${scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`}/verify`, { method: 'POST' }).then(json),
@@ -560,6 +578,25 @@ export const api = {
   slackShareStatus: () => fetch('/api/my/slack/share-status').then(json),
   slackShare: (p) => fetch('/api/my/slack/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
+
+  // ChottuLink deep links — dual surface (admin per client / client self-service).
+  chottuLinks: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`).then(json),
+  chottuCreateLink: (scope, entityId, link) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(link) }).then(json),
+  chottuUpdateLink: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  chottuSetLinkStatus: (scope, entityId, id, enabled) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}/status` : `/api/my/chottu/${entityId}/links/${id}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  chottuRefreshStats: (scope, entityId, body = {}) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/refresh-stats` : `/api/my/chottu/${entityId}/refresh-stats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuImportPreview: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/import/preview`).then(json),
+  chottuRemoveImported: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/imported`, { method: 'DELETE' }).then(json),
+  chottuImport: (entityId, body = {}) => fetch(`/api/admin/entities/${entityId}/chottu/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuDeleteLink: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'DELETE' }).then(json),
+  chottuTest: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/test`, { method: 'POST' }).then(json),
+  chottuSuggestMeta: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/suggest-meta` : `/api/my/chottu/${entityId}/suggest-meta`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuStats: (scope, entityId, suiteId = '') => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/stats` : `/api/my/chottu/${entityId}/stats`) + (suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : '')).then(json),
+  chottuTemplates: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`).then(json),
+  chottuSaveTemplate: (scope, entityId, id, t) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + (id ? `/${id}` : ''), { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  chottuDeleteTemplate: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}`, { method: 'DELETE' }),
+  chottuPreviewTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuApplyTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
@@ -828,6 +865,9 @@ export const api = {
   setLivePulseStatus: (id, status) => fetch(`/api/livepulse/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
   setLivePulseLive: (id, live) => fetch(`/api/livepulse/${id}/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ live }) }).then(json),
   testLivePulse: (id) => fetch(`/api/livepulse/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  // Live preview of a draft's numbers (no send/save) + send-to-me preview.
+  previewLivePulse: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  sendLivePulsePreview: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}/preview-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   livePulseRuns: (id) => fetch(`/api/livepulse/${id}/runs`).then(json),
 
   // Status notices — human-authored platform incidents. Admin authors + updates +
@@ -884,6 +924,13 @@ export const api = {
   eopPortalIssue: (suiteId, token, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eopPortalCheckpoint: (suiteId, token, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/checkpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eopPortalIssues: (suiteId, token, status = 'open') => fetch(`/api/eventops/portal/${suiteId}/${token}/issues?status=${status}`).then(json),
+  // PUBLIC device support call — the device's PRE-BOUND link (station + device baked in).
+  eopCallInfo: (suiteId, token, deviceId) => fetch(`/api/eventops/portal/${suiteId}/${token}/call/${deviceId}`).then(json),
+  eopCallRaise: (suiteId, token, deviceId, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/call/${deviceId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  // Console (authed): dispatch's live call queue.
+  eventopsCalls: (suiteId, status = 'open') => fetch(`/api/eventops/suites/${suiteId}/calls?status=${status}`).then(json),
+  eventopsAckCall: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/calls/${id}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  eventopsResolveCall: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/calls/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   eopPortalResolveIssue: (suiteId, token, id, b) => fetch(`/api/eventops/portal/${suiteId}/${token}/issues/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsActivity: (suiteId, { limit = 200, from = '', to = '' } = {}) => fetch(`/api/eventops/suites/${suiteId}/activity?limit=${limit}${from ? `&from=${encodeURIComponent(from)}` : ''}${to ? `&to=${encodeURIComponent(to)}` : ''}`).then(json),
   eventopsCheckpoints: (suiteId) => fetch(`/api/eventops/suites/${suiteId}/checkpoints`).then(json),

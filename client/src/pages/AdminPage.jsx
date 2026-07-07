@@ -17,6 +17,7 @@ import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
@@ -24,6 +25,8 @@ import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
+import FlagsMatrix from '../components/FlagsMatrix.jsx';
+import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
@@ -476,7 +479,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -487,8 +490,10 @@ function Product() {
         ))}
       </div>
       {sub === 'tickets' && <TicketBoard />}
+      {sub === 'flags' && <FlagsMatrix />}
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
+      {sub === 'helpbot' && <HelpBotAdmin />}
     </div>
   );
 }
@@ -681,7 +686,8 @@ function ProductReleaseNotes() {
     try {
       const r = await api.adminGenerateReleaseNotes(14);
       await load();
-      setGen({ busy: false, msg: r.created ? `Added ${r.created} draft${r.created === 1 ? '' : 's'} from recent commits — review and publish below.` : (r.message || 'Nothing new to add.') });
+      const bits = [r.created && `added ${r.created} draft${r.created === 1 ? '' : 's'}`, r.refreshed && `refreshed ${r.refreshed}`].filter(Boolean);
+      setGen({ busy: false, msg: bits.length ? `From recent commits: ${bits.join(', ')} — review and publish below.` : (r.message || 'Nothing new to add.') });
     } catch (e) { setGen({ busy: false, msg: e.message }); }
   };
   const add = async () => {
@@ -1221,7 +1227,7 @@ function SetupWizard({ fields }) {
             </div>
             {entity
               ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /><div data-tour="client-sending-domain" style={{ marginTop: 12 }}><L>Custom sending domain · optional</L><div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div></div></>
-              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
+              : <div data-tour="client-later" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1315,7 +1321,7 @@ function SetupWizard({ fields }) {
               <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
               <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
             </div>
-            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, goals &amp; alerts, links, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
           </>
         )}
 
@@ -1336,6 +1342,9 @@ const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSi
 const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+  // Only rendered BEFORE the client exists (the fields below replace it after) —
+  // the tour skips whichever of the two states isn't on screen.
+  { tour: 'client-later', icon: '🔓', title: 'The rest unlocks once created', body: 'Reporting currency, AI copy language, a vanity login URL, a login background and a custom sending domain all live right here too — they appear the moment the client is created. Hit “Create client & continue”, and come back to this step any time to set them.' },
   { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
@@ -1353,6 +1362,8 @@ const SUITES_TOUR = [
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
   { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
   { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-howler-id', icon: '🎟️', title: 'Add the Howler event ID', body: 'The event’s number on howler.co.za (e.g. 40848). Deep links and link templates auto-fill their destinations from it — no typing at link-creation time.' },
+  { tour: 'suite-live', icon: '🔴', title: 'Set the LIVE button', body: 'Pick the live-ticketing report. A red LIVE button appears on this event’s sidebar row so the client can jump to live sales in one tap.' },
   { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
 ];
@@ -1375,13 +1386,22 @@ const BRANDING_TOUR = [
 const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
 
 function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
-  const [i, setI] = useState(0);
+  const root = () => (container && container.current) || document;
+  // Only tour points whose [data-tour] anchor is actually on screen. A point
+  // whose section isn't rendered right now (the client fields that only appear
+  // once the client is created, the login form before "+ Add user" is pressed,
+  // the organiser picker when "All organisers" is ticked…) is SKIPPED instead of
+  // spotlighting nothing. Recomputed every render, so sections that appear
+  // mid-tour join the sequence and the step count stays honest.
+  const anchored = steps.filter((s) => root().querySelector(`[data-tour="${s.tour}"]`));
+  const seq = anchored.length ? anchored : steps; // nothing anchored → old behaviour
+  const [rawI, setI] = useState(0);
   const [rect, setRect] = useState(null);
   const last = useRef(null);
-  const cur = steps[i];
+  const i = Math.min(rawI, seq.length - 1);
+  const cur = seq[i];
 
   useEffect(() => {
-    const root = () => (container && container.current) || document;
     const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
     const el0 = find();
     if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1400,7 +1420,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
     return () => cancelAnimationFrame(raf);
   }, [i, cur.tour, container]);
 
-  const isLast = i === steps.length - 1;
+  const isLast = i === seq.length - 1;
   const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
   const cardW = Math.min(360, vw - 24);
@@ -1417,7 +1437,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
       {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
       <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {seq.length}</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
         </div>
@@ -1620,10 +1640,12 @@ function StepPreviewModal({ steps, index, onClose }) {
       case 'client': return (<>
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('client-later', <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>)}
         {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
         {sec('client-language', <>{lbl('AI copy language')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (English)</div></>)}
         {sec('client-slug', <>{lbl('Vanity login URL')}<div style={{ ...fauxInput, maxWidth: 320 }}>{window.location.host}/kunye</div></>)}
         {sec('client-loginbg', <>{lbl('Login background image')}<div style={{ width: 160, height: 90, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>background</div></>)}
+        {sec('client-sending-domain', <>{lbl('Custom sending domain · optional')}<div style={{ ...fauxInput, maxWidth: 320 }}>mail.brand.com · Verify DNS</div></>)}
       </>);
       case 'scope': return (<>
         {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
@@ -1639,6 +1661,8 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('suite-roles', secHead('Dashboard access by role'))}
         {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
         {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-howler-id', <>{lbl('Howler event ID')}<div style={fauxInput}>40848</div></>)}
+        {sec('suite-live', <>{lbl('🔴 LIVE button dashboard')}<div style={fauxInput}>Live Ticketing report</div></>)}
         {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
         {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
       </>);
@@ -2698,7 +2722,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2746,6 +2770,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Reusable, always-live audiences for <b>{entity.name}</b> — built from their data and used by campaigns. Clients can also manage these themselves.</p>
               <SegmentManager entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'links' && (
+            <div>
+              <p style={hint}>ChottuLink deep links for <b>{entity.name}</b> — short links into the Howler app, tied to their events, with click counts. Clients manage these themselves in Engage → Links; the key/domain lives under Integrations.</p>
+              <ChottuLinks entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'eventops' && (
@@ -3603,6 +3633,8 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
   const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
+  const [howlerEventId, setHowlerEventId] = useState(suite.howlerEventId || '');
+  const [liveDashboardId, setLiveDashboardId] = useState(suite.liveDashboardId || '');
   const [saved, setSaved] = useState(false);
   const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
   const setDashLock = (did, map) => setDashLocks((cur) => {
@@ -3638,7 +3670,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, howlerEventId, liveDashboardId }); flash(setSaved); onChange(); };
   // Sets grouped by their library folder (item: show folder → set → dashboards),
   // named folders first then the ungrouped bucket.
   const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
@@ -3801,6 +3833,19 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
+      </div>
+      <div data-tour="suite-howler-id" style={{ marginTop: 12 }}>
+        <L>Howler event ID</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's number on <b>howler.co.za</b> (e.g. <b>40848</b> — pasting the event URL works too). Deep links and link templates auto-fill their destinations from it. Manual for now; the Howler integration will fill it automatically later.</div>
+        <input style={{ ...input, width: '100%' }} value={howlerEventId} onChange={(e) => setHowlerEventId(e.target.value)} placeholder="40848" inputMode="numeric" />
+      </div>
+      <div data-tour="suite-live" style={{ marginTop: 12 }}>
+        <L>🔴 LIVE button dashboard</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>Pick the live-ticketing report. A red <b>LIVE</b> button appears on this event's row in the sidebar and jumps straight to it — one tap to live sales, no drill-down.</div>
+        <select style={{ ...input, width: '100%' }} value={liveDashboardId} onChange={(e) => setLiveDashboardId(e.target.value)}>
+          <option value="">No LIVE button</option>
+          {includedDashboards.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+        </select>
       </div>
       <div data-tour="suite-save"><SaveRow onSave={save} saved={saved} id={suite.id} /></div>
       <Section tour="suite-branding" title="Event branding (logo / colours / sender)">
@@ -4764,7 +4809,7 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5068,8 +5113,9 @@ function ClientIntegrations({ entity }) {
         showMeta
         showTikTok
         showSlack
+        showChottu
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}

@@ -8,6 +8,7 @@ import ShareMenu from './ShareMenu.jsx';
 // also returns the user's own most-asked questions). A small mirror so it never opens
 // blank; the live list — personalised first — replaces these.
 const FALLBACK_STARTERS = [
+  { label: "What's new", icon: '✨', prompt: "What's new in Pulse?" },
   { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
   { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
   { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },
@@ -31,6 +32,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [busy, setBusy] = useState(false);
   const [threadId, setThreadId] = useState(null);
   const [dock, setDock] = useState(() => localStorage.getItem('howler_owl_dock') || 'docked');
+  const [wide, setWide] = useState(() => localStorage.getItem('howler_owl_wide') === '1'); // full-screen the panel
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('howler_owl_zoom')) || 1);
   // Scope the Owl answers for — pick a client (organiser) and optionally an event.
   const [selEntity, setSelEntity] = useState(entityId || '');
@@ -94,6 +96,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setTimeout(() => { w.focus(); w.print(); }, 350);
   };
   const pickDock = (m) => { localStorage.setItem('howler_owl_dock', m); setDock(m); };
+  const toggleWide = () => setWide((v) => { const n = !v; localStorage.setItem('howler_owl_wide', n ? '1' : '0'); return n; });
   const bumpZoom = (d) => setZoom((z) => { const n = Math.min(1.3, Math.max(0.8, Math.round((z + d) * 100) / 100)); localStorage.setItem('howler_owl_zoom', String(n)); return n; });
 
   // Follow the page context if it changes while open.
@@ -244,13 +247,25 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       if (fu && fu.length) setFollowups(fu);
     } catch (e) {
       if (e && (e.name === 'AbortError' || ac.signal.aborted)) appendToOwl('⏹ Stopped.');
-      else if (liveTidRef.current) {
-        // The STREAM died (navigated away / phone locked / flaky network) but the
-        // server keeps working and saves the answer to the thread — recover it
-        // instead of failing (the "loading failed after switching screens" bug).
+      else {
+        // The stream died before finishing — phone locked, flaky mobile network, or
+        // Safari's raw "Load failed" (the fetch rejected before we even got the thread
+        // id). The server keeps working and PERSISTS the answer, so recover it instead
+        // of surfacing a fetch error. When we never got the id back, find the just-made
+        // thread by its title (= this question) and recover from that.
         setStatus('Connection dropped — still working…');
-        await recoverAnswer(liveTidRef.current);
-      } else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
+        let tid = liveTidRef.current || threadId;
+        if (!tid) {
+          try {
+            const r = await api.owlThreads();
+            const want = q.trim().slice(0, 80);
+            const hit = (r && r.threads ? r.threads : []).find((t) => String(t.title || '').trim() === want);
+            tid = hit && hit.id;
+          } catch { /* ignore — fall through to the retry note */ }
+        }
+        if (tid) await recoverAnswer(tid);
+        else appendToOwl('⚠ The connection dropped before I could answer that — please tap send to try again.');
+      }
     } finally {
       abortRef.current = null;
       setBusy(false);
@@ -312,9 +327,12 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
 
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
+  // Round "floating" control — chats/more/close sit as soft circular buttons on the
+  // header row alongside the scope pickers, so there's no separate scope strip.
+  const floatBtn = { border: 'none', background: 'var(--elevated, rgba(128,128,128,0.1))', color: 'var(--text)', cursor: 'pointer', borderRadius: 999, width: 32, height: 32, flexShrink: 0, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   const segBtn = (active) => ({ padding: '4px 10px', fontSize: 11.5, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const menuItem = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600 };
-  const selStyle = { padding: '4px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
+  const selStyle = { padding: '4px 8px', borderRadius: 8, border: 'none', background: 'var(--elevated, rgba(128,128,128,0.08))', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
 
   const bubble = (m, i) => (
     <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
@@ -404,23 +422,39 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     : <div style={{ flexShrink: 0 }}>{sidebarInner}</div>);
 
   const panel = (
-    <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
+    // On phones the panel is edge-to-edge (like a native app) — drop the animated
+    // gradient frame so it reads borderless, not a card floating in a window.
+    <div className={isMobile ? undefined : 'ai-glow'} style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Clean header: chats ☰, new chat ✎, title — everything else lives in the ⋯ menu
-          (copy / PDF / share / text size / overlay-vs-in-app), so the bar stays calm. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-        <span style={{ fontSize: 16 }}>🦉</span>
-        <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
-        <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
-        <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
+      {/* Single header row: chats ☰, the scope pickers themselves, then ⋯ + close ✕ —
+          all as soft floating buttons, so scope lives IN the header (no second row). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 8px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
+        <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...floatBtn, fontSize: 15 }}>☰</button>
+        {showPicker && (clients.length > 1 ? (
+          <select value={selEntity} onChange={(e) => { setSelEntity(e.target.value); setSelSuite(''); resetThread(); }} style={{ ...selStyle, padding: '5px 8px', maxWidth: isMobile ? 132 : 200 }} aria-label="Client">
+            <option value="">Pick a client…</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ) : (
+          <strong style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(clients[0] && clients[0].name) || 'Your data'}</strong>
+        ))}
+        {showPicker && selEntity && clientEvents.length > 0 && (
+          <select value={selSuite} onChange={(e) => { setSelSuite(e.target.value); resetThread(); }} style={{ ...selStyle, padding: '5px 8px', maxWidth: isMobile ? 112 : 200 }} aria-label="Event">
+            <option value="">All events</option>
+            {clientEvents.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        )}
         <span style={{ flex: 1 }} />
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...hdrBtn, fontSize: 18, fontWeight: 700, padding: '2px 8px', ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 8 } : null) }}>⋯</button>
+          <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...floatBtn, fontSize: 17, fontWeight: 700, ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.22))' } : null) }}>⋯</button>
           {hdrMenuOpen && (
             <>
               <div onClick={() => setHdrMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
               <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 91, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: 'var(--shadow-pop, 0 8px 28px rgba(0,0,0,0.18))', minWidth: 210, padding: 6 }}>
+                <button onClick={() => { newChat(); setHdrMenuOpen(false); }} style={menuItem}>✎ New chat</button>
+                {!isMobile && !embed && <button onClick={() => { toggleWide(); setHdrMenuOpen(false); }} style={menuItem}>{wide ? '⤡ Exit full screen' : '⤢ Full screen'}</button>}
+                <div style={{ height: 1, background: 'var(--hairline)', margin: '5px 4px' }} />
                 {messages.some((m) => m.text) && (
                   <>
                     <button onClick={() => { copyChat(); setHdrMenuOpen(false); }} style={menuItem}>{chatCopied ? '✓ Copied' : '📋 Copy chat'}</button>
@@ -453,28 +487,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             </>
           )}
         </div>
-        {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>}
+        {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...floatBtn, fontSize: 16 }}>✕</button>}
       </div>
-
-      {showPicker && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--hairline)', flexShrink: 0, flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--muted)', fontSize: 12.5 }}>Scope:</span>
-          {clients.length > 1 ? (
-            <select value={selEntity} onChange={(e) => { setSelEntity(e.target.value); setSelSuite(''); resetThread(); }} style={selStyle} aria-label="Client">
-              <option value="">Pick a client…</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          ) : (
-            <strong style={{ fontSize: 12.5 }}>{(clients[0] && clients[0].name) || 'Your data'}</strong>
-          )}
-          {selEntity && clientEvents.length > 0 && (
-            <select value={selSuite} onChange={(e) => { setSelSuite(e.target.value); resetThread(); }} style={selStyle} aria-label="Event">
-              <option value="">All events</option>
-              {clientEvents.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-            </select>
-          )}
-        </div>
-      )}
 
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, fontSize: `${zoom}em` }}>
         {messages.length === 0 && (
@@ -486,7 +500,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
               {(starters.length ? starters : FALLBACK_STARTERS).map((s) => (
                 <button key={s.prompt} type="button" onClick={() => send(s.prompt)} disabled={busy || !canAsk}
                   title={s.prompt}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'var(--elevated, rgba(128,128,128,0.08))', color: 'var(--text)', borderRadius: 980, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: (busy || !canAsk) ? 'default' : 'pointer', opacity: (busy || !canAsk) ? 0.6 : 1 }}>
                   <span style={{ fontSize: 14 }}>{s.icon}</span>{s.label}
                 </button>
               ))}
@@ -557,7 +571,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8 }}>
           {[['quick', '⚡ Quick', 'Fast, grounded answers'], ['analyst', '🔬 Analyst', 'Deeper analysis: multiple cuts, the “so what”, and strategic follow-ups (a little slower)'], ['operator', '🧭 Operator', 'Deep analysis AND proactively drafts the best next action (alert / segment / campaign) for you to confirm']].map(([k, lbl, tip]) => (
             <button key={k} type="button" onClick={() => setPersona(k)} title={tip}
-              style={{ border: '1px solid var(--hairline)', background: persona === k ? 'var(--brand)' : 'var(--card)', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
+              style={{ border: 'none', background: persona === k ? 'var(--brand)' : 'transparent', color: persona === k ? '#fff' : 'var(--muted)', borderRadius: 980, padding: '3px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
           ))}
           {persona === 'analyst' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deeper · a little slower</span>}
           {persona === 'operator' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>deep + proposes an action</span>}
@@ -586,9 +600,9 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
             style={{ width: '100%', boxSizing: 'border-box', resize: 'none', minHeight: composerFresh ? 108 : 40, maxHeight: 200, overflowY: 'auto', padding: '8px 10px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontSize: 14.5, fontFamily: 'inherit', lineHeight: 1.5 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: '1px solid var(--hairline)', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
-            <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: '1px solid var(--hairline)', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.12))' : 'var(--card)', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
-            {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: '1px solid var(--hairline)', background: listening ? '#e0414a' : 'var(--card)', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
+            <button onClick={openSlash} title="Commands" aria-label="Slash commands" style={{ border: 'none', background: slashOpen ? 'var(--elevated, rgba(128,128,128,0.14))' : 'transparent', color: 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 17, fontWeight: 700, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>/</button>
+            <button onClick={() => setAttachOpen((o) => !o)} title="Attach data (CSV or Google Sheet)" aria-label="Attach data" style={{ border: 'none', background: attachOpen || uploads.length ? 'var(--elevated, rgba(128,128,128,0.14))' : 'transparent', color: 'var(--text)', borderRadius: 980, minWidth: 38, height: 38, padding: '0 11px', fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>📎{uploads.length ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 3 }}>{uploads.length}</span> : ''}</button>
+            {SR && <button onClick={toggleMic} title={listening ? 'Stop dictation' : 'Dictate your question'} aria-label="Dictate" style={{ border: 'none', background: listening ? '#e0414a' : 'transparent', color: listening ? '#fff' : 'var(--text)', borderRadius: 980, width: 38, height: 38, fontSize: 16, cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>🎤</button>}
             <span style={{ flex: 1 }} />
             <button onClick={() => send()} disabled={busy || !input.trim() || !canAsk} aria-label="Send"
               style={{ border: 'none', borderRadius: 980, padding: '0 20px', height: 38, fontSize: 14, fontWeight: 700, cursor: busy || !input.trim() || !canAsk ? 'default' : 'pointer', background: busy || !input.trim() || !canAsk ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: busy || !input.trim() || !canAsk ? 'var(--muted)' : '#fff' }}>
@@ -607,7 +621,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   if (embed) return <div style={{ position: 'fixed', inset: 0 }}>{panel}</div>;
 
   if (docked) {
-    const w = sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)';
+    const w = wide ? '100vw' : (sidebarOpen && !isMobile ? 'min(800px, 58vw)' : 'min(560px, 44vw)');
     return (
       <div style={{ position: 'relative', flexShrink: 0, height: '100%', width: open ? w : 0, transition: 'width .28s var(--ease-spring, ease)', overflow: 'hidden' }} aria-hidden={!open}>
         <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w }}>{panel}</div>
@@ -615,7 +629,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     );
   }
 
-  const w = isMobile ? '100%' : (sidebarOpen ? 'min(800px, 96vw)' : 'min(560px, 94vw)');
+  const w = isMobile ? '100%' : (wide ? '100vw' : (sidebarOpen ? 'min(800px, 96vw)' : 'min(560px, 94vw)'));
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />
@@ -960,7 +974,108 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
   if (action.kind === 'draftReport') return <ReportActionCard action={action} />;
+  if (action.kind === 'createChottuLink') return <ChottuLinkActionCard action={action} />;
+  if (action.kind === 'applyChottuTemplate') return <ChottuTemplateActionCard action={action} />;
   return null;
+}
+
+// "Create link" — the Owl drafted one ChottuLink deep link; tapping mints it on
+// ChottuLink (permission re-checked server-side) and shows the live short URL.
+function ChottuLinkActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const [made, setMade] = useState(null);
+  const d = action.draft || {};
+  const utmLine = Object.entries(d.utm || {}).map(([k, v]) => `${k}=${v}`).join(' · ');
+  const create = async () => {
+    setState('busy'); setErr('');
+    try { const r = await api.owlCreateChottuLink({ entityId: action.entityId, suiteId: action.suiteId, draft: d }); setMade(r.link); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the link.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🔗</span>
+        <strong style={{ fontSize: 12.5 }}>Deep link</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, marginBottom: 4 }}><strong>{d.linkName}</strong></div>
+      <div style={{ fontSize: 12, color: 'var(--brand)', marginBottom: 4, wordBreak: 'break-all' }}>{action.domain}/{d.path || '(auto code)'}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: utmLine ? 2 : 8, wordBreak: 'break-all' }}>→ {d.destinationUrl}</div>
+      {utmLine && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{utmLine}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>
+          ✓ Link is live: <span style={{ userSelect: 'all' }}>{made?.shortUrl}</span>
+          <button onClick={() => { try { navigator.clipboard.writeText(made?.shortUrl || ''); } catch { /* older browsers */ } }} style={{ marginLeft: 8, border: '1px solid var(--hairline)', background: 'none', borderRadius: 8, padding: '2px 8px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>Copy</button>
+          <ViewLink url={ '/engage/links' } label="View links →" />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create link'}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Create N links" — the Owl resolved a link template against the current event;
+// tapping creates the whole set sequentially and reports each ✓/✗.
+function ChottuTemplateActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const [outcome, setOutcome] = useState(null);
+  const items = action.items || [];
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      const r = await api.owlApplyChottuTemplate({ entityId: action.entityId, suiteId: action.suiteId, templateId: action.templateId, base: action.base, items: items.map((i) => ({ key: i.key })) });
+      setOutcome(r); setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the links.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>⚡</span>
+        <strong style={{ fontSize: 12.5 }}>Link set — {action.templateName}</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      {state !== 'done' && (
+        <div style={{ fontSize: 12, marginBottom: 8 }}>
+          {items.map((i) => (
+            <div key={i.key} style={{ padding: '3px 0' }}>
+              <span style={{ color: 'var(--brand)' }}>…/{i.path || '(auto)'}</span> <span style={{ color: 'var(--muted)' }}>· {i.name}</span>
+              {(i.warnings || []).map((w, k) => <div key={k} style={{ fontSize: 11.5, color: '#b25000' }}>⚠ {w}</div>)}
+            </div>
+          ))}
+        </div>
+      )}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5 }}>
+          <div style={{ color: 'var(--brand)', fontWeight: 700, marginBottom: 4 }}>
+            {outcome.failed ? `✓ ${outcome.created} created · ✗ ${outcome.failed} failed` : `✓ All ${outcome.created} links created`}
+            <ViewLink url={outcome.url || '/engage/links'} label="View links →" />
+          </div>
+          {(outcome.results || []).map((r) => (
+            <div key={r.key} style={{ padding: '2px 0', color: r.ok ? 'var(--text)' : '#e0414a' }}>
+              {r.ok ? <>✓ <span style={{ userSelect: 'all' }}>{r.link.shortUrl}</span></> : <>✗ {r.key}: {r.error}</>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : `Create ${items.length} link${items.length === 1 ? '' : 's'}`}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 // "File it" — the Owl drafted a product report (bug/idea) from the chat; tapping
 // files it to the product board (same path as the report widget), tagged source=owl.
