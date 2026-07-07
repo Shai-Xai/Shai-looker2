@@ -330,8 +330,10 @@ test('preview resolves placeholders per event and flags problems instead of blan
   const wallet = p.body.items.find((i) => i.key === 'ticketwallet');
   assert.equal(wallet.destination, 'https://www.howler.co.za/event/40848?dest=my-tickets');
   assert.deepEqual(main.warnings, []);
-  // Without the base URL, every {{base}} item warns rather than silently blanking.
-  const noBase = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: suiteA.id } });
+  // Without a base URL — and on an event that hasn't learned its Howler ID —
+  // every {{base}} item warns rather than silently blanking.
+  const blankSuite = h.db.createSuite({ entityId: entityA.id, name: 'No ID Fest' });
+  const noBase = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: blankSuite.id } });
   assert.ok(noBase.body.items.every((i) => i.warnings.some((w) => /\{\{base\}\}/.test(w))));
   // Another client's event is rejected outright.
   const wrongSuite = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: 'nope', base: 'https://h' } });
@@ -374,6 +376,26 @@ test('apply creates the ticked links, survives per-item failures, and honours ov
   // Unticked items were not created.
   const links = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
   assert.ok(!links.some((l) => l.shortUrl.endsWith('-lineup')), 'unticked lineup item must not be created');
+});
+
+test('events learn their Howler ID from the links attached to them (never overwriting)', async () => {
+  const su = h.db.createSuite({ entityId: entityA.id, name: 'Learn Fest' });
+  assert.equal(h.db.getSuite(su.id).howlerEventId, '');
+  // Creating a link on the event with a howler.co.za destination teaches it.
+  await app.req('POST', `/api/my/chottu/${entityA.id}/links`, {
+    as: ownerA, body: { linkName: 'Learn', destinationUrl: 'https://www.howler.co.za/event/77001?dest=tickets', path: 'learn-1', suiteId: su.id },
+  });
+  assert.equal(h.db.getSuite(su.id).howlerEventId, '77001');
+  // A later link with a different id does NOT overwrite what's set.
+  await app.req('POST', `/api/my/chottu/${entityA.id}/links`, {
+    as: ownerA, body: { linkName: 'Learn 2', destinationUrl: 'https://www.howler.co.za/event/88002', path: 'learn-2', suiteId: su.id },
+  });
+  assert.equal(h.db.getSuite(su.id).howlerEventId, '77001');
+  // Import with event assignment teaches too.
+  const su2 = h.db.createSuite({ entityId: entityA.id, name: 'Learn Fest 2' });
+  upstream.nextLinks = [{ id: 'ext-learn', short_url: 'https://howler.chottu.link/learn3', link_name: 'L3', destination_url: 'https://www.howler.co.za/event/99003?dest=my-map', is_enabled: true }];
+  await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: { ids: ['ext-learn'], assignments: { 'ext-learn': su2.id } } });
+  assert.equal(h.db.getSuite(su2.id).howlerEventId, '99003');
 });
 
 test('a suite with a Howler event ID needs no base URL — destinations compose themselves', async () => {

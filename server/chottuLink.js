@@ -142,6 +142,20 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     if (!su || su.entityId !== entityId) throw new HttpError(400, 'That event doesn’t belong to this client.');
     return suiteId;
   }
+  // The links themselves know the Howler event id — when one pointing at
+  // howler.co.za/event/<id> lands on an event whose id field is still blank,
+  // fill it in. Never overwrites a value someone set; failure never blocks the
+  // link operation that triggered it.
+  function learnHowlerId(suiteId, destinationUrl) {
+    try {
+      if (!suiteId) return;
+      const id = (String(destinationUrl || '').match(/howler\.co\.za\/event\/(\d+)/) || [])[1];
+      if (!id) return;
+      const su = db.getSuite(suiteId);
+      if (su && !su.howlerEventId) db.updateSuite(suiteId, { howlerEventId: id });
+    } catch { /* learning is a bonus, never a blocker */ }
+  }
+
   const cleanUtm = (u) => {
     const out = {};
     for (const k of ['source', 'medium', 'campaign', 'term', 'content']) {
@@ -201,6 +215,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,1,'pulse',?,?,?)`)
       .run(id, entityId, suiteId, info.id || `unknown:${id}`, shortUrl, linkName, destinationUrl,
         ios, android, JSON.stringify(utm), JSON.stringify(social), String(userEmail || ''), now(), now());
+    learnHowlerId(suiteId, destinationUrl);
     return rowToLink(sql.prepare('SELECT * FROM chottu_links WHERE id=?').get(id));
   }
 
@@ -218,7 +233,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     if (body.utm !== undefined) { const u = cleanUtm(body.utm); local.utm = JSON.stringify(u); Object.assign(patch, upstreamFields(u, {})); }
     if (body.social !== undefined) { const s = cleanSocial(body.social); local.social = JSON.stringify(s); Object.assign(patch, upstreamFields({}, s)); }
     if (Object.keys(patch).length) await chottu(configFor(entityId), 'PATCH', `/update-link/${r.chottu_link_id}`, patch);
-    if (body.suiteId !== undefined) local.suite_id = checkSuite(entityId, body.suiteId); // Pulse-only field — no upstream call
+    if (body.suiteId !== undefined) { local.suite_id = checkSuite(entityId, body.suiteId); learnHowlerId(local.suite_id, local.destination_url || r.destination_url); } // Pulse-only field — no upstream call
     if (Object.keys(local).length) {
       local.modified_time = now();
       sql.prepare(`UPDATE chottu_links SET ${Object.keys(local).map((k) => `${k}=?`).join(', ')} WHERE id=?`)
@@ -318,11 +333,13 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
           restored++;
         } else refreshed++;
       } else {
+        const assignedSuite = suiteFor(l.id);
         sql.prepare(`INSERT INTO chottu_links
             (id, entity_id, suite_id, chottu_link_id, short_url, link_name, destination_url, is_enabled, source, created_time, modified_time)
             VALUES (?,?,?,?,?,?,?,?, 'imported', ?, ?)`)
-          .run(crypto.randomUUID(), entityId, suiteFor(l.id), l.id, l.short_url, l.link_name || '', l.destination_url || '',
+          .run(crypto.randomUUID(), entityId, assignedSuite, l.id, l.short_url, l.link_name || '', l.destination_url || '',
             l.is_enabled ? 1 : 0, l.createdTime || now(), now());
+        learnHowlerId(assignedSuite, l.destination_url);
         imported++;
       }
     }
