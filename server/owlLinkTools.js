@@ -91,7 +91,10 @@ module.exports = function createOwlLinkTools({ db, getChottuApi }) {
       ? templates.find((x) => x.name.toLowerCase() === wanted) || templates.find((x) => x.name.toLowerCase().includes(wanted))
       : (templates.length === 1 ? templates[0] : null);
     if (!t) return refuse('which_template', `Which template? Available: ${templates.map((x) => `"${x.name}"`).join(', ')}.`);
-    const base = String(args.baseUrl || '').trim();
+    // A bare Howler event id works too — the base URL is composed from it.
+    const rawBase = String(args.baseUrl || '').trim();
+    const digits = (rawBase.match(/event\/(\d+)/) || [])[1] || (rawBase.match(/^(\d+)$/) || [])[1];
+    const base = digits ? `https://www.howler.co.za/event/${digits}` : rawBase;
     let resolved;
     try { resolved = chottu.resolveTemplate(entityId, t.id, { suiteId, base }); }
     catch (e) { return refuse('resolve_failed', e.expose ? e.message : 'Could not resolve the template.'); }
@@ -117,7 +120,7 @@ module.exports = function createOwlLinkTools({ db, getChottuApi }) {
       type: 'object',
       properties: {
         templateName: { type: 'string', description: 'Which template to apply (fuzzy-matched). Omit if there is only one.' },
-        baseUrl: { type: 'string', description: 'The event\'s public page URL, e.g. https://www.howler.co.za/event/40848 — fills every {{base}} in the template.' },
+        baseUrl: { type: 'string', description: 'The event\'s public page URL (https://www.howler.co.za/event/40848) or just its Howler event id (40848) — fills every {{base}} destination in the template.' },
       },
     },
   };

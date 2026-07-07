@@ -333,11 +333,44 @@ function ImportPicker({ entityId, suites, onDone }) {
   );
 }
 
+// The Howler app's deep-link destinations — the "I want to…" picker in the link
+// editor. {id} = the Howler event id (digits), {code} = a promo code.
+const HOWLER_BASE = 'https://www.howler.co.za';
+const DEST_PRESETS = [
+  { group: 'General', key: 'app', label: 'Open the app (generic)', url: HOWLER_BASE },
+  { group: 'General', key: 'feed', label: 'Open the Feed', url: `${HOWLER_BASE}?dest=feed` },
+  { group: 'General', key: 'my-events', label: 'Open My Events', url: `${HOWLER_BASE}?dest=my-events` },
+  { group: 'General', key: 'profile', label: 'Open Profile', url: `${HOWLER_BASE}?dest=profile` },
+  { group: 'Event', key: 'event', label: 'Show my event in Explore', url: `${HOWLER_BASE}/event/{id}` },
+  { group: 'Event', key: 'info', label: 'Open event info screen', url: `${HOWLER_BASE}/event/{id}?dest=info` },
+  { group: 'Event', key: 'tickets', label: 'Open buy tickets screen', url: `${HOWLER_BASE}/event/{id}?dest=tickets` },
+  { group: 'Event', key: 'lineup', label: 'Open artist lineup', url: `${HOWLER_BASE}/event/{id}?dest=lineup` },
+  { group: 'Event', key: 'map', label: 'Open event map', url: `${HOWLER_BASE}/event/{id}?dest=map` },
+  { group: 'Event', key: 'announcements', label: 'Open announcements', url: `${HOWLER_BASE}/event/{id}?dest=announcements` },
+  { group: 'Event', key: 'promo', label: 'Apply a promo code', url: `${HOWLER_BASE}/event/{id}?promo={code}`, needsCode: true },
+  { group: 'Event', key: 'promo-tickets', label: 'Promo + go straight to tickets', url: `${HOWLER_BASE}/event/{id}?promo={code}&dest=tickets`, needsCode: true },
+  { group: 'Ticketholder', key: 'my-tickets', label: 'Ticketholder: my tickets', url: `${HOWLER_BASE}/event/{id}?dest=my-tickets` },
+  { group: 'Ticketholder', key: 'my-chat', label: 'Ticketholder: event chat', url: `${HOWLER_BASE}/event/{id}?dest=my-chat` },
+  { group: 'Ticketholder', key: 'my-lineup', label: 'Ticketholder: lineup', url: `${HOWLER_BASE}/event/{id}?dest=my-lineup` },
+  { group: 'Ticketholder', key: 'my-map', label: 'Ticketholder: event map', url: `${HOWLER_BASE}/event/{id}?dest=my-map` },
+  { group: 'Ticketholder', key: 'my-announcements', label: 'Ticketholder: announcements', url: `${HOWLER_BASE}/event/{id}?dest=my-announcements` },
+];
+const DEST_GROUPS = ['General', 'Event', 'Ticketholder'];
+const presetNeedsId = (p) => !!p && p.url.includes('{id}');
+// Accepts a bare event id ("40848") or a pasted event URL — the digits win.
+const extractEventId = (v) => (String(v || '').match(/event\/(\d+)/) || [])[1] || (String(v || '').match(/^\s*(\d+)\s*$/) || [])[1] || '';
+const composeDest = (p, eventId, code) => p.url.replace('{id}', eventId || '{id}').replace('{code}', (code || '').trim() || '{code}');
+
 // Create/edit one link — stacked single-column form (mobile-first).
 function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
   const [name, setName] = useState(link?.linkName || '');
   const [suiteId, setSuiteId] = useState(link?.suiteId || '');
   const [destination, setDestination] = useState(link?.destinationUrl || '');
+  // Destination picker — new links start on the catalogue; editing an existing
+  // link starts on Custom with its URL (switching to a preset recomposes it).
+  const [preset, setPreset] = useState(link ? 'custom' : 'tickets');
+  const [eventRef, setEventRef] = useState(link ? '' : '');
+  const [promo, setPromo] = useState('');
   const [path, setPath] = useState('');
   const [openInApp, setOpenInApp] = useState(link ? link.iosBehavior !== 1 : true);
   const [utm, setUtm] = useState(link?.utm || {});
@@ -386,9 +419,58 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
             {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
-        <Field label="Destination URL">
-          <input style={input} value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="https://www.howler.co.za/event/…" autoComplete="off" inputMode="url" />
+        <Field label="I want the link to…">
+          <select
+            style={input}
+            value={preset}
+            onChange={(e) => {
+              const key = e.target.value; setPreset(key);
+              const p = DEST_PRESETS.find((x) => x.key === key);
+              if (p) setDestination(composeDest(p, extractEventId(eventRef), promo));
+            }}
+          >
+            {DEST_GROUPS.map((g) => (
+              <optgroup key={g} label={g}>
+                {DEST_PRESETS.filter((p) => p.group === g).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </optgroup>
+            ))}
+            <option value="custom">Custom URL…</option>
+          </select>
         </Field>
+        {preset !== 'custom' && presetNeedsId(DEST_PRESETS.find((p) => p.key === preset)) && (
+          <Field label="Howler event" hint="Paste the event's page URL or just its number — e.g. 40848.">
+            <input
+              style={input} value={eventRef} autoComplete="off" inputMode="url"
+              placeholder="https://www.howler.co.za/event/40848 or 40848"
+              onChange={(e) => {
+                setEventRef(e.target.value);
+                const p = DEST_PRESETS.find((x) => x.key === preset);
+                if (p) setDestination(composeDest(p, extractEventId(e.target.value), promo));
+              }}
+            />
+          </Field>
+        )}
+        {preset !== 'custom' && DEST_PRESETS.find((p) => p.key === preset)?.needsCode && (
+          <Field label="Promo code">
+            <input
+              style={input} value={promo} autoComplete="off" placeholder="e.g. EARLYBIRD"
+              onChange={(e) => {
+                setPromo(e.target.value);
+                const p = DEST_PRESETS.find((x) => x.key === preset);
+                if (p) setDestination(composeDest(p, extractEventId(eventRef), e.target.value));
+              }}
+            />
+          </Field>
+        )}
+        {preset === 'custom' ? (
+          <Field label="Destination URL">
+            <input style={input} value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="https://www.howler.co.za/event/…" autoComplete="off" inputMode="url" />
+          </Field>
+        ) : (
+          <div style={{ fontSize: 12, color: destination.includes('{') ? 'var(--warn,#b25000)' : 'var(--muted)', wordBreak: 'break-all' }}>
+            → {destination}{destination.includes('{id}') && ' — fill in the event above'}{destination.includes('{code}') && ' — add the promo code'}
+          </div>
+        )}
         {!link && (
           <Field label="Short URL path · optional" hint="Leave blank for an auto-generated code. Letters, numbers and dashes only.">
             <input style={input} value={path} onChange={(e) => setPath(e.target.value)} placeholder="my-event-ig" autoComplete="off" />
@@ -425,7 +507,7 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
         {(social.title || social.description || social.imageUrl) && <SharePreviewPhone social={social} />}
         {error && <div style={{ color: 'var(--error,#ef4444)', fontSize: 13 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button style={btnPrimary} disabled={busy || !name.trim() || !destination.trim()} onClick={save}>
+          <button style={btnPrimary} disabled={busy || !name.trim() || !destination.trim() || destination.includes('{')} onClick={save}>
             {busy ? 'Saving…' : link ? 'Save changes' : 'Create link'}
           </button>
           <button style={btnGhost} disabled={busy} onClick={() => onDone(false)}>Cancel</button>

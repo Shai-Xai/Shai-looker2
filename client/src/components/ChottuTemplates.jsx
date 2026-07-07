@@ -75,11 +75,17 @@ function ApplyWizard({ template, entityId, scope, suites, onDone }) {
   const [error, setError] = useState('');
 
   const needsBase = template.items.some((i) => JSON.stringify(i).includes('{{base}}'));
+  // The user gives the Howler EVENT ID (or pastes the event page URL) — every
+  // {{base}} destination is composed from it automatically.
+  const composedBase = (() => {
+    const digits = (String(base).match(/event\/(\d+)/) || [])[1] || (String(base).match(/^\s*(\d+)\s*$/) || [])[1];
+    return digits ? `https://www.howler.co.za/event/${digits}` : String(base).trim();
+  })();
 
   async function runPreview() {
     setBusy('preview'); setError(''); setResults(null);
     try {
-      const p = await api.chottuPreviewTemplate(scope, entityId, template.id, { suiteId, base });
+      const p = await api.chottuPreviewTemplate(scope, entityId, template.id, { suiteId, base: composedBase });
       setPreview(p);
       setPicked(Object.fromEntries(p.items.map((i) => [i.key, { on: !i.warnings.length, path: i.path, name: i.name }])));
     } catch (e) { setError(e.message); }
@@ -92,7 +98,7 @@ function ApplyWizard({ template, entityId, scope, suites, onDone }) {
       const items = preview.items
         .filter((i) => (onlyKeys ? onlyKeys.includes(i.key) : picked[i.key]?.on))
         .map((i) => ({ key: i.key, path: picked[i.key]?.path ?? i.path, name: picked[i.key]?.name ?? i.name }));
-      const r = await api.chottuApplyTemplate(scope, entityId, template.id, { suiteId, base, items });
+      const r = await api.chottuApplyTemplate(scope, entityId, template.id, { suiteId, base: composedBase, items });
       setResults((prev) => {
         if (!prev) return r;
         // A retry replaces just the retried keys' outcomes.
@@ -116,8 +122,8 @@ function ApplyWizard({ template, entityId, scope, suites, onDone }) {
           </select>
         </Field>
         {needsBase && (
-          <Field label="Event page URL" hint="Pasted into every {{base}} — e.g. https://www.howler.co.za/event/40848">
-            <input style={input} value={base} onChange={(e) => { setBase(e.target.value); setPreview(null); setResults(null); }} placeholder="https://www.howler.co.za/event/…" inputMode="url" autoComplete="off" />
+          <Field label="Howler event ID" hint={composedBase && composedBase !== base.trim() ? `Every destination becomes ${composedBase}…` : 'The event\'s ID (e.g. 40848) or its page URL — fills every destination automatically.'}>
+            <input style={input} value={base} onChange={(e) => { setBase(e.target.value); setPreview(null); setResults(null); }} placeholder="40848 — or paste https://www.howler.co.za/event/40848" inputMode="url" autoComplete="off" />
           </Field>
         )}
         {!preview && <button style={btnPrimarySm} disabled={!!busy || !suiteId || (needsBase && !base.trim())} onClick={runPreview}>{busy === 'preview' ? 'Working…' : 'Preview links'}</button>}
