@@ -96,6 +96,32 @@ test('tileQueryBody scopes the body, and returns null when scope is denied', asy
   assert.equal(await q.tileQueryBody(tile, def, user2, undefined), null);
 });
 
+test('tileQueryBody applies a hand-added (custom-field) lock the tile isn\'t wired to, matching the live report', async () => {
+  const q = makeEngine();
+  const user = h.makeClient('mlock@test.local', [h.makeEntity('MonthLock Co', 'ML-org').id]);
+  // A hand-added "custom field" filter (no Looker model/explore, so no tile listenTo
+  // wiring) locked to July — exactly the Start/Purchased Month Name locks in the UI.
+  const def = { filters: [{ name: 'Start Month Name', field: 'core.start_month_name' }] };
+  const lockMap = { 'Start Month Name': 'July' };
+  // Tile whose query joins the 'core' view → the month field is filterable, so the
+  // lock must apply even without listenTo (mirrors client useTileData field-match).
+  const tile = { type: 'vis', query: { model: 'ticketing', view: 'core', fields: ['core.count'], filters: {} } };
+  const body = await q.tileQueryBody(tile, def, user, undefined, lockMap);
+  assert.equal(body.filters['core.start_month_name'], 'July', 'month lock reaches the tile query server-side');
+  assert.equal(body.filters[h.ORG_FIELD], 'ML-org', 'organiser scope still forced');
+
+  // A lock whose field lives in a view the tile's query does NOT join must NOT apply
+  // (you can't filter a field the query doesn't select) — same guard the client uses.
+  const otherViewDef = { filters: [{ name: 'Start Month Name', field: 'payments.start_month_name' }] };
+  const otherBody = await q.tileQueryBody(tile, otherViewDef, user, undefined, lockMap);
+  assert.equal(otherBody.filters['payments.start_month_name'], undefined, 'a lock never touches a query that doesn\'t join its view');
+
+  // A Looker-wired filter (model/explore) stays listenTo-only — no field-match fallback.
+  const wiredDef = { filters: [{ name: 'Month', field: 'core.month', model: 'ticketing', explore: 'core' }] };
+  const wiredBody = await q.tileQueryBody(tile, wiredDef, user, undefined, { Month: 'July' });
+  assert.equal(wiredBody.filters['core.month'], undefined, 'wired filters are not auto-applied by view match (listenTo only)');
+});
+
 test('oversized results (campaign audiences) are served but never cached', async () => {
   // A 50k-row audience pull is ~25-100 MB parsed — caching a handful of those
   // OOMs the 512 MB instance. Rows > QCACHE_MAX_ROWS must bypass the cache;

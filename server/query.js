@@ -223,6 +223,20 @@ module.exports = function createQueryEngine({ looker, auth }) {
       const v = fv[filterName];
       if (v && String(v).trim()) overrides[queryField] = String(v).trim();
     }
+    // Mirror the client (client/src/lib/useTileData.js): a dashboard filter the tile
+    // ISN'T wired to via listenTo still filters it when the tile's own query already
+    // touches that field's view. Without this, hand-added "custom field" locks (e.g. a
+    // Start/Purchased Month lock) filter the live report but silently drop out of the
+    // server-built digest/briefing/goal reads. Looker-wired filters (model/explore)
+    // stay listenTo-only, so nothing over-filters.
+    const qViews = fx.queryViews(q);
+    for (const f of def.filters || []) {
+      if ((tile.listenTo && f.name in tile.listenTo) || f.model || f.explore) continue;
+      const v = fv[f.name];
+      if (!v || v === ANY_VALUE || !String(v).trim()) continue;
+      const field = f.field || f.dimension;
+      if (field && String(field).includes('.') && qViews.has(String(field).split('.')[0])) overrides[field] = String(v).trim();
+    }
     const body = { ...q, filters: stripAnyValue({ ...(q.filters || {}), ...overrides, ...extraOverrides }) };
     if (!(await applyScope(body, user, suiteId))) return null;
     // Combined-field OR locks (one value across several fields) can't live in the
