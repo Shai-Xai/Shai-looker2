@@ -9,26 +9,56 @@
 // finishes and approves in Engage. Recipes live in actionTemplates.js.
 const actionTemplates = require('./actionTemplates');
 
-// Clamp + sanitize an Owl-authored node tree. Returns { nodes, messages, decisions }
-// or throws with a readable reason (the Owl sees it and self-corrects).
+// Clamp + sanitize an Owl-authored node tree, stamping what the EXECUTION
+// engine needs: stable node `id`s, a `step` number on every message (ties it to
+// the per-step open/click tracking), a `kind` on decisions ('behaviour' waits on
+// what people DID; 'split' forks instantly on WHO they are — an attribute like
+// ticket type / gender / age / location), and a machine `when` predicate on
+// behaviour branches (bought | clicked | opened | timeout), inferred from the
+// human label when the author omitted it. Throws readable reasons (the Owl
+// sees them and self-corrects).
 const MAX_NODES = 14; const MAX_DEPTH = 2;
-function cleanNodes(nodes, depth = 0, budget = { left: MAX_NODES }) {
+function inferWhen(label) {
+  const l = String(label || '').toLowerCase();
+  if (/bought|purchas|convert|paid|complete/.test(l)) return 'bought';
+  if (/click/.test(l) && /(didn|not|no |never)/.test(l) === false) return 'clicked';
+  if (/open/.test(l) && /(didn|not|no |never)/.test(l) === false) return 'opened';
+  return 'timeout'; // "no response" / "didn't open" / "otherwise" — the catch-all
+}
+function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }) {
   if (!Array.isArray(nodes)) return [];
   const out = [];
   for (const n of nodes) {
-    if (!n || typeof n !== 'object' || budget.left <= 0) continue;
+    if (!n || typeof n !== 'object' || ctx.left <= 0) continue;
     if (n.type === 'decision') {
       if (depth >= MAX_DEPTH) throw new Error(`Decisions can nest at most ${MAX_DEPTH} levels deep — flatten the tree.`);
-      budget.left -= 1;
+      ctx.left -= 1;
+      const id = `d${(ctx.seq += 1)}`;
+      const kind = n.kind === 'split' || n.field ? 'split' : 'behaviour';
       const branches = (Array.isArray(n.branches) ? n.branches : []).slice(0, 4)
-        .map((b) => ({ label: String(b?.label || 'Branch').slice(0, 60), nodes: cleanNodes(b?.nodes, depth + 1, budget) }))
+        .map((b) => ({
+          label: String(b?.label || 'Branch').slice(0, 60),
+          ...(kind === 'split'
+            ? { values: Array.isArray(b?.values) && b.values.length ? b.values.slice(0, 12).map((v) => String(v).slice(0, 80)) : null } // null = "everyone else"
+            : { when: ['bought', 'clicked', 'opened', 'timeout'].includes(b?.when) ? b.when : inferWhen(b?.label) }),
+          nodes: cleanNodes(b?.nodes, depth + 1, ctx),
+        }))
         .filter((b) => b.nodes.length);
       if (branches.length < 2) throw new Error('A decision needs at least 2 branches, each with at least one message.');
-      out.push({ type: 'decision', question: String(n.question || 'What did they do?').slice(0, 140), waitHours: Math.min(720, Math.max(1, Number(n.waitHours) || 48)), branches });
+      if (kind === 'split') {
+        if (!String(n.field || '').trim()) throw new Error('An audience split needs the attribute field it splits on (e.g. core_ticket_types.name).');
+        if (!branches.some((b) => b.values === null)) branches[branches.length - 1].values = null; // last branch catches everyone else
+        out.push({ type: 'decision', kind, id, question: String(n.question || 'Which group are they in?').slice(0, 140), field: String(n.field).slice(0, 120), branches });
+      } else {
+        if (!branches.some((b) => b.when === 'timeout')) branches[branches.length - 1].when = 'timeout'; // someone must catch the silence
+        out.push({ type: 'decision', kind, id, question: String(n.question || 'What did they do?').slice(0, 140), waitHours: Math.min(720, Math.max(1, Number(n.waitHours) || 48)), branches });
+      }
     } else {
-      budget.left -= 1;
+      ctx.left -= 1;
       out.push({
         type: 'message',
+        id: `m${(ctx.seq += 1)}`,
+        step: (ctx.step += 1) - 1, // 0-based — the open-pixel / click-link step used for tracking
         channel: n.channel === 'sms' ? 'sms' : 'email',
         delayHours: Math.min(8760, Math.max(0, Number(n.delayHours) || 0)),
         subject: String(n.subject || '').slice(0, 200),
@@ -126,7 +156,7 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
   const schema = {
     name: 'draftJourney',
     description:
-      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label (e.g. "Opened" / "No response" / "Bought"), nodes:[...]}]}. Decisions branch on opened / clicked / bought / no response; 2-3 branches each; nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. TARGETING — establish the audience BEFORE calling this tool (it is the heart of the journey; ask the user one short question if they haven\'t named who it\'s for): pass segmentName for an EXISTING saved segment, OR filters to build a NEW cohort from curated dimensions (e.g. {"core_purchasers.country":"Spain"}) — on confirm the cohort is auto-SAVED as a reusable segment and the journey pointed at it, so tell the user the segment gets saved too. Provide at most ONE of segmentName/filters; contact/PII fields cannot define the audience. Only draft without an audience if the user explicitly wants to pick it later in Engage. The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it: give one line on the flow, STATE the audience size from the returned reach and that a new cohort will be saved as a segment in Engage → Segments, ask the user to confirm the audience is right (or offer: another saved segment, refined filters, or building it from a dashboard tile\'s 🎯 Create segment button / an uploaded list in Engage → Segments, then targeting it here by name), and tell them to tap the button. If reach is zero/missing, flag it and verify the filter values before proceeding.',
+      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION, which comes in two kinds: (a) BEHAVIOUR — waits then branches on what they DID: {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label, when:"bought"|"clicked"|"opened"|"timeout", nodes:[...]}]} — always include a when on each branch ("timeout" = no response, the catch-all); (b) SPLIT — forks INSTANTLY on who they ARE: {type:"decision", kind:"split", question (e.g. "VIP or GA?"), field: a curated dimension (e.g. "core_ticket_types.name", buyer city/country, age, gender), branches:[{label, values:["VIP","VVIP"], nodes:[...]}, {label:"Everyone else", values:null, nodes:[...]}]} — use a split when the user wants different treatment per ticket type/category, gender, age or location (e.g. VIPs get one flow, GA another). 2-3 branches per decision (max 4); nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. TARGETING — establish the audience BEFORE calling this tool (it is the heart of the journey; ask the user one short question if they haven\'t named who it\'s for): pass segmentName for an EXISTING saved segment, OR filters to build a NEW cohort from curated dimensions (e.g. {"core_purchasers.country":"Spain"}) — on confirm the cohort is auto-SAVED as a reusable segment and the journey pointed at it, so tell the user the segment gets saved too. Provide at most ONE of segmentName/filters; contact/PII fields cannot define the audience. Only draft without an audience if the user explicitly wants to pick it later in Engage. The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it: give one line on the flow, STATE the audience size from the returned reach and that a new cohort will be saved as a segment in Engage → Segments, ask the user to confirm the audience is right (or offer: another saved segment, refined filters, or building it from a dashboard tile\'s 🎯 Create segment button / an uploaded list in Engage → Segments, then targeting it here by name), and tell them to tap the button. If reach is zero/missing, flag it and verify the filter values before proceeding.',
     input_schema: {
       type: 'object',
       properties: {
@@ -144,6 +174,116 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
   return { schema, run };
 }
 
+// ─── The branching engine ─────────────────────────────────────────────────────
+// Executes the tree. STAGING-GATED: runs only when JOURNEY_ENGINE=1 (env) or the
+// `journey_engine` setting is '1' — otherwise journey campaigns keep sending
+// their linear opening sequence through the classic drip loop, unchanged.
+//
+// COMPILE: flatten the stored tree into a graph — Map(id → { node, nextId }) —
+// where each branch's tail links back to the node AFTER its decision (or ends).
+// Pure + exported for tests.
+function compile(nodes) {
+  const map = new Map();
+  const walk = (seq, afterId) => {
+    for (let i = 0; i < seq.length; i++) {
+      const n = seq[i];
+      const nextId = i + 1 < seq.length ? seq[i + 1].id : afterId;
+      map.set(n.id, { node: n, nextId });
+      if (n.type === 'decision') for (const b of n.branches) walk(b.nodes, nextId);
+    }
+  };
+  walk(nodes || [], null);
+  return { map, entryId: (nodes && nodes[0] && nodes[0].id) || null };
+}
+
+// Behaviour decision: first-match-wins by SEVERITY (bought > clicked > opened);
+// the timeout branch only fires once the wait window has expired. Pure.
+function pickBranch(decision, signals) {
+  for (const when of ['bought', 'clicked', 'opened']) {
+    if (signals[when]) { const b = decision.branches.find((x) => x.when === when); if (b) return b; }
+  }
+  if (signals.expired) return decision.branches.find((x) => x.when === 'timeout') || null;
+  return null; // keep waiting
+}
+// Attribute split: instant fork on who the person IS. Case-insensitive value
+// match; the `values: null` branch catches everyone else. Pure.
+function pickSplit(decision, attributes) {
+  const raw = attributes ? attributes[decision.field] : undefined;
+  const v = raw == null ? '' : String(raw).trim().toLowerCase();
+  for (const b of decision.branches) {
+    if (Array.isArray(b.values) && b.values.some((x) => String(x).trim().toLowerCase() === v)) return b;
+  }
+  return decision.branches.find((b) => b.values === null) || decision.branches[decision.branches.length - 1];
+}
+
+const POLL_MS = 3.5 * 60000; // re-check waiting people roughly every tick
+const MAX_HOPS = 6; // max sends/moves per person per tick (loop backstop)
+function engineOn(sql) {
+  if (process.env.JOURNEY_ENGINE === '1') return true;
+  try { return (sql.prepare("SELECT value FROM settings WHERE key='journey_engine'").get() || {}).value === '1'; } catch { return false; }
+}
+
+// One tick of one journey campaign. Called from the drip loop (which has already
+// re-resolved the live audience, conversions and suppressions for this action).
+// Same safety net as the classic loop: consent per channel per send, suppression
+// ejects, conversion routes (bought) rather than silently exiting.
+async function processAction(a, deps) {
+  const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults } = deps;
+  try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN node_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
+  try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN wait_until TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
+  const { map, entryId } = compile(a.config.journey.nodes);
+  const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
+  const upd = (e, fields) => sql.prepare(`UPDATE action_enrollments SET ${Object.keys(fields).map((k) => `${k}=?`).join(', ')}, updated_at=? WHERE action_id=? AND email=?`).run(...Object.values(fields), now(), a.id, e.email);
+  let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
+  const signalsFor = (email) => ({
+    bought: convSet ? convSet.has(String(email || '').toLowerCase()) : !reachable.has(email),
+    clicked: !!sql.prepare('SELECT 1 FROM action_clicks WHERE action_id=? AND email=? LIMIT 1').get(a.id, email),
+    opened: !!sql.prepare('SELECT 1 FROM action_opens WHERE action_id=? AND email=? LIMIT 1').get(a.id, email),
+  });
+  for (const e of due) {
+    if (sup.has(e.email)) { upd(e, { status: 'unsubscribed' }); continue; }
+    const row = reachable.get(e.email) || {};
+    let id = e.node_id || entryId;
+    let waitUntil = e.wait_until || '';
+    let boughtRouted = false;
+    for (let hops = 0; hops < MAX_HOPS; hops++) {
+      const cur = id ? map.get(id) : null;
+      if (!cur) { upd(e, { status: boughtRouted ? 'converted' : 'done', node_id: id || '' }); converted += boughtRouted ? 1 : 0; break; }
+      const n = cur.node;
+      if (n.type === 'message') {
+        // A delayed message we only just arrived at: schedule it, don't send yet.
+        if (n.delayHours > 0 && e.node_id !== n.id && hops > 0) { upd(e, { node_id: n.id, next_at: new Date(Date.now() + n.delayHours * 3600e3).toISOString(), wait_until: '' }); break; }
+        try {
+          const rcpt = { email: e.email, name: e.name, ticket: e.ticket, phone: e.phone, attributes: row.attributes || {} };
+          let ok = false;
+          if (n.channel !== 'sms' && e.email && row.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, n, n.step); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          if (n.channel === 'sms' && e.phone && row.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, n, n.step) }); if (r.ok) { ok = true; smsSent += 1; } }
+          if (ok) sent += 1;
+        } catch (err) { console.error('[journeys] send failed', a.id, e.email, err.message); }
+        id = cur.nextId; waitUntil = '';
+        const nx = id ? map.get(id) : null;
+        if (!nx) { upd(e, { status: boughtRouted ? 'converted' : 'done', node_id: '' }); converted += boughtRouted ? 1 : 0; break; }
+        if (nx.node.type === 'message' && nx.node.delayHours > 0) { upd(e, { node_id: id, next_at: new Date(Date.now() + nx.node.delayHours * 3600e3).toISOString(), wait_until: '' }); break; }
+        continue; // immediate next node — same tick
+      }
+      // Decisions.
+      if (n.kind === 'split') { const b = pickSplit(n, row.attributes || {}); id = (b.nodes[0] && b.nodes[0].id) || cur.nextId; waitUntil = ''; continue; }
+      if (!waitUntil || e.node_id !== n.id) waitUntil = new Date(Date.now() + (n.waitHours || 48) * 3600e3).toISOString(); // just arrived — open the window
+      const sig = signalsFor(e.email); sig.expired = now() >= waitUntil;
+      const b = pickBranch(n, sig);
+      if (!b) { upd(e, { node_id: n.id, wait_until: waitUntil, next_at: new Date(Date.now() + POLL_MS).toISOString() }); break; } // keep waiting, poll next tick
+      if (b.when === 'bought') boughtRouted = true;
+      id = (b.nodes[0] && b.nodes[0].id) || cur.nextId; waitUntil = '';
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, 120)); // gentle rate (matches the classic loop)
+  }
+  if (sent || converted) {
+    const res = a.results || {};
+    saveResults(a.id, { ...res, sent: (res.sent || 0) + sent, converted: (res.converted || 0) + converted, emailSent: (res.emailSent || 0) + emailSent, smsSent: (res.smsSent || 0) + smsSent });
+  }
+}
+
 // The journey-authoring guidance lives in the draftJourney tool description —
 // expose it in the AI audit like any other prompt (insights.js spreads this in).
 function promptRegistry() {
@@ -158,4 +298,4 @@ function mount(app, { auth }) {
   });
 }
 
-module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry };
+module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction };
