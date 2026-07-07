@@ -1357,6 +1357,7 @@ const SUITES_TOUR = [
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
   { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
   { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-howler-id', icon: '🎟️', title: 'Add the Howler event ID', body: 'The event’s number on howler.co.za (e.g. 40848). Deep links and link templates auto-fill their destinations from it — no typing at link-creation time.' },
   { tour: 'suite-live', icon: '🔴', title: 'Set the LIVE button', body: 'Pick the live-ticketing report. A red LIVE button appears on this event’s sidebar row so the client can jump to live sales in one tap.' },
   { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
@@ -1644,6 +1645,7 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('suite-roles', secHead('Dashboard access by role'))}
         {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
         {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-howler-id', <>{lbl('Howler event ID')}<div style={fauxInput}>40848</div></>)}
         {sec('suite-live', <>{lbl('🔴 LIVE button dashboard')}<div style={fauxInput}>Live Ticketing report</div></>)}
         {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
         {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
@@ -3615,6 +3617,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
   const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
+  const [howlerEventId, setHowlerEventId] = useState(suite.howlerEventId || '');
   const [liveDashboardId, setLiveDashboardId] = useState(suite.liveDashboardId || '');
   const [saved, setSaved] = useState(false);
   const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
@@ -3651,7 +3654,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, liveDashboardId }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, howlerEventId, liveDashboardId }); flash(setSaved); onChange(); };
   // Sets grouped by their library folder (item: show folder → set → dashboards),
   // named folders first then the ungrouped bucket.
   const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
@@ -3814,6 +3817,11 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
+      </div>
+      <div data-tour="suite-howler-id" style={{ marginTop: 12 }}>
+        <L>Howler event ID</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's number on <b>howler.co.za</b> (e.g. <b>40848</b> — pasting the event URL works too). Deep links and link templates auto-fill their destinations from it. Manual for now; the Howler integration will fill it automatically later.</div>
+        <input style={{ ...input, width: '100%' }} value={howlerEventId} onChange={(e) => setHowlerEventId(e.target.value)} placeholder="40848" inputMode="numeric" />
       </div>
       <div data-tour="suite-live" style={{ marginTop: 12 }}>
         <L>🔴 LIVE button dashboard</L>

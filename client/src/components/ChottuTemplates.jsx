@@ -67,7 +67,9 @@ export default function ChottuTemplates({ entityId, scope, suites, onLinksChange
 // Pick event + base URL → preview → tick/edit → create → results (retry failures).
 function ApplyWizard({ template, entityId, scope, suites, onDone }) {
   const [suiteId, setSuiteId] = useState(suites[0]?.id || '');
-  const [base, setBase] = useState('');
+  // Pre-fill from the event's stored Howler ID (Admin → event → "Howler event ID");
+  // typing anything overrides it.
+  const [base, setBase] = useState(suites[0]?.howlerEventId || '');
   const [preview, setPreview] = useState(null);   // resolved items
   const [picked, setPicked] = useState({});       // key -> { on, path, name }
   const [results, setResults] = useState(null);   // apply outcome
@@ -116,7 +118,11 @@ function ApplyWizard({ template, entityId, scope, suites, onDone }) {
     <div style={{ ...panel, marginTop: 10 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <Field label="Event">
-          <select style={input} value={suiteId} onChange={(e) => { setSuiteId(e.target.value); setPreview(null); setResults(null); }}>
+          <select style={input} value={suiteId} onChange={(e) => {
+            setSuiteId(e.target.value); setPreview(null); setResults(null);
+            const hid = suites.find((s) => s.id === e.target.value)?.howlerEventId;
+            if (hid) setBase(hid); // the event knows its own Howler ID — prefill it
+          }}>
             {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             {!suites.length && <option value="">No events yet</option>}
           </select>

@@ -376,6 +376,21 @@ test('apply creates the ticked links, survives per-item failures, and honours ov
   assert.ok(!links.some((l) => l.shortUrl.endsWith('-lineup')), 'unticked lineup item must not be created');
 });
 
+test('a suite with a Howler event ID needs no base URL — destinations compose themselves', async () => {
+  const su = h.db.createSuite({ entityId: entityA.id, name: 'Auto Fest' });
+  h.db.updateSuite(su.id, { howlerEventId: 'https://www.howler.co.za/event/55111' }); // pasted URL → digits stored
+  assert.equal(h.db.getSuite(su.id).howlerEventId, '55111');
+  const starter = (await app.req('GET', `/api/my/chottu/${entityA.id}/templates`, { as: ownerA })).body.templates.find((t) => t.platform);
+  const p = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: su.id } }); // NO base sent
+  assert.equal(p.status, 200);
+  const main = p.body.items.find((i) => i.key === 'main');
+  assert.equal(main.destination, 'https://www.howler.co.za/event/55111');
+  assert.deepEqual(main.warnings, [], 'no missing-{{base}} warning when the suite knows its Howler ID');
+  // An explicit base still wins over the stored ID.
+  const p2 = await app.req('POST', `/api/my/chottu/${entityA.id}/templates/${starter.id}/preview`, { as: ownerA, body: { suiteId: su.id, base: 'https://www.howler.co.za/event/99' } });
+  assert.equal(p2.body.items.find((i) => i.key === 'main').destination, 'https://www.howler.co.za/event/99');
+});
+
 test('clients manage their own templates; other clients cannot see or touch them', async () => {
   const created = await app.req('POST', `/api/my/chottu/${entityA.id}/templates`, {
     as: ownerA,

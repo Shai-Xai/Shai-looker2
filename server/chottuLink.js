@@ -479,10 +479,14 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     if (!suiteId) throw new HttpError(400, 'Pick the event to create links for.');
     checkSuite(entityId, suiteId);
     const su = db.getSuite(suiteId);
-    const baseUrl = String(base || '').trim().replace(/\/$/, '');
+    // The event's howler.co.za id — stored on the suite (or readable from its
+    // ticket link). When present, {{base}} needs no typing at apply time.
+    const howlerId = su.howlerEventId || ((su.eventUrl || '').match(/howler\.co\.za\/event\/(\d+)/) || [])[1] || '';
+    let baseUrl = String(base || '').trim().replace(/\/$/, '');
+    if (!baseUrl && howlerId) baseUrl = `https://www.howler.co.za/event/${howlerId}`;
     const ctx = {
       base: baseUrl,
-      'event.name': su.name, 'event.slug': slugify(su.name), 'event.id': su.id,
+      'event.name': su.name, 'event.slug': slugify(su.name), 'event.id': su.id, 'event.howlerId': howlerId,
       'client.name': db.getEntity(entityId)?.name || '',
     };
     const fillClean = (v) => fill(v, ctx);

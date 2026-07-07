@@ -368,8 +368,10 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
   const [destination, setDestination] = useState(link?.destinationUrl || '');
   // Destination picker — new links start on the catalogue; editing an existing
   // link starts on Custom with its URL (switching to a preset recomposes it).
+  // The Howler event ID prefills from the selected event's stored ID.
+  const idForSuite = (sid) => suites.find((s) => s.id === sid)?.howlerEventId || '';
   const [preset, setPreset] = useState(link ? 'custom' : 'tickets');
-  const [eventRef, setEventRef] = useState(link ? '' : '');
+  const [eventRef, setEventRef] = useState(link ? '' : idForSuite(link?.suiteId || ''));
   const [promo, setPromo] = useState('');
   const [path, setPath] = useState('');
   const [openInApp, setOpenInApp] = useState(link ? link.iosBehavior !== 1 : true);
@@ -414,7 +416,16 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
           <input style={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Tickets — Instagram bio" autoComplete="off" />
         </Field>
         <Field label="Event">
-          <select style={input} value={suiteId} onChange={(e) => setSuiteId(e.target.value)}>
+          <select style={input} value={suiteId} onChange={(e) => {
+            setSuiteId(e.target.value);
+            // The event knows its own Howler ID — prefill the destination with it.
+            const hid = idForSuite(e.target.value);
+            if (hid) {
+              setEventRef(hid);
+              const p = DEST_PRESETS.find((x) => x.key === preset);
+              if (p && preset !== 'custom') setDestination(composeDest(p, hid, promo));
+            }
+          }}>
             <option value="">Not linked to an event</option>
             {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
