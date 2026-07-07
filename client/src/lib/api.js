@@ -556,6 +556,15 @@ export const api = {
   slackShare: (p) => fetch('/api/my/slack/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
 
+  // ChottuLink deep links — dual surface (admin per client / client self-service).
+  chottuLinks: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`).then(json),
+  chottuCreateLink: (scope, entityId, link) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(link) }).then(json),
+  chottuUpdateLink: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  chottuSetLinkStatus: (scope, entityId, id, enabled) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}/status` : `/api/my/chottu/${entityId}/links/${id}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  chottuRefreshStats: (scope, entityId, body = {}) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/refresh-stats` : `/api/my/chottu/${entityId}/refresh-stats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuImport: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/import`, { method: 'POST' }).then(json),
+  chottuTest: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/test`, { method: 'POST' }).then(json),
+
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),

@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-05 (🔥 transaction heatmap on the Flow board) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🔗 deep links into the Howler app) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -416,6 +416,28 @@ new to set up).
 **Pitch:** "Your ad account and your ticket data finally in one place — see the
 spend, the return, and ask the Owl which campaign is worth more budget."
 
+### 5g. Deep links into the Howler app  🟡 (needs connection)
+Short, branded **`howler.chottu.link` URLs** that open the right place in the
+Howler app (tickets, lineup, map, chat…) — created **from Pulse** instead of
+one-by-one in the ChottuLink dashboard.
+- **Engage → Links** — clients create and manage their own links: name it, pick
+  the event, paste the destination, done. Each link is **tied to a Pulse event**
+  and shows its **click counts** (total / 7 / 30 days).
+- **UTM tags & app behaviour** built in — every link can carry campaign tags and
+  choose app-vs-browser opening per platform.
+- **Import** — one tap pulls in everything already created in ChottuLink, so the
+  existing links show up in Pulse and get attached to their events.
+- **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
+  the connection (API key + domain) layers platform-default → per-client override.
+- **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
+  covers all clients by default).
+- **🔜 Next:** link **templates** — one click creates the whole standard set for a
+  new event (main + ticket wallet + lineup + map + feed + chat) — then click
+  **trends** per source.
+
+**Pitch:** "Every link your event needs — created in seconds from Pulse, tracked
+per event, and ready to drop into posts, bios, emails and QR codes."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client — sent from Howler's verified domain by
@@ -785,6 +807,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **Deep links into the Howler app (ChottuLink)** 🟡: short branded
+  `howler.chottu.link` URLs created **from Pulse** (Engage → Links + Admin → 🔗 Deep
+  links) instead of one-by-one in the ChottuLink dashboard — tied to events, with UTM
+  tags, app-vs-browser behaviour, click counts and one-tap import of existing links.
+  Needs the ChottuLink API key + domain (platform default, per-client override).
+  Templates (one click = the whole standard link set for an event) are next.
 - **2026-07-05 (late)** — **Flow board: 🔥 transaction heatmap** 🧪: a new 🔥 Heat mode on
   the venue map turns each station into a heat bloom sized by how much it's *transacting*,
   colour-coded by category so **bars and gates read at the same time**. A **▶ play-the-day**
