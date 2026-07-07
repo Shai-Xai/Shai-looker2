@@ -44,6 +44,9 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
       if (!by.has(c)) by.set(c, { name: c, count: 0, clicks: 0 });
       const e = by.get(c); e.count += 1; e.clicks += l.clicks?.total || 0;
     }
+    // "App" is the front door — always there (even before the first link), so the
+    // landing is categories from day one: tap App → the Chotulink toolkit inside.
+    if (!by.has('App')) by.set('App', { name: 'App', count: 0, clicks: 0 });
     return [...by.values()].sort((a, b) => (a.name === 'App' ? -1 : b.name === 'App' ? 1 : a.name.localeCompare(b.name)));
   }, [data]);
   const categoryNames = categories.map((c) => c.name);
@@ -69,10 +72,11 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
     catch { window.prompt('Copy the link:', url); }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
-      {/* Connection / setup state */}
-      <div style={card}>
+  // The ChottuLink connection card — the plumbing belongs INSIDE the App category
+  // (its links are what the connection powers). Only the unconfigured state shows
+  // up front: without a connection nothing else here works yet.
+  const connCard = (
+    <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: data.configured ? 'var(--success,#10b981)' : 'var(--muted)' }} />
           <div style={{ fontSize: 13.5, minWidth: 0, flex: 1 }}>
@@ -118,34 +122,20 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
           </div>
         )}
       </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
+      {!data.configured && connCard}
 
       {(notice || error) && (
         <div style={{ fontSize: 13, fontWeight: 600, color: error ? 'var(--error,#ef4444)' : 'var(--success,#10b981)' }}>{error || notice}</div>
       )}
 
-      {importing && scope === 'admin' && (
-        <ImportPicker
-          entityId={entityId} suites={suites}
-          onDone={async (msg) => { setImporting(false); if (msg) { flash(msg); await load(); } }}
-        />
-      )}
-
-      {data.configured && (editing === 'new'
-        ? <LinkEditor scope={scope} entityId={entityId} suites={suites} categories={categoryNames} initialCategory={category || 'App'} onDone={async (changed) => { setEditing(null); if (changed) { flash('Link created — the short URL is live.'); await load(); } }} />
-        : <button style={btnPrimary} onClick={() => setEditing('new')}>＋ New link</button>
-      )}
-
-      {data.configured && <ChottuTemplates entityId={entityId} scope={scope} suites={suites} onLinksChanged={load} />}
-
-      {(data.links || []).length === 0 && data.configured && (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-          No links yet. Create the first one{scope === 'admin' ? ', or import what already exists in ChottuLink.' : '.'}
-        </p>
-      )}
-
-      {/* Landing: category tiles (tap to drill in). "App" holds every chottu link
-          until it's filed somewhere more specific — mobile-first big targets. */}
-      {category === null && (data.links || []).length > 0 && (
+      {/* LANDING: category tiles are the front door — always shown (App exists
+          from day one, before any links). Tap a tile to open that category;
+          everything link-level (create, templates, the list) lives inside. */}
+      {category === null && data.configured && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
           {categories.map((c) => (
             <button key={c.name} onClick={() => setCategory(c.name)} style={{ ...card, minHeight: 92, textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -157,15 +147,35 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
         </div>
       )}
 
-      {/* Drilled into one category: clear back navigation + its links by event. */}
+      {/* INSIDE a category: clear back navigation, then the toolkit — new link
+          (filed here by default), templates (App only — they mint app link sets),
+          and this category's links grouped by event. */}
       {category !== null && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button style={{ ...linkBtn, minHeight: 40, fontSize: 13.5 }} onClick={() => setCategory(null)}>← All categories</button>
           <span style={{ fontWeight: 700, fontSize: 14.5 }}>{category === 'App' ? '📱' : '🔗'} {category}</span>
         </div>
       )}
+
+      {category === 'App' && data.configured && connCard}
+      {importing && scope === 'admin' && category === 'App' && (
+        <ImportPicker
+          entityId={entityId} suites={suites}
+          onDone={async (msg) => { setImporting(false); if (msg) { flash(msg); await load(); } }}
+        />
+      )}
+
+      {category !== null && data.configured && (editing === 'new'
+        ? <LinkEditor scope={scope} entityId={entityId} suites={suites} categories={categoryNames} initialCategory={category} onDone={async (changed) => { setEditing(null); if (changed) { flash('Link created — the short URL is live.'); await load(); } }} />
+        : <button style={btnPrimary} onClick={() => setEditing('new')}>＋ New link in {category}</button>
+      )}
+
+      {category === 'App' && data.configured && <ChottuTemplates entityId={entityId} scope={scope} suites={suites} onLinksChanged={load} />}
+
       {category !== null && groups.length === 0 && (
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>Nothing in this category any more.</p>
+        <p style={{ color: 'var(--muted)', fontSize: 14 }}>
+          No links in {category} yet. Create the first one{scope === 'admin' && category === 'App' ? ', or import what already exists in ChottuLink.' : '.'}
+        </p>
       )}
 
       {category !== null && groups.map((g) => (
