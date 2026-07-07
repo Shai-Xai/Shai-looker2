@@ -1,131 +1,129 @@
-// ─── Journeys (Engage → Journeys) ─────────────────────────────────────────────
-// SELF-CONTAINED, DISPOSABLE MODULE. Owns the journey-building Owl (a
-// conversational, data-aware assistant) + the journey recipe list, and
-// contributes its system prompt to the AI audit via promptRegistry() (insights.js
-// spreads this in). A journey is a tree of `message` + `decision` nodes; the Owl
-// turns a conversation into that tree, grounded in the client's real segments,
-// and a human reviews it before anything is created. Recipes (starter prompts)
-// live in actionTemplates.js. Mounts in one line from index.js.
-const Anthropic = require('@anthropic-ai/sdk');
+// ─── Journeys — the Owl's journey-building skill ──────────────────────────────
+// SELF-CONTAINED, DISPOSABLE MODULE. A journey is a DECISION TREE of `message`
+// (email/SMS) + `decision` nodes that branch on behaviour (opened / clicked /
+// bought / no response). This module owns the tree's validation, the Owl's
+// `draftJourney` ACT-TOOL (registered in owlTools.js — the NORMAL Owl drafts
+// journeys mid-conversation; no separate journey chat), and the starter-recipe
+// route the Engage → Journeys tab shows as suggestion prompts. The Owl only
+// DRAFTS: the user confirms in chat, which creates a draft campaign a human
+// finishes and approves in Engage. Recipes live in actionTemplates.js.
 const actionTemplates = require('./actionTemplates');
 
-const MODEL = 'claude-opus-4-8';
-
-// One Anthropic client per API key (kept local so this module has no dependency
-// on insights.js — a clean, removable unit).
-const clients = new Map();
-function clientFor(apiKey) {
-  const key = (apiKey || process.env.ANTHROPIC_API_KEY || '').trim();
-  if (!key) return null;
-  if (!clients.has(key)) clients.set(key, new Anthropic({ apiKey: key }));
-  return clients.get(key);
-}
-function systemWith(base, instructions) {
-  const extra = (instructions || '').trim();
-  return extra ? `${base}\n\nStanding instructions from the Howler team — always follow these:\n${extra}` : base;
-}
-
-// The Owl as a journey builder: converses, grounds targeting in the client's real
-// audiences (via the list_audiences tool), and emits/updates the decision tree
-// (via the propose_journey tool). Proposes only — a human reviews and launches.
-const OWL_JOURNEY_SYSTEM = `You are the Owl 🦉 — Howler Pulse's assistant — helping an event organiser build a marketing JOURNEY by talking to them. Warm, direct, concise; one or two short sentences per reply, no walls of text. You never send anything; everything you make is a draft the human reviews and approves in Pulse.
-
-A journey is a DECISION TREE: email/SMS messages interleaved with decision points that branch on what the customer did (opened, clicked, bought, or didn't respond).
-
-How to work:
-- If the request is clear enough, propose a concrete journey straight away. If a key detail is genuinely missing (who to target, the goal), ask ONE short question — don't interrogate.
-- Ground targeting in the client's REAL data: call the list_audiences tool to see their saved segments before suggesting who to target, and refer to them by name ("your 'Lapsed VIPs' segment — 1,240 people").
-- Whenever you have a concrete journey, or the user asks for a change, call the propose_journey tool to show/update the tree. Then tell the user in one line what you did or ask what to tweak.
-- Escalate channels sensibly (email → SMS for urgency). A "bought" branch usually thanks them and stops; a "no response" branch can keep nurturing.
-- Never invent prices, dates or discounts not given. No spam tropes (ALL CAPS, !!!, "act now"); one tasteful emoji max. South African audience, amounts in Rand.
-
-The propose_journey tool takes a journey { name, goal, summary, nodes }. Each node is either:
-- a MESSAGE: { "type":"message", "channel":"email"|"sms", "delayHours":0, "subject":"(email only, <60 chars; empty for SMS)", "body":"(email 50-120 words, SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural)", "ctaText":"2-4 words" }
-- a DECISION: { "type":"decision", "question":"e.g. 'After 2 days, did they buy?'", "waitHours":48, "branches":[ { "label":"e.g. 'Bought' / 'Clicked but didn't buy' / 'No response'", "nodes":[ ...nodes... ] } ] }
-Keep it tight (~6-10 nodes); decisions 2-3 branches; nest at most 2 levels deep.`;
-
-const JOURNEY_SCHEMA = {
-  type: 'object',
-  required: ['name', 'nodes'],
-  properties: {
-    name: { type: 'string', description: 'short journey name, <40 chars' },
-    goal: { type: 'string', description: 'one sentence: the outcome this journey drives' },
-    summary: { type: 'string', description: '2-3 plain sentences on what happens and how it branches' },
-    nodes: { type: 'array', description: 'ordered tree of message/decision nodes', items: { type: 'object' } },
-  },
-};
-const TOOLS = [
-  { name: 'list_audiences', description: "List the client's saved segments/audiences (with sizes) so journey targeting is grounded in real data. Call before suggesting who to target.", input_schema: { type: 'object', properties: {} } },
-  { name: 'propose_journey', description: 'Show or update the journey decision tree for the user to review. Call whenever you have a concrete journey or a change to it.', input_schema: JOURNEY_SCHEMA },
-];
-
-function audiencesFor(db, entityId) {
-  try {
-    const rows = db.db.prepare('SELECT name, last_count AS people, last_email AS emailReach, last_sms AS smsReach FROM segments WHERE entity_id=? ORDER BY updated_at DESC LIMIT 40').all(entityId);
-    return rows.map((r) => ({ name: r.name, people: r.people < 0 ? 'not yet counted' : r.people, emailReach: r.emailReach, smsReach: r.smsReach }));
-  } catch { return []; }
-}
-
-// Run one conversational turn: the client sends the running text history + the
-// current journey draft; the Owl replies and (via tools) may look up audiences
-// and/or emit an updated tree. Returns { reply, journey }.
-async function chat({ messages, currentJourney, clientName, clientContext, instructions, apiKey, lookupAudiences }) {
-  const c = clientFor(apiKey);
-  if (!c) throw new Error('AI is not configured for this client');
-  const ctxBits = [
-    clientName ? `You are helping: ${clientName}.` : '',
-    clientContext ? `Client context: ${clientContext}` : '',
-    currentJourney ? `The journey draft so far (modify it when asked):\n${JSON.stringify(currentJourney)}` : 'No journey drafted yet.',
-  ].filter(Boolean).join('\n');
-  const system = systemWith(`${OWL_JOURNEY_SYSTEM}\n\n${ctxBits}`, instructions);
-  const convo = (messages || []).slice(-24)
-    .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.text || '').slice(0, 4000) }))
-    .filter((m) => m.content);
-  if (!convo.length) return { reply: '', journey: currentJourney || null };
-
-  let journey = currentJourney || null;
-  let reply = '';
-  for (let i = 0; i < 5; i++) {
-    const resp = await c.messages.create({ model: MODEL, max_tokens: 1800, thinking: { type: 'adaptive' }, output_config: { effort: 'low' }, system, tools: TOOLS, messages: convo });
-    reply = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim() || reply;
-    const toolUses = (resp.content || []).filter((b) => b.type === 'tool_use');
-    if (resp.stop_reason !== 'tool_use' || !toolUses.length) break;
-    convo.push({ role: 'assistant', content: resp.content });
-    const results = [];
-    for (const tu of toolUses) {
-      if (tu.name === 'propose_journey') { journey = tu.input; results.push({ type: 'tool_result', tool_use_id: tu.id, content: 'Journey updated and shown to the user.' }); }
-      else if (tu.name === 'list_audiences') { results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(lookupAudiences ? lookupAudiences() : []).slice(0, 4000) }); }
-      else results.push({ type: 'tool_result', tool_use_id: tu.id, content: 'Unknown tool' });
+// Clamp + sanitize an Owl-authored node tree. Returns { nodes, messages, decisions }
+// or throws with a readable reason (the Owl sees it and self-corrects).
+const MAX_NODES = 14; const MAX_DEPTH = 2;
+function cleanNodes(nodes, depth = 0, budget = { left: MAX_NODES }) {
+  if (!Array.isArray(nodes)) return [];
+  const out = [];
+  for (const n of nodes) {
+    if (!n || typeof n !== 'object' || budget.left <= 0) continue;
+    if (n.type === 'decision') {
+      if (depth >= MAX_DEPTH) throw new Error(`Decisions can nest at most ${MAX_DEPTH} levels deep — flatten the tree.`);
+      budget.left -= 1;
+      const branches = (Array.isArray(n.branches) ? n.branches : []).slice(0, 4)
+        .map((b) => ({ label: String(b?.label || 'Branch').slice(0, 60), nodes: cleanNodes(b?.nodes, depth + 1, budget) }))
+        .filter((b) => b.nodes.length);
+      if (branches.length < 2) throw new Error('A decision needs at least 2 branches, each with at least one message.');
+      out.push({ type: 'decision', question: String(n.question || 'What did they do?').slice(0, 140), waitHours: Math.min(720, Math.max(1, Number(n.waitHours) || 48)), branches });
+    } else {
+      budget.left -= 1;
+      out.push({
+        type: 'message',
+        channel: n.channel === 'sms' ? 'sms' : 'email',
+        delayHours: Math.min(8760, Math.max(0, Number(n.delayHours) || 0)),
+        subject: String(n.subject || '').slice(0, 200),
+        body: String(n.body || '').slice(0, 8000),
+        ctaText: String(n.ctaText || '').slice(0, 60),
+      });
     }
-    convo.push({ role: 'user', content: results });
   }
-  return { reply, journey };
+  return out;
+}
+function countNodes(nodes) {
+  let messages = 0; let decisions = 0;
+  for (const n of nodes || []) {
+    if (n.type === 'decision') { decisions += 1; for (const b of n.branches) { const c = countNodes(b.nodes); messages += c.messages; decisions += c.decisions; } }
+    else messages += 1;
+  }
+  return { messages, decisions };
+}
+function validateJourney(j = {}) {
+  const nodes = cleanNodes(j.nodes);
+  if (!nodes.length) throw new Error('The journey has no steps — give it at least one message.');
+  const { messages, decisions } = countNodes(nodes);
+  if (!messages) throw new Error('The journey has no messages.');
+  return {
+    name: String(j.name || 'Journey').slice(0, 120),
+    goal: String(j.goal || '').slice(0, 300),
+    summary: String(j.summary || '').slice(0, 600),
+    nodes, messages, decisions,
+  };
 }
 
-// Exposed to insights.promptRegistry() so the journey Owl prompt is in the AI audit.
+// The Owl act-tool ({ schema, run } — registered in owlTools.js next to
+// draftCampaign). The NORMAL Owl writes the tree (copy included) as tool input;
+// this validates it, optionally grounds targeting in a saved segment, and
+// returns a confirm-card action. No model call in here.
+function owlTool({ db, getSegmentsApi }) {
+  const refuse = (reason, message) => ({ ok: false, reason, message });
+  async function run(args = {}, ctx = {}) {
+    const { user, suiteId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user in context.');
+    const entityId = ctx.entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!entityId) return refuse('no_client', 'Open or pick a client first — a journey belongs to a client.');
+    let journey;
+    try { journey = validateJourney(args); } catch (e) { return refuse('bad_journey', e.message); }
+    // Optional audience grounding: a saved segment by name (same matching as draftCampaign).
+    let audience = null; let audienceName = ''; let reach = null;
+    const segName = String(args.segmentName || '').trim();
+    if (segName) {
+      const segApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      const list = segApi && segApi.listSegments ? segApi.listSegments(entityId) : [];
+      const lc = segName.toLowerCase();
+      const seg = list.find((s) => s.name.toLowerCase() === lc)
+        || list.find((s) => s.name.toLowerCase().includes(lc) || lc.includes(s.name.toLowerCase()));
+      if (!seg) {
+        return refuse('no_segment', list.length
+          ? `No saved segment called "${segName}". You have: ${list.map((s) => `"${s.name}"`).join(', ')}.`
+          : 'There are no saved segments for this client yet — the journey can be created without one, and the audience picked in Engage.');
+      }
+      audience = { mode: 'segment', segmentId: seg.id };
+      audienceName = seg.name;
+      try { if (segApi.resolveSegment) { const r = await segApi.resolveSegment(entityId, seg.id, user); if (r && r.reach) reach = r.reach; } } catch { /* best-effort preview */ }
+    }
+    return { ok: true, confirm: true, action: { kind: 'draftJourney', entityId, ...journey, audience, audienceName, reach } };
+  }
+  const schema = {
+    name: 'draftJourney',
+    description:
+      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label (e.g. "Opened" / "No response" / "Bought"), nodes:[...]}]}. Decisions branch on opened / clicked / bought / no response; 2-3 branches each; nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. Optionally pass segmentName to target a saved segment (when the user names one). The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human picks/confirms the audience, reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it, give one line on the flow and tell the user to tap the button.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short journey name, <40 chars (e.g. "Abandoned cart recovery").' },
+        goal: { type: 'string', description: 'One sentence: the outcome this journey drives.' },
+        summary: { type: 'string', description: '2-3 plain sentences a non-technical promoter reads to understand what happens and how it branches.' },
+        nodes: { type: 'array', description: 'The ordered tree of message/decision nodes (see tool description for the exact node shapes).', items: { type: 'object' } },
+        segmentName: { type: 'string', description: 'OPTIONAL: target an existing saved segment by name (only when the user names an audience).' },
+      },
+      required: ['name', 'nodes'],
+    },
+  };
+  return { schema, run };
+}
+
+// The journey-authoring guidance lives in the draftJourney tool description —
+// expose it in the AI audit like any other prompt (insights.js spreads this in).
 function promptRegistry() {
-  return [{ key: 'journey', label: 'Journey Owl', scope: 'Engage → Journeys: conversational, data-aware journey builder', text: OWL_JOURNEY_SYSTEM }];
+  return [{ key: 'journey', label: 'Journey drafting (Owl tool)', scope: 'The Owl\'s draftJourney act-tool: how it authors branching journeys in chat', text: owlTool({}).schema.description }];
 }
 
-// resolveContext(entityId) → { apiKey, clientName, clientContext, instructions }
-// (built in index.js, which owns the per-entity key + AI instruction layers).
-function mount(app, { auth, db, resolveContext }) {
+// Starter recipes for the Engage → Journeys tab (suggestion prompts + example
+// trees). resolveContext is accepted for mount-signature compatibility.
+function mount(app, { auth }) {
   app.get('/api/journeys/:entityId/recipes', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     res.json({ recipes: actionTemplates.listJourneys() });
   });
-  app.post('/api/journeys/:entityId/chat', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
-    try {
-      const ctx = resolveContext(req.params.entityId) || {};
-      if (!ctx.apiKey && !process.env.ANTHROPIC_API_KEY) return res.status(400).json({ error: 'AI is not configured for this client' });
-      const out = await chat({
-        messages: (req.body || {}).messages || [],
-        currentJourney: (req.body || {}).currentJourney || null,
-        ...ctx,
-        lookupAudiences: () => audiencesFor(db, req.params.entityId),
-      });
-      res.json(out);
-    } catch (e) { res.status(400).json({ error: e.message }); }
-  });
 }
 
-module.exports = { mount, chat, promptRegistry, OWL_JOURNEY_SYSTEM };
+module.exports = { mount, owlTool, validateJourney, promptRegistry };

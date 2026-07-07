@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import ChartTile from './tiles/ChartTile.jsx';
 import ShareMenu from './ShareMenu.jsx';
+import JourneyTree, { countDecisions, journeyDraftBody } from './JourneyTree.jsx';
 
 // Prompt-starter pills shown on the empty state before /api/owl/starters loads (which
 // also returns the user's own most-asked questions). A small mirror so it never opens
@@ -972,11 +973,57 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'createLiveUpdate') return <LivePulseActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
+  if (action.kind === 'draftJourney') return <JourneyActionCard action={action} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
   if (action.kind === 'draftReport') return <ReportActionCard action={action} />;
   if (action.kind === 'createChottuLink') return <ChottuLinkActionCard action={action} />;
   if (action.kind === 'applyChottuTemplate') return <ChottuTemplateActionCard action={action} />;
   return null;
+}
+
+// "Create draft journey" — the Owl authored a branching journey (draftJourney
+// tool); the decision tree renders right in the chat and tapping creates a DRAFT
+// sequence campaign in Engage → Campaigns (permission re-checked server-side by
+// the create route). The user finishes audience + copy there; nothing sends.
+function JourneyActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const decisions = countDecisions(action.nodes);
+  const reach = action.reach || null;
+  const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
+  const create = async () => {
+    setState('busy'); setErr('');
+    try { await api.createAction(action.entityId, journeyDraftBody(action)); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '95%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🧭</span>
+        <strong style={{ fontSize: 12.5 }}>Journey</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+        {decisions > 0 && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>◆ {decisions} decision{decisions === 1 ? '' : 's'}</span>}
+      </div>
+      <div style={{ fontSize: 13, marginBottom: 2 }}><strong>{action.name}</strong></div>
+      {action.audienceName && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 2 }}>→ “{action.audienceName}”{reachLine ? ` · ${reachLine}` : ''}</div>}
+      {action.summary && <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.45, marginBottom: 6 }}>{action.summary}</div>}
+      <JourneyTree nodes={action.nodes} />
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>
+          ✓ Draft created — finish the audience and approve it in Campaigns.
+          <ViewLink url="/engage/campaigns" label="Open Campaigns →" />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 9, padding: '7px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', opacity: state === 'busy' ? 0.6 : 1 }}>
+            {state === 'busy' ? 'Creating…' : 'Create draft journey'}
+          </button>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Lands as a draft in Campaigns — you review and approve before anything sends.</span>
+          {state === 'error' && <span style={{ fontSize: 12, color: 'var(--error, #d33)' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // "Create link" — the Owl drafted one ChottuLink deep link; tapping mints it on

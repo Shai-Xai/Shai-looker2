@@ -1473,6 +1473,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     createLiveUpdate: { schema: createLiveUpdateSchema, run: runCreateLiveUpdate },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
     draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
+    draftJourney: { ...require('./journeys').owlTool({ db, getSegmentsApi }), menu: { cmd: 'journey', label: 'Build a journey', icon: '🧭', example: 'Build an abandoned-cart journey — email first, SMS if they don’t open' } },
     // ChottuLink deep-link act-tools (createLink, applyLinkTemplate) live in
     // their own factory — server/owlLinkTools.js (line-budget discipline).
     ...require('./owlLinkTools')({ db, getChottuApi }),
