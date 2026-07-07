@@ -973,7 +973,108 @@ function ActionCard({ action, suiteId }) {
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
   if (action.kind === 'draftReport') return <ReportActionCard action={action} />;
+  if (action.kind === 'createChottuLink') return <ChottuLinkActionCard action={action} />;
+  if (action.kind === 'applyChottuTemplate') return <ChottuTemplateActionCard action={action} />;
   return null;
+}
+
+// "Create link" — the Owl drafted one ChottuLink deep link; tapping mints it on
+// ChottuLink (permission re-checked server-side) and shows the live short URL.
+function ChottuLinkActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const [made, setMade] = useState(null);
+  const d = action.draft || {};
+  const utmLine = Object.entries(d.utm || {}).map(([k, v]) => `${k}=${v}`).join(' · ');
+  const create = async () => {
+    setState('busy'); setErr('');
+    try { const r = await api.owlCreateChottuLink({ entityId: action.entityId, suiteId: action.suiteId, draft: d }); setMade(r.link); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the link.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>🔗</span>
+        <strong style={{ fontSize: 12.5 }}>Deep link</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, marginBottom: 4 }}><strong>{d.linkName}</strong></div>
+      <div style={{ fontSize: 12, color: 'var(--brand)', marginBottom: 4, wordBreak: 'break-all' }}>{action.domain}/{d.path || '(auto code)'}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: utmLine ? 2 : 8, wordBreak: 'break-all' }}>→ {d.destinationUrl}</div>
+      {utmLine && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>{utmLine}</div>}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>
+          ✓ Link is live: <span style={{ userSelect: 'all' }}>{made?.shortUrl}</span>
+          <button onClick={() => { try { navigator.clipboard.writeText(made?.shortUrl || ''); } catch { /* older browsers */ } }} style={{ marginLeft: 8, border: '1px solid var(--hairline)', background: 'none', borderRadius: 8, padding: '2px 8px', fontSize: 11.5, cursor: 'pointer', color: 'var(--text)' }}>Copy</button>
+          <ViewLink url={ '/engage/links' } label="View links →" />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : 'Create link'}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Create N links" — the Owl resolved a link template against the current event;
+// tapping creates the whole set sequentially and reports each ✓/✗.
+function ChottuTemplateActionCard({ action }) {
+  const [state, setState] = useState('');
+  const [err, setErr] = useState('');
+  const [outcome, setOutcome] = useState(null);
+  const items = action.items || [];
+  const create = async () => {
+    setState('busy'); setErr('');
+    try {
+      const r = await api.owlApplyChottuTemplate({ entityId: action.entityId, suiteId: action.suiteId, templateId: action.templateId, base: action.base, items: items.map((i) => ({ key: i.key })) });
+      setOutcome(r); setState('done');
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the links.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>⚡</span>
+        <strong style={{ fontSize: 12.5 }}>Link set — {action.templateName}</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      {state !== 'done' && (
+        <div style={{ fontSize: 12, marginBottom: 8 }}>
+          {items.map((i) => (
+            <div key={i.key} style={{ padding: '3px 0' }}>
+              <span style={{ color: 'var(--brand)' }}>…/{i.path || '(auto)'}</span> <span style={{ color: 'var(--muted)' }}>· {i.name}</span>
+              {(i.warnings || []).map((w, k) => <div key={k} style={{ fontSize: 11.5, color: '#b25000' }}>⚠ {w}</div>)}
+            </div>
+          ))}
+        </div>
+      )}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5 }}>
+          <div style={{ color: 'var(--brand)', fontWeight: 700, marginBottom: 4 }}>
+            {outcome.failed ? `✓ ${outcome.created} created · ✗ ${outcome.failed} failed` : `✓ All ${outcome.created} links created`}
+            <ViewLink url={outcome.url || '/engage/links'} label="View links →" />
+          </div>
+          {(outcome.results || []).map((r) => (
+            <div key={r.key} style={{ padding: '2px 0', color: r.ok ? 'var(--text)' : '#e0414a' }}>
+              {r.ok ? <>✓ <span style={{ userSelect: 'all' }}>{r.link.shortUrl}</span></> : <>✗ {r.key}: {r.error}</>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy'}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: state === 'busy' ? 'default' : 'pointer', background: state === 'busy' ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: state === 'busy' ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Creating…' : `Create ${items.length} link${items.length === 1 ? '' : 's'}`}
+          </button>
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 // "File it" — the Owl drafted a product report (bug/idea) from the chat; tapping
 // files it to the product board (same path as the report widget), tagged source=owl.

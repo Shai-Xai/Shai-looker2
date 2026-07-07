@@ -668,3 +668,56 @@ test('a Looker timeout tells the model to change the query shape, not retry it',
   assert.equal(res.ok, false);
   assert.match(res.message, /do NOT retry the same query/, 'anti-retry guidance on timeouts');
 });
+
+// ── ChottuLink act-tools: createLink + applyLinkTemplate (draft-only) ─────────
+// The tools must DRAFT (confirm:true, never touch ChottuLink) and mirror the
+// Links UI's validation. The upstream API is a stub — commits happen elsewhere.
+const chottuStub = () => ({
+  configFor: () => ({ key: 'k', domain: 'howler.chottu.link', source: 'platform' }),
+  listTemplates: () => [{ id: 'tpl-1', name: 'Standard event set', platform: true, items: [{ key: 'main' }] }],
+  resolveTemplate: (entityId, id, { base }) => ({
+    template: { id, name: 'Standard event set' },
+    items: [
+      { key: 'main', name: 'Fest', path: 'fest', destination: base ? `${base}` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+      { key: 'chat', name: 'Fest (chat)', path: 'fest-chat', destination: base ? `${base}?dest=my-chat` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+    ],
+  }),
+});
+
+test('createLink drafts (confirm, never creates) with normalised UTMs; refuses when unconnected', async () => {
+  const ent = h.makeEntity('LinkCo', 'LinkCo Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest' });
+  const user = h.makeClient('owl-link@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const res = await t.createLink.run(
+    { name: 'Tickets — IG bio', destinationUrl: 'https://howler.co.za/event/9', path: 'fest-ig', utmSource: 'Insta Gram' },
+    { user, suiteId: su.id },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true, 'draft-only: the user must confirm');
+  assert.equal(res.action.kind, 'createChottuLink');
+  assert.equal(res.action.draft.utm.source, 'insta-gram', 'UTMs normalised lowercase/url-safe');
+  assert.equal(res.action.suiteId, su.id);
+  // Unconnected client → clear refusal, no draft.
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: () => ({ configFor: () => ({ key: '', domain: '', source: null }) }) });
+  const no = await t2.createLink.run({ name: 'X', destinationUrl: 'https://h/x' }, { user, suiteId: su.id });
+  assert.equal(no.ok, false);
+  assert.equal(no.reason, 'not_connected');
+});
+
+test('applyLinkTemplate resolves the set for the current event and demands the base URL when needed', async () => {
+  const ent = h.makeEntity('LinkCo2', 'LinkCo2 Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest 2' });
+  const user = h.makeClient('owl-tpl@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const noBase = await t.applyLinkTemplate.run({}, { user, suiteId: su.id });
+  assert.equal(noBase.ok, false);
+  assert.equal(noBase.reason, 'no_base', 'must ask for the event page URL, not draft broken links');
+  const res = await t.applyLinkTemplate.run({ baseUrl: 'https://howler.co.za/event/9' }, { user, suiteId: su.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'applyChottuTemplate');
+  assert.equal(res.action.items.length, 2);
+  const noSuite = await t.applyLinkTemplate.run({ baseUrl: 'https://h' }, { user });
+  assert.equal(noSuite.ok, false, 'a template run needs an event in context');
+});

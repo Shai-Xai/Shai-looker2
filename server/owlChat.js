@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
 const owlMemory = require('./owlMemory'); // durable per-client facts (memoryNote + rememberFact tool)
 const { actionViewPath } = require('./owlActionLinks'); // where a created action is viewed
+const { asyncHandler } = require('./http'); // act-commits that await upstream APIs (ChottuLink)
 
 // ── Live "thinking" status ───────────────────────────────────────────────────
 // The Owl can pause for seconds while it reasons or runs a Looker query, so we
@@ -73,6 +74,8 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
+- createLink → when the user wants a SHORT / TRACKING / DEEP LINK into the Howler app for sharing ("make me a link for the Instagram bio", "short link to the tickets page tagged whatsapp", "QR link for the poster"). It DRAFTS one branded short link (with optional UTM tags + social share preview) tied to the current event; the user confirms with a button — see ACTING below. If ChottuLink isn't connected it will tell you — relay that.
+- applyLinkTemplate → when the user wants ALL the links / the STANDARD LINK SET for an event in one go ("set up the links for this event", "create the standard link set"). It resolves a saved template (e.g. "Standard event set": main + ticket wallet + lineup + map + event feed + chat) against the current event and DRAFTS the whole set; the user confirms with a button. It usually needs the event's public page URL (baseUrl) — ask for it if the tool says so.
 - draftReport → when the user reports a PROBLEM with the app/product or suggests a FEATURE/IMPROVEMENT ("there's a bug", "X is broken / not working", "this page is confusing", "it would be great if…", "can you add…", "I wish it could…"). This is about the PULSE APP ITSELF, not their ticketing data. It DRAFTS a bug/idea report the user confirms with a button — see ACTING below.
 
 - rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Pick the scope: scope='event' for a fact true only of the CURRENT event (one festival sells add-ons heavily, another is single-day); scope='user' for THIS person's own answer-style preference ("keep it short", "always lead with revenue") — that shapes style, not data; scope='client' (default) for anything about the whole client/organiser. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold appears under "What you REMEMBER…" — don't re-offer what's already there.
@@ -83,6 +86,7 @@ ACTING (tools that DO something, not just read):
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
 - Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
 - The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
+- After calling createLink or applyLinkTemplate, do NOT say the link(s) exist yet. State what will be created (the short URL shape(s), tags, any warnings the tool returned) and tell the user to tap the button — the links only go live on ChottuLink when they confirm.
 - After calling draftCampaign, do NOT say it's sent or scheduled. Say you've DRAFTED the campaign, give the audience (size + reach) and the subject line, and tell them to tap "Create draft campaign" then review, approve and send it in Engage — you never send anything to customers. If it returns ok:false, relay why.
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
@@ -306,7 +310,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, getChottuApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -798,6 +802,42 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the segment.' });
     res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
+
+  // POST /api/owl/act/create-chottu-link — the user tapping "Create link" on the card
+  // the createLink tool produced. The tool only DRAFTS; this creates the real short
+  // link on ChottuLink. Permission re-checked here (campaigns.approve — the same gate
+  // as the Links UI), so the Owl can never mint a link the user couldn't make by hand.
+  app.post('/api/owl/act/create-chottu-link', auth.requireAuth, asyncHandler(async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, suiteId, draft } = req.body || {};
+    if (!entityId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'entityId and draft are required.' });
+    if (req.user.role !== 'admin' && (!(req.user.entityIds || []).includes(entityId) || !auth.hasPermission(req.user, entityId, 'campaigns.approve'))) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const chottuApi = typeof getChottuApi === 'function' ? getChottuApi() : null;
+    if (!chottuApi || !chottuApi.createLink) return res.status(503).json({ error: 'Links aren\'t available right now.' });
+    const link = await chottuApi.createLink(entityId, {
+      linkName: draft.linkName, destinationUrl: draft.destinationUrl, path: draft.path,
+      suiteId: suiteId || '', utm: draft.utm, social: draft.social,
+    }, req.user.email);
+    res.status(201).json({ ok: true, link: { shortUrl: link.shortUrl, linkName: link.linkName }, url: actionViewPath('createChottuLink') });
+  }));
+
+  // POST /api/owl/act/apply-chottu-template — the user confirming the link-set card
+  // the applyLinkTemplate tool produced. Sequential creation with per-item results
+  // (same engine as the Links UI); permission re-checked as above.
+  app.post('/api/owl/act/apply-chottu-template', auth.requireAuth, asyncHandler(async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, suiteId, templateId, base, items } = req.body || {};
+    if (!entityId || !suiteId || !templateId) return res.status(400).json({ error: 'entityId, suiteId and templateId are required.' });
+    if (req.user.role !== 'admin' && (!(req.user.entityIds || []).includes(entityId) || !auth.hasPermission(req.user, entityId, 'campaigns.approve'))) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const chottuApi = typeof getChottuApi === 'function' ? getChottuApi() : null;
+    if (!chottuApi || !chottuApi.applyTemplate) return res.status(503).json({ error: 'Links aren\'t available right now.' });
+    const r = await chottuApi.applyTemplate(entityId, templateId, { suiteId, base, items }, req.user.email);
+    res.status(201).json({ ok: true, ...r, url: actionViewPath('applyChottuTemplate') });
+  }));
 
   // POST /api/owl/act/draft-campaign — the user tapping "Create draft campaign" on the
   // card the draftCampaign tool produced. Creates a DRAFT campaign only (status 'draft',
