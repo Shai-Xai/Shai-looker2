@@ -22,6 +22,8 @@ function mount(app, { db, auth }) {
   const brandingDone = (e) => { try { const b = db.getEntityMailBranding(e) || {}; return !!(b.logo || b.brandColor || b.senderName || b.header) || !!db.getEntity(e)?.logo; } catch { return false; } };
   // Auto-tick once either ad platform is connected (token + account set).
   const adChannelsDone = (e) => { try { return require('./meta').isConfigured(e) || require('./tiktok').isConfigured(e); } catch { return false; } };
+  // Auto-tick once any pixel/tag id is saved in the Pulse Pixel section.
+  const pixelDone = (e) => { try { return require('./pixel').view(db.getEntityIntegrations(e) || {}).configured; } catch { return false; } };
 
   // Step catalogue. `auto` (when present) auto-completes the step from real state;
   // steps without `auto` are manual (a CTA + tick). Order = the suggested journey,
@@ -42,6 +44,7 @@ function mount(app, { db, auth }) {
     { key: 'segment', phase: 'See & act on your data', guide: 'segment', icon: '🎯', title: 'Create your first audience', desc: 'Turn a dashboard tile or a list into a reusable audience you can message.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
     { key: 'campaign', phase: 'See & act on your data', guide: 'campaign', icon: '📣', title: 'Launch your first campaign', desc: 'Email or SMS an audience, and winning back abandoned carts is a great first one.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
     { key: 'channels', phase: 'See & act on your data', guide: 'channels', icon: '🔗', title: 'Connect Meta & TikTok', desc: 'Link your ad accounts to push audiences to Meta & TikTok Custom Audiences for targeting.', cta: '/settings?section=integrations', auto: adChannelsDone },
+    { key: 'pixel', phase: 'See & act on your data', icon: '🎯', title: 'Install the Pulse Pixel', desc: 'One snippet on your website or ticket shop — remarketing lists then build automatically in Meta, Google and TikTok.', cta: '/settings?section=integrations', auto: pixelDone },
   ];
 
   function progress(entityId) {
