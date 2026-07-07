@@ -28,6 +28,54 @@ export default function DriveSourcesCard({ entityId, scope = 'my' }) {
     catch (e) { setError(e.message || 'Something went wrong.'); }
     setBusy('');
   };
+
+  // ── One-click OAuth + the Google Picker ──
+  const oauth = view.oauth || {};
+  const connectGoogle = async () => {
+    setBusy('oauth'); setError('');
+    try {
+      const r = scope === 'admin-client' ? await api.adminDriveOauthStart(entityId, window.location.pathname + window.location.search) : await api.myDriveOauthStart(entityId, window.location.pathname + window.location.search);
+      window.location.href = r.url;
+    } catch (e) { setError(e.message); setBusy(''); }
+  };
+  const disconnectGoogle = () => window.confirm('Disconnect Google? Added files stop syncing (they stay until removed).')
+    && act('oauth', () => (scope === 'admin-client' ? api.adminDriveOauthDisconnect(entityId) : api.myDriveOauthDisconnect(entityId)));
+  const openPicker = async () => {
+    setBusy('picker'); setError('');
+    try {
+      const t = scope === 'admin-client' ? await api.adminDrivePickerToken(entityId) : await api.myDrivePickerToken(entityId);
+      await new Promise((resolve, reject) => {
+        if (window.google?.picker) return resolve();
+        const s = document.createElement('script');
+        s.src = 'https://apis.google.com/js/api.js';
+        s.onload = () => window.gapi.load('picker', { callback: resolve, onerror: reject });
+        s.onerror = () => reject(new Error("Couldn't load the Google picker."));
+        document.head.appendChild(s);
+      });
+      const g = window.google.picker;
+      const docsView = new g.DocsView(g.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(true).setOwnedByMe(true);
+      const sharedView = new g.DocsView(g.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(true).setOwnedByMe(false);
+      let b = new g.PickerBuilder()
+        .setOAuthToken(t.accessToken)
+        .addView(docsView).addView(sharedView)
+        .enableFeature(g.Feature.MULTISELECT_ENABLED)
+        .setCallback(async (data) => {
+          if (data.action !== g.Action.PICKED) return;
+          setBusy('add');
+          try {
+            let last = view;
+            for (const d of data.docs || []) {
+              last = await (scope === 'admin-client' ? api.adminDriveAddSource(entityId, { fileId: d.id }) : api.myDriveAddSource(entityId, { fileId: d.id }));
+            }
+            setView(last);
+          } catch (e) { setError(e.message); }
+          setBusy('');
+        });
+      if (t.apiKey) b = b.setDeveloperKey(t.apiKey);
+      b.build().setVisible(true);
+    } catch (e) { setError(e.message); }
+    setBusy('');
+  };
   const saveKey = () => act('key', async () => { const v = await run('SetKey', { serviceAccountJson: keyJson }); setKeyJson(''); setShowKeyForm(false); return v; });
   const clearKey = () => window.confirm('Disconnect Google Drive? Added files stop syncing (they stay until removed).') && act('key', () => run('SetKey', { clear: true }));
   const add = () => act('add', async () => { const v = await run('AddSource', { link: link.trim() }); setLink(''); return v; });
@@ -48,8 +96,25 @@ export default function DriveSourcesCard({ entityId, scope = 'my' }) {
         Sheets become queryable tables; Docs, Slides and PDFs become searchable text the Owl quotes by name.
       </p>
 
-      {!view.configured && !showKeyForm && (
-        <button style={btn} onClick={() => setShowKeyForm(true)}>Connect Google Drive</button>
+      {oauth.connected ? (
+        <div style={{ ...row, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div style={{ minWidth: 0, flex: '1 1 220px', fontSize: 13 }}>
+            <b>Connected{oauth.email ? ` as ${oauth.email}` : ''}</b>
+            <div style={{ fontSize: 12, color: oauth.error ? 'var(--danger, #dc2626)' : 'var(--muted)', marginTop: 2 }}>
+              {oauth.error || 'Pick the files or folders the Owl may read — it only ever sees what you pick.'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+            {oauth.error ? <button style={btn} disabled={busy === 'oauth'} onClick={connectGoogle}>Reconnect</button>
+              : <button style={btn} disabled={busy === 'picker' || busy === 'add'} onClick={openPicker}>{busy === 'picker' ? 'Opening…' : '📂 Pick files or folders'}</button>}
+            <button style={dangerBtn} onClick={disconnectGoogle}>Disconnect</button>
+          </div>
+        </div>
+      ) : !view.configured && !showKeyForm && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {oauth.available && <button style={btn} disabled={busy === 'oauth'} onClick={connectGoogle}>{busy === 'oauth' ? 'Opening…' : 'Connect with Google'}</button>}
+          <button style={oauth.available ? ghostBtn : btn} onClick={() => setShowKeyForm(true)}>{oauth.available ? 'Use a service account instead' : 'Connect Google Drive'}</button>
+        </div>
       )}
       {(showKeyForm || (!view.configured && showKeyForm)) && (
         <div style={{ marginBottom: 12 }}>
@@ -62,7 +127,7 @@ export default function DriveSourcesCard({ entityId, scope = 'my' }) {
         </div>
       )}
 
-      {view.configured && (
+      {view.configured && view.mode === 'sa' && (
         <>
           <div style={{ ...row, flexWrap: 'wrap', marginBottom: 12 }}>
             <div style={{ minWidth: 0, flex: '1 1 240px' }}>

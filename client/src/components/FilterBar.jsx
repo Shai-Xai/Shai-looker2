@@ -310,12 +310,12 @@ function FilterDropdown({ filter, value, onChange, multi = false }) {
                 <li
                   key={i}
                   onMouseDown={(e) => { e.preventDefault(); multi ? toggleMulti(o.value) : pickSingle(o.value); }}
-                  style={{ ...optStyle, display: 'flex', alignItems: 'center', gap: 8, ...(isSel ? { background: 'rgba(var(--brand-rgb), 0.15)', fontWeight: 600 } : null) }}
+                  style={{ ...optStyle, display: 'flex', alignItems: 'flex-start', gap: 8, ...(isSel ? { background: 'rgba(var(--brand-rgb), 0.15)', fontWeight: 600 } : null) }}
                   onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'rgba(128,128,128,0.12)'; }}
                   onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  {multi && <span style={{ color: isSel ? 'var(--brand)' : '#bbb' }}>{isSel ? '☑' : '☐'}</span>}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+                  {multi && <span style={{ color: isSel ? 'var(--brand)' : '#bbb', flexShrink: 0 }}>{isSel ? '☑' : '☐'}</span>}
+                  <span style={{ minWidth: 0 }} title={o.label}>{o.label}</span>
                 </li>
               );
             })
@@ -333,11 +333,15 @@ const rangeWrap = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px
 const rangeOp = { fontSize: 12, color: 'var(--muted-2)', fontWeight: 600, whiteSpace: 'nowrap' };
 const rangeInput = { width: 64, padding: '6px 8px', border: '1px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', textAlign: 'center', background: 'var(--card)', boxSizing: 'border-box' };
 const caretStyle = { position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#888', pointerEvents: 'auto', cursor: 'pointer' };
+// The panel may grow WIDER than its input (long event names) and long labels
+// wrap to a second line — options were ellipsizing into five identical
+// "Kappa FuturFestiva…" rows you couldn't tell apart.
 const dropdownList = {
-  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
+  position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
+  minWidth: '100%', width: 'max-content', maxWidth: 'min(440px, calc(100vw - 40px))',
   background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10,
-  boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 240, overflowY: 'auto',
+  boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 280, overflowY: 'auto',
   listStyle: 'none', margin: 0, padding: '4px 0',
 };
-const optStyle = { padding: '9px 12px', cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+const optStyle = { padding: '9px 12px', cursor: 'pointer', fontSize: 13, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35 };
 const optMuted = { padding: '9px 12px', fontSize: 13, color: 'var(--muted)' };

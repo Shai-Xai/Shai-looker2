@@ -4,11 +4,13 @@ import { api } from '../lib/api.js';
 import HomeButton from '../components/HomeButton.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import SendingDomainCard from '../components/SendingDomainCard.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
+import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
@@ -134,6 +136,7 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+              <MetaConnectCard entityId={activeItem.entityId} scope="my" />
               <DriveSourcesCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}
@@ -149,6 +152,10 @@ export default function ClientIntegrationsPage() {
               <BrandingSection title="Account &amp; portfolio" subtitle="your overall look · used on portfolio digests">
                 <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
                 <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+              </BrandingSection>
+
+              <BrandingSection title="Your sending domain" subtitle="send from you@yourbrand.com">
+                <SendingDomainCard entityId={activeItem.entityId} scope="my" />
               </BrandingSection>
 
               <BrandingSection title="Events" subtitle="brand a specific event">

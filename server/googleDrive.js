@@ -143,23 +143,55 @@ function mount(app, { db, auth, insights, anthropicKeyForEntity, extractDocText,
   `);
   const now = () => new Date().toISOString();
 
-  // ── connection (client SA key, else platform env) ──
+  // ── connection: one-click OAuth (preferred) → client SA key → platform env ──
+  // OAuth stores a per-entity refresh token (sealed) from the "Connect with
+  // Google" flow (drive.file scope — the app only sees files picked/granted).
+  // The service-account share-with-email path stays as the robust fallback.
+  const oauthApp = () => ({
+    clientId: (db.getSetting ? db.getSetting('google_oauth_client_id', '') : '') || process.env.GOOGLE_OAUTH_CLIENT_ID || '',
+    clientSecret: (db.getSetting ? db.getSetting('google_oauth_client_secret', '') : '') || process.env.GOOGLE_OAUTH_CLIENT_SECRET || '',
+    apiKey: (db.getSetting ? db.getSetting('google_api_key', '') : '') || process.env.GOOGLE_API_KEY || '', // the Picker's developerKey
+  });
   function connection(entityId) {
-    const stored = entityId ? (db.getEntityIntegrations(entityId).googleServiceAccountSecret || '') : '';
+    const i = entityId ? db.getEntityIntegrations(entityId) : {};
+    const app = oauthApp();
+    if (i.googleOauthRefreshToken && app.clientId && app.clientSecret) {
+      return { mode: 'oauth', email: i.googleOauthEmail || '', refreshToken: i.googleOauthRefreshToken, entityId };
+    }
+    const stored = i.googleServiceAccountSecret || '';
     const sa = parseServiceAccount(stored) || parseServiceAccount(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '');
-    return sa ? { ...sa, envFallback: !stored } : null;
+    return sa ? { mode: 'sa', ...sa, envFallback: !stored } : null;
   }
 
-  // Access-token cache per SA email (several clients may share the env key).
-  const tokens = new Map(); // email → { token, exp }
-  async function accessToken(sa) {
-    const hit = tokens.get(sa.email);
-    if (hit && hit.exp > Date.now() + 60_000) return hit.token;
-    const body = new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: buildAssertion(sa, Math.floor(Date.now() / 1000)) });
-    const res = await doFetch(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString(), signal: AbortSignal.timeout(15000) });
+  // Access-token cache: SA tokens key on the SA email (clients may share the env
+  // key); OAuth tokens key on the entity.
+  const tokens = new Map(); // key → { token, exp }
+  async function tokenGrant(params) {
+    const res = await doFetch(TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params).toString(), signal: AbortSignal.timeout(15000) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.access_token) throw new Error(data.error_description || data.error || `Google auth failed (${res.status})`);
-    tokens.set(sa.email, { token: data.access_token, exp: Date.now() + Math.min(Number(data.expires_in) || 3600, 3600) * 1000 });
+    if (!res.ok || !data.access_token) { const e = new Error(data.error_description || data.error || `Google auth failed (${res.status})`); e.googleError = data.error; throw e; }
+    return data;
+  }
+  async function accessToken(conn) {
+    const key = conn.mode === 'oauth' ? `oauth:${conn.entityId}` : `sa:${conn.email}`;
+    const hit = tokens.get(key);
+    if (hit && hit.exp > Date.now() + 60_000) return hit.token;
+    let data;
+    if (conn.mode === 'oauth') {
+      const app = oauthApp();
+      try {
+        data = await tokenGrant({ grant_type: 'refresh_token', refresh_token: conn.refreshToken, client_id: app.clientId, client_secret: app.clientSecret });
+      } catch (e) {
+        if (e.googleError === 'invalid_grant') { // revoked / expired → surface a reconnect, don't retry forever
+          db.setEntityIntegrations(conn.entityId, { googleOauthError: 'Access was revoked or expired — reconnect Google Drive.' });
+          throw new Error('Google access needs a reconnect (it was revoked or expired).');
+        }
+        throw e;
+      }
+    } else {
+      data = await tokenGrant({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: buildAssertion(conn, Math.floor(Date.now() / 1000)) });
+    }
+    tokens.set(key, { token: data.access_token, exp: Date.now() + Math.min(Number(data.expires_in) || 3600, 3600) * 1000 });
     return data.access_token;
   }
 
@@ -303,26 +335,40 @@ function mount(app, { db, auth, insights, anthropicKeyForEntity, extractDocText,
   const srcView = (r) => ({ id: r.id, fileId: r.file_id, kind: r.kind, name: r.name, mime: r.mime, watch: !!r.watch, status: r.status, error: r.error, lastSynced: r.last_synced, files: r.kind === 'folder' ? fBySource.all(r.id).map(fileView) : undefined });
   const fileView = (r) => ({ id: r.id, fileId: r.file_id, name: r.name, mime: r.mime, kind: r.kind, chars: r.chars, rowCount: r.kind === 'table' ? r.chars : undefined, status: r.status, error: r.error, syncedAt: r.synced_at });
   function view(entityId) {
-    const sa = connection(entityId);
+    const conn = connection(entityId);
+    const i = db.getEntityIntegrations(entityId);
+    const app = oauthApp();
     return {
-      configured: !!sa,
-      saEmail: sa ? sa.email : '',
-      envFallback: sa ? !!sa.envFallback : false,
-      keySet: !!(db.getEntityIntegrations(entityId).googleServiceAccountSecret || '').trim(),
+      configured: !!conn,
+      mode: conn ? conn.mode : '',
+      saEmail: conn && conn.mode === 'sa' ? conn.email : '',
+      envFallback: conn && conn.mode === 'sa' ? !!conn.envFallback : false,
+      keySet: !!(i.googleServiceAccountSecret || '').trim(),
+      oauth: {
+        available: !!(app.clientId && app.clientSecret),
+        connected: !!(i.googleOauthRefreshToken || '').trim(),
+        email: i.googleOauthEmail || '',
+        error: i.googleOauthError || '',
+        pickerKey: app.apiKey, // browser key for the Google Picker (public by design)
+        clientId: app.clientId,
+      },
       sources: srcList.all(entityId).map(srcView),
     };
   }
 
   // ── route handlers (shared by both surfaces) ──
   async function addSource(entityId, userId, body, res) {
-    const parsed = parseLink(body.link);
+    const parsed = body.fileId ? { fileId: String(body.fileId) } : parseLink(body.link); // Picker passes the id directly
     if (!parsed) return res.status(400).json({ error: 'Paste a Google Drive / Docs / Sheets link (or a folder link).' });
-    const sa = connection(entityId);
-    if (!sa) return res.status(400).json({ error: 'Connect Google Drive first (add the service-account key).' });
+    const conn = connection(entityId);
+    if (!conn) return res.status(400).json({ error: 'Connect Google Drive first.' });
     if (srcByFile.get(entityId, parsed.fileId)) return res.status(400).json({ error: 'That file is already added.' });
     let meta;
-    try { meta = await getMeta(await accessToken(sa), parsed.fileId); }
-    catch (e) { return res.status(400).json({ error: `${e.message} Share it with ${sa.email} and try again.` }); }
+    try { meta = await getMeta(await accessToken(conn), parsed.fileId); }
+    catch (e) {
+      const hint = conn.mode === 'oauth' ? 'Use "Pick files" to grant access to it (pasted links only work for files already picked).' : `Share it with ${conn.email} and try again.`;
+      return res.status(400).json({ error: `${e.message} ${hint}` });
+    }
     const isFolder = meta.mimeType === 'application/vnd.google-apps.folder';
     const id = crypto.randomUUID();
     srcIns.run(id, entityId, userId || '', meta.id, isFolder ? 'folder' : 'file', meta.name || '', meta.mimeType || '', isFolder && body.watch !== false ? 1 : 0, 'pending', '', '', now());
@@ -379,6 +425,67 @@ function mount(app, { db, auth, insights, anthropicKeyForEntity, extractDocText,
   app.post('/api/my/drive/:entityId/sources/:sid/sync', auth.requireAuth, myEntity, manage, wrap((req, res) => syncOne(req.params.entityId, req.params.sid, res)));
   app.put('/api/my/drive/:entityId/sources/:sid', auth.requireAuth, myEntity, manage, (req, res) => updateSource(req.params.entityId, req.params.sid, req.body || {}, res));
   app.delete('/api/my/drive/:entityId/sources/:sid', auth.requireAuth, myEntity, manage, (req, res) => removeSource(req.params.entityId, req.params.sid, res));
+
+  // ── One-click OAuth ("Connect with Google", drive.file scope) ─────────────────
+  // The Picker-first flow: the app only ever sees files the user explicitly picks
+  // (non-sensitive scope — no Google verification ordeal). Platform app config:
+  // settings google_oauth_client_id / google_oauth_client_secret / google_api_key
+  // (or env GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_API_KEY).
+  // Register the redirect URI <base>/api/drive/oauth/callback on the OAuth client.
+  const oauthState = require('./oauthState');
+  oauthState.init({ db });
+  const baseUrl = (req) => (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const redirectUri = (req) => `${baseUrl(req)}/api/drive/oauth/callback`;
+  const safeReturn = (p) => (typeof p === 'string' && p.startsWith('/') && !p.startsWith('//') ? p : '/settings?section=integrations');
+
+  function oauthStart(entityId, req, res) {
+    const app2 = oauthApp();
+    if (!app2.clientId || !app2.clientSecret) return res.status(400).json({ error: 'Google connect isn\'t configured on the platform yet (OAuth client id/secret).' });
+    const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    u.searchParams.set('client_id', app2.clientId);
+    u.searchParams.set('redirect_uri', redirectUri(req));
+    u.searchParams.set('response_type', 'code');
+    u.searchParams.set('scope', 'https://www.googleapis.com/auth/drive.file openid email');
+    u.searchParams.set('access_type', 'offline');
+    u.searchParams.set('prompt', 'consent'); // guarantees a refresh_token on re-connects
+    u.searchParams.set('state', oauthState.sign({ t: 'gdrive', entityId, userId: req.user.id, ret: safeReturn(req.query.ret) }));
+    res.json({ url: u.toString() });
+  }
+  app.get('/api/my/drive/:entityId/oauth/start', auth.requireAuth, myEntity, manage, (req, res) => oauthStart(req.params.entityId, req, res));
+  app.get('/api/admin/entities/:entityId/drive/oauth/start', auth.requireAdmin, (req, res) => oauthStart(req.params.entityId, req, res));
+
+  app.get('/api/drive/oauth/callback', auth.requireAuth, wrap(async (req, res) => {
+    const st = oauthState.verify(req.query.state);
+    if (!st || st.t !== 'gdrive' || st.userId !== req.user.id) return res.status(400).send('This connect link expired — go back to Settings and try again.');
+    if (!(req.user.role === 'admin' || (req.user.entityIds || []).includes(st.entityId))) return res.status(403).send('Not your client.');
+    if (req.query.error) return res.redirect(302, `${safeReturn(st.ret)}${st.ret.includes('?') ? '&' : '?'}drive=denied`);
+    const app2 = oauthApp();
+    const data = await tokenGrant({ grant_type: 'authorization_code', code: String(req.query.code || ''), client_id: app2.clientId, client_secret: app2.clientSecret, redirect_uri: redirectUri(req) });
+    let email = '';
+    try { email = JSON.parse(Buffer.from(String(data.id_token || '').split('.')[1] || '', 'base64url').toString()).email || ''; } catch { /* display-only */ }
+    if (!data.refresh_token) return res.status(400).send('Google didn\'t return a durable grant — remove the app at https://myaccount.google.com/permissions and connect again.');
+    db.setEntityIntegrations(st.entityId, { googleOauthRefreshToken: data.refresh_token, googleOauthEmail: email, googleOauthError: '' });
+    tokens.delete(`oauth:${st.entityId}`);
+    res.redirect(302, `${safeReturn(st.ret)}${st.ret.includes('?') ? '&' : '?'}drive=connected`);
+  }));
+
+  // Short-lived access token for the Google Picker (drive.file scope; the Picker
+  // browses as the CONNECTED account and only picked files reach the server).
+  async function pickerToken(entityId, res) {
+    const conn = connection(entityId);
+    if (!conn || conn.mode !== 'oauth') return res.status(400).json({ error: 'Connect with Google first.' });
+    res.json({ accessToken: await accessToken(conn), apiKey: oauthApp().apiKey, email: conn.email });
+  }
+  app.get('/api/my/drive/:entityId/oauth/picker-token', auth.requireAuth, myEntity, manage, wrap((req, res) => pickerToken(req.params.entityId, res)));
+  app.get('/api/admin/entities/:entityId/drive/oauth/picker-token', auth.requireAdmin, wrap((req, res) => pickerToken(req.params.entityId, res)));
+
+  function oauthDisconnect(entityId, res) {
+    db.setEntityIntegrations(entityId, { googleOauthRefreshToken: '', googleOauthEmail: '', googleOauthError: '' });
+    tokens.delete(`oauth:${entityId}`);
+    res.json({ ok: true, ...view(entityId) });
+  }
+  app.post('/api/my/drive/:entityId/oauth/disconnect', auth.requireAuth, myEntity, manage, (req, res) => oauthDisconnect(req.params.entityId, res));
+  app.post('/api/admin/entities/:entityId/drive/oauth/disconnect', auth.requireAdmin, (req, res) => oauthDisconnect(req.params.entityId, res));
 
   // ── P3: the background tick. Watched folders re-sync hourly; everything else
   // refreshes every 6h (cheap: unchanged files short-circuit on modifiedTime).

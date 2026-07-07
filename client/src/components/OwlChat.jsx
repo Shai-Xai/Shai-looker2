@@ -36,6 +36,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [selEntity, setSelEntity] = useState(entityId || '');
   const [selSuite, setSelSuite] = useState(suiteId || '');
   const [sidebarOpen, setSidebarOpen] = useState(false); // chat list: persistent on desktop, slide-over on mobile
+  const [hdrMenuOpen, setHdrMenuOpen] = useState(false); // the header's ⋯ overflow menu (copy/PDF/share/size/dock)
   const [threads, setThreads] = useState([]);
   const [editingId, setEditingId] = useState(null); // thread being renamed inline
   const [editText, setEditText] = useState('');
@@ -226,13 +227,14 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     setBusy(true);
     const ac = new AbortController(); // powers the ⏹ Stop button
     abortRef.current = ac;
+    liveTidRef.current = threadId || null; // refreshed by onThread as soon as the server names the thread
     const appendToOwl = (delta) => setMessages((m) => {
       const next = m.slice();
       for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], text: next[i].text + delta }; break; } }
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal }, appendToOwl, setStatus);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -242,14 +244,52 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       if (fu && fu.length) setFollowups(fu);
     } catch (e) {
       if (e && (e.name === 'AbortError' || ac.signal.aborted)) appendToOwl('⏹ Stopped.');
-      else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
+      else if (liveTidRef.current) {
+        // The STREAM died (navigated away / phone locked / flaky network) but the
+        // server keeps working and saves the answer to the thread — recover it
+        // instead of failing (the "loading failed after switching screens" bug).
+        setStatus('Connection dropped — still working…');
+        await recoverAnswer(liveTidRef.current);
+      } else appendToOwl((e && e.message) ? `⚠ ${e.message}` : '⚠ Sorry — I hit a problem answering that.');
     } finally {
       abortRef.current = null;
       setBusy(false);
       setStatus('');
     }
   }
-  const stop = () => { try { abortRef.current && abortRef.current.abort(); } catch { /* already gone */ } };
+  // Poll the thread until the persisted answer lands (the turn keeps running
+  // server-side after a dropped stream), then swap the whole thread in. Bounded:
+  // ~2.5 min of polling, then an honest "reopen this chat" note.
+  const liveTidRef = useRef(null);
+  async function recoverAnswer(tid) {
+    setThreadId((cur) => cur || tid);
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        const r = await api.owlThreadMessages(tid);
+        const msgs = r.messages || [];
+        const last = msgs[msgs.length - 1];
+        if (last && last.role !== 'user' && String(last.body || '').trim()) {
+          setMessages(msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'owl', text: m.body, sources: m.sources })));
+          refreshThreads();
+          return;
+        }
+      } catch { /* transient — keep polling */ }
+    }
+    appendLastOwl('📡 The connection dropped and the answer is taking a while — reopen this chat in a minute and it\'ll be here.');
+  }
+  const appendLastOwl = (delta) => setMessages((m) => {
+    const next = m.slice();
+    for (let i = next.length - 1; i >= 0; i--) { if (next[i].role === 'owl') { next[i] = { ...next[i], text: (next[i].text ? `${next[i].text}\n\n` : '') + delta }; break; } }
+    return next;
+  });
+  // ⏹ Stop: tell the server to end the turn (a socket close alone no longer
+  // stops it — it can't tell "stopped" from "switched screens"), THEN abort.
+  const stop = () => {
+    const tid = liveTidRef.current || threadId;
+    if (tid) api.owlStop(tid).catch(() => {});
+    try { abortRef.current && abortRef.current.abort(); } catch { /* already gone */ }
+  };
   // "/" command palette: open while the input is just "/word" (no space yet), so it
   // never triggers mid-sentence or on a date like "1/2". Picking a command drops its
   // example question into the box (editable), per the chosen behaviour.
@@ -273,6 +313,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const docked = dock === 'docked' && !isMobile;
   const hdrBtn = { border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
   const segBtn = (active) => ({ padding: '4px 10px', fontSize: 11.5, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
+  const menuItem = { display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', padding: '8px 10px', borderRadius: 8, fontSize: 13, fontWeight: 600 };
   const selStyle = { padding: '4px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12.5, maxWidth: 200 };
 
   const bubble = (m, i) => (
@@ -366,33 +407,52 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     <div className="ai-glow" style={{ height: '100%', width: '100%', background: 'var(--card)', display: 'flex', flexDirection: 'row', overflow: 'hidden', position: 'relative' }}>
       {!isMobile && sidebar}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Clean header: chats ☰, new chat ✎, title — everything else lives in the ⋯ menu
+          (copy / PDF / share / text size / overlay-vs-in-app), so the bar stays calm. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 10px 11px 14px', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
         <span style={{ fontSize: 16 }}>🦉</span>
         <strong style={{ fontSize: 14.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Ask the Owl</strong>
         <button onClick={() => setSidebarOpen((o) => !o)} title="Chats" aria-label="Show chats" style={{ ...hdrBtn, fontSize: 16, padding: '2px 5px' }}>☰</button>
         <button onClick={newChat} title="New chat" aria-label="New chat" style={{ ...hdrBtn, fontSize: 15, padding: '2px 5px' }}>✎</button>
-        {messages.some((m) => m.text) && (
-          <>
-            <button onClick={copyChat} title="Copy the chat" aria-label="Copy the chat" style={{ ...hdrBtn, fontSize: 14, padding: '2px 5px' }}>{chatCopied ? '✓' : '📋'}</button>
-            <button onClick={printChat} title="Save as PDF" aria-label="Save as PDF" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '2px 5px' }}>PDF</button>
-            <ShareMenu
-              heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
-              text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
-              isMobile={isMobile} variant="tile" title="Share this chat"
-            />
-          </>
-        )}
         <span style={{ flex: 1 }} />
-        <div style={{ display: 'inline-flex', gap: 2, marginRight: 2 }} title="Text size">
-          <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 6px' }}>A−</button>
-          <button onClick={() => bumpZoom(0.1)} aria-label="Larger" style={{ ...hdrBtn, fontSize: 14.5, fontWeight: 700, padding: '4px 6px' }}>A+</button>
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setHdrMenuOpen((o) => !o)} title="More" aria-label="More options" style={{ ...hdrBtn, fontSize: 18, fontWeight: 700, padding: '2px 8px', ...(hdrMenuOpen ? { background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 8 } : null) }}>⋯</button>
+          {hdrMenuOpen && (
+            <>
+              <div onClick={() => setHdrMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 90 }} />
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 91, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, boxShadow: 'var(--shadow-pop, 0 8px 28px rgba(0,0,0,0.18))', minWidth: 210, padding: 6 }}>
+                {messages.some((m) => m.text) && (
+                  <>
+                    <button onClick={() => { copyChat(); setHdrMenuOpen(false); }} style={menuItem}>{chatCopied ? '✓ Copied' : '📋 Copy chat'}</button>
+                    <button onClick={() => { printChat(); setHdrMenuOpen(false); }} style={menuItem}>📄 Save as PDF</button>
+                    <div style={{ padding: '2px 4px' }} onClick={() => setHdrMenuOpen(false)}>
+                      <ShareMenu
+                        heading={`Owl chat${messages.find((m) => m.role === 'user' && m.text) ? ' — ' + messages.find((m) => m.role === 'user' && m.text).text.slice(0, 60) : ''}`}
+                        text={messages.filter((m) => m.text).map((m) => `${m.role === 'user' ? 'Q' : 'Owl'}: ${m.text}`).join('\n\n')}
+                        isMobile={isMobile} variant="tile" title="Share this chat"
+                      />
+                    </div>
+                    <div style={{ height: 1, background: 'var(--hairline)', margin: '5px 4px' }} />
+                  </>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1 }}>Text size</span>
+                  <button onClick={() => bumpZoom(-0.1)} aria-label="Smaller" style={{ ...hdrBtn, fontSize: 11.5, fontWeight: 700, padding: '4px 8px', border: '1px solid var(--hairline)', borderRadius: 8 }}>A−</button>
+                  <button onClick={() => bumpZoom(0.1)} aria-label="Larger" style={{ ...hdrBtn, fontSize: 14.5, fontWeight: 700, padding: '4px 8px', border: '1px solid var(--hairline)', borderRadius: 8 }}>A+</button>
+                </div>
+                {!isMobile && !embed && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--muted)', flex: 1 }}>Opens as</span>
+                    <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980 }} title="How the Owl opens">
+                      <button onClick={() => pickDock('overlay')} style={segBtn(!docked)}>Overlay</button>
+                      <button onClick={() => pickDock('docked')} style={segBtn(docked)}>In-app</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        {!isMobile && !embed && (
-          <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--elevated, rgba(128,128,128,0.12))', borderRadius: 980, marginRight: 2 }} title="How the Owl opens">
-            <button onClick={() => pickDock('overlay')} style={segBtn(!docked)}>Overlay</button>
-            <button onClick={() => pickDock('docked')} style={segBtn(docked)}>In-app</button>
-          </div>
-        )}
         {!embed && <button onClick={onClose} title="Close" aria-label="Close the Owl" style={{ ...hdrBtn, fontSize: 20, padding: '2px 6px' }}>✕</button>}
       </div>
 
@@ -442,7 +502,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                 <CopyBtn text={m.text} />
                 <ShareMenu heading={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || 'Owl answer'} text={m.text} isMobile={isMobile} variant="tile" title="Share this answer" />
-                <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} />
+                <DataActions source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.rows && s.rows.length)} suiteId={selSuite} entityId={selEntity} />
                 {isAdmin && selEntity && <SaveSegmentButton source={(m.sources || []).filter((s) => s.kind !== 'dashboard').find((s) => s.queryBody && s.queryBody.model)} entityId={selEntity} />}
                 <ReportToClaude
                   question={[...messages.slice(0, i)].reverse().find((x) => x.role === 'user')?.text || ''}
@@ -632,12 +692,23 @@ function OwlMd({ text }) {
           // exploding each row into a tall stacked card. Momentum + overscroll-contain
           // keep the scroll inside the table rather than dragging the page/chat.
           const stickyL = { position: 'sticky', left: 0, zIndex: 1, borderRight: '1px solid var(--hairline)' };
+          // Download THIS table (as written in the answer) — markdown stripped to plain text.
+          const plain = (s) => String(s ?? '').replace(/\*\*|__|\*|_|`/g, '').trim();
+          const tableCsv = () => downloadText(
+            `${plain(b.header[0] || 'table').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'owl-table'}.csv`,
+            [b.header.map((h) => csvEscape(plain(h))).join(','), ...b.rows.map((r) => r.map((c) => csvEscape(plain(c))).join(','))].join('\n'),
+          );
           return (
-            <div key={k} style={{ margin: '6px 0', overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain', border: '1px solid var(--hairline)', borderRadius: 10 }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: isMobile ? '0.85em' : '0.92em', width: '100%', minWidth: isMobile ? 'max-content' : undefined }}>
-                <thead><tr>{b.header.map((h, j) => <th key={j} style={j === 0 ? { ...th, ...stickyL, zIndex: 2, background: 'var(--elevated, #f1f1f5)' } : th}>{mdInline(h)}</th>)}</tr></thead>
-                <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={ci === 0 ? { ...td(false), ...stickyL, background: 'var(--card)', fontWeight: 600 } : td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
-              </table>
+            <div key={k} style={{ margin: '6px 0' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y', overscrollBehavior: 'contain', border: '1px solid var(--hairline)', borderRadius: 10 }}>
+                <table style={{ borderCollapse: 'collapse', fontSize: isMobile ? '0.85em' : '0.92em', width: '100%', minWidth: isMobile ? 'max-content' : undefined }}>
+                  <thead><tr>{b.header.map((h, j) => <th key={j} style={j === 0 ? { ...th, ...stickyL, zIndex: 2, background: 'var(--elevated, #f1f1f5)' } : th}>{mdInline(h)}</th>)}</tr></thead>
+                  <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={ci === 0 ? { ...td(false), ...stickyL, background: 'var(--card)', fontWeight: 600 } : td(ci > 0 && looksNumeric(c))}>{mdInline(c)}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+              <div style={{ textAlign: 'right', marginTop: 2 }}>
+                <button type="button" onClick={tableCsv} title="Download this table as CSV" style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 10.5, fontWeight: 600, padding: '1px 4px' }}>⬇ Table CSV</button>
+              </div>
             </div>
           );
         }
@@ -708,7 +779,44 @@ function SourceTable({ source }) {
 // show the biggest first (rows arrive measure-desc); line charts re-sort by the
 // date dimension so time runs left→right.
 const VIS = { line: 'looker_line', bar: 'looker_column', pie: 'looker_pie' };
+
+// Two dimensions + one measure (e.g. check-ins by GATE and HOUR) pivot into one
+// SERIES per value of the lower-cardinality dimension — so gates compare side by
+// side (and can Stack) instead of flattening both dims onto one long axis.
+function pivotInfo(s) {
+  const dims = (s.columns || []).filter((c) => c.kind === 'dimension');
+  const meas = (s.columns || []).filter((c) => c.kind === 'measure');
+  if (dims.length !== 2 || meas.length !== 1) return null;
+  const rows = s.rows || [];
+  if (rows.length < 3) return null;
+  const d0 = new Set(rows.map((r) => String(r[dims[0].field]))).size;
+  const d1 = new Set(rows.map((r) => String(r[dims[1].field]))).size;
+  const [sCol, xCol] = d0 <= d1 ? [dims[0], dims[1]] : [dims[1], dims[0]];
+  const sN = Math.min(d0, d1); const xN = Math.max(d0, d1);
+  if (sN < 2 || sN > 12 || xN < 2) return null; // a legend of 13+ series is unreadable
+  return { sCol, xCol, mCol: meas[0], seriesVals: [...new Set(rows.map((r) => String(r[sCol.field])))] };
+}
+const timeLike = (v) => /^\d{4}-\d{2}/.test(v) || /^\d{1,2}:\d{2}/.test(v) || /^\d+$/.test(v);
 function chartDataFromSource(s) {
+  const p = pivotInfo(s);
+  if (p) {
+    const { sCol, xCol, mCol, seriesVals } = p;
+    const byX = new Map();
+    for (const r of (s.rows || [])) { const x = String(r[xCol.field]); if (!byX.has(x)) byX.set(x, {}); byX.get(x)[String(r[sCol.field])] = r[mCol.field]; }
+    let xs = [...byX.keys()];
+    const sumX = (x) => Object.values(byX.get(x)).reduce((t, v) => t + (Number(v) || 0), 0);
+    // Time-ish x (dates, hours) runs left→right; categorical x sorts biggest-first.
+    if (s.chartType === 'line' || xs.every(timeLike)) xs.sort((a, b) => a.localeCompare(b));
+    else { xs.sort((a, b) => sumX(b) - sumX(a)); xs = xs.slice(0, 15); }
+    const key = (v) => `${mCol.field}|${v}`;
+    return {
+      fields: {
+        dimensions: [{ name: xCol.field, label: xCol.label, label_short: xCol.label }],
+        measures: seriesVals.map((v) => ({ name: key(v), label: v, label_short: v })),
+      },
+      data: xs.map((x) => { const o = { [xCol.field]: { value: x } }; const m = byX.get(x); for (const v of seriesVals) o[key(v)] = { value: m[v] != null ? m[v] : null }; return o; }),
+    };
+  }
   const dims = s.columns.filter((c) => c.kind === 'dimension');
   const meas = s.columns.filter((c) => c.kind === 'measure');
   let rows = s.rows || [];
@@ -805,12 +913,27 @@ function CopyBtn({ text }) {
 // CSV + chart-image downloads for an answer, sitting inline with the other message
 // actions. The image grabs the answer's rendered chart canvas (found via the message
 // wrapper's data attribute), so no ref-threading into the chart is needed.
-function DataActions({ source }) {
+// CSV = the RAW query data: when the citation preview is capped (50 rows) the button
+// re-runs the query live server-side (same scope gates) and downloads ALL rows.
+function DataActions({ source, suiteId, entityId }) {
+  const [busy, setBusy] = useState(false);
   if (!source || !(source.rows && source.rows.length)) return null;
   const hasChart = !!source.chartType;
+  const capped = (source.count || 0) > source.rows.length && !!source.queryBody;
+  const downloadCsv = async () => {
+    if (busy) return;
+    let rows = source.rows;
+    if (capped) {
+      setBusy(true);
+      try { const r = await api.owlExportRows({ queryBody: source.queryBody, suiteId: suiteId || undefined, entityId: entityId || undefined }); if (r && Array.isArray(r.rows) && r.rows.length) rows = r.rows; }
+      catch { /* fall back to the preview rows rather than failing the download */ }
+      setBusy(false);
+    }
+    downloadText(csvName(source), toCSV(source.columns, rows));
+  };
   return (
     <>
-      <button onClick={() => downloadText(csvName(source), toCSV(source.columns, source.rows))} title="Download the data as CSV (opens in Excel/Sheets)" style={msgActionStyle}>⬇ CSV</button>
+      <button onClick={downloadCsv} disabled={busy} title={capped ? `Download ALL ${Number(source.count).toLocaleString()} rows as CSV (re-runs the query live)` : 'Download the data as CSV (opens in Excel/Sheets)'} style={msgActionStyle}>{busy ? '⬇ Fetching…' : `⬇ CSV${capped ? ` (${Number(source.count).toLocaleString()})` : ''}`}</button>
       {hasChart && <button onClick={(e) => { const c = e.currentTarget.closest('[data-owl-msg]') && e.currentTarget.closest('[data-owl-msg]').querySelector('canvas'); if (c) downloadCanvasJpg(c, csvName(source).replace(/\.csv$/, '.jpg')); }} title="Download the chart as an image (JPEG)" style={msgActionStyle}>⬇ Image</button>}
     </>
   );
@@ -832,6 +955,7 @@ function ViewLink({ url, label = 'View it →' }) {
 function ActionCard({ action, suiteId }) {
   if (!action) return null;
   if (action.kind === 'createAlert') return <AlertActionCard action={action} />;
+  if (action.kind === 'createLiveUpdate') return <LivePulseActionCard action={action} />;
   if (action.kind === 'createSegment') return <SegmentActionCard action={action} />;
   if (action.kind === 'draftCampaign') return <CampaignActionCard action={action} suiteId={suiteId} />;
   if (action.kind === 'rememberFact') return <MemoryActionCard action={action} />;
@@ -945,6 +1069,62 @@ function AlertActionCard({ action }) {
           <button onClick={create} disabled={state === 'busy' || !suiteId}
             style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
             {state === 'busy' ? 'Creating…' : 'Create alert'}
+          </button>
+          {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
+          {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Live update confirm card — sets up a recurring event-day multi-metric snapshot
+// (the Alerts page's "Live updates" tab). Same draft→confirm shape as the alert
+// card; commit re-checks alerts.manage server-side. The user still presses Go live
+// on event day (or sets a window in the editor) — nothing sends until then.
+function LivePulseActionCard({ action }) {
+  const [state, setState] = useState(''); // '' | 'busy' | 'done' | 'error'
+  const [err, setErr] = useState('');
+  const [suiteId, setSuiteId] = useState(action.suiteId || '');
+  const [url, setUrl] = useState('');
+  const d = action.draft || {};
+  const CHAN_LABEL = { push: 'push', email: 'email', sms: 'SMS', whatsapp: 'WhatsApp' };
+  const chans = (d.channels || []).map((c) => CHAN_LABEL[c] || c);
+  const events = action.events || [];
+  const create = async () => {
+    if (!suiteId) return;
+    setState('busy'); setErr('');
+    try { const r = await api.owlCreateLiveUpdate({ suiteId, draft: d }); setUrl((r && r.url) || ''); setState('done'); }
+    catch (e) { setState('error'); setErr((e && e.message) || 'Could not set up the live update.'); }
+  };
+  return (
+    <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '85%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+        <span style={{ fontSize: 15 }}>⚡</span>
+        <strong style={{ fontSize: 12.5 }}>Live update</strong>
+        <span style={{ fontSize: 11, color: 'var(--muted)', border: '1px solid var(--hairline)', borderRadius: 980, padding: '1px 7px' }}>Draft</span>
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>
+        Every <strong>{d.cadenceMin || 30} min</strong> while the event is live: <strong>{(d.blocks || []).map((b) => b.label || (b.type === 'eventops' ? 'Devices' : 'Metric')).join(' · ')}</strong>.
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 8 }}>via {['in-app', ...chans].join(', ')} · press Go live on event day (Alerts → Live updates)</div>
+      {action.needsEvent && state !== 'done' && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 3 }}>Which event is this for?</div>
+          <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        </div>
+      )}
+      {state === 'done' ? (
+        <div style={{ fontSize: 12.5, color: 'var(--brand)', fontWeight: 600 }}>✓ Live update set up — press Go live on event day.<ViewLink url={url} label="View live updates →" /></div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={create} disabled={state === 'busy' || !suiteId}
+            style={{ border: 'none', borderRadius: 980, padding: '6px 16px', fontSize: 12.5, fontWeight: 700, cursor: (state === 'busy' || !suiteId) ? 'default' : 'pointer', background: (state === 'busy' || !suiteId) ? 'var(--elevated, rgba(128,128,128,0.18))' : 'var(--brand)', color: (state === 'busy' || !suiteId) ? 'var(--muted)' : '#fff' }}>
+            {state === 'busy' ? 'Setting up…' : '⚡ Set it up'}
           </button>
           {action.needsEvent && !suiteId && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Pick an event above</span>}
           {state === 'error' && <span style={{ fontSize: 12, color: '#e0414a' }}>{err}</span>}
@@ -1108,7 +1288,9 @@ function OwlChart({ source, entityId, suiteId, canPin }) {
   const seg = (active) => ({ padding: '3px 9px', fontSize: 11, fontWeight: 600, border: 'none', borderRadius: 980, cursor: 'pointer', background: active ? 'var(--brand)' : 'transparent', color: active ? '#fff' : 'var(--text)' });
   const total = (source.rows || []).reduce((a, r) => a + (Number(r[meas?.field]) || 0), 0);
   const showPin = canPin && source.queryBody && entityId;
-  const canStack = multiMeasure && (type === 'bar' || type === 'line');
+  // Stack applies to any multi-series chart: several measures, OR a two-dimension
+  // result pivoted into one series per category (e.g. check-ins by gate over hours).
+  const canStack = (multiMeasure || !!pivotInfo(source)) && (type === 'bar' || type === 'line');
   return (
     <div style={{ margin: '2px 0 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>

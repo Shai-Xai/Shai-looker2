@@ -107,12 +107,15 @@ export const api = {
   // Agentic Owl chat: POST a question, stream the grounded answer as plain text
   // (onText per delta), resolve with { threadId } (read from the X-Owl-Thread header
   // so a new conversation can be continued).
-  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode, signal }, onText, onStatus) => {
-    // `signal` (AbortController) powers the ⏹ Stop button — aborting closes the socket,
-    // which the server notices and bails out of the loop instead of finishing the answer.
+  owlChat: async ({ suiteId, entityId, dashboardId, message, threadId, mode, signal, onThread }, onText, onStatus) => {
+    // `signal` powers ⏹ Stop (paired with owlStop — a socket close alone no longer
+    // stops the server; it finishes and PERSISTS the answer so a dropped stream can
+    // be recovered from the thread). `onThread` fires as soon as the server names
+    // the thread — before any text — so recovery knows where to look.
     const res = await fetch('/api/owl/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suiteId, entityId, dashboardId, message, threadId, mode }), signal });
     if (!res.ok) return json(res); // pre-stream rejection (no scope / no API key) → throws
     const tid = res.headers.get('X-Owl-Thread') || threadId || null;
+    try { onThread?.(tid); } catch { /* advisory only */ }
     const persona = res.headers.get('X-Owl-Persona') || mode || 'quick';
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -160,6 +163,7 @@ export const api = {
   },
   // Act layer: commit a drafted action the Owl proposed (the "Create alert" tap).
   owlCreateAlert: (body) => fetch('/api/owl/act/create-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlCreateLiveUpdate: (body) => fetch('/api/owl/act/create-live-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   owlRemember: (body) => fetch('/api/owl/act/remember', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Client memory (durable per-client facts the Owl carries across chats).
   owlMemory: (entityId) => fetch(`/api/admin/entities/${entityId}/owl-memory`).then(json),
@@ -187,6 +191,9 @@ export const api = {
   owlCatalogueFields: (model, view) => fetch(`/api/admin/owl/catalogue${model ? `?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}` : ''}`).then(json),
   saveOwlCatalogue: (enabled, model, view) => fetch('/api/admin/owl/catalogue', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, model, view }) }).then(json),
   owlStarters: (entityId) => fetch(`/api/owl/starters${entityId ? `?entityId=${encodeURIComponent(entityId)}` : ''}`).then(json),
+  // Raw-data export for a chat answer: re-runs the citation's query live (scope-gated
+  // server-side) and returns ALL rows — the chat stream itself caps previews at 50.
+  owlExportRows: (body) => fetch('/api/owl/export-rows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
   owlCreateSegment: (body) => fetch('/api/owl/act/create-segment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
@@ -198,6 +205,7 @@ export const api = {
   owlThreads: () => fetch('/api/owl/threads').then(json),
   owlPinTargets: (entityId) => fetch(`/api/owl/pin-targets?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlPin: (body) => fetch('/api/owl/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlStop: (threadId) => fetch('/api/owl/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threadId }) }).then(json),
   owlThreadMessages: (id) => fetch(`/api/owl/threads/${id}/messages`).then(json),
   owlRenameThread: (id, title) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json),
   owlSetThreadFolder: (id, folder) => fetch(`/api/owl/threads/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }).then(json),
@@ -219,6 +227,21 @@ export const api = {
   adminDriveSyncSource: (entityId, sid) => fetch(`/api/admin/entities/${entityId}/drive/sources/${sid}/sync`, { method: 'POST' }).then(json),
   adminDriveUpdateSource: (entityId, sid, body) => fetch(`/api/admin/entities/${entityId}/drive/sources/${sid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   adminDriveRemoveSource: (entityId, sid) => fetch(`/api/admin/entities/${entityId}/drive/sources/${sid}`, { method: 'DELETE' }).then(json),
+  myDriveOauthStart: (entityId, ret) => fetch(`/api/my/drive/${entityId}/oauth/start?ret=${encodeURIComponent(ret || '')}`).then(json),
+  adminDriveOauthStart: (entityId, ret) => fetch(`/api/admin/entities/${entityId}/drive/oauth/start?ret=${encodeURIComponent(ret || '')}`).then(json),
+  myDrivePickerToken: (entityId) => fetch(`/api/my/drive/${entityId}/oauth/picker-token`).then(json),
+  adminDrivePickerToken: (entityId) => fetch(`/api/admin/entities/${entityId}/drive/oauth/picker-token`).then(json),
+  myDriveOauthDisconnect: (entityId) => fetch(`/api/my/drive/${entityId}/oauth/disconnect`, { method: 'POST' }).then(json),
+  adminDriveOauthDisconnect: (entityId) => fetch(`/api/admin/entities/${entityId}/drive/oauth/disconnect`, { method: 'POST' }).then(json),
+  // Meta "Continue with Facebook" connect — dual-surface
+  myMetaConnect: (entityId) => fetch(`/api/my/meta-connect/${entityId}`).then(json),
+  adminMetaConnect: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-connect`).then(json),
+  myMetaConnectStart: (entityId, ret) => fetch(`/api/my/meta-connect/${entityId}/start?ret=${encodeURIComponent(ret || '')}`).then(json),
+  adminMetaConnectStart: (entityId, ret) => fetch(`/api/admin/entities/${entityId}/meta-connect/start?ret=${encodeURIComponent(ret || '')}`).then(json),
+  myMetaConnectSelect: (entityId, accountId) => fetch(`/api/my/meta-connect/${entityId}/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) }).then(json),
+  adminMetaConnectSelect: (entityId, accountId) => fetch(`/api/admin/entities/${entityId}/meta-connect/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) }).then(json),
+  myMetaConnectDisconnect: (entityId) => fetch(`/api/my/meta-connect/${entityId}/disconnect`, { method: 'POST' }).then(json),
+  adminMetaConnectDisconnect: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-connect/disconnect`, { method: 'POST' }).then(json),
   owlUploads: (entityId) => fetch(`/api/owl/uploads?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlUploadCsv: (entityId, name, csv) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, csv }) }).then(json),
   owlUploadSheet: (entityId, name, sheetUrl) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, sheetUrl }) }).then(json),
@@ -386,6 +409,11 @@ export const api = {
   createCampaignTemplate: (entityId, b) => fetch(`/api/campaign-templates/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateCampaignTemplate: (entityId, id, b) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteCampaignTemplate: (entityId, id) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'DELETE' }).then(json),
+  // Engage Links — per-client links grouped into typed categories (dual-surface)
+  listEngageLinks: (entityId) => fetch(`/api/engage-links/${entityId}`).then(json),
+  createEngageLink: (entityId, b) => fetch(`/api/engage-links/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateEngageLink: (entityId, id, b) => fetch(`/api/engage-links/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteEngageLink: (entityId, id) => fetch(`/api/engage-links/${entityId}/${id}`, { method: 'DELETE' }).then(json),
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
@@ -494,6 +522,15 @@ export const api = {
   saveAiInstructions: (instructions) => fetch('/api/admin/ai-instructions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instructions }) }).then(json),
   getAiOverview: () => fetch('/api/admin/ai-overview').then(json),
   getAiUsage: (days = 14) => fetch(`/api/admin/ai-usage?days=${days}`).then(json),
+
+  // Custom sending domain (dual-surface: admin per client, client self-service)
+  getTileZoom: (dashboardId) => fetch(`/api/my/tile-zoom/${dashboardId}`).then(json),
+  saveTileZoom: (dashboardId, zoom) => fetch(`/api/my/tile-zoom/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zoom }) }).then(json),
+  clearQueryCache: () => fetch('/api/admin/clear-query-cache', { method: 'POST' }).then(json),
+  getSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`).then(json),
+  saveSendingDomain: (entityId, body, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  verifySendingDomain: (entityId, scope = 'admin') => fetch(`${scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`}/verify`, { method: 'POST' }).then(json),
+  deleteSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'DELETE' }).then(json),
   getResolvedPrompt: ({ feature, entityId, role }) => fetch(`/api/admin/ai-resolved-prompt?feature=${encodeURIComponent(feature)}${entityId ? `&entityId=${encodeURIComponent(entityId)}` : ''}${role ? `&role=${encodeURIComponent(role)}` : ''}`).then(json),
 
   // Integrations
@@ -782,6 +819,16 @@ export const api = {
   alertTemplates: (entityId) => fetch(`/api/alerts/templates/${entityId}`).then(json),
   saveAlertTemplate: (body) => fetch('/api/alerts/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   deleteAlertTemplate: (id) => fetch(`/api/alerts/templates/${id}`, { method: 'DELETE' }).then(json),
+  // Live updates (Live Pulse) — recurring event-day multi-metric snapshots; the
+  // "Live updates" tab of the Alerts page. Same suite-keyed guarded set as alerts.
+  suiteLivePulses: (suiteId) => fetch(`/api/livepulse/suites/${suiteId}`).then(json),
+  createLivePulse: (suiteId, b) => fetch(`/api/livepulse/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateLivePulse: (id, b) => fetch(`/api/livepulse/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteLivePulse: (id) => fetch(`/api/livepulse/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  setLivePulseStatus: (id, status) => fetch(`/api/livepulse/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
+  setLivePulseLive: (id, live) => fetch(`/api/livepulse/${id}/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ live }) }).then(json),
+  testLivePulse: (id) => fetch(`/api/livepulse/${id}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  livePulseRuns: (id) => fetch(`/api/livepulse/${id}/runs`).then(json),
 
   // Status notices — human-authored platform incidents. Admin authors + updates +
   // resolves; clients read the banner/feed via myNotices (scoped server-side).
@@ -848,4 +895,16 @@ export const api = {
   eventopsCreateStaff: (suiteId, b) => fetch(`/api/eventops/suites/${suiteId}/staff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsUpdateStaff: (suiteId, id, b) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   eventopsDeleteStaff: (suiteId, id) => fetch(`/api/eventops/suites/${suiteId}/staff/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+
+  // Data health (Admin) — the BigQuery → Looker stream monitor.
+  dataHealth: () => fetch('/api/admin/data-health').then(json),
+  createDataMonitor: (b) => fetch('/api/admin/data-health/monitors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateDataMonitor: (id, b) => fetch(`/api/admin/data-health/monitors/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteDataMonitor: (id) => fetch(`/api/admin/data-health/monitors/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  setDataMonitorStatus: (id, status) => fetch(`/api/admin/data-health/monitors/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).then(json),
+  checkDataMonitor: (id) => fetch(`/api/admin/data-health/monitors/${id}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  dataMonitorHistory: (id) => fetch(`/api/admin/data-health/monitors/${id}/history`).then(json),
+  forgetDataStream: (id, station) => fetch(`/api/admin/data-health/monitors/${id}/streams/${encodeURIComponent(station)}`, { method: 'DELETE' }).then(json),
+  dataHealthExplores: () => fetch('/api/admin/data-health/explores').then(json),
+  dataHealthFields: (model, view) => fetch(`/api/admin/data-health/fields?model=${encodeURIComponent(model)}&view=${encodeURIComponent(view)}`).then(json),
 };

@@ -8,6 +8,7 @@ import SegmentManager from '../components/SegmentManager.jsx';
 import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
 import JourneyWizard from '../components/JourneyWizard.jsx';
+import EngageLinks from '../components/EngageLinks.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -20,6 +21,7 @@ const TABS = [
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
+  { key: 'links', label: 'Links', icon: '🔗', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
 
@@ -108,6 +110,11 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Create reusable email templates, then apply them when building a campaign.</p>
           <TemplateManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
+      ) : active === 'links' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Keep your useful links in one place, grouped into categories so the right one is easy to find.</p>
+          <EngageLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : (
         <>
