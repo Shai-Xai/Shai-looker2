@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-05 (🔥 transaction heatmap on the Flow board) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🦉 Owl product help: ask the Owl how-to / what's new — grounded in published release notes + curated knowledge) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -256,6 +256,31 @@ shoulder when it's worth your time."
 **Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
 on top of the event without logging in."
 
+## 2b. Ask the Owl about Pulse itself (product help)  🧪
+- The **same Owl chat** now also answers questions about **Pulse itself** — *how
+  do I do this*, *what's new*, *what can I do with my access* — alongside its
+  usual data answers. One door for everything; the Owl routes the question.
+- **Only released features, ever:** answers are grounded strictly in Howler's
+  curated help knowledge plus **published release notes** — drafts and unshipped
+  work can never surface. If it isn't published, the Owl doesn't know it.
+- **Tailored to the user:** answers respect their **role** (won't walk a Viewer
+  through something only an Owner can do), their **tenant setup** and their
+  **current event** — e.g. it won't pitch cashless features to a non-cashless
+  event.
+- **"What's new"** pulls the latest, correctly-dated published release notes; a
+  ✨ starter pill on the Owl chat asks it in one tap.
+- **Deep-links** the user straight to the right screen ("open Engage →
+  Campaigns"), and **declines gracefully** when the answer isn't in its knowledge
+  — it never invents behaviour.
+- **Curated & versioned:** Howler staff maintain the knowledge in **Admin →
+  Product → 💬 Help knowledge** (add/edit/publish articles, tag them by role +
+  required feature, set deep-links, toggle product help on/off) — **no deploy
+  needed**. The Owl chat itself is the client's self-service surface.
+
+**Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
+who you are and what your account can do, and it only ever describes features
+that have actually shipped."
+
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
   and **must-acknowledge** messages for things that need sign-off.
@@ -415,6 +440,46 @@ new to set up).
 
 **Pitch:** "Your ad account and your ticket data finally in one place — see the
 spend, the return, and ask the Owl which campaign is worth more budget."
+
+### 5g. Deep links into the Howler app  🟡 (needs connection)
+Short, branded **`howler.chottu.link` URLs** that open the right place in the
+Howler app (tickets, lineup, map, chat…) — created **from Pulse** instead of
+one-by-one in the ChottuLink dashboard.
+- **Engage → Links** — clients create and manage their own links: name it, pick
+  the event, paste the destination, done. Each link is **tied to a Pulse event**
+  and shows its **click counts** (total / 7 / 30 days).
+- **UTM tags & app behaviour** built in — every link can carry campaign tags and
+  choose app-vs-browser opening per platform.
+- **Import (pick & choose)** — the import screen lists everything on the
+  ChottuLink account, flagged new / already in Pulse / previously deleted; tick
+  the ones to bring in and optionally attach them to an event in the same step.
+- **Delete** — removing a link takes it out of Pulse *and* switches it off in
+  ChottuLink (their API has no true delete), so the short URL stops redirecting;
+  re-imports won't resurrect it unless you pick it on purpose.
+- **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
+  the connection (API key + domain) layers platform-default → per-client override.
+- **⚡ Templates — every link in one click** ✅ — pick a template, pick the event,
+  paste the event page URL, done: the whole standard set (main + ticket wallet +
+  lineup + map + event feed + chat) is created in one go, named and tagged per
+  event automatically. Preview first (untick / tweak paths inline, collisions
+  flagged); anything that fails can be retried individually. A Howler-managed
+  starter template ships built in; clients can save their own sets too.
+- **📈 Click trends & source split** ✅ — Pulse snapshots every link's clicks
+  nightly and charts **clicks per day** per event, plus a **by-source** split
+  (instagram vs whatsapp vs email…) from the links' UTM tags — history
+  ChottuLink's own API doesn't offer. Tap 📈 on any event's link card.
+- **🦉 Owl does links too** ✅ — ask the Owl "make me a tickets link for the
+  Instagram bio" or "set up the standard links for this event"; it drafts the
+  link(s) with tags + preview and you confirm with one tap. Draft-only, same
+  permissions as doing it by hand.
+- **✨ AI autofill** ✅ — one tap fills a link's UTM tags and social share
+  preview from its name, destination and event, matching the client's existing
+  tag conventions.
+- **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
+  covers all clients by default).
+
+**Pitch:** "Every link your event needs — created in one click from Pulse, tracked
+per event, and ready to drop into posts, bios, emails and QR codes."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -785,6 +850,39 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
+  answers product questions — *how do I…*, *what's new*, *what can I do* — right in
+  Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
+  deploy) plus **published release notes only** (nothing unreleased can surface),
+  and **tailored to the user's role, tenant and event** (e.g. omits cashless help
+  for non-cashless events). Deep-links to the right screen and **declines** rather
+  than inventing. Dual-surface: Howler curates + publishes the knowledge in
+  **Admin → Product → 💬 Help knowledge**; the Owl chat (with a ✨ What's-new starter
+  pill) is the client's self-service surface.
+- **2026-07-07 (evening)** — **Deep links: click trends, Owl link tools & ✨ autofill** ✅:
+  nightly click snapshots now power a per-event **clicks-per-day chart + by-source
+  split** (📈 on the Links tab); the **Owl** drafts single links or the whole
+  template set from chat (confirm-button, draft-only); and **✨ Autofill with AI**
+  fills a link's UTM tags + social share preview (rich link previews now editable
+  in Pulse, with a live share-card preview). Completes Phase 3 of the ChottuLink
+  integration.
+- **2026-07-07 (later)** — **Deep links: pick-and-choose import + delete** ✅: the
+  import screen now lists the whole ChottuLink account (new / in Pulse / previously
+  deleted) so you tick exactly what comes in, optionally attached to an event in the
+  same step; links can be deleted (removed from Pulse + switched off in ChottuLink,
+  tombstoned so re-imports don't resurrect them).
+- **2026-07-07 (late)** — **Deep-link templates: every link in one click** ✅: apply a
+  template to an event and Pulse creates the whole link set (main + ticket wallet +
+  lineup + map + feed + chat) against ChottuLink in one go — placeholders fill the
+  event's name/slug into names, paths and UTMs; preview with per-link tick/tweak and
+  collision warnings; per-link retry on failure. Howler starter template built in;
+  clients can save their own sets (Engage → Links → ⚡ Templates).
+- **2026-07-07** — **Deep links into the Howler app (ChottuLink)** 🟡: short branded
+  `howler.chottu.link` URLs created **from Pulse** (Engage → Links + Admin → 🔗 Deep
+  links) instead of one-by-one in the ChottuLink dashboard — tied to events, with UTM
+  tags, app-vs-browser behaviour, click counts and one-tap import of existing links.
+  Needs the ChottuLink API key + domain (platform default, per-client override).
+  Templates (one click = the whole standard link set for an event) are next.
 - **2026-07-05 (late)** — **Flow board: 🔥 transaction heatmap** 🧪: a new 🔥 Heat mode on
   the venue map turns each station into a heat bloom sized by how much it's *transacting*,
   colour-coded by category so **bars and gates read at the same time**. A **▶ play-the-day**

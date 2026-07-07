@@ -197,6 +197,8 @@ export const api = {
   // Act layer: commit a drafted segment the Owl proposed (the "Create segment" tap),
   // or "Save as segment" from a chat answer's cohort. Never carries PII.
   owlCreateSegment: (body) => fetch('/api/owl/act/create-segment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlCreateChottuLink: (body) => fetch('/api/owl/act/create-chottu-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  owlApplyChottuTemplate: (body) => fetch('/api/owl/act/apply-chottu-template', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   // Act layer: commit a drafted campaign (the "Create draft campaign" tap). Creates a
   // DRAFT only — a human reviews/approves/sends in Engage. Never carries PII.
   owlDraftCampaign: (body) => fetch('/api/owl/act/draft-campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
@@ -305,6 +307,16 @@ export const api = {
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
   adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
+  // Admin — Product → Help knowledge: curate + publish what the Owl may say about
+  // Pulse itself (server/helpBot.js — grounds the Owl's productHelp tool). The
+  // client self-service surface is the Owl chat itself; there's no separate bot.
+  adminHelpArticles: () => fetch('/api/admin/help/articles').then(json),
+  adminCreateHelpArticle: (a) => fetch('/api/admin/help/articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminUpdateHelpArticle: (id, a) => fetch(`/api/admin/help/articles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminDeleteHelpArticle: (id) => fetch(`/api/admin/help/articles/${id}`, { method: 'DELETE' }),
+  adminDraftHelpArticles: () => fetch('/api/admin/help/draft', { method: 'POST' }).then(json),
+  adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
+  adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -560,6 +572,25 @@ export const api = {
   slackShareStatus: () => fetch('/api/my/slack/share-status').then(json),
   slackShare: (p) => fetch('/api/my/slack/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   setEntityIntegrationLock: (id, key, locked) => fetch(`/api/admin/entities/${id}/integrations/lock`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, locked }) }).then(json),
+
+  // ChottuLink deep links — dual surface (admin per client / client self-service).
+  chottuLinks: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`).then(json),
+  chottuCreateLink: (scope, entityId, link) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links` : `/api/my/chottu/${entityId}/links`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(link) }).then(json),
+  chottuUpdateLink: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  chottuSetLinkStatus: (scope, entityId, id, enabled) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}/status` : `/api/my/chottu/${entityId}/links/${id}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
+  chottuRefreshStats: (scope, entityId, body = {}) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/refresh-stats` : `/api/my/chottu/${entityId}/refresh-stats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuImportPreview: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/import/preview`).then(json),
+  chottuRemoveImported: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/imported`, { method: 'DELETE' }).then(json),
+  chottuImport: (entityId, body = {}) => fetch(`/api/admin/entities/${entityId}/chottu/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuDeleteLink: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'DELETE' }).then(json),
+  chottuTest: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/test`, { method: 'POST' }).then(json),
+  chottuSuggestMeta: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/suggest-meta` : `/api/my/chottu/${entityId}/suggest-meta`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuStats: (scope, entityId, suiteId = '') => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/stats` : `/api/my/chottu/${entityId}/stats`) + (suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : '')).then(json),
+  chottuTemplates: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`).then(json),
+  chottuSaveTemplate: (scope, entityId, id, t) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + (id ? `/${id}` : ''), { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(t) }).then(json),
+  chottuDeleteTemplate: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}`, { method: 'DELETE' }),
+  chottuPreviewTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  chottuApplyTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),

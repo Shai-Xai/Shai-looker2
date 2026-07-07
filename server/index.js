@@ -146,8 +146,8 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor, staffInboundFn = null; // waDigestFor set when digests mount; staffInboundFn set when staffAlerts mounts (lets the WhatsApp Owl intercept staff numbers before they reach it)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getChottuApi: () => chottuApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
 // Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
@@ -478,12 +478,15 @@ app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
 // ─── Release notes (daily product changelog — Admin → Product) ───────────────
-// Disposable module: own routes + the daily auto-draft tick (kill switch:
-// settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
-require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
+// Disposable module: own routes + the hourly auto-draft/refresh tick (kill switch:
+// settings key 'release_notes_auto'). Commits come from the GitHub API (the deploy
+// clone is shallow) via the issue bridge's token — getGithub is a thunk because the
+// bridge mounts a few lines down. Remove this line + server/releaseNotes.js.
+require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey, getGithub: () => github });
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
+require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); // Product help knowledge: grounds the Owl's productHelp tool (published articles + release notes only) + admin curation + auto-drafts from published release notes → server/helpBot.js; kill switches help_enabled / help_draft_auto
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
@@ -1050,95 +1053,13 @@ app.get('/api/admin/ai-resolved-prompt', auth.requireAdmin, (req, res) => {
 });
 
 // ─── Integrations ──────────────────────────────────────────────────────────────
-// Admin sets the PRIMARY Looker + Anthropic accounts (override .env). Clients can
-// set their own, which take precedence for their data. Secrets are write-only:
-// responses only report whether a value is set, never the value itself.
-function applyIntegrationsPatch(body, set) {
-  // `set(key, value)` writes a field; called only for fields the caller changed.
-  const lk = body.looker || {};
-  if (lk.baseUrl !== undefined) set('lookerBaseUrl', String(lk.baseUrl || '').replace(/\/$/, ''));
-  if (lk.clientId !== undefined) set('lookerClientId', String(lk.clientId || ''));
-  if (lk.clientSecret) set('lookerClientSecret', String(lk.clientSecret));
-  if (lk.clearClientSecret) set('lookerClientSecret', '');
-  const an = body.anthropic || {};
-  if (an.apiKey) set('anthropicApiKey', String(an.apiKey));
-  if (an.clearApiKey) set('anthropicApiKey', '');
-  const mt = body.meta || {};
-  if (mt.accessToken) set('metaAccessToken', String(mt.accessToken));
-  if (mt.clearAccessToken) set('metaAccessToken', '');
-  if (mt.adAccountId !== undefined) set('metaAdAccountId', String(mt.adAccountId || ''));
-  if (mt.businessId !== undefined) set('metaBusinessId', String(mt.businessId || ''));
-  // Organic-insights assets (inbound social metrics) — non-secret ids.
-  if (mt.pageId !== undefined) set('metaPageId', String(mt.pageId || ''));
-  if (mt.igUserId !== undefined) set('metaIgUserId', String(mt.igUserId || ''));
-  const tt = body.tiktok || {};
-  if (tt.accessToken) set('tiktokAccessToken', String(tt.accessToken));
-  if (tt.clearAccessToken) set('tiktokAccessToken', '');
-  if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || '')); slack.applyPatch(body, set); // Slack: webhook / bot token / channel
-}
-function adminIntegrationsView() {
-  return {
-    looker: {
-      baseUrl: db.getSetting('looker_base_url') || '',
-      clientId: db.getSetting('looker_client_id') || '',
-      clientSecretSet: !!db.getSetting('looker_client_secret'),
-      envFallback: !db.getSetting('looker_base_url') && !!process.env.LOOKER_BASE_URL,
-      configured: looker.isConfigured(),
-    },
-    anthropic: {
-      keySet: !!db.getSetting('anthropic_api_key'),
-      keyHint: maskSecret(db.getSetting('anthropic_api_key')),
-      envFallback: !db.getSetting('anthropic_api_key') && !!process.env.ANTHROPIC_API_KEY,
-      configured: !!adminAnthropicKey(),
-    },
-    // Email (Resend) is platform-level only — it sends from Howler's domain.
-    resend: { ...mailer.status(), recent: mailer.recent() },
-    // Inventive embedded AI analyst (platform-level: one account, per-client workspaces).
-    inventive: {
-      keySet: !!db.getSetting('inventive_api_key'),
-      keyHint: maskSecret(db.getSetting('inventive_api_key')),
-      tokenSet: !!db.getSetting('inventive_embed_auth_token'),
-      tokenHint: maskSecret(db.getSetting('inventive_embed_auth_token')),
-      endpoint: db.getSetting('inventive_api_endpoint') || '',
-      envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
-      configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
-    },
-    locks: getPlatformIntegrationLocks(), // { key: true } — frozen platform integrations
-  };
-}
-function entityIntegrationsView(entityId) {
-  const i = db.getEntityIntegrations(entityId);
-  return {
-    looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
-    anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
-    meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
-    tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' }, slack: slack.view(i),
-    locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
-  };
-}
-// Per-entity integration keys that can be frozen. A frozen section's changes are
-// dropped server-side (defence in depth — the UI also disables it), so a freeze
-// can't be bypassed by a hand-crafted request.
-const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack'];
-function dropFrozenSections(entityId, body) {
-  const locks = db.getEntityIntegrationLocks(entityId);
-  const b = { ...(body || {}) };
-  // Locked by default: a section is editable only when explicitly unlocked (false).
-  for (const k of ENTITY_INTEGRATION_KEYS) if (locks[k] !== false) delete b[k];
-  return b;
-}
-
-// Platform-level integration freeze locks — same idea as per-client, but for
-// Howler's own accounts, kept in a single setting. Frozen sections are dropped
-// from any save (defence in depth) so a freeze can't be bypassed.
-const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive'];
-function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
-function setPlatformIntegrationLock(key, locked) {
-  const cur = getPlatformIntegrationLocks();
-  cur[key] = !!locked; // store explicit state — absent reads as locked (default)
-  db.setSetting('integration_locks', JSON.stringify(cur));
-  return cur;
-}
+// Patch / masked views / freeze-locks for both tiers live in
+// server/integrationsConfig.js (factory library — secrets stay write-only).
+const {
+  applyIntegrationsPatch, adminIntegrationsView, entityIntegrationsView,
+  dropFrozenSections, getPlatformIntegrationLocks, setPlatformIntegrationLock,
+  ENTITY_INTEGRATION_KEYS, PLATFORM_INTEGRATION_KEYS,
+} = require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret });
 
 // Admin: primary accounts.
 app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(adminIntegrationsView()));
@@ -1148,7 +1069,8 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   // Locked by default: a section is editable only when explicitly unlocked (false).
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
+  if (locks.chottu !== false) delete body.chottu;
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain' };
   applyIntegrationsPatch(body, (k, v) => db.setSetting(map[k], v));
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
@@ -2562,6 +2484,7 @@ require('./onboarding').mount(app, { db, auth });
 // Client setup wizard config — lets AMs edit the back-end setup wizard (step
 // wording, order, and their own custom guidance steps) from the admin UI.
 require('./setupWizard').mount(app, { db, auth });
+const chottuApi = require('./chottuLink').mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }); // ChottuLink deep links — event short links + click counts + ✨ autofill (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
 
 // PWA install tracking — records when a user opens Pulse as an installed app.
 require('./installs').mount(app, { db, auth });

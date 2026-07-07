@@ -139,6 +139,30 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
   useEffect(() => { if (open && !data) load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (name) => setEnabled((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  // Bulk-clear a set of field names (a whole category, or all dimensions) so a bloated
+  // catalogue can be cut to a focused set in a few taps instead of hundreds.
+  const clearNames = (names) => setEnabled((s) => { const n = new Set(s); names.forEach((nm) => n.delete(nm)); return n; });
+  // "Suggest a focused set" — the answer to "I can't decide what to keep". Auto-pick the
+  // fields the Owl actually needs by name/label: money & count MEASURES, and the business
+  // DIMENSIONS you break down by (who / where / what / when / which edition), dropping the
+  // technical plumbing (ids, flags, device internals, raw timestamps). A starting point to
+  // review — not perfect — so the admin tweaks from ~40 sensible picks, not 400 blanks.
+  const suggestFocused = () => {
+    if (!data) return;
+    // Tuned to the questions Shai actually asks (2026-07): sales split by payment
+    // method/type/time/station/product/producer/operator/customer UID; check-ins by
+    // ticket type/category/station/time/date/operator; demographics. customer_uid is
+    // pseudonymous (per-customer spend without identity) so it's kept; real contact
+    // fields (email/phone/name) stay excluded — they're lock-only anyway.
+    const DROP = /(_id$|_id\b|uuid|_key\b|_pk\b|_fk\b|hash|token|_flag\b|\bis_|\bhas_|latitude|longitude|timezone|_tz\b|device|terminal|reader|serial|firmware|battery|\bversion\b|_url|email|phone|mobile|passport)/i;
+    const KEEP_DIM = /(countr|nationalit|birth|\bage\b|age_?band|gender|\bsex\b|city|region|province|station|\bbar\b|vendor|outlet|booth|zone|\barea\b|product|item|categor|\btype\b|brand|event|edition|festival|\bname\b|\bday\b|date|\btime\b|hour|weekday|payment|method|currency|producer|operator|ticket|check_?in|customer_?uid)/i;
+    const KEEP_MEAS = /(sum|avg|average|total|count|amount|spend|revenue|sales|price|value|qty|quantit|transaction|tickets?|check_?in)/i;
+    const keep = new Set();
+    (data.measures || []).filter((m) => !m.pii && (KEEP_MEAS.test(m.name) || KEEP_MEAS.test(m.label || ''))).slice(0, 15).forEach((m) => keep.add(m.name));
+    if (keep.size === 0) (data.measures || []).filter((m) => !m.pii).slice(0, 8).forEach((m) => keep.add(m.name)); // keep it queryable
+    (data.dimensions || []).filter((d) => !d.pii && (KEEP_DIM.test(d.name) || KEEP_DIM.test(d.label || '')) && !DROP.test(d.name)).slice(0, 40).forEach((d) => keep.add(d.name));
+    setEnabled(keep);
+  };
   const save = async () => {
     setBusy(true); setErr(''); setSaved(false);
     try {
@@ -195,6 +219,21 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter fields…" style={{ flex: '1 1 200px', minWidth: 160, padding: '6px 9px', border: '1px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', color: 'var(--text)', fontSize: 13 }} />
                 <button onClick={save} disabled={busy || !enabled} style={{ border: 'none', background: 'var(--brand)', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Saving…' : 'Save'}</button>
+                {data && (data.dimensions || []).length > 40 && (
+                  <button onClick={() => { if (window.confirm('Auto-pick a focused starter set — the money/count measures and the business dimensions you break down by (who / where / what / when), dropping technical fields. This REPLACES the current selection; review and tweak, then Save.')) suggestFocused(); }}
+                    style={{ border: '1px solid var(--brand)', background: 'transparent', color: 'var(--brand)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>✨ Suggest a focused set</button>
+                )}
+                {/* Bulk-clear the dimensions so you can rebuild a FOCUSED set fast — unticking
+                    hundreds by hand (esp. on a phone) is the reason big catalogues never get
+                    trimmed. Measures stay ticked; then tick the ~30 dimensions you actually ask about. */}
+                {enabled && (data.dimensions || []).some((d) => enabled.has(d.name)) && (
+                  <button onClick={() => { if (window.confirm('Untick every dimension on this explore? Your measures stay ticked — then tick just the few dimensions you actually ask about, and Save.')) clearNames((data.dimensions || []).map((d) => d.name)); }}
+                    style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Untick all dimensions</button>
+                )}
+                {enabled && enabled.size > 0 && (
+                  <button onClick={() => { if (window.confirm('Untick EVERY field on this explore (measures and dimensions)? You then rebuild a small, focused set from zero — usually the fastest way. Tick what you need, then Save.')) setEnabled(new Set()); }}
+                    style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Untick all</button>
+                )}
                 {saved && <span style={{ fontSize: 12.5, color: '#34c759', fontWeight: 600 }}>Saved ✓</span>}
                 {err && <span style={{ fontSize: 12.5, color: '#e0414a', fontWeight: 600 }}>⚠ {err}</span>}
               </div>
@@ -202,14 +241,21 @@ function ExplorePanel({ explore, primary = false, defaultOpen = false, ents = []
               {!primary && total > 0 && enabled && !(data.measures || []).some((m) => enabled.has(m.name)) && (
                 <p style={{ fontSize: 12.5, color: 'var(--warn, #b45309)', margin: '0 0 8px', fontWeight: 600 }}>⚠ Tick at least one <u>measure</u> (a number, e.g. revenue or a count) — without one the Owl can’t query this explore, so it won’t appear in chat.</p>
               )}
+              {/* Large sets are supported: past ~60 fields the Owl stops carrying every name
+                  and resolves plain business names server-side ("country of birth" → the real
+                  field), so hundreds of enabled fields no longer slow every turn. A gentle
+                  nudge only appears for very large sets, where extra noise still blurs picks. */}
+              {onCount > 150 && (
+                <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 8px', lineHeight: 1.5 }}>ℹ️ {onCount} fields enabled. That works — the Owl resolves plain field names on demand — but a tighter set still sharpens its choices. ✨ Suggest a focused set gives a quick starting point if answers ever feel off.</p>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
                 <div>
                   <div style={colHead}>Measures ({filtered.measures.length})</div>
-                  {groupFields(filtered.measures).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                  {groupFields(filtered.measures).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} onClear={clearNames} />)}
                 </div>
                 <div>
                   <div style={colHead}>Dimensions ({filtered.dimensions.length})</div>
-                  {groupFields(filtered.dimensions).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} />)}
+                  {groupFields(filtered.dimensions).map(([g, fs]) => <FieldGroup key={g} name={g} fields={fs} enabled={enabled} renderRow={Row} forceOpen={!!q.trim()} onClear={clearNames} />)}
                 </div>
               </div>
             </>
@@ -242,7 +288,7 @@ function groupFields(arr) {
 // One collapsible category. Auto-opens while a filter is active or the group holds
 // ticked fields (so the current selection is always visible), but the admin can still
 // collapse it manually.
-function FieldGroup({ name, fields, enabled, renderRow, forceOpen }) {
+function FieldGroup({ name, fields, enabled, renderRow, forceOpen, onClear }) {
   const [override, setOverride] = useState(null); // null = auto, true/false = manual
   const on = enabled ? fields.filter((f) => enabled.has(f.name)).length : 0;
   const auto = forceOpen || on > 0;
@@ -253,6 +299,9 @@ function FieldGroup({ name, fields, enabled, renderRow, forceOpen }) {
         <span style={{ fontSize: 11, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .12s' }}>▸</span>
         <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
         {on > 0 && <span style={badge('#34c759')}>{on} on</span>}
+        {/* Clear a whole category in one tap — the fast way to drop entire groups you
+            never ask about (access control, device internals…) from a bloated explore. */}
+        {on > 0 && onClear && <button onClick={(e) => { e.stopPropagation(); onClear(fields.map((f) => f.name)); }} title={`Untick all ${fields.length} in ${name}`} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '0 4px', fontWeight: 700 }}>untick</button>}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>{fields.length}</span>
       </div>
       {isOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px' }}>{fields.map(renderRow)}</div>}

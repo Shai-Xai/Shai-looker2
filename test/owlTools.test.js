@@ -630,3 +630,94 @@ test('an explore with a category dimension advertises subset-filtering in its to
   const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat2 });
   assert.doesNotMatch(t2.ask_cashless_y.schema.description, /SUBSET QUESTIONS/);
 });
+
+test('big catalogue: enum dropped past the cap, loose names resolve, ambiguity suggests candidates', async () => {
+  // 80 filler dims push past the 60-dim enum cap; two country fields make "country" ambiguous.
+  const dims = Array.from({ length: 80 }, (_, i) => ({ name: `cashless_x.dim_${i}`, label: `Dim ${i}`, type: 'string' }));
+  dims.push({ name: 'cashless_x.country_of_birth', label: 'Country Of Birth', type: 'string' });
+  dims.push({ name: 'cashless_x.country_of_residence', label: 'Country Of Residence', type: 'string' });
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.avg_spend', label: 'Average Spend', type: 'number' }], dimensions: dims, notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const tool = t.ask_cashless_x;
+  assert.equal(tool.schema.input_schema.properties.dimensions.items.enum, undefined, 'no dimension enum past the cap');
+  assert.match(tool.schema.input_schema.properties.dimensions.description, /resolved server-side/i, 'schema teaches name resolution');
+  assert.ok(Array.isArray(tool.schema.input_schema.properties.measure.enum), 'small measure list keeps its enum');
+  const ent = h.makeEntity('Ultra Big', 'Ultra Big Cat');
+  const user = h.makeClient('owl-big@client.test', [ent.id]);
+  // Plain business names resolve to the real fields (label + name matching).
+  const res = await tool.run({ measure: 'average spend', dimensions: ['country of birth'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.dimensions, ['cashless_x.country_of_birth']);
+  assert.ok(res.queryBody.fields.includes('cashless_x.avg_spend'), 'loose measure resolved');
+  assert.match(res.note || '', /Resolved fields/, 'snapping surfaced in the note');
+  // Ambiguous name → refuse (before Looker) WITH the candidates so one retry fixes it.
+  lookerCalls = 0;
+  const bad = await tool.run({ measure: 'cashless_x.avg_spend', dimensions: ['country'] }, ctx(user));
+  assert.equal(bad.ok, false);
+  assert.match(bad.message, /Closest matches:.*country_of_birth/, 'suggests the real fields');
+  assert.equal(lookerCalls, 0, 'failed closed before querying');
+});
+
+test('a Looker timeout tells the model to change the query shape, not retry it', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const failing = { ...queryEngine, runLookerQuery: async () => { throw new Error('Query timed out after 120s'); } };
+  const t = createOwlTools({ query: failing, auth: h.auth, db: h.db, catalogue: cat });
+  const ent = h.makeEntity('Ultra TO', 'Ultra Timeout');
+  const user = h.makeClient('owl-to@client.test', [ent.id]);
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user));
+  assert.equal(res.ok, false);
+  assert.match(res.message, /do NOT retry the same query/, 'anti-retry guidance on timeouts');
+});
+
+// ── ChottuLink act-tools: createLink + applyLinkTemplate (draft-only) ─────────
+// The tools must DRAFT (confirm:true, never touch ChottuLink) and mirror the
+// Links UI's validation. The upstream API is a stub — commits happen elsewhere.
+const chottuStub = () => ({
+  configFor: () => ({ key: 'k', domain: 'howler.chottu.link', source: 'platform' }),
+  listTemplates: () => [{ id: 'tpl-1', name: 'Standard event set', platform: true, items: [{ key: 'main' }] }],
+  resolveTemplate: (entityId, id, { base }) => ({
+    template: { id, name: 'Standard event set' },
+    items: [
+      { key: 'main', name: 'Fest', path: 'fest', destination: base ? `${base}` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+      { key: 'chat', name: 'Fest (chat)', path: 'fest-chat', destination: base ? `${base}?dest=my-chat` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+    ],
+  }),
+});
+
+test('createLink drafts (confirm, never creates) with normalised UTMs; refuses when unconnected', async () => {
+  const ent = h.makeEntity('LinkCo', 'LinkCo Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest' });
+  const user = h.makeClient('owl-link@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const res = await t.createLink.run(
+    { name: 'Tickets — IG bio', destinationUrl: 'https://howler.co.za/event/9', path: 'fest-ig', utmSource: 'Insta Gram' },
+    { user, suiteId: su.id },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true, 'draft-only: the user must confirm');
+  assert.equal(res.action.kind, 'createChottuLink');
+  assert.equal(res.action.draft.utm.source, 'insta-gram', 'UTMs normalised lowercase/url-safe');
+  assert.equal(res.action.suiteId, su.id);
+  // Unconnected client → clear refusal, no draft.
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: () => ({ configFor: () => ({ key: '', domain: '', source: null }) }) });
+  const no = await t2.createLink.run({ name: 'X', destinationUrl: 'https://h/x' }, { user, suiteId: su.id });
+  assert.equal(no.ok, false);
+  assert.equal(no.reason, 'not_connected');
+});
+
+test('applyLinkTemplate resolves the set for the current event and demands the base URL when needed', async () => {
+  const ent = h.makeEntity('LinkCo2', 'LinkCo2 Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest 2' });
+  const user = h.makeClient('owl-tpl@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const noBase = await t.applyLinkTemplate.run({}, { user, suiteId: su.id });
+  assert.equal(noBase.ok, false);
+  assert.equal(noBase.reason, 'no_base', 'must ask for the event page URL, not draft broken links');
+  const res = await t.applyLinkTemplate.run({ baseUrl: 'https://howler.co.za/event/9' }, { user, suiteId: su.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'applyChottuTemplate');
+  assert.equal(res.action.items.length, 2);
+  const noSuite = await t.applyLinkTemplate.run({ baseUrl: 'https://h' }, { user });
+  assert.equal(noSuite.ok, false, 'a template run needs an event in context');
+});

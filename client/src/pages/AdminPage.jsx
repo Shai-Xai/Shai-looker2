@@ -17,6 +17,7 @@ import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
@@ -25,6 +26,7 @@ import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import FlagsMatrix from '../components/FlagsMatrix.jsx';
+import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
@@ -477,7 +479,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -491,6 +493,7 @@ function Product() {
       {sub === 'flags' && <FlagsMatrix />}
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
+      {sub === 'helpbot' && <HelpBotAdmin />}
     </div>
   );
 }
@@ -683,7 +686,8 @@ function ProductReleaseNotes() {
     try {
       const r = await api.adminGenerateReleaseNotes(14);
       await load();
-      setGen({ busy: false, msg: r.created ? `Added ${r.created} draft${r.created === 1 ? '' : 's'} from recent commits — review and publish below.` : (r.message || 'Nothing new to add.') });
+      const bits = [r.created && `added ${r.created} draft${r.created === 1 ? '' : 's'}`, r.refreshed && `refreshed ${r.refreshed}`].filter(Boolean);
+      setGen({ busy: false, msg: bits.length ? `From recent commits: ${bits.join(', ')} — review and publish below.` : (r.message || 'Nothing new to add.') });
     } catch (e) { setGen({ busy: false, msg: e.message }); }
   };
   const add = async () => {
@@ -1355,6 +1359,7 @@ const SUITES_TOUR = [
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
   { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
   { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-howler-id', icon: '🎟️', title: 'Add the Howler event ID', body: 'The event’s number on howler.co.za (e.g. 40848). Deep links and link templates auto-fill their destinations from it — no typing at link-creation time.' },
   { tour: 'suite-live', icon: '🔴', title: 'Set the LIVE button', body: 'Pick the live-ticketing report. A red LIVE button appears on this event’s sidebar row so the client can jump to live sales in one tap.' },
   { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
@@ -1642,6 +1647,7 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('suite-roles', secHead('Dashboard access by role'))}
         {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
         {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-howler-id', <>{lbl('Howler event ID')}<div style={fauxInput}>40848</div></>)}
         {sec('suite-live', <>{lbl('🔴 LIVE button dashboard')}<div style={fauxInput}>Live Ticketing report</div></>)}
         {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
         {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
@@ -2702,7 +2708,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2750,6 +2756,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Reusable, always-live audiences for <b>{entity.name}</b> — built from their data and used by campaigns. Clients can also manage these themselves.</p>
               <SegmentManager entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'links' && (
+            <div>
+              <p style={hint}>ChottuLink deep links for <b>{entity.name}</b> — short links into the Howler app, tied to their events, with click counts. Clients manage these themselves in Engage → Links; the key/domain lives under Integrations.</p>
+              <ChottuLinks entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'eventops' && (
@@ -3607,6 +3619,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
   const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
+  const [howlerEventId, setHowlerEventId] = useState(suite.howlerEventId || '');
   const [liveDashboardId, setLiveDashboardId] = useState(suite.liveDashboardId || '');
   const [saved, setSaved] = useState(false);
   const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
@@ -3643,7 +3656,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, liveDashboardId }); flash(setSaved); onChange(); };
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, howlerEventId, liveDashboardId }); flash(setSaved); onChange(); };
   // Sets grouped by their library folder (item: show folder → set → dashboards),
   // named folders first then the ungrouped bucket.
   const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
@@ -3806,6 +3819,11 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <L>Ticket / checkout link</L>
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
+      </div>
+      <div data-tour="suite-howler-id" style={{ marginTop: 12 }}>
+        <L>Howler event ID</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's number on <b>howler.co.za</b> (e.g. <b>40848</b> — pasting the event URL works too). Deep links and link templates auto-fill their destinations from it. Manual for now; the Howler integration will fill it automatically later.</div>
+        <input style={{ ...input, width: '100%' }} value={howlerEventId} onChange={(e) => setHowlerEventId(e.target.value)} placeholder="40848" inputMode="numeric" />
       </div>
       <div data-tour="suite-live" style={{ marginTop: 12 }}>
         <L>🔴 LIVE button dashboard</L>
@@ -4777,7 +4795,7 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5081,8 +5099,9 @@ function ClientIntegrations({ entity }) {
         showMeta
         showTikTok
         showSlack
+        showChottu
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}

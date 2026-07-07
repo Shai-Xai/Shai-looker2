@@ -119,8 +119,9 @@ export default function ClientIntegrationsPage() {
                 showMeta
                 showTikTok
                 showSlack
+                showChottu
                 canManageLock={isAdmin || role === 'owner'}
-                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
                 locks={activeItem.locks || {}}
                 onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {

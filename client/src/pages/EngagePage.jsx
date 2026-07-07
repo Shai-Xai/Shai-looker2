@@ -7,6 +7,7 @@ import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -17,6 +18,7 @@ const TABS = [
   { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
+  { key: 'links', label: 'Links', icon: '🔗', ready: true },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
@@ -90,6 +92,11 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Every audience Pulse mirrors to your Meta &amp; TikTok ad accounts — connection health, live size and status, all in one place.</p>
           <AudienceHub entityId={entityId} />
+        </>
+      ) : active === 'links' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Short links into the Howler app — created from Pulse, tied to your events, with click counts. Share them in posts, bios, emails and QR codes.</p>
+          <ChottuLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'templates' ? (
         <>

@@ -1097,7 +1097,7 @@ const HEAT_CAT = (name) => {
   if (/bar|beer|drink|acqua/.test(n)) return [255, 90, 122];
   return [77, 159, 255];
 };
-function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
+function VenueMapView({ rows, apiBase, suiteId, day = '', onSelect }) {
   const isMobile = useIsMobile();
   const scope = apiBase.indexOf('/api/admin') === 0 ? '/api/admin' : '/api/my';
   const [cfg, setCfg] = useState(null);
@@ -1252,8 +1252,14 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
     const ivMs = iv * 60000;
     const mids = [...new Set(sts.map((s) => s.mid))];
     const monName = new Map(sts.map((s) => [s.mid, s.monitor]));
-    Promise.all(mids.map((mid) => fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=24&interval=${iv}`)
-      .then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null }))))
+    // Per-request timeout so one slow/hanging monitor timeline can't wedge the whole
+    // heatmap on "Reading transactions…" forever — it resolves to null and the rest draw.
+    const hrs = day ? `day:${day}` : '24'; // 📅 a picked festival day replays that whole day; else rolling 24h
+    const pull = (mid) => Promise.race([
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=${hrs}&interval=${iv}`).then((r) => r.json()).then((d) => ({ mid, d })).catch(() => ({ mid, d: null })),
+      new Promise((res) => setTimeout(() => res({ mid, d: null }), 22000)),
+    ]);
+    Promise.all(mids.map(pull))
       .then((packs) => {
         if (!alive) return;
         const series = new Map(); const catKeyOf = new Map(); const catCol = new Map(); const axisSet = new Set();
@@ -1283,11 +1289,12 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         const dayPeak = new Map();
         for (const [st, m2] of series.entries()) { const mid = catKeyOf.get(st); let mx = dayPeak.get(mid) || 0; for (const b of axis) { const v = m2.get(b) || 0; if (v > mx) mx = v; } dayPeak.set(mid, mx); }
         setHeat({ axis, series, catKeyOf, catCol, dayPeak });
-      });
+      })
+      .catch(() => { if (alive) setHeat({ axis: [], series: new Map(), catKeyOf: new Map(), catCol: new Map(), dayPeak: new Map() }); });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval/60s tick
-  }, [mode, iv, suiteId, apiBase, heatTick]);
-  useEffect(() => { if (mode === 'heat') { setHeatIdx(null); setPlaying(false); } }, [iv, mode]); // fresh live view on enter / window change
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch on mode/interval/day/60s tick
+  }, [mode, iv, day, suiteId, apiBase, heatTick]);
+  useEffect(() => { if (mode === 'heat') { setHeatIdx(null); setPlaying(false); } }, [iv, mode, day]); // fresh view on enter / window / day change
   useEffect(() => { if (mode !== 'heat') return undefined; const t = setInterval(() => setHeatTick((n) => n + 1), 60000); return () => clearInterval(t); }, [mode]);
   useEffect(() => { // play advances the scrub through the day
     if (!playing || !heat || !heat.axis.length) return undefined;
@@ -1482,6 +1489,12 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
         })}
       </div>
       {!edit && mode === 'heat' && !heat && <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Reading transactions per {iv < 60 ? iv + ' min' : 'hour'}…</div>}
+      {!edit && mode === 'heat' && heat && !heat.axis.length && (
+        <div style={{ ...card, marginTop: 8, fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          No transactions came back for this window — the feed may be slow or the event is quiet.
+          <button onClick={() => setHeatTick((n) => n + 1)} style={{ border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 8, padding: '5px 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>🔄 Retry</button>
+        </div>
+      )}
       {!edit && mode === 'heat' && heat && heat.axis.length > 1 && (() => {
         const idx = heatIdx == null ? heat.axis.length - 1 : Math.min(heatIdx, heat.axis.length - 1);
         const hhmm = (ms) => new Date(ms + 2 * 3600000).toISOString().slice(11, 16); // SAST
@@ -1489,7 +1502,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <div style={{ ...card, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <button onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play the day'} style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>{playing ? '⏸' : '▶'}</button>
             <input type="range" min={0} max={heat.axis.length - 1} value={idx} onChange={(e) => { setPlaying(false); setHeatIdx(+e.target.value === heat.axis.length - 1 ? null : +e.target.value); }} style={{ flex: 1, accentColor: 'var(--brand)' }} aria-label="Scrub the day" />
-            <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 62, textAlign: 'right' }}>{heatIdx == null ? '● LIVE' : hhmm(heat.axis[idx]) + ' · ' + (iv < 60 ? iv + 'm' : '1h')}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'ui-monospace,monospace', color: heatIdx == null && !day ? STATUS_COLOR.fresh : 'var(--text)', minWidth: 62, textAlign: 'right' }}>{heatIdx == null ? (day ? hhmm(heat.axis[idx]) + ' · end' : '● LIVE') : hhmm(heat.axis[idx]) + ' · ' + (iv < 60 ? iv + 'm' : '1h')}</span>
           </div>
         );
       })()}
@@ -1571,7 +1584,7 @@ function VenueMapView({ rows, apiBase, suiteId, onSelect }) {
           <div style={{ ...card, width: isMobile ? '100%' : 344, flexShrink: 0, marginTop: isMobile ? 8 : 0, padding: '10px 12px', alignSelf: isMobile ? 'auto' : 'stretch' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)' }}>🖐 Hand index</span>
-              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: heatIdx == null ? STATUS_COLOR.fresh : 'var(--text)' }}>{heatIdx == null ? '● LIVE' : hhmm(T)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'ui-monospace,monospace', color: heatIdx == null && !day ? STATUS_COLOR.fresh : 'var(--text)' }}>{heatIdx == null ? (day ? hhmm(T) : '● LIVE') : hhmm(T)}</span>
               <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{rtot.toLocaleString('en-ZA')} · {iv < 60 ? iv + 'm' : '1h'}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', ...listStyle }}>
@@ -1962,7 +1975,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const dayLbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
   const todaySAST = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10);
   const dayOpts = [...new Set((monitors || []).flatMap((m) => m.days || []).filter((d) => d < todaySAST))].sort().slice(-7);
-  const dayAware = view === 'board' || view === 'stations' || view === 'rhythm'; // the views a past day applies to
+  const dayAware = view === 'board' || view === 'stations' || view === 'rhythm' || view === 'map'; // the views a past day applies to (Map → Heat replays that day)
   useEffect(() => {
     if (day && view === 'board') setScrubIdx(1e9); // huge → PulseStrip clamps to the day's last bin, board shows its close
     else if (!day) { setScrubIdx(null); setReplay(null); }
@@ -2156,7 +2169,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'map' && (
-        <VenueMapView key={'m' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} onSelect={setSel} />
+        <VenueMapView key={'m' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} day={day} onSelect={setSel} />
       )}
 
       {/* key on the filter set: changing chips while drilled into a station's devices
