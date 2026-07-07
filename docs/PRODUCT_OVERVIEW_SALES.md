@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (⚡ one-click deep-link templates) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (📈 deep-link click trends + 🦉 Owl link tools) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -439,9 +439,19 @@ one-by-one in the ChottuLink dashboard.
   event automatically. Preview first (untick / tweak paths inline, collisions
   flagged); anything that fails can be retried individually. A Howler-managed
   starter template ships built in; clients can save their own sets too.
+- **📈 Click trends & source split** ✅ — Pulse snapshots every link's clicks
+  nightly and charts **clicks per day** per event, plus a **by-source** split
+  (instagram vs whatsapp vs email…) from the links' UTM tags — history
+  ChottuLink's own API doesn't offer. Tap 📈 on any event's link card.
+- **🦉 Owl does links too** ✅ — ask the Owl "make me a tickets link for the
+  Instagram bio" or "set up the standard links for this event"; it drafts the
+  link(s) with tags + preview and you confirm with one tap. Draft-only, same
+  permissions as doing it by hand.
+- **✨ AI autofill** ✅ — one tap fills a link's UTM tags and social share
+  preview from its name, destination and event, matching the client's existing
+  tag conventions.
 - **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
   covers all clients by default).
-- **🔜 Next:** click **trends** per source (nightly history).
 
 **Pitch:** "Every link your event needs — created in one click from Pulse, tracked
 per event, and ready to drop into posts, bios, emails and QR codes."
@@ -815,6 +825,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07 (evening)** — **Deep links: click trends, Owl link tools & ✨ autofill** ✅:
+  nightly click snapshots now power a per-event **clicks-per-day chart + by-source
+  split** (📈 on the Links tab); the **Owl** drafts single links or the whole
+  template set from chat (confirm-button, draft-only); and **✨ Autofill with AI**
+  fills a link's UTM tags + social share preview (rich link previews now editable
+  in Pulse, with a live share-card preview). Completes Phase 3 of the ChottuLink
+  integration.
 - **2026-07-07 (later)** — **Deep links: pick-and-choose import + delete** ✅: the
   import screen now lists the whole ChottuLink account (new / in Pulse / previously
   deleted) so you tick exactly what comes in, optionally attached to an event in the

@@ -11,6 +11,7 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
   const [suites, setSuites] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | link id
   const [importing, setImporting] = useState(false);
+  const [statsOpen, setStatsOpen] = useState({}); // per event group: 📈 panel visible
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -121,10 +122,18 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
         <div key={g.suiteId || 'none'} style={card}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
             <div style={{ fontWeight: 700, fontSize: 14.5, minWidth: 0 }}>{g.title}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>
-              {g.links.length} link{g.links.length === 1 ? '' : 's'} · {g.links.reduce((n, l) => n + (l.clicks?.total || 0), 0)} clicks
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexShrink: 0 }}>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {g.links.length} link{g.links.length === 1 ? '' : 's'} · {g.links.reduce((n, l) => n + (l.clicks?.total || 0), 0)} clicks
+              </span>
+              <button
+                style={{ ...linkBtn, padding: '2px 4px' }}
+                title="Clicks over time + per-source split"
+                onClick={() => setStatsOpen((s) => ({ ...s, [g.suiteId || 'none']: !s[g.suiteId || 'none'] }))}
+              >{statsOpen[g.suiteId || 'none'] ? 'Hide 📈' : '📈'}</button>
             </div>
           </div>
+          {statsOpen[g.suiteId || 'none'] && <LinkStatsPanel scope={scope} entityId={entityId} suiteId={g.suiteId} />}
           {g.links.map((l) => (
             <div key={l.id}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: '1px solid var(--hairline)', opacity: l.enabled ? 1 : 0.55 }}>
@@ -153,6 +162,59 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+// 📈 per-event stats: clicks over time (day-to-day deltas of the nightly
+// snapshots) + a per-source split from the links' UTM tags. History accrues
+// from the nightly sweep, so young accounts see a short chart at first.
+function LinkStatsPanel({ scope, entityId, suiteId }) {
+  const [stats, setStats] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.chottuStats(scope, entityId, suiteId || '').then(setStats).catch((e) => setError(e.message));
+  }, [scope, entityId, suiteId]);
+  if (error) return <div style={{ fontSize: 12.5, color: 'var(--error,#ef4444)', marginBottom: 8 }}>{error}</div>;
+  if (!stats) return <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>Loading stats…</div>;
+
+  // Day-to-day clicks = delta between consecutive snapshot totals (clamped ≥ 0
+  // — totals can shrink upstream if links get deleted there).
+  const deltas = (stats.series || []).slice(1).map((p, i) => ({ date: p.date, clicks: Math.max(0, p.total - stats.series[i].total) }));
+  const maxDelta = Math.max(1, ...deltas.map((d) => d.clicks));
+  const maxSrc = Math.max(1, ...(stats.sources || []).map((s) => s.clicks));
+
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 12px', marginBottom: 10, background: 'var(--bg)' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+        <b style={{ color: 'var(--text)' }}>{stats.totals.clicks}</b> clicks total · {stats.totals.last7} last 7 days · {stats.totals.last30} last 30 days
+      </div>
+      {deltas.length >= 2 ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Clicks per day</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 44 }} role="img" aria-label={`Clicks per day over the last ${deltas.length} days`}>
+            {deltas.slice(-30).map((d) => (
+              <div key={d.date} title={`${d.date}: ${d.clicks} clicks`} style={{ flex: 1, minWidth: 3, borderRadius: 2, background: 'var(--brand,#ff385c)', opacity: 0.85, height: `${Math.max(4, (d.clicks / maxDelta) * 100)}%` }} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>The clicks-per-day chart appears once a couple of nightly snapshots have accrued.</div>
+      )}
+      {(stats.sources || []).length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>By source</div>
+          {stats.sources.slice(0, 8).map((s) => (
+            <div key={s.source} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+              <span style={{ fontSize: 12, width: 90, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: s.source === 'untagged' ? 'var(--muted)' : 'var(--text)' }}>{s.source}</span>
+              <span style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--hairline)', overflow: 'hidden' }}>
+                <span style={{ display: 'block', height: '100%', width: `${(s.clicks / maxSrc) * 100}%`, background: 'var(--brand,#ff385c)', opacity: s.source === 'untagged' ? 0.35 : 0.85 }} />
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums', width: 46, textAlign: 'right', flexShrink: 0 }}>{s.clicks}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

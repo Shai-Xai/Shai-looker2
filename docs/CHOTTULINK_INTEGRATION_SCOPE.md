@@ -1,6 +1,6 @@
 # ChottuLink Integration — Scope
 
-**Status:** ✅ Phases 1–2 live (`server/chottuLink.js` — link CRUD, import, click counts, templates + one-click apply, both surfaces) · 🔜 Phase 3 analytics history · **Last updated:** 2026-07-07
+**Status:** ✅ All 3 phases live (`server/chottuLink.js` — link CRUD, selective import, delete, templates + one-click apply, ✨ AI autofill, rich previews, nightly click snapshots + trends + per-source split, Owl act-tools) · **Last updated:** 2026-07-07
 
 Bring [ChottuLink](https://chottulink.com/) deep-link management into Pulse so
 links are created via their [REST API](https://docs.chottulink.com/rest-api/postman)

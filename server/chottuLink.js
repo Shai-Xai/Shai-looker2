@@ -71,6 +71,14 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
       modified_time TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_chottu_templates_entity ON chottu_templates(entity_id);
+    CREATE TABLE IF NOT EXISTS chottu_link_stats (
+      link_id     TEXT NOT NULL,              -- chottu_links.id
+      captured_on TEXT NOT NULL,              -- YYYY-MM-DD (UTC) — one snapshot per day
+      total_clicks INTEGER NOT NULL DEFAULT 0,
+      clicks_7d   INTEGER NOT NULL DEFAULT 0,
+      clicks_30d  INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (link_id, captured_on)
+    );
   `);
   // Additive migration for databases created before the delete feature shipped.
   if (!sql.prepare('PRAGMA table_info(chottu_links)').all().some((c) => c.name === 'archived')) {
@@ -322,11 +330,75 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
         const a = await chottu(cfg, 'POST', '/analytics', { linkId: r.chottu_link_id });
         sql.prepare('UPDATE chottu_links SET total_clicks=?, clicks_7d=?, clicks_30d=?, stats_at=? WHERE id=?')
           .run(a.total_clicks || 0, a.clicks_last_7_days || 0, a.clicks_last_30_days || 0, now(), r.id);
+        // Daily snapshot — ChottuLink only serves fixed windows (total/7d/30d),
+        // so Pulse builds its own history: one row per link per day, refreshed
+        // in place if stats are pulled again the same day. Trends = day deltas.
+        sql.prepare(`INSERT INTO chottu_link_stats (link_id, captured_on, total_clicks, clicks_7d, clicks_30d) VALUES (?,?,?,?,?)
+            ON CONFLICT(link_id, captured_on) DO UPDATE SET total_clicks=excluded.total_clicks, clicks_7d=excluded.clicks_7d, clicks_30d=excluded.clicks_30d`)
+          .run(r.id, now().slice(0, 10), a.total_clicks || 0, a.clicks_last_7_days || 0, a.clicks_last_30_days || 0);
         updated++;
       } catch { failed++; } // one bad link must not sink the sweep
     }
     return { updated, failed };
   }
+
+  // ── stats rollups: clicks over time + per-source split, per event or client ──
+  // Series = summed daily snapshots across the matching links (the UI charts the
+  // day-to-day deltas); sources = current totals grouped by utm_source.
+  function statsFor(entityId, { suiteId } = {}) {
+    checkSuite(entityId, suiteId);
+    const links = sql.prepare(`SELECT * FROM chottu_links WHERE entity_id=? AND archived=0 ${suiteId ? 'AND suite_id=?' : ''}`)
+      .all(...(suiteId ? [entityId, suiteId] : [entityId]));
+    const ids = links.map((l) => l.id);
+    let series = [];
+    if (ids.length) {
+      series = sql.prepare(`SELECT captured_on AS date, SUM(total_clicks) AS total FROM chottu_link_stats
+          WHERE link_id IN (${ids.map(() => '?').join(',')}) GROUP BY captured_on ORDER BY captured_on DESC LIMIT 45`)
+        .all(...ids).reverse();
+    }
+    const bySource = {};
+    for (const l of links) {
+      const src = JSON.parse(l.utm || '{}').source || 'untagged';
+      bySource[src] = (bySource[src] || 0) + (l.total_clicks || 0);
+    }
+    return {
+      series,
+      sources: Object.entries(bySource).map(([source, clicks]) => ({ source, clicks })).sort((a, b) => b.clicks - a.clicks),
+      totals: {
+        clicks: links.reduce((n, l) => n + (l.total_clicks || 0), 0),
+        last7: links.reduce((n, l) => n + (l.clicks_7d || 0), 0),
+        last30: links.reduce((n, l) => n + (l.clicks_30d || 0), 0),
+        links: links.length,
+      },
+    };
+  }
+
+  // ── nightly sweep: refresh every configured client's click counters once a day ──
+  // Kill switch: setting chottu_stats_enabled ('0' stops the sweep). Sequential per
+  // entity AND per link (their rate limits are unpublished); one client failing
+  // must not sink the rest. Same tick pattern as server/scheduler.js.
+  let sweeping = false;
+  async function nightlySweep() {
+    if (sweeping) return;
+    if (db.getSetting('chottu_stats_enabled', '1') === '0') return;
+    const today = now().slice(0, 10);
+    if (db.getSetting('chottu_stats_last_sweep', '') === today) return;
+    sweeping = true;
+    try {
+      db.setSetting('chottu_stats_last_sweep', today); // claim the day up front — a crash mustn't hot-loop the sweep
+      const entityIds = sql.prepare('SELECT DISTINCT entity_id FROM chottu_links WHERE archived=0').all().map((r) => r.entity_id);
+      for (const entityId of entityIds) {
+        try {
+          if (!configFor(entityId).key) continue;
+          const r = await refreshStats(entityId, {});
+          console.log(`[chottuLink] nightly stats: ${entityId} → ${r.updated} updated${r.failed ? `, ${r.failed} failed` : ''}`);
+        } catch (e) { console.error(`[chottuLink] nightly stats failed for ${entityId}:`, e.message); }
+      }
+    } finally { sweeping = false; }
+  }
+  const statsTimer = setInterval(() => nightlySweep().catch(() => {}), 15 * 60_000);
+  if (statsTimer.unref) statsTimer.unref();
+  setTimeout(() => nightlySweep().catch(() => {}), 20_000); // shortly after boot (covers restarts past midnight)
 
   // ── templates: one click creates every link an event needs ──
   // An item's strings may carry placeholders, resolved at preview/apply time:
@@ -539,6 +611,8 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
     res.json(await deleteLink(req.params.entityId, req.params.id))));
   app.post(`${A}/suggest-meta`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await suggestLinkMeta(req.params.entityId, req.body || {}))));
+  app.get(`${A}/stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
+    res.json(statsFor(req.params.entityId, { suiteId: req.query.suiteId ? String(req.query.suiteId) : '' }))));
   app.post(`${A}/refresh-stats`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await refreshStats(req.params.entityId, { suiteId: req.body?.suiteId, linkId: req.body?.linkId }))));
   // Templates — admin can also manage the shared platform set ({ platform: true }).
@@ -587,6 +661,8 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
   app.post(`${M}/suggest-meta`, auth.requireAuth, canManage,
     rateLimit({ windowMs: 60_000, max: 12, by: 'user', scope: 'chottu-suggest', message: 'Too many autofills at once — give it a moment.' }),
     asyncHandler(async (req, res) => res.json(await suggestLinkMeta(myEntity(req), req.body || {}))));
+  app.get(`${M}/stats`, auth.requireAuth, canManage, asyncHandler(async (req, res) =>
+    res.json(statsFor(myEntity(req), { suiteId: req.query.suiteId ? String(req.query.suiteId) : '' }))));
   app.post(`${M}/refresh-stats`, auth.requireAuth, canManage,
     rateLimit({ windowMs: 60_000, max: 4, by: 'user', scope: 'chottu-stats' }),
     asyncHandler(async (req, res) => {
@@ -613,7 +689,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
       res.json(await applyTemplate(myEntity(req), req.params.tid, req.body || {}, req.user?.email))));
 
   console.log('[chottuLink] deep-link management mounted');
-  return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, refreshStats, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
+  return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, refreshStats, statsFor, nightlySweep, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
 }
 
 module.exports = { mount, LINK_META_SYSTEM };

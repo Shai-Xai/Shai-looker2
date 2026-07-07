@@ -226,6 +226,48 @@ test('delete switches the link off upstream, hides it everywhere, and imports do
   assert.equal((await app.req('DELETE', `/api/my/chottu/${entityA.id}/links/${someA.id}`, { as: ownerB })).status, 403);
 });
 
+// ── Phase 3: snapshots + rollups ──
+
+test('stats refresh snapshots daily; rollups serve series + per-source split; tenancy-gated', async () => {
+  // The earlier refresh already snapshotted today at 42 total. Backdate a
+  // yesterday snapshot so the series has a delta to chart.
+  const links = (await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA })).body.links;
+  const first = links[0];
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  h.db.db.prepare('INSERT OR REPLACE INTO chottu_link_stats (link_id, captured_on, total_clicks, clicks_7d, clicks_30d) VALUES (?,?,?,?,?)')
+    .run(first.id, yesterday, 30, 5, 20);
+  const r = await app.req('GET', `/api/my/chottu/${entityA.id}/stats`, { as: ownerA });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.series.length >= 2, 'series carries the daily snapshots');
+  const days = r.body.series.map((p) => p.date);
+  assert.deepEqual([...days].sort(), days, 'series is chronological');
+  assert.ok(r.body.totals.clicks > 0);
+  assert.ok(r.body.sources.length >= 1, 'per-source split from UTM tags');
+  assert.ok(r.body.sources.some((s) => s.source === 'instagram'), 'tagged source appears by name');
+  // Suite filter narrows; foreign suite rejected; other clients locked out.
+  assert.equal((await app.req('GET', `/api/my/chottu/${entityA.id}/stats?suiteId=${suiteA.id}`, { as: ownerA })).status, 200);
+  assert.equal((await app.req('GET', `/api/my/chottu/${entityA.id}/stats?suiteId=nope`, { as: ownerA })).status, 400);
+  assert.equal((await app.req('GET', `/api/my/chottu/${entityA.id}/stats`, { as: ownerB })).status, 403);
+});
+
+test('nightly sweep refreshes every configured client once per day (kill switch + day claim)', async () => {
+  h.db.setSetting('chottu_stats_last_sweep', ''); // fresh day
+  upstream.calls.length = 0;
+  await chottu.nightlySweep();
+  const analyticsCalls = upstream.calls.filter((c) => c.path === '/analytics').length;
+  assert.ok(analyticsCalls > 0, 'the sweep pulled analytics');
+  // Same day again → no-op (the day is claimed).
+  upstream.calls.length = 0;
+  await chottu.nightlySweep();
+  assert.equal(upstream.calls.filter((c) => c.path === '/analytics').length, 0, 'one sweep per day');
+  // Kill switch stops it outright.
+  h.db.setSetting('chottu_stats_last_sweep', '');
+  h.db.setSetting('chottu_stats_enabled', '0');
+  await chottu.nightlySweep();
+  assert.equal(upstream.calls.filter((c) => c.path === '/analytics').length, 0, 'kill switch respected');
+  h.db.setSetting('chottu_stats_enabled', '1');
+});
+
 test('✨ autofill suggests cleaned UTM tags + social preview; permission-gated', async () => {
   const r = await app.req('POST', `/api/my/chottu/${entityA.id}/suggest-meta`, {
     as: ownerA, body: { linkName: 'Tickets — Instagram bio', destinationUrl: 'https://howler.co.za/event/1', suiteId: suiteA.id },
