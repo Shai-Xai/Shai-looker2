@@ -565,6 +565,7 @@ export const api = {
   chottuSetLinkStatus: (scope, entityId, id, enabled) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}/status` : `/api/my/chottu/${entityId}/links/${id}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
   chottuRefreshStats: (scope, entityId, body = {}) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/refresh-stats` : `/api/my/chottu/${entityId}/refresh-stats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   chottuImportPreview: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/import/preview`).then(json),
+  chottuRemoveImported: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/imported`, { method: 'DELETE' }).then(json),
   chottuImport: (entityId, body = {}) => fetch(`/api/admin/entities/${entityId}/chottu/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   chottuDeleteLink: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/links/${id}` : `/api/my/chottu/${entityId}/links/${id}`, { method: 'DELETE' }).then(json),
   chottuTest: (entityId) => fetch(`/api/admin/entities/${entityId}/chottu/test`, { method: 'POST' }).then(json),

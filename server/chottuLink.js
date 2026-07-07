@@ -249,6 +249,19 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
   // ChottuLink SEGREGATES links by how they were created — /links/page silently
   // defaults to dashboard-made links (api_user) only, hiding API/SDK-made ones.
   // Sweep every bucket and dedupe so imports see the whole account.
+  // Undo a wrong import: hard-DELETE this client's imported rows from Pulse —
+  // WITHOUT touching ChottuLink (these are live marketing links; disabling them
+  // upstream would kill real traffic). No tombstones either: the links must be
+  // free to import again under the RIGHT client (chottu_link_id is unique
+  // account-wide, so a leftover row would pin them to the wrong one). Links
+  // created in Pulse (source='pulse') are never touched.
+  function removeImported(entityId) {
+    const rows = sql.prepare("SELECT id FROM chottu_links WHERE entity_id=? AND source='imported'").all(entityId);
+    for (const r of rows) sql.prepare('DELETE FROM chottu_link_stats WHERE link_id=?').run(r.id);
+    const removed = sql.prepare("DELETE FROM chottu_links WHERE entity_id=? AND source='imported'").run(entityId).changes;
+    return { removed };
+  }
+
   async function fetchAllUpstream(cfg) {
     const byId = new Map();
     for (const createdBy of ['api_user', 'api_rest', 'sdk']) {
@@ -605,6 +618,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
   app.patch(`${A}/links/:id/status`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json({ link: await setEnabled(req.params.entityId, req.params.id, !!req.body?.enabled) })));
   app.get(`${A}/import/preview`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await importPreview(req.params.entityId))));
+  app.delete(`${A}/imported`, auth.requireAdmin, (req, res) => res.json(removeImported(req.params.entityId)));
   app.post(`${A}/import`, auth.requireAdmin, asyncHandler(async (req, res) =>
     res.json(await importLinks(req.params.entityId, { ids: req.body?.ids, suiteId: req.body?.suiteId, assignments: req.body?.assignments }))));
   app.delete(`${A}/links/:id`, auth.requireAdmin, asyncHandler(async (req, res) =>
@@ -689,7 +703,7 @@ function mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }) {
       res.json(await applyTemplate(myEntity(req), req.params.tid, req.body || {}, req.user?.email))));
 
   console.log('[chottuLink] deep-link management mounted');
-  return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, refreshStats, statsFor, nightlySweep, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
+  return { createLink, listLinks, updateLink, setEnabled, deleteLink, importLinks, importPreview, removeImported, refreshStats, statsFor, nightlySweep, configFor, testConnection, resolveTemplate, applyTemplate, saveTemplate, listTemplates };
 }
 
 module.exports = { mount, LINK_META_SYSTEM };

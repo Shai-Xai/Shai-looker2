@@ -81,6 +81,17 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
               flash(`Click counts refreshed for ${r.updated} link${r.updated === 1 ? '' : 's'}${r.failed ? ` (${r.failed} failed)` : ''}.`);
               await load();
             })}>{busy === 'stats' ? 'Refreshing…' : '⟳ Refresh clicks'}</button>
+            {(data.links || []).some((l) => l.source === 'imported') && (
+              <button style={{ ...btnGhost, color: 'var(--error,#ef4444)' }} disabled={!!busy} onClick={() => {
+                const n = (data.links || []).filter((l) => l.source === 'imported').length;
+                if (!window.confirm(`Remove all ${n} imported links from this client in Pulse?\n\nNothing changes on ChottuLink — the links keep working and stay in their dashboard. They just disappear from this client here, and become importable again (e.g. under the right client). Links created in Pulse are not touched.`)) return;
+                run('unimport', async () => {
+                  const r = await api.chottuRemoveImported(entityId);
+                  flash(`Removed ${r.removed} imported link${r.removed === 1 ? '' : 's'} from this client — ChottuLink untouched.`);
+                  await load();
+                });
+              }}>{busy === 'unimport' ? 'Removing…' : '⌫ Remove imported links'}</button>
+            )}
           </div>
         )}
         {scope === 'my' && data.configured && (data.links || []).length > 0 && (

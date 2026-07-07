@@ -226,6 +226,28 @@ test('delete switches the link off upstream, hides it everywhere, and imports do
   assert.equal((await app.req('DELETE', `/api/my/chottu/${entityA.id}/links/${someA.id}`, { as: ownerB })).status, 403);
 });
 
+test('remove-imported undoes a wrong import: Pulse-only, upstream untouched, links importable again', async () => {
+  upstream.nextLinks = [
+    { id: 'ext-m1', short_url: 'https://howler.chottu.link/m1', link_name: 'Other client link', destination_url: 'https://h/m1', is_enabled: true },
+    { id: 'ext-m2', short_url: 'https://howler.chottu.link/m2', link_name: 'Other client link 2', destination_url: 'https://h/m2', is_enabled: true },
+  ];
+  await app.req('POST', `/api/admin/entities/${entityA.id}/chottu/import`, { as: admin, body: { ids: ['ext-m1', 'ext-m2'] } });
+  const before = (await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/links`, { as: admin })).body.links;
+  const pulseMade = before.filter((l) => l.source === 'pulse').length;
+  assert.ok(pulseMade > 0, 'sanity: there are Pulse-created links to protect');
+  upstream.calls.length = 0;
+  const r = await app.req('DELETE', `/api/admin/entities/${entityA.id}/chottu/imported`, { as: admin });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.removed >= 2);
+  assert.equal(upstream.calls.length, 0, 'MUST NOT touch ChottuLink — these are live marketing links');
+  const after = (await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/links`, { as: admin })).body.links;
+  assert.equal(after.filter((l) => l.source === 'imported').length, 0, 'all imported rows gone');
+  assert.equal(after.filter((l) => l.source === 'pulse').length, pulseMade, 'Pulse-created links untouched');
+  // No tombstones: the links read as NEW again, importable under the right client.
+  const p = await app.req('GET', `/api/admin/entities/${entityA.id}/chottu/import/preview`, { as: admin });
+  assert.equal(p.body.links.find((l) => l.chottuLinkId === 'ext-m1').status, 'new');
+});
+
 // ── Phase 3: snapshots + rollups ──
 
 test('stats refresh snapshots daily; rollups serve series + per-source split; tenancy-gated', async () => {
