@@ -112,14 +112,15 @@ function GithubConfig() {
   const [token, setToken] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
   const [stagingBranch, setStagingBranch] = useState('');
+  const [stagingUrl, setStagingUrl] = useState('');
   const [prodBranch, setProdBranch] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); setStagingBranch(c.stagingBranch || 'staging'); setProdBranch(c.prodBranch || 'main'); }).catch(() => {});
+  const refresh = () => api.getGithubConfig().then((c) => { setCfg(c); setRepo(c.repo || ''); setStagingBranch(c.stagingBranch || 'staging'); setStagingUrl(c.stagingUrl || ''); setProdBranch(c.prodBranch || 'main'); }).catch(() => {});
   useEffect(() => { refresh(); }, []);
   async function save() {
     setBusy(true); setMsg('');
-    try { const c = await api.saveGithubConfig({ repo, stagingBranch, prodBranch, ...(token ? { token } : {}) }); setCfg(c); setToken(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); }
+    try { const c = await api.saveGithubConfig({ repo, stagingBranch, stagingUrl, prodBranch, ...(token ? { token } : {}) }); setCfg(c); setToken(''); setMsg('Saved'); setTimeout(() => setMsg(''), 1500); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   }
   if (!cfg) return null;
@@ -150,7 +151,9 @@ function GithubConfig() {
               <input className="fld" value={prodBranch} onChange={(e) => setProdBranch(e.target.value)} placeholder="main" style={{ width: '100%', boxSizing: 'border-box' }} />
             </div>
           </div>
-          <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>Tickets sent to <b>staging</b> get a PR against the staging branch (it deploys to the staging server to test); <b>Promote to production</b> opens a release PR merging staging → production.</p>
+          <label style={ctlLbl}>Staging site URL (reporters get this link to test)</label>
+          <input className="fld" value={stagingUrl} onChange={(e) => setStagingUrl(e.target.value)} placeholder="https://howler-pulse-staging.onrender.com" />
+          <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>Tickets sent to <b>staging</b> get a PR against the staging branch (it deploys to the staging server). When it lands there, the <b>reporter is asked to test and approve</b> (they get the staging URL); only once every staged ticket is approved can <b>Promote to production</b> open the release PR.</p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button onClick={save} disabled={busy} style={primaryBtn}>{busy ? 'Saving…' : 'Save'}</button>
             {cfg.tokenSet && <button onClick={async () => { await api.saveGithubConfig({ clearToken: true }); refresh(); }} style={miniBtn}>Remove token</button>}
@@ -274,7 +277,7 @@ function TicketDetail({ id, onClose, onChange }) {
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   }
   async function promote() {
-    if (!window.confirm('Promote to production?\n\nThis opens a release PR that merges the staging branch into production. Merging it ships EVERY ticket currently on staging — not just this one.')) return;
+    if (!window.confirm('Promote to production?\n\nThis opens a release PR that merges the staging branch into production. Merging it ships EVERY ticket currently on staging — not just this one. (It only opens if every staged ticket has been approved by its reporter.)')) return;
     setBusy('promote'); setErr('');
     try {
       const r = await api.adminPromoteTicket(id);
@@ -447,12 +450,21 @@ function TicketDetail({ id, onClose, onChange }) {
               {t.prUrl && <a href={t.prUrl} target="_blank" rel="noreferrer" style={{ ...ghBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>🔀 PR #{t.prNumber} ↗</a>}
             </div>
 
-            {/* On staging → verified → promote. Release-train: ships everything on staging. */}
+            {/* On staging → the REPORTER verifies (approve in My reports) → promote.
+                Release-train: ships everything on staging, so promotion is blocked
+                (here and server-side) until every staged ticket is approved. */}
             {t.status === 'staging' && (
               <div style={{ ...banner, background: 'rgba(var(--brand-rgb), 0.06)', border: '1px solid var(--hairline)' }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🧪 On staging — verify, then promote</div>
-                <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>Test it on the staging server. When it's good, promote to production — this opens a release PR that ships <b>everything</b> currently on staging.</p>
-                <button onClick={promote} disabled={busy === 'promote'} style={primaryBtn}>{busy === 'promote' ? 'Opening release…' : '🚀 Promote to production'}</button>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>🧪 On staging{t.clientVerdict === 'approved' ? ' — verified by the reporter ✅' : ' — waiting for the reporter to verify'}</div>
+                <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>
+                  {t.clientVerdict === 'approved'
+                    ? <>The reporter tested it on staging and approved. Promote when ready — the release PR ships <b>everything</b> currently on staging (each ticket must be approved).</>
+                    : <>The reporter has been asked to test it on the staging site and approve it. Promotion unlocks once they do — unverified work can't ship to production.</>}
+                </p>
+                <button onClick={promote} disabled={busy === 'promote' || t.clientVerdict !== 'approved'} title={t.clientVerdict !== 'approved' ? 'Blocked until the reporter approves it on staging' : undefined}
+                  style={{ ...primaryBtn, ...(t.clientVerdict !== 'approved' ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}>
+                  {busy === 'promote' ? 'Opening release…' : t.clientVerdict === 'approved' ? '🚀 Promote to production' : '🔒 Promote (awaiting reporter approval)'}
+                </button>
               </div>
             )}
 

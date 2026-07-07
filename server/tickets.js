@@ -449,16 +449,22 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
 
   // Promote to production: open (or reuse) the release PR that merges the staging
   // branch into production. Release-train — merging it ships EVERY ticket currently
-  // on staging (the webhook flips them to Shipped on merge). Honest about that: the
-  // response lists how many staging tickets ride along. No per-ticket cherry-pick —
-  // a shared staging branch can't cleanly un-merge one change.
+  // on staging (the webhook flips verified ones to Done on merge). Honest about
+  // that: the response lists how many staging tickets ride along. No per-ticket
+  // cherry-pick — a shared staging branch can't cleanly un-merge one change.
   app.post('/api/admin/tickets/:id/promote', auth.requireAdmin, requireOn, async (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     if (!github?.isConfigured?.()) return res.status(400).json({ error: 'Connect GitHub (token + repo) to promote.' });
-    const staged = sql.prepare("SELECT id, ai_title, title FROM tickets WHERE status='staging'").all();
-    const lines = staged.map((s) => `- ${s.ai_title || s.title || s.id}${s.github_issue_number ? ` (#${s.github_issue_number})` : ''}`);
-    const body = [`Promote staging → production (release).`, '', `Ships ${staged.length} ticket${staged.length === 1 ? '' : 's'} now on staging:`, ...lines, '', '_Opened from Howler Pulse._'].join('\n');
+    const staged = sql.prepare("SELECT id, ai_title, title, github_issue_number, client_verdict FROM tickets WHERE status='staging'").all();
+    // The gate: EVERY ticket riding this release must be verified by its reporter
+    // first (approve on staging). Unverified work never reaches production via Pulse.
+    const unverified = staged.filter((s) => s.client_verdict !== 'approved');
+    if (unverified.length) {
+      return res.status(400).json({ error: `Not yet — ${unverified.length} ticket${unverified.length === 1 ? ' on staging is' : 's on staging are'} still waiting for the reporter to test and approve: ${unverified.map((s) => `“${s.ai_title || s.title || s.id}”`).join(', ')}. Everything on staging ships together, so all of it must be verified first.` });
+    }
+    const lines = staged.map((s) => `- ${s.ai_title || s.title || s.id}${s.github_issue_number ? ` (#${s.github_issue_number})` : ''} — ✅ verified by the reporter`);
+    const body = [`Promote staging → production (release).`, '', `Ships ${staged.length} reporter-verified ticket${staged.length === 1 ? '' : 's'} now on staging:`, ...lines, '', '_Opened from Howler Pulse._'].join('\n');
     try {
       const pr = await github.openReleasePr({ title: `Release: promote ${stagingBranch()} → ${prodBranch()}`, body });
       if (pr.nothingToPromote) return res.json({ nothingToPromote: true, staged: staged.length });
@@ -578,14 +584,23 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     parts.push('Review it under Product → My reports and let us know — approve it, or send it back with what still needs fixing.');
     return parts.join('\n');
   }
+  // The staging review ask: test it on the staging site, approve → we push it live.
+  function stagingBody(t) {
+    const parts = [`Your ${t.type} “${label(t)}” is built and running on our staging site (a safe preview) — please test it.`, ''];
+    if (t.test_url) parts.push(`Try it: ${t.test_url}`, '');
+    parts.push('Approve it under Product → My reports and we’ll push it live — or send it back with what still needs fixing.');
+    return parts.join('\n');
+  }
   // Reporter-facing message per new status. Statuses not listed here don't notify
-  // (e.g. approved/rejected are the reporter's OWN actions; inbox is the start).
+  // (rejected is the reporter's OWN action; inbox is the start). 'approved' fires
+  // when a staging-verified ticket goes live via a release (or an admin closes it).
   function reporterMessage(t) {
     switch (t.status) {
       case 'triaged': return { title: 'We’re reviewing your report', body: `Your ${t.type} “${label(t)}” has been logged and is being reviewed.` };
       case 'accepted': return { title: 'Your report was accepted ✅', body: `Good news — we’ve accepted your ${t.type} “${label(t)}” and it’s queued to build.` };
       case 'in_progress': return { title: 'We’ve started building 🔨', body: `Work has started on your ${t.type} “${label(t)}”.` };
-      case 'staging': return { title: 'Ready to preview on staging 🧪', body: `Your ${t.type} “${label(t)}” is built and running on our staging environment for final checks before it goes live. We’ll let you know the moment it ships to production.` };
+      case 'staging': return { title: 'Ready for you to test 🧪', body: stagingBody(t), priority: 'needs_reply' };
+      case 'approved': return { title: 'It’s live 🎉', body: `Your ${t.type} “${label(t)}” is now live in production. Thanks for testing and approving it!` };
       case 'shipped': return { title: 'Shipped — please review 🎉', body: shipBody(t), priority: 'needs_reply' };
       case 'declined': return { title: 'Update on your report', body: `We won’t be taking your ${t.type} “${label(t)}” forward${t.decline_reason ? `: ${t.decline_reason}` : ' for now.'}` };
       default: return null;
@@ -618,27 +633,29 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   }
 
   // Notify the team (as a ticket comment) when the reporter approves or rejects a
-  // shipped ticket, so the board reflects the outcome without a webhook.
+  // shipped/staged ticket, so the board reflects the outcome without a webhook.
   function notifyTeamOnVerdict(t) {
     const who = t.reporter_name || t.reporter_email || 'The reporter';
-    if (t.client_verdict === 'approved') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `✅ ${who} approved the shipped work.` });
+    if (t.client_verdict === 'approved') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: t.status === 'staging' ? `✅ ${who} verified it on staging — cleared to promote to production.` : `✅ ${who} approved the shipped work.` });
     else if (t.client_verdict === 'rejected') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `↩️ ${who} sent it back: ${t.client_verdict_note || '(no reason given)'}` });
   }
 
-  // Client self-service: approve or reject the SHIPPED work. Only the reporter, only
-  // while shipped. Approve → 'approved' (done). Reject → 'rejected' (dev reopens);
-  // a reason is required so the team knows what to fix.
+  // Client self-service: approve or reject the work — while SHIPPED (production
+  // review: approve = done) or while ON STAGING (pre-release verification: approve
+  // stays on staging but clears it to promote; the release then takes it live).
+  // Reject → 'rejected' either way (dev reopens); a reason is required.
   app.post('/api/my/tickets/:id/verdict', auth.requireAuth, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     if (t.reporter_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
-    if (t.status !== 'shipped') return res.status(400).json({ error: 'This report is not awaiting your review.' });
+    if (t.status !== 'shipped' && t.status !== 'staging') return res.status(400).json({ error: 'This report is not awaiting your review.' });
     const verdict = (req.body || {}).verdict;
     if (verdict !== 'approved' && verdict !== 'rejected') return res.status(400).json({ error: 'verdict must be approved or rejected' });
     const note = clamp((req.body || {}).note, 4000).trim();
     if (verdict === 'rejected' && !note) return res.status(400).json({ error: 'Please say what still needs fixing.' });
+    const nextStatus = verdict === 'rejected' ? 'rejected' : (t.status === 'staging' ? 'staging' : 'approved');
     sql.prepare('UPDATE tickets SET status=?, client_verdict=?, client_verdict_note=?, client_verdict_at=?, updated_at=? WHERE id=?')
-      .run(verdict === 'approved' ? 'approved' : 'rejected', verdict, note, now(), now(), t.id);
+      .run(nextStatus, verdict, note, now(), now(), t.id);
     notifyTeamOnVerdict(getTicket(t.id));
     res.json({ ticket: myTicketRow(getTicket(t.id)) });
   });
@@ -668,12 +685,16 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
 
     // Release promotion: merging the staging branch into production ships everything
     // sitting on staging at once (a release train). The release PR carries no
-    // per-ticket issue refs, so we flip by status, not by issue number.
+    // per-ticket issue refs, so we flip by status, not by issue number. Tickets the
+    // reporter already verified on staging go straight to Done ("it's live" notify);
+    // any unverified stragglers (a release merged outside Pulse, bypassing the
+    // promote gate) fall back to Shipped so they still get the normal review ask.
     if (action === 'closed' && pr.merged && head === staging && staging !== prod && base === prod) {
       for (const t of sql.prepare("SELECT * FROM tickets WHERE status='staging'").all()) {
+        const verified = t.client_verdict === 'approved';
         const note = (t.ship_note || '').trim() || `Verified on staging, promoted to production via release PR #${pr.number}.`;
-        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note.slice(0, 8000), now(), t.id);
-        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `Release PR #${pr.number} merged — promoted to production, shipped.` });
+        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run(verified ? 'approved' : 'shipped', note.slice(0, 8000), now(), t.id);
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `Release PR #${pr.number} merged — live in production${verified ? ' (reporter verified on staging — done)' : ', awaiting the reporter’s review'}.` });
         notifyReporter(getTicket(t.id), t.status);
       }
       return;
@@ -690,8 +711,11 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
         const toStaging = base === staging && staging !== prod;
         if (toStaging) {
           if (t.status === 'staging') continue; // already there
-          sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('staging', now(), t.id);
-          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — now on staging to verify.` });
+          // Fresh landing on staging = fresh review: clear any earlier verdict and
+          // point the test link at the staging site (unless a dev set one already).
+          const testUrl = (t.test_url || '').trim() || (github?.stagingUrl?.() || '');
+          sql.prepare("UPDATE tickets SET status='staging', client_verdict='', client_verdict_note='', client_verdict_at='', test_url=?, updated_at=? WHERE id=?").run(testUrl, now(), t.id);
+          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — on staging, reporter asked to verify.` });
           notifyReporter(getTicket(t.id), t.status);
         } else {
           const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);

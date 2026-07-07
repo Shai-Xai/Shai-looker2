@@ -15,6 +15,7 @@ const TOKEN_KEY = 'github_token';
 const REPO_KEY = 'github_repo';
 const WEBHOOK_KEY = 'github_webhook_secret';
 const STAGING_KEY = 'github_staging_branch';
+const STAGING_URL_KEY = 'github_staging_url';
 const PROD_KEY = 'github_production_branch';
 const REPO_RE = /^[^/\s]+\/[^/\s]+$/; // owner/name
 
@@ -28,6 +29,7 @@ function mount(app, { db, auth }) {
   // built into either; "promote" opens a staging→production release PR. Both are
   // just branch names — override them here if the repo uses different conventions.
   const stagingBranch = () => (db.getSetting(STAGING_KEY, '') || 'staging').trim();
+  const stagingUrl = () => (db.getSetting(STAGING_URL_KEY, '') || '').trim(); // the staging site — reporters test here
   const prodBranch = () => (db.getSetting(PROD_KEY, '') || 'main').trim();
   // Auto-dispatch: when on, issues Pulse creates include an @claude mention so the
   // Claude Code GitHub Action picks the ticket up and opens a PR. Off by default —
@@ -42,7 +44,7 @@ function mount(app, { db, auth }) {
     const mac = `sha256=${crypto.createHmac('sha256', secret).update(rawBuf).digest('hex')}`;
     try { return crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(String(signature))); } catch { return false; }
   }
-  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured(), dispatchClaude: dispatchEnabled(), webhookSecretSet: !!webhookSecret(), stagingBranch: stagingBranch(), prodBranch: prodBranch() });
+  const config = () => ({ repo: repo(), tokenSet: !!token(), tokenMask: mask(token()), configured: isConfigured(), dispatchClaude: dispatchEnabled(), webhookSecretSet: !!webhookSecret(), stagingBranch: stagingBranch(), stagingUrl: stagingUrl(), prodBranch: prodBranch() });
 
   // Admin: read/write the connection (token is write-only — a blank token keeps the
   // existing one; { clearToken:true } removes it).
@@ -52,6 +54,7 @@ function mount(app, { db, auth }) {
     if (b.repo !== undefined) db.setSetting(REPO_KEY, String(b.repo || '').trim());
     if (b.dispatchClaude !== undefined) db.setSetting('github_dispatch_claude', b.dispatchClaude ? '1' : '0');
     if (b.stagingBranch !== undefined) db.setSetting(STAGING_KEY, String(b.stagingBranch || '').trim());
+    if (b.stagingUrl !== undefined) db.setSetting(STAGING_URL_KEY, String(b.stagingUrl || '').trim());
     if (b.prodBranch !== undefined) db.setSetting(PROD_KEY, String(b.prodBranch || '').trim());
     if (b.clearToken) db.setSetting(TOKEN_KEY, '');
     else if (b.token) db.setSetting(TOKEN_KEY, String(b.token).trim());
@@ -159,7 +162,7 @@ function mount(app, { db, auth }) {
   }
 
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, openReleasePr, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, stagingBranch, prodBranch, webhookSecretSet: () => !!webhookSecret() };
+  return { isConfigured, createIssue, openReleasePr, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, stagingBranch, stagingUrl, prodBranch, webhookSecretSet: () => !!webhookSecret() };
 }
 
 module.exports = { mount };

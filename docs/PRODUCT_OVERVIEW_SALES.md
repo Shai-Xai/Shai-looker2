@@ -853,8 +853,10 @@ see "The continuous comms loop" above.)*
 - **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
   can now be built to a **staging** environment first, checked there, then **promoted to
   production** — so changes are verified before they hit the live app. In your **My reports**
-  view a new **Testing** step appears in the journey (Building → Testing → Ready for you), and
-  you're notified when your request is previewing on staging and again when it goes live.
+  view a new **Testing** step appears in the journey (Building → Testing → Ready for you).
+  **You're the tester**: when your request lands on staging you get a link to try it and an
+  **Approve / Send back** choice — nothing goes live until you (and every other reporter with
+  work on staging) approve it, and you're notified the moment it's in production.
 - **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
   answers product questions — *how do I…*, *what's new*, *what can I do* — right in
   Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
