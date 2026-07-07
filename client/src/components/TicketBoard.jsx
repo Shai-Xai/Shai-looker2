@@ -23,6 +23,7 @@ export default function TicketBoard() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const [envFilter, setEnvFilter] = useState(''); // '' | staging | production — where a sent ticket is building/built
   const [lane, setLane] = useState('inbox'); // mobile: which lane is shown
   const [openId, setOpenId] = useState(null);
 
@@ -34,7 +35,10 @@ export default function TicketBoard() {
 
   const labels = data?.labels || {};
   const counts = data?.counts || {};
-  const byLane = (l) => (data?.tickets || []).filter((t) => t.status === l);
+  // A ticket only HAS an environment once it's been sent to GitHub (the target is
+  // chosen at send time), so the env filter only matches dispatched tickets.
+  const inEnv = (t) => !envFilter || (t.githubIssue > 0 && t.target === envFilter);
+  const byLane = (l) => (data?.tickets || []).filter((t) => t.status === l && inEnv(t));
   const terminal = [];
   if (counts.declined) terminal.push(`${counts.declined} declined`);
 
@@ -47,10 +51,17 @@ export default function TicketBoard() {
           <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>🎟️ Tickets</h2>
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>Bugs, improvements and ideas from the team and clients — triage, build, ship.</p>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {['', 'bug', 'improvement', 'idea'].map((t) => (
             <button key={t || 'all'} onClick={() => setTypeFilter(t)} style={pill(typeFilter === t)}>
               {t ? `${TYPE_ICON[t]} ${t}` : 'All'}
+            </button>
+          ))}
+          <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)', margin: '0 2px' }} />
+          {/* Environment filter — only tickets already sent to GitHub carry one. */}
+          {[['', 'All envs'], ['staging', '🧪 Staging'], ['production', '🚀 Production']].map(([v, lbl]) => (
+            <button key={v || 'allenv'} onClick={() => setEnvFilter(v)} style={pill(envFilter === v)} title={v ? 'Tickets sent to GitHub with this build target' : undefined}>
+              {lbl}
             </button>
           ))}
         </div>
@@ -197,10 +208,14 @@ function Card({ t, onOpen }) {
       textAlign: 'left', width: '100%', background: 'var(--card)', border: '1px solid var(--hairline)',
       borderRadius: 10, padding: 10, cursor: 'pointer', display: 'block',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
         <span>{TYPE_ICON[t.type] || '📝'}</span>
         {t.type === 'bug' && <span style={{ ...chip, ...u }}>{t.urgency}</span>}
         {t.aiStatus === 'ready' && <span style={{ ...chip, color: 'var(--muted)', background: 'rgba(128,128,128,0.1)' }}>AI ✓</span>}
+        {/* Environment: only meaningful once the ticket has been sent to GitHub. */}
+        {t.githubIssue > 0 && (t.target === 'production'
+          ? <span style={{ ...chip, color: '#fff', background: '#16a34a', textTransform: 'none' }}>🚀 prod</span>
+          : <span style={{ ...chip, color: 'var(--brand)', background: 'rgba(var(--brand-rgb), 0.12)', textTransform: 'none' }}>🧪 staging</span>)}
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4, lineHeight: 1.3 }}>
         {t.aiTitle || t.title || '(untitled)'}
@@ -311,7 +326,7 @@ function TicketDetail({ id, onClose, onChange }) {
               <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 24, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
             </div>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-              {t.screen || 'unknown screen'} · {t.type} · {t.urgency} urgency · by {t.reporterName || t.reporterEmail}
+              {t.screen || 'unknown screen'} · {t.type} · {t.urgency} urgency{t.githubIssue > 0 ? ` · ${t.target === 'production' ? '🚀 production' : '🧪 staging'}` : ''} · by {t.reporterName || t.reporterEmail}
               {t.entityName ? ` (${t.entityName})` : ''}
             </p>
             {t.tileName && (
