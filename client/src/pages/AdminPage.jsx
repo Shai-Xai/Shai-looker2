@@ -2543,6 +2543,7 @@ const AM_TASKS = [
   { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
   { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
   { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'pixel', icon: '🎯', title: 'Install the Pulse Pixel', desc: 'One snippet on their site/ticket shop — remarketing lists build automatically in Meta / Google / TikTok.', section: 'integrations', auto: (d) => !!d.pixelConfigured },
   { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
 ];
@@ -2571,16 +2572,18 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
+      api.getEntityIntegrations(entity.id).catch(() => null),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
       Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
-    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
+    ]).then(([mt, digests, prog, integ, goalsArr, suiteMtArr, alertsArr]) => {
       if (!alive) return;
       const acc = tmplOf(mt);
       setAux({
         brandingSet: hasBranding(acc) || !!entity.logo,
         emailTemplateSet: hasTemplate(acc),
         digests: (digests || []).length,
+        pixelConfigured: !!integ?.pixel?.configured,
         goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
         brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
         templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
@@ -2596,7 +2599,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
     setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
     api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
   };
-  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0, pixelConfigured: aux?.pixelConfigured };
   const accAuto = (t) => !!(t.auto && t.auto(accData));
   const accManual = (t) => ticks['amchk_' + t.key] === 1;
   const accDone = (t) => accAuto(t) || accManual(t);
@@ -5114,8 +5117,12 @@ function ClientIntegrations({ entity }) {
         showTikTok
         showSlack
         showChottu
+        showPixel
+        pixelEntityId={entity.id}
+        onPixelStatus={() => api.getPixelStatus(entity.id)}
+        onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}

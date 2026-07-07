@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (🔗 Links grouped into categories — tiles landing on Engage → Links) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🎯 Pulse Pixel: one website snippet carries all ad pixels + one-click retargeting audiences · 🔗 Links grouped into categories) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -485,6 +485,30 @@ one-by-one in the ChottuLink dashboard.
 
 **Pitch:** "Every link your event needs — created in one click from Pulse, tracked
 per event, and ready to drop into posts, bios, emails and QR codes."
+### 5h. Pulse Pixel — website retargeting  🧪 (new)
+- **One snippet, all pixels.** Install a single Pulse script tag on the client's
+  website or ticket shop and it loads their **Meta Pixel, Google tag and TikTok
+  Pixel** for them — configured (and changeable later) entirely inside Pulse, so
+  the site never needs touching again.
+- **Remarketing lists build automatically** in each ad platform from its own
+  pixel: all visitors, ticket-page viewers, checkout abandoners, purchasers.
+- **One-click standard audiences** — Pulse creates the standard retargeting
+  audience pack (visitors 180d/30d · viewed tickets 30d · checkout abandoners 14d
+  · purchasers 180d) directly in the client's **Meta** and **TikTok** ad accounts
+  via their connected APIs. (Google's audience definitions are a guided one-time
+  manual step — no self-serve API — the tag itself is fully automatic.)
+- **Install check built in** — every event also beacons back to Pulse, so admin
+  and the client can see "✓ receiving events" the moment the snippet is live
+  (and Pulse builds a first-party behaviour log for future segments).
+- **Consent-aware** — a GDPR mode holds all pixels off until the site's cookie
+  banner grants consent.
+- Dual-surface: Howler configures it in Admin → client → Integrations; clients
+  self-serve in Settings → Integrations. *Meta/TikTok audience-pack API calls not
+  yet exercised against live ad accounts (same caveat as audience sync).*
+
+**Pitch:** "Add one line to your website and your retargeting is done — every ad
+pixel managed from Pulse, and the standard remarketing audiences created in your
+Meta and TikTok accounts in one click. Change pixels any time without a developer."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -855,6 +879,25 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **🎯 Pulse Pixel — website retargeting** 🧪 (new): one snippet on
+  the client's website/ticket shop loads their **Meta / Google / TikTok pixels**
+  (managed from Pulse — changeable without touching the site), fires the standard
+  events, and beacons to Pulse for a built-in "✓ receiving events" install check.
+  **One click creates the standard retargeting audience pack** (visitors 180/30d,
+  viewed tickets 30d, checkout abandoners 14d, purchasers 180d) in the connected
+  Meta + TikTok ad accounts; Google audiences are a guided one-time manual step.
+  GDPR consent mode included. Dual-surface (Admin → Integrations + client
+  self-service); platform API calls not yet verified against live ad accounts.
+- **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
+  page gains a **Live updates** tab — while the event runs, Pulse sends the team a
+  compact multi-metric snapshot every 15–120 min (gates in with **+change** and
+  **pace/hr**, bar revenue, **top-3 bars/vendors**, Event Ops device health, optional
+  **"% of last year"** vs a chosen past event). Manual **Go live** switch or a
+  scheduled window; delivered to the inbox (one thread for the whole night) + app
+  push, email, SMS and **WhatsApp** (24h service-window rule respected). The **Owl
+  can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`
+  permission as Alerts.
+- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
 - **2026-07-07** — **🔗 Links grouped into categories** ✅ (Engage → Links): the Links
   landing now opens on **category tiles** — tap one (e.g. **App**, home of every
   Chotulink/Howler-app link) to see just that category's links, with a clear

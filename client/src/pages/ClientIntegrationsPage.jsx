@@ -124,8 +124,12 @@ export default function ClientIntegrationsPage() {
                 showTikTok
                 showSlack
                 showChottu
+                showPixel
+                pixelEntityId={activeItem.entityId}
+                onPixelStatus={() => api.myPixelStatus(activeItem.entityId)}
+                onCreatePixelAudiences={(channel) => api.myCreatePixelAudiences(activeItem.entityId, channel)}
                 canManageLock={isAdmin || role === 'owner'}
-                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel']}
                 locks={activeItem.locks || {}}
                 onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {

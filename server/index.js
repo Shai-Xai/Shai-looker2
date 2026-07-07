@@ -124,7 +124,7 @@ const meta = require('./meta');
 meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
-tiktok.init({ db });
+tiktok.init({ db }); const pixel = require('./pixel'); // Pulse Pixel — tag container + retargeting audience packs (mounted below)
 const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND — mirror inbox notifications into a client's Slack (+ test/share routes)
 // Social metrics INBOUND — pull organic FB/IG/TikTok stats into Pulse (the read
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
@@ -2487,6 +2487,7 @@ require('./setupWizard').mount(app, { db, auth });
 const chottuApi = require('./chottuLink').mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }); // ChottuLink deep links — event short links + click counts + ✨ autofill (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
 
 require('./installs').mount(app, { db, auth }); // PWA install tracking — opens of Pulse as an installed app
+pixel.mount(app, { db, auth, rateLimit, meta, tiktok }); // Pulse Pixel — /px.js tag-container loader + /px event collect + retargeting audience packs
 
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
