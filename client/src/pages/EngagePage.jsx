@@ -94,7 +94,7 @@ export default function EngagePage() {
         </>
       ) : active === 'journeys' ? (
         <>
-          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Set up a multi-step, multi-channel journey in minutes — pick a recipe or just describe what you want and let AI draft it. You review it before anything is created.</p>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Build a multi-step, multi-channel journey by chatting to the Owl — describe what you want, it drafts a branching journey (grounded in your saved audiences) and refines it as you talk. You review it before anything is created.</p>
           <JourneyWizard entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'audiences' ? (
