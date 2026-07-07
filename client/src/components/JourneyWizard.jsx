@@ -29,6 +29,10 @@ export default function JourneyWizard({ entityId }) {
   const [liveErr, setLiveErr] = useState('');
   const [drafts, setDrafts] = useState([]);
   const [openDraft, setOpenDraft] = useState(null); // draft id with the tree expanded
+  const [stats, setStats] = useState({}); // draft id -> live funnel stats
+
+  const loadStats = (id) => api.journeyStats(entityId, id).then((s) => setStats((m) => ({ ...m, [id]: s }))).catch(() => {});
+  const toggleDraft = (a, open) => { setOpenDraft(open ? null : a.id); if (!open) loadStats(a.id); };
 
   const loadDrafts = () => api.listActions(entityId)
     .then((r) => setDrafts((r.actions || []).filter((a) => a.config?.journey?.nodes?.length)))
@@ -112,22 +116,35 @@ export default function JourneyWizard({ entityId }) {
               return (
                 <div key={a.id} style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <button onClick={() => setOpenDraft(open ? null : a.id)} style={{ ...linkBtn, fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{open ? '▾' : '▸'} {a.title || j.name}</button>
+                    <button onClick={() => toggleDraft(a, open)} style={{ ...linkBtn, fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{open ? '▾' : '▸'} {a.title || j.name}</button>
                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', borderRadius: 980, padding: '2px 8px', background: a.status === 'draft' ? 'rgba(128,128,128,0.14)' : 'rgba(124,58,237,0.12)', color: a.status === 'draft' ? 'var(--muted)' : 'var(--brand)' }}>{a.status}</span>
                     {d > 0 && <span style={{ fontSize: 11.5, color: '#b45309', fontWeight: 700 }}>◆ {d}</span>}
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDate(a.updatedAt || a.createdAt)}</span>
                     <span style={{ flex: 1 }} />
-                    <button onClick={() => setOpenDraft(open ? null : a.id)} style={{ ...smallBtn, ...(open ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : {}) }}>{open ? 'Hide tree' : '🧭 View tree'}</button>
+                    <button onClick={() => toggleDraft(a, open)} style={{ ...smallBtn, ...(open ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : {}) }}>{open ? 'Hide tree' : '🧭 View tree'}</button>
                     <button onClick={() => duplicate(a)} style={smallBtn}>Duplicate</button>
                     <a href={`/engage/campaigns?action=${a.id}`} style={{ ...smallBtn, textDecoration: 'none', display: 'inline-block' }}>Edit in Campaigns</a>
                   </div>
                   {j.summary && !open && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>{j.summary}</div>}
-                  {open && (
-                    <div style={{ marginTop: 8 }}>
-                      {j.summary && <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 4px' }}>{j.summary}</p>}
-                      <JourneyTree nodes={j.nodes} />
-                    </div>
-                  )}
+                  {open && (() => {
+                    const s = stats[a.id];
+                    const t = s?.totals || {};
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        {j.summary && <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 4px' }}>{j.summary}</p>}
+                        {t.enrolled > 0 && (
+                          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, fontWeight: 600, margin: '2px 0 6px' }}>
+                            <span>👥 {t.enrolled} enrolled</span>
+                            <span>▶ {t.active || 0} in the journey</span>
+                            <span style={{ color: 'var(--brand)' }}>✓ {t.converted || 0} converted</span>
+                            <span style={{ color: 'var(--muted)' }}>{t.done || 0} finished{t.unsubscribed ? ` · ${t.unsubscribed} unsubscribed` : ''}</span>
+                            <button onClick={() => loadStats(a.id)} style={{ ...linkBtn }}>↻ refresh</button>
+                          </div>
+                        )}
+                        <JourneyTree nodes={(s?.nodes) || j.nodes} stats={s} />
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

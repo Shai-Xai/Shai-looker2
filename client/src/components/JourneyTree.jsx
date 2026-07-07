@@ -41,7 +41,21 @@ function channelChip(channel) {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', borderRadius: 980, padding: '2px 8px', background: email ? 'rgba(124,58,237,0.12)' : 'rgba(16,185,129,0.14)', color: email ? 'var(--brand)' : '#0d9668' }}>{email ? '✉️ Email' : '💬 SMS'}</span>
   );
 }
-function MessageCard({ node }) {
+function statChips(node, stats) {
+  if (!stats) return null;
+  const s = (node.step != null && stats.byStep && stats.byStep[node.step]) || {};
+  const waiting = (node.id && stats.atNode && stats.atNode[node.id]) || 0;
+  if (!s.opened && !s.clicked && !waiting) return null;
+  const chip = { fontSize: 11, fontWeight: 700, borderRadius: 980, padding: '2px 8px', background: 'rgba(128,128,128,0.10)', color: 'var(--muted)' };
+  return (
+    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
+      {s.opened ? <span style={chip}>👁 {s.opened} opened</span> : null}
+      {s.clicked ? <span style={{ ...chip, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>🖱 {s.clicked} clicked</span> : null}
+      {waiting ? <span style={{ ...chip, color: '#b45309', background: 'rgba(245,158,11,0.12)' }}>⏳ {waiting} here now</span> : null}
+    </div>
+  );
+}
+function MessageCard({ node, stats }) {
   return (
     <div style={{ padding: 13, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -51,16 +65,19 @@ function MessageCard({ node }) {
       {node.channel === 'email' && node.subject && <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{node.subject}</div>}
       {node.body && <div style={{ fontSize: 12.5, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{node.body}</div>}
       {node.ctaText && <div style={{ marginTop: 8 }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, color: 'var(--brand)', border: '1px solid var(--brand)', borderRadius: 8, padding: '3px 9px' }}>{node.ctaText} →</span></div>}
+      {statChips(node, stats)}
     </div>
   );
 }
-function DecisionSplit({ node }) {
+function DecisionSplit({ node, stats }) {
+  const waiting = (stats && node.id && stats.atNode && stats.atNode[node.id]) || 0;
   return (
     <div className="jt-col">
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', maxWidth: 280, textAlign: 'left' }}>
         <span style={{ fontSize: 14 }}>◆</span>
         <span style={{ fontSize: 13, fontWeight: 700 }}>{node.question}</span>
         {node.waitHours ? <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>· {fmtWait(node.waitHours)}</span> : null}
+        {waiting ? <span style={{ fontSize: 11, fontWeight: 800, color: '#b45309', whiteSpace: 'nowrap' }}>⏳ {waiting} waiting</span> : null}
       </div>
       <div className="jt-stem" />
       <div className="jt-branches">
@@ -72,7 +89,7 @@ function DecisionSplit({ node }) {
                 <span style={{ opacity: 0.85 }}>if</span> {b.label}
               </span>
               <div className="jt-link" />
-              <NodeColumn nodes={b.nodes || []} />
+              <NodeColumn nodes={b.nodes || []} stats={stats} />
             </div>
           );
         })}
@@ -80,20 +97,22 @@ function DecisionSplit({ node }) {
     </div>
   );
 }
-function NodeColumn({ nodes }) {
+function NodeColumn({ nodes, stats }) {
   return (
     <div className="jt-col">
       {(nodes || []).map((n, i) => (
         <Fragment key={i}>
           {i > 0 && <div className="jt-link" />}
-          {n.type === 'decision' ? <DecisionSplit node={n} /> : <div className="jt-card"><MessageCard node={n} /></div>}
+          {n.type === 'decision' ? <DecisionSplit node={n} stats={stats} /> : <div className="jt-card"><MessageCard node={n} stats={stats} /></div>}
         </Fragment>
       ))}
     </div>
   );
 }
-export default function JourneyTree({ nodes }) {
-  return <div className="jt-scroll"><style>{TREE_CSS}</style><NodeColumn nodes={nodes} /></div>;
+// stats (optional): { byStep: {step:{opened,clicked}}, atNode: {nodeId:count} } —
+// overlays live funnel chips on the design (see /api/journeys/:e/:id/stats).
+export default function JourneyTree({ nodes, stats }) {
+  return <div className="jt-scroll"><style>{TREE_CSS}</style><NodeColumn nodes={nodes} stats={stats} /></div>;
 }
 
 export function countDecisions(nodes) {

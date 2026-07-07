@@ -705,6 +705,7 @@ export const api = {
   actionFieldValues: (entityId, b) => fetch(`/api/actions/${entityId}/field-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   journeyRecipes: (entityId) => fetch(`/api/journeys/${entityId}/recipes`).then(json),
+  journeyStats: (entityId, actionId) => fetch(`/api/journeys/${entityId}/${actionId}/stats`).then(json),
   owlDraftJourney: (body) => fetch('/api/owl/act/draft-journey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   designImage: (entityId, b) => fetch(`/api/actions/${entityId}/design-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),

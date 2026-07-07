@@ -231,7 +231,7 @@ async function processAction(a, deps) {
   const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults } = deps;
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN node_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN wait_until TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
-  const { map, entryId } = compile(a.config.journey.nodes);
+  const { map, entryId } = compile(stampIfNeeded(a.config.journey).nodes);
   const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
   const upd = (e, fields) => sql.prepare(`UPDATE action_enrollments SET ${Object.keys(fields).map((k) => `${k}=?`).join(', ')}, updated_at=? WHERE action_id=? AND email=?`).run(...Object.values(fields), now(), a.id, e.email);
   let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
@@ -292,10 +292,39 @@ function promptRegistry() {
 
 // Starter recipes for the Engage → Journeys tab (suggestion prompts + example
 // trees). resolveContext is accepted for mount-signature compatibility.
-function mount(app, { auth }) {
+function mount(app, { auth, db }) {
   app.get('/api/journeys/:entityId/recipes', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
     res.json({ recipes: actionTemplates.listJourneys() });
   });
+
+  // Live per-node stats for one journey — the tree becomes a funnel. Honest v1:
+  // per MESSAGE node, distinct people who opened / clicked it (from the per-step
+  // tracking already recorded); per node, how many people are CURRENTLY parked
+  // there (waiting at a decision or a delayed message); plus journey totals.
+  // ("Sent per node" isn't recorded yet — that lands with the engine's send log.)
+  app.get('/api/journeys/:entityId/:actionId/stats', auth.requireAuth, auth.requirePermission('campaigns.view'), (req, res) => {
+    const sql = db.db;
+    const a = sql.prepare('SELECT * FROM actions WHERE id=? AND entity_id=?').get(req.params.actionId, req.params.entityId);
+    if (!a) return res.status(404).json({ error: 'Not found' });
+    let cfg = {}; try { cfg = JSON.parse(a.config || '{}'); } catch { /* corrupt config */ }
+    if (!cfg.journey?.nodes?.length) return res.status(404).json({ error: 'Not a journey campaign' });
+    const journey = stampIfNeeded(cfg.journey);
+    const byStep = {};
+    try { for (const r of sql.prepare("SELECT step, COUNT(DISTINCT email) n FROM action_opens WHERE action_id=? AND email!='' GROUP BY step").all(a.id)) byStep[r.step] = { ...(byStep[r.step] || {}), opened: r.n }; } catch { /* legacy */ }
+    try { for (const r of sql.prepare("SELECT step, COUNT(DISTINCT email) n FROM action_clicks WHERE action_id=? AND email!='' GROUP BY step").all(a.id)) byStep[r.step] = { ...(byStep[r.step] || {}), clicked: r.n }; } catch { /* legacy */ }
+    const atNode = {};
+    try { for (const r of sql.prepare("SELECT node_id, COUNT(*) n FROM action_enrollments WHERE action_id=? AND status='active' AND node_id!='' GROUP BY node_id").all(a.id)) atNode[r.node_id] = r.n; } catch { /* column lands with the engine */ }
+    const totals = { enrolled: 0, active: 0, converted: 0, done: 0, unsubscribed: 0 };
+    try { for (const r of sql.prepare('SELECT status, COUNT(*) n FROM action_enrollments WHERE action_id=? GROUP BY status').all(a.id)) { totals[r.status] = r.n; totals.enrolled += r.n; } } catch { /* no enrolments yet */ }
+    res.json({ byStep, atNode, totals, nodes: journey.nodes });
+  });
+}
+
+// Journeys saved before id-stamping existed have no node ids/steps — stamp them
+// deterministically on read so the engine and stats work on old trees too.
+function stampIfNeeded(journey) {
+  if (journey?.nodes?.[0]?.id) return journey;
+  try { return validateJourney(journey); } catch { return journey; }
 }
 
 module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction };
