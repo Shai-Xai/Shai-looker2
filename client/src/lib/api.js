@@ -327,6 +327,7 @@ export const api = {
   adminTicketAssignees: () => fetch('/api/admin/tickets/assignees').then(json),
   adminTicketGithubIssue: (id, mode, target) => fetch(`/api/admin/tickets/${id}/github-issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(mode ? { mode } : {}), ...(target ? { target } : {}) }) }).then(json),
   adminPromoteTicket: (id) => fetch(`/api/admin/tickets/${id}/promote`, { method: 'POST' }).then(json),
+  adminTicketRedispatch: (id, target) => fetch(`/api/admin/tickets/${id}/redispatch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target ? { target } : {}) }).then(json),
   adminDeleteTicket: (id) => fetch(`/api/admin/tickets/${id}`, { method: 'DELETE' }).then(json),
   getGithubConfig: () => fetch('/api/admin/github').then(json),
   saveGithubConfig: (b) => fetch('/api/admin/github', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

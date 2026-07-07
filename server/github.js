@@ -121,6 +121,19 @@ function mount(app, { db, auth }) {
     throw new Error(`Could not open release PR (${resp.status})${txt ? `: ${txt.slice(0, 200)}` : ''}`);
   }
 
+  // Comment on an existing issue — the re-dispatch path: a sent-back ticket's
+  // refreshed brief (+ @claude ask) rides an issue comment, so the Action picks
+  // the rework up on the SAME issue instead of opening a duplicate.
+  async function createIssueComment(issueNumber, body) {
+    needGithub();
+    const resp = await ghFetch(`/issues/${Number(issueNumber)}/comments`, { method: 'POST', payload: { body: String(body || '') } });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`GitHub comment failed (${resp.status})${txt ? `: ${txt.slice(0, 200)}` : ''}`);
+    }
+    return { url: (await resp.json()).html_url };
+  }
+
   // A token-free prefilled "new issue" URL (opened in the user's browser). Empty
   // string when no repo is set — the caller then asks the admin to configure one.
   function newIssueUrl({ title, body }) {
@@ -162,7 +175,7 @@ function mount(app, { db, auth }) {
   }
 
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, openReleasePr, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, stagingBranch, stagingUrl, prodBranch, webhookSecretSet: () => !!webhookSecret() };
+  return { isConfigured, createIssue, createIssueComment, openReleasePr, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, stagingBranch, stagingUrl, prodBranch, webhookSecretSet: () => !!webhookSecret() };
 }
 
 module.exports = { mount };
