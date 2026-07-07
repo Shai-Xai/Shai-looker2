@@ -1422,6 +1422,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     catalogue,
     exportRows, // NOT a chat tool (no schema) — the export route calls it directly
     ...extraTools,
+    productHelp: require('./helpBot').createOwlTool({ db, auth }), // one Owl: how-to / what's-new about Pulse itself (published knowledge only) — see server/helpBot.js
     draftReport: { schema: draftReportSchema, run: runDraftReport, menu: { cmd: 'report', label: 'Report a bug or idea', icon: '🐞', example: 'I found a bug on the alerts page' } },
     eventOps: { schema: eventOpsSchema, run: runEventOps, menu: { cmd: 'eventops', label: 'Event Ops', icon: '📟', example: 'Where is SL005, and any open issues?' } },
     dataHealth: { schema: dataHealthSchema, run: runDataHealth, menu: { cmd: 'datahealth', label: 'Data health', icon: '📶', example: 'Is the check-in data flowing — any devices offline?' } },

@@ -8,6 +8,7 @@ import ShareMenu from './ShareMenu.jsx';
 // also returns the user's own most-asked questions). A small mirror so it never opens
 // blank; the live list — personalised first — replaces these.
 const FALLBACK_STARTERS = [
+  { label: "What's new", icon: '✨', prompt: "What's new in Pulse?" },
   { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
   { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
   { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },

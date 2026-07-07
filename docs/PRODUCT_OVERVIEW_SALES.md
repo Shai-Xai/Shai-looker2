@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (📈 deep-link click trends + 🦉 Owl link tools) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🦉 Owl product help: ask the Owl how-to / what's new — grounded in published release notes + curated knowledge) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -255,6 +255,31 @@ shoulder when it's worth your time."
 
 **Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
 on top of the event without logging in."
+
+## 2b. Ask the Owl about Pulse itself (product help)  🧪
+- The **same Owl chat** now also answers questions about **Pulse itself** — *how
+  do I do this*, *what's new*, *what can I do with my access* — alongside its
+  usual data answers. One door for everything; the Owl routes the question.
+- **Only released features, ever:** answers are grounded strictly in Howler's
+  curated help knowledge plus **published release notes** — drafts and unshipped
+  work can never surface. If it isn't published, the Owl doesn't know it.
+- **Tailored to the user:** answers respect their **role** (won't walk a Viewer
+  through something only an Owner can do), their **tenant setup** and their
+  **current event** — e.g. it won't pitch cashless features to a non-cashless
+  event.
+- **"What's new"** pulls the latest, correctly-dated published release notes; a
+  ✨ starter pill on the Owl chat asks it in one tap.
+- **Deep-links** the user straight to the right screen ("open Engage →
+  Campaigns"), and **declines gracefully** when the answer isn't in its knowledge
+  — it never invents behaviour.
+- **Curated & versioned:** Howler staff maintain the knowledge in **Admin →
+  Product → 💬 Help knowledge** (add/edit/publish articles, tag them by role +
+  required feature, set deep-links, toggle product help on/off) — **no deploy
+  needed**. The Owl chat itself is the client's self-service surface.
+
+**Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
+who you are and what your account can do, and it only ever describes features
+that have actually shipped."
 
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
@@ -825,6 +850,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
+  answers product questions — *how do I…*, *what's new*, *what can I do* — right in
+  Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
+  deploy) plus **published release notes only** (nothing unreleased can surface),
+  and **tailored to the user's role, tenant and event** (e.g. omits cashless help
+  for non-cashless events). Deep-links to the right screen and **declines** rather
+  than inventing. Dual-surface: Howler curates + publishes the knowledge in
+  **Admin → Product → 💬 Help knowledge**; the Owl chat (with a ✨ What's-new starter
+  pill) is the client's self-service surface.
 - **2026-07-07 (evening)** — **Deep links: click trends, Owl link tools & ✨ autofill** ✅:
   nightly click snapshots now power a per-event **clicks-per-day chart + by-source
   split** (📈 on the Links tab); the **Owl** drafts single links or the whole

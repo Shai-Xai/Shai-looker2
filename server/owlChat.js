@@ -36,6 +36,7 @@ const TOOL_STATUS = {
   searchDriveDocs: 'Searching your Drive files…',
   readDriveDoc: 'Reading that document…',
   getPaidPerformance: 'Checking your ad performance…',
+  productHelp: 'Checking the Pulse help notes…',
   createAlert: 'Setting up that alert…',
 };
 function statusForTools(toolUses) {
@@ -76,6 +77,8 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
 - createLink → when the user wants a SHORT / TRACKING / DEEP LINK into the Howler app for sharing ("make me a link for the Instagram bio", "short link to the tickets page tagged whatsapp", "QR link for the poster"). It DRAFTS one branded short link (with optional UTM tags + social share preview) tied to the current event; the user confirms with a button — see ACTING below. If ChottuLink isn't connected it will tell you — relay that.
 - applyLinkTemplate → when the user wants ALL the links / the STANDARD LINK SET for an event in one go ("set up the links for this event", "create the standard link set"). It resolves a saved template (e.g. "Standard event set": main + ticket wallet + lineup + map + event feed + chat) against the current event and DRAFTS the whole set; the user confirms with a button. It usually needs the event's public page URL (baseUrl) — ask for it if the tool says so.
+- productHelp → ANY question about PULSE ITSELF: how to do or set up something ("how do I set up an abandoned cart?", "where do I change my logo?"), what a feature does or where a screen lives, what the user can/can't do with their access, or "what's new / latest updates / recent releases". It returns curated help notes + PUBLISHED release notes tailored to this user — answer ONLY from that material, follow the grounding instructions it carries, and point the user to the screen it names. Never describe product features from your own knowledge — if productHelp doesn't cover it, say you don't have it in your help notes. This is for questions ABOUT the product; for reporting a problem or suggesting an improvement use draftReport instead.
+
 - draftReport → when the user reports a PROBLEM with the app/product or suggests a FEATURE/IMPROVEMENT ("there's a bug", "X is broken / not working", "this page is confusing", "it would be great if…", "can you add…", "I wish it could…"). This is about the PULSE APP ITSELF, not their ticketing data. It DRAFTS a bug/idea report the user confirms with a button — see ACTING below.
 
 - rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Pick the scope: scope='event' for a fact true only of the CURRENT event (one festival sells add-ons heavily, another is single-day); scope='user' for THIS person's own answer-style preference ("keep it short", "always lead with revenue") — that shapes style, not data; scope='client' (default) for anything about the whole client/organiser. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold appears under "What you REMEMBER…" — don't re-offer what's already there.
@@ -651,6 +654,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   // most-asked questions first (personalised quick pills), topped up with curated
   // defaults. Concrete prompts (tapping asks straight away), not tool names.
   const STARTER_DEFAULTS = [
+    { label: "What's new", icon: '✨', prompt: "What's new in Pulse?" }, // → productHelp (published release notes)
     { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
     { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
     { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },

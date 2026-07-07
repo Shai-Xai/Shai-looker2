@@ -307,6 +307,15 @@ export const api = {
   adminUpdateReleaseNote: (id, n) => fetch(`/api/admin/release-notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) }).then(json),
   adminDeleteReleaseNote: (id) => fetch(`/api/admin/release-notes/${id}`, { method: 'DELETE' }),
   adminGenerateReleaseNotes: (days) => fetch('/api/admin/release-notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }) }).then(json),
+  // Admin — Product → Help knowledge: curate + publish what the Owl may say about
+  // Pulse itself (server/helpBot.js — grounds the Owl's productHelp tool). The
+  // client self-service surface is the Owl chat itself; there's no separate bot.
+  adminHelpArticles: () => fetch('/api/admin/help/articles').then(json),
+  adminCreateHelpArticle: (a) => fetch('/api/admin/help/articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminUpdateHelpArticle: (id, a) => fetch(`/api/admin/help/articles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(a) }).then(json),
+  adminDeleteHelpArticle: (id) => fetch(`/api/admin/help/articles/${id}`, { method: 'DELETE' }),
+  adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
+  adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
