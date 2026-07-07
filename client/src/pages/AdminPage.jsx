@@ -684,7 +684,8 @@ function ProductReleaseNotes() {
     try {
       const r = await api.adminGenerateReleaseNotes(14);
       await load();
-      setGen({ busy: false, msg: r.created ? `Added ${r.created} draft${r.created === 1 ? '' : 's'} from recent commits — review and publish below.` : (r.message || 'Nothing new to add.') });
+      const bits = [r.created && `added ${r.created} draft${r.created === 1 ? '' : 's'}`, r.refreshed && `refreshed ${r.refreshed}`].filter(Boolean);
+      setGen({ busy: false, msg: bits.length ? `From recent commits: ${bits.join(', ')} — review and publish below.` : (r.message || 'Nothing new to add.') });
     } catch (e) { setGen({ busy: false, msg: e.message }); }
   };
   const add = async () => {

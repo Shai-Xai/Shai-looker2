@@ -86,8 +86,40 @@ function mount(app, { db, auth }) {
     return `https://github.com/${repo()}/issues/new?${q.toString()}`;
   }
 
+  // Recent commits from the GitHub API (newest first, merges skipped). This is the
+  // release-notes drafter's source of truth: the deployed clone's git history is
+  // SHALLOW at runtime, so a local `git log` sees almost nothing — the API always
+  // has the full picture. Returns [{ sha, date: ISO, subject, body }].
+  async function listCommits({ sinceIso, maxPages = 10 }) {
+    if (!isConfigured()) { const e = new Error('GitHub is not configured (set a token + repo in Admin).'); e.code = 'NO_GITHUB'; throw e; }
+    const out = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const q = new URLSearchParams({ since: sinceIso, per_page: '100', page: String(page) });
+      const resp = await fetch(`https://api.github.com/repos/${repo()}/commits?${q.toString()}`, {
+        headers: { Authorization: `Bearer ${token()}`, Accept: 'application/vnd.github+json', 'User-Agent': 'HowlerPulse', 'X-GitHub-Api-Version': '2022-11-28' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!resp.ok) throw new Error(`GitHub commits read failed (${resp.status})`);
+      const rows = await resp.json();
+      if (!Array.isArray(rows)) break;
+      for (const r of rows) {
+        if ((r.parents || []).length > 1) continue; // merge commit
+        const msg = String((r.commit && r.commit.message) || '');
+        const nl = msg.indexOf('\n');
+        out.push({
+          sha: r.sha,
+          date: (r.commit && ((r.commit.committer && r.commit.committer.date) || (r.commit.author && r.commit.author.date))) || '',
+          subject: (nl === -1 ? msg : msg.slice(0, nl)).trim(),
+          body: nl === -1 ? '' : msg.slice(nl + 1),
+        });
+      }
+      if (rows.length < 100) break;
+    }
+    return out;
+  }
+
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, newIssueUrl, repo, dispatchEnabled, verifyWebhook, webhookSecretSet: () => !!webhookSecret() };
+  return { isConfigured, createIssue, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, webhookSecretSet: () => !!webhookSecret() };
 }
 
 module.exports = { mount };

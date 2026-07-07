@@ -478,9 +478,11 @@ app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
 // ─── Release notes (daily product changelog — Admin → Product) ───────────────
-// Disposable module: own routes + the daily auto-draft tick (kill switch:
-// settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
-require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
+// Disposable module: own routes + the hourly auto-draft/refresh tick (kill switch:
+// settings key 'release_notes_auto'). Commits come from the GitHub API (the deploy
+// clone is shallow) via the issue bridge's token — getGithub is a thunk because the
+// bridge mounts a few lines down. Remove this line + server/releaseNotes.js.
+require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey, getGithub: () => github });
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
