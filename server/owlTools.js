@@ -1334,23 +1334,28 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
       }
       // A single cross-view breakdown (e.g. sales measure × buyer demographic) is the
       // known heavy-join shape: give the direct attempt a short leash, then CHUNK.
-      const crossFamily = dimensions.length === 1 && measureList.length === 1 && String(dimensions[0]).split('.')[0] !== String(measure).split('.')[0];
+      const crossFamily = dimensions.length === 1 && measureList.length >= 1 && String(dimensions[0]).split('.')[0] !== String(measure).split('.')[0];
       let rows; let shardNote;
+      const _q0 = Date.now();
       try {
         if (crossFamily) {
           const primary = query.runLookerQuery('/queries/run/json', body);
           primary.catch(() => { /* abandoned after the leash — don't crash the process */ });
-          rows = await Promise.race([primary, new Promise((_, rej) => setTimeout(() => rej(new Error('probe timed out (heavy cross-view join)')), 25000))]);
+          rows = await Promise.race([primary, new Promise((_, rej) => setTimeout(() => rej(new Error('probe timed out (heavy cross-view join)')), 30000))]);
         } else {
           rows = await query.runLookerQuery('/queries/run/json', body);
         }
+        // The dashboards feel instant because Looker's cache is warmed by every view;
+        // the Owl's ad-hoc shapes miss it and pay the full fan-out join each time. So
+        // keep OUR OWN slow successes warm too — common questions repeat all day.
+        if (Date.now() - _q0 > 8000 && Array.isArray(rows)) owlShard.cacheSet(cacheKey, rows, 'Slow live query kept warm.');
       } catch (e) {
         const msg = e && e.message ? String(e.message).slice(0, 140) : '';
         const timedOut = /time.{0,3}out|deadline|504|502|cancel/i.test(msg);
         // Chunked fallback: re-run the heavy query per batch of dimension values
         // (single-value filters complete fine) and merge — see server/owlShard.js.
         if (timedOut && crossFamily) {
-          const s = await owlShard.shardQuery(query, body, dimensions[0], measure).catch(() => null);
+          const s = await owlShard.shardQuery(query, body, dimensions[0], measure, { deadlineMs: 40000 }).catch(() => null);
           if (s) { rows = s.rows; shardNote = s.note; if (s.complete) owlShard.cacheSet(cacheKey, s.rows, s.note); }
         }
         if (!rows) {
