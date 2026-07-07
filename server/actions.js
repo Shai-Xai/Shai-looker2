@@ -363,9 +363,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
       audience: shapeAudience(aud),
-      // Delivery mode: 'once' = single send to the current list; 'sequence' = an
-      // automated drip (enroll abandoners, send timed steps, drop on purchase).
+      // Delivery mode: 'once' = single send; 'sequence' = automated drip (enroll, timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
+      journey: (() => { try { return body.journey ? require('./journeys').validateJourney(body.journey) : undefined; } catch { return undefined; } })(), // full branching tree (Owl journeys) — steps carry the opening sequence; the tree powers the Journeys page
       // Drip timing: 'abandonment' = anchor each person on their abandonment time
       // and only enrol FRESH ones (within freshHours); 'send' = run forward from
       // enrolment for the whole list; '' = legacy (anchor if mapped, enrol all).

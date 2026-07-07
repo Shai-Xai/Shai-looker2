@@ -926,6 +926,9 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
       audience: audience || {}, campaignMode: 'sequence', dripStart: 'send', steps,
       subject: steps[0]?.subject || journey.name, body: steps[0]?.body || '', ctaText: steps[0]?.ctaText || '',
       goal: journey.goal, eventSuiteId: String(suiteId || ''),
+      // Persist the FULL branching tree — the Journeys page lists drafts by it,
+      // and the branch-execution engine will run it. Steps above are the opening.
+      journey: { name: journey.name, goal: journey.goal, summary: journey.summary, nodes: journey.nodes },
     };
     const r = actionsApi.createDraftCampaign({ entityId, title: journey.name, config, user: req.user, via: 'owl' });
     if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the journey.' });

@@ -989,6 +989,12 @@ function JourneyActionCard({ action, suiteId }) {
   const [state, setState] = useState('');
   const [err, setErr] = useState('');
   const decisions = countDecisions(action.nodes);
+  // Broadcast the draft so the Engage → Journeys page (the live canvas) renders
+  // the tree full-size in the main body while the chat stays the assistant.
+  // Rendering an older thread re-broadcasts its journey — last card wins.
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('howler:journey-draft', { detail: action })); } catch { /* ignore */ }
+  }, [action]);
   const reach = action.reach || null;
   const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
   const create = async () => {
