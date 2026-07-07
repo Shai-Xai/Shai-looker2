@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (test-first staging → production releases) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-07 (🔗 Links grouped into categories — tiles landing on Engage → Links) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -448,6 +448,11 @@ one-by-one in the ChottuLink dashboard.
 - **Engage → Links** — clients create and manage their own links: name it, pick
   the event, paste the destination, done. Each link is **tied to a Pulse event**
   and shows its **click counts** (total / 7 / 30 days).
+- **Grouped by category** ✅ — the Links landing shows **category tiles** (link +
+  click counts per tile); tap one to drill into just that category's links, with a
+  clear **← All categories** back link. Every link starts in the **App** category
+  (they open the Howler app); file links under your own categories ("Socials",
+  "Website"…) from the link editor. Mobile-first: big tap targets, stacking tiles.
 - **UTM tags & app behaviour** built in — every link can carry campaign tags and
   choose app-vs-browser opening per platform.
 - **Import (pick & choose)** — the import screen lists everything on the
@@ -850,6 +855,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-07** — **🔗 Links grouped into categories** ✅ (Engage → Links): the Links
+  landing now opens on **category tiles** — tap one (e.g. **App**, home of every
+  Chotulink/Howler-app link) to see just that category's links, with a clear
+  **← All categories** back link. File links under your own categories from the
+  link editor (existing list or type a new one). Mobile-first; dual-surface (same
+  grouping in Admin → client → 🔗 Deep links).
 - **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
   can now be built to a **staging** environment first, checked there, then **promoted to
   production** — so changes are verified before they hit the live app. In your **My reports**

@@ -436,3 +436,24 @@ test('unconfigured client gets a clear 400, not an upstream call', async () => {
   assert.match(r.body.error, /not connected/i);
   h.db.setSetting('chottu_api_key', 'c_api_platform_key'); // restore for any later test
 });
+
+test('categories: unset files under App; set on create (cleaned); category edits stay Pulse-side', async () => {
+  // Links that never named a category display under the default "App".
+  const before = await app.req('GET', `/api/my/chottu/${entityA.id}/links`, { as: ownerA });
+  assert.ok(before.body.links.length > 0);
+  assert.ok(before.body.links.every((l) => l.category === 'App'), 'unset category displays as App');
+  // Create with an explicit category — trimmed + inner whitespace collapsed.
+  const r = await app.req('POST', `/api/my/chottu/${entityA.id}/links`, {
+    as: ownerA, body: { linkName: 'IG bio', destinationUrl: 'https://howler.co.za/event/1', path: 'cat-ig', category: '  Socials   &  bios ' },
+  });
+  assert.equal(r.status, 201);
+  assert.equal(r.body.link.category, 'Socials & bios');
+  // Re-categorising is Pulse-only — no upstream update call rides along.
+  const upstreamBefore = upstream.calls.filter((c) => c.path.startsWith('/update-link/')).length;
+  const upd = await app.req('PATCH', `/api/my/chottu/${entityA.id}/links/${r.body.link.id}`, { as: ownerA, body: { category: 'Website' } });
+  assert.equal(upd.body.link.category, 'Website');
+  assert.equal(upstream.calls.filter((c) => c.path.startsWith('/update-link/')).length, upstreamBefore, 'category change must not call ChottuLink');
+  // Clearing it sends the link home to App.
+  const cleared = await app.req('PATCH', `/api/my/chottu/${entityA.id}/links/${r.body.link.id}`, { as: ownerA, body: { category: '' } });
+  assert.equal(cleared.body.link.category, 'App');
+});
