@@ -522,6 +522,11 @@ export const api = {
   getTileZoom: (dashboardId) => fetch(`/api/my/tile-zoom/${dashboardId}`).then(json),
   saveTileZoom: (dashboardId, zoom) => fetch(`/api/my/tile-zoom/${dashboardId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zoom }) }).then(json),
   clearQueryCache: () => fetch('/api/admin/clear-query-cache', { method: 'POST' }).then(json),
+  // 🚩 Feature flags (Admin → Product → Flags) + the client's own effective map.
+  adminFlags: () => fetch('/api/admin/flags').then(json),
+  setFlagDefault: (key, value) => fetch('/api/admin/flags/default', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
+  setFlagOverride: (entityId, key, value) => fetch(`/api/admin/flags/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
+  myFlags: (entityId) => fetch(`/api/my/flags/${entityId}`).then(json),
   getSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`).then(json),
   saveSendingDomain: (entityId, body, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   verifySendingDomain: (entityId, scope = 'admin') => fetch(`${scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`}/verify`, { method: 'POST' }).then(json),

@@ -284,9 +284,13 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   // tools carry an exploreKey and are dropped when that explore is switched OFF for the
   // client in context (per-client access, checked live so a flip applies immediately).
   const owlCatalogue = require('./owlCatalogue');
+  const flags = require('./flags');
   const currentTools = (entityId) => {
     const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool]
-      .filter((t) => !t.exploreKey || owlCatalogue.exploreEnabledFor(db, t.exploreKey, entityId));
+      .filter((t) => !t.exploreKey || owlCatalogue.exploreEnabledFor(db, t.exploreKey, entityId))
+      // 🚩 Act-tools honour the client's feature flags: a switched-off action is
+      // simply NOT offered to the model, so it can't be prompted into it.
+      .filter((t) => { const fk = flags.OWL_TOOL_FLAGS[t.schema.name]; return !fk || !entityId || flags.enabled(entityId, fk); });
     return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
   };
 

@@ -54,7 +54,7 @@ test('index.js still mounts every critical disposable module (a merge must not s
   // were just gone). A dropped mount is invisible in review, so assert the load-
   // bearing modules are still wired into the composition root.
   const src = fs.readFileSync(path.join(SERVER_DIR, 'index.js'), 'utf8');
-  const mustMount = ['alerts', 'livepulse', 'eventops', 'staffAlerts', 'os', 'digests', 'goals', 'actions', 'segments'];
+  const mustMount = ['alerts', 'livepulse', 'eventops', 'staffAlerts', 'os', 'digests', 'goals', 'actions', 'segments', 'flags'];
   const missing = mustMount.filter((m) => !new RegExp(`require\\('\\./${m}'\\)\\.mount`).test(src) && !new RegExp(`require\\('\\./${m}'\\).*\\.mount`).test(src));
   assert.deepEqual(missing, [], `index.js is no longer mounting: ${missing.join(', ')} — restore the mount line`);
 });

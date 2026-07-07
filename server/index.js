@@ -173,7 +173,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser });
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); // 🚩 per-client feature flags — mounts EARLY so its route gates register before the feature modules → server/flags.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
