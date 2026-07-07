@@ -1227,7 +1227,7 @@ function SetupWizard({ fields }) {
             </div>
             {entity
               ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /><div data-tour="client-sending-domain" style={{ marginTop: 12 }}><L>Custom sending domain · optional</L><div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div></div></>
-              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
+              : <div data-tour="client-later" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1321,7 +1321,7 @@ function SetupWizard({ fields }) {
               <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
               <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
             </div>
-            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, goals &amp; alerts, links, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
           </>
         )}
 
@@ -1342,6 +1342,9 @@ const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSi
 const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+  // Only rendered BEFORE the client exists (the fields below replace it after) —
+  // the tour skips whichever of the two states isn't on screen.
+  { tour: 'client-later', icon: '🔓', title: 'The rest unlocks once created', body: 'Reporting currency, AI copy language, a vanity login URL, a login background and a custom sending domain all live right here too — they appear the moment the client is created. Hit “Create client & continue”, and come back to this step any time to set them.' },
   { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
@@ -1383,13 +1386,22 @@ const BRANDING_TOUR = [
 const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
 
 function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
-  const [i, setI] = useState(0);
+  const root = () => (container && container.current) || document;
+  // Only tour points whose [data-tour] anchor is actually on screen. A point
+  // whose section isn't rendered right now (the client fields that only appear
+  // once the client is created, the login form before "+ Add user" is pressed,
+  // the organiser picker when "All organisers" is ticked…) is SKIPPED instead of
+  // spotlighting nothing. Recomputed every render, so sections that appear
+  // mid-tour join the sequence and the step count stays honest.
+  const anchored = steps.filter((s) => root().querySelector(`[data-tour="${s.tour}"]`));
+  const seq = anchored.length ? anchored : steps; // nothing anchored → old behaviour
+  const [rawI, setI] = useState(0);
   const [rect, setRect] = useState(null);
   const last = useRef(null);
-  const cur = steps[i];
+  const i = Math.min(rawI, seq.length - 1);
+  const cur = seq[i];
 
   useEffect(() => {
-    const root = () => (container && container.current) || document;
     const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
     const el0 = find();
     if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1408,7 +1420,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
     return () => cancelAnimationFrame(raf);
   }, [i, cur.tour, container]);
 
-  const isLast = i === steps.length - 1;
+  const isLast = i === seq.length - 1;
   const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
   const cardW = Math.min(360, vw - 24);
@@ -1425,7 +1437,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
       {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
       <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {seq.length}</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
         </div>
@@ -1628,10 +1640,12 @@ function StepPreviewModal({ steps, index, onClose }) {
       case 'client': return (<>
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('client-later', <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>)}
         {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
         {sec('client-language', <>{lbl('AI copy language')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (English)</div></>)}
         {sec('client-slug', <>{lbl('Vanity login URL')}<div style={{ ...fauxInput, maxWidth: 320 }}>{window.location.host}/kunye</div></>)}
         {sec('client-loginbg', <>{lbl('Login background image')}<div style={{ width: 160, height: 90, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>background</div></>)}
+        {sec('client-sending-domain', <>{lbl('Custom sending domain · optional')}<div style={{ ...fauxInput, maxWidth: 320 }}>mail.brand.com · Verify DNS</div></>)}
       </>);
       case 'scope': return (<>
         {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
