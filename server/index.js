@@ -2427,15 +2427,14 @@ function tileCatalogueWithFields(entityId) {
 }
 // The templates a client can run, each with its audience pre-resolved + presets.
 // `prefer` ({ dashboardId, suiteId }) — when a suggestion pointed at a specific
-// dashboard/event (e.g. "Worth a look" → abandoned carts), try that one FIRST so
-// the audience resolves to exactly that event for a multi-event client.
+// dashboard/event (e.g. "Worth a look" → abandoned carts), scope the audience to
+// THAT event. A deep-linked suggestion is about ONE event, so we HARD-restrict
+// resolution to its suite: otherwise resolveAudience (first-match wins) could fall
+// through to another event's abandoned-cart tile and target the wrong crowd (e.g.
+// a Golden Hour suggestion binding Palette Range's audience). If that event has no
+// matching tile we return ready:false so the user picks — never a different event.
 function resolveActionTemplates(entityId, prefer = {}) {
-  let dashboards = tileCatalogueWithFields(entityId);
-  const { dashboardId, suiteId } = prefer;
-  if (dashboardId) {
-    const isPref = (d) => d.dashboardId === dashboardId && (!suiteId || d.suiteId === suiteId);
-    dashboards = [...dashboards.filter(isPref), ...dashboards.filter((d) => !isPref(d))];
-  }
+  const dashboards = actionTemplates.scopeDashboards(tileCatalogueWithFields(entityId), prefer);
   return actionTemplates.list().map((meta) => {
     const t = actionTemplates.get(meta.key);
     const resolved = actionTemplates.resolveAudience(t, dashboards);

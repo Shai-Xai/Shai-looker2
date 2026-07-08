@@ -53,7 +53,10 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     let cancelled = false;
     (async () => {
       let pool = templates;
-      if (initialType && initialDashboardId) {
+      // Scope the recipe to the suggestion's event whenever we know it — a suite
+      // alone is enough (a suggestion can carry an event without a dashboard), so
+      // the audience never falls through to another event's abandoned-cart tile.
+      if (initialType && (initialDashboardId || initialSuiteId)) {
         try {
           const r = await api.getActionTemplates(entityId, { dashboard: initialDashboardId, suite: initialSuiteId });
           if (r.templates) pool = r.templates;
