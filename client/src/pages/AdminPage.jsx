@@ -173,7 +173,7 @@ export default function AdminPage() {
       {tab === 'sets' && <Sets />}
       {tab === 'library' && <Library />}
       {tab === 'ai' && <AISettings />}
-      {tab === 'onboarding' && <OnboardingInsights />}
+      {tab === 'onboarding' && <OnboardingHub />}
       {tab === 'settlements' && <Settlements />}
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
@@ -259,10 +259,10 @@ const FEATURE_LABELS = {
 // Global Reminders defaults — cadence + the editable client-nudge wording. Applies
 // to every client; each client can still override the timing in its own Reminders
 // panel. Lives in the onboarding tab next to the funnel insights.
-function NudgeGlobalSettings() {
+function NudgeGlobalSettings({ defaultOpen = false }) {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [testMsg, setTestMsg] = useState('');
   useEffect(() => { api.getSetupNudgeSettings().then(setS).catch(() => setS(null)); }, []);
   if (!s) return null;
@@ -342,10 +342,10 @@ function NudgeGlobalSettings() {
 // Global onboarding-journey email settings — the welcome pack + phase-completion
 // emails every client gets as they move through the layered journey. Wording is
 // editable here; each client can be opted out in its own Onboarding journey panel.
-function OnboardingMailGlobalSettings() {
+function OnboardingMailGlobalSettings({ defaultOpen = false }) {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [testMsg, setTestMsg] = useState('');
   useEffect(() => { api.getOnboardingMailSettings().then(setS).catch(() => setS(null)); }, []);
   if (!s) return null;
@@ -413,9 +413,9 @@ function OnboardingMailGlobalSettings() {
 // Monthly activation score + medals per AM, with the team leaderboard. Every
 // number is computed from real journey/inbox data server-side; the top scorer
 // takes the Golden Owl. Recognition only — nothing here feeds comp.
-function AmScorecard() {
+function AmScorecard({ defaultOpen = false }) {
   const [data, setData] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   useEffect(() => { api.getOnboardingScorecard().then(setData).catch(() => setData(null)); }, []);
   if (!data || !(data.cards || []).length) return null;
   const me = data.cards.find((c) => c.userId === data.me);
@@ -546,20 +546,50 @@ function OnboardingCockpit() {
   );
 }
 
-function OnboardingInsights() {
+// The Onboarding hub — one tab, sub-tabbed by job: the live cockpit, the AM
+// scorecard, the two email programmes, and the two analytics reads. Each panel
+// is its own component; this is just the switchboard.
+const ONBOARDING_TABS = [
+  ['journeys', '🛩 Client journeys'],
+  ['scorecard', '🏆 AM scorecard'],
+  ['emails', '✉️ Journey emails'],
+  ['reminders', '🔔 Reminders'],
+  ['insights', '📊 Guide insights'],
+  ['features', '⚙️ Feature usage'],
+];
+function OnboardingHub() {
+  const [sub, setSub] = useState('journeys');
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, overflowX: 'auto', paddingBottom: 2 }}>
+        {ONBOARDING_TABS.map(([key, label]) => (
+          <button key={key} onClick={() => setSub(key)} style={{ ...folderChip, cursor: 'pointer', whiteSpace: 'nowrap', ...(sub === key ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff', fontWeight: 700 } : null) }}>{label}</button>
+        ))}
+      </div>
+      {sub === 'journeys' && <OnboardingCockpit />}
+      {sub === 'scorecard' && <AmScorecard defaultOpen />}
+      {sub === 'emails' && <div style={{ maxWidth: 720 }}><OnboardingMailGlobalSettings defaultOpen /></div>}
+      {sub === 'reminders' && <div style={{ maxWidth: 720 }}><NudgeGlobalSettings defaultOpen /></div>}
+      {sub === 'insights' && <GuideInsights />}
+      {sub === 'features' && <FeatureUsage />}
+    </div>
+  );
+}
+
+// Shared fetch for the telemetry-backed reads (guide funnel + feature usage).
+function useOnboardingStats() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
   useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
+  return { stats, err };
+}
+const statsFallback = (err) => <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>;
 
-  if (err || !stats) return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
-      <AmScorecard />
-      <OnboardingCockpit />
-      <OnboardingMailGlobalSettings />
-      <NudgeGlobalSettings />
-      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
-    </div>
-  );
+// How clients move through the in-app guides: the funnel per walkthrough plus
+// plain-language recommendations. Measure → recommend → a human edits guides.js.
+function GuideInsights() {
+  const { stats, err } = useOnboardingStats();
+  if (err || !stats) return statsFallback(err);
 
   // Build an ordered funnel per guide using the real step order from guides.js.
   const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
@@ -582,17 +612,11 @@ function OnboardingInsights() {
     const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
     if (g.opens >= 5 && rate < 50) recs.push(`Only ${rate}% finish “${GUIDES[id].title}” (${g.completes}/${g.opens}). It may be too long — trim it.`);
   }
-  const features = stats.features || [];
-  const topFeature = features[0];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
-      <AmScorecard />
-      <OnboardingCockpit />
-      <OnboardingMailGlobalSettings />
-      <NudgeGlobalSettings />
       <div>
-        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
+        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Guide insights</h2>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
           How clients use the welcome wizard and guides. Use this to refine the steps in <code>client/src/lib/guides.js</code>. {stats.total === 0 && 'No usage recorded yet — check back once clients have started using the wizards.'}
         </p>
@@ -638,7 +662,18 @@ function OnboardingInsights() {
           </div>
         );
       })}
+    </div>
+  );
+}
 
+// What clients actually do — the most-used features are the ones worth teaching.
+function FeatureUsage() {
+  const { stats, err } = useOnboardingStats();
+  if (err || !stats) return statsFallback(err);
+  const features = stats.features || [];
+  const topFeature = features[0];
+  return (
+    <div style={{ maxWidth: 720 }}>
       <div style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
         <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 4 }}>Feature usage</div>
         <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>What clients actually do — the most-used features are the ones worth teaching in the wizard.</p>
