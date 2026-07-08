@@ -15,6 +15,7 @@ export default function JourneyPage() {
   const entityId = activeEntityId || (user?.entityIds || [])[0] || '';
   const isMobile = useIsMobile();
   const [data, setData] = useState(null);
+  const [showLedger, setShowLedger] = useState(false);
   useEffect(() => {
     if (!entityId) { setData(null); return; }
     api.getMyJourney(entityId).then((d) => {
@@ -39,6 +40,54 @@ export default function JourneyPage() {
             <div style={{ marginLeft: 'auto', textAlign: 'right', fontSize: 12, color: 'var(--muted)', lineHeight: 1.45 }}>
               Earned by your whole team,<br />step by step. 🎁 Rewards soon.
             </div>
+          </section>
+
+          {/* Where the number comes from — the itemised ledger */}
+          <section style={{ ...cardS, padding: 0, overflow: 'hidden' }}>
+            <button type="button" onClick={() => setShowLedger((v) => !v)} aria-expanded={showLedger}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 16px', cursor: 'pointer', color: 'var(--text)' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', transform: showLedger ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800 }}>How you earned it</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>
+                {`Steps ${(data.points?.steps || 0).toLocaleString()} · Stickers ${(data.points?.phases || 0).toLocaleString()} · Badges ${(data.points?.activity || 0).toLocaleString()}`}
+              </span>
+            </button>
+            {showLedger && (
+              <div style={{ borderTop: '1px solid var(--hairline)', padding: '6px 16px 12px' }}>
+                {(data.ledger || []).length === 0 ? (
+                  <p style={{ ...hintS, margin: '8px 0 4px' }}>Nothing earned yet — every step on your Getting-started card shows what it's worth.</p>
+                ) : (
+                  (() => {
+                    const groups = [];
+                    for (const l of data.ledger) {
+                      const g = groups.find((x) => x.name === l.group);
+                      if (g) g.items.push(l); else groups.push({ name: l.group, items: [l] });
+                    }
+                    return groups.map((g) => (
+                      <div key={g.name} style={{ margin: '10px 0 0' }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{g.name}</span>
+                          <span style={{ flex: 1, borderBottom: '1px dashed var(--hairline)' }} />
+                          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>{g.items.reduce((n, x) => n + x.pts, 0).toLocaleString()} ⚡</span>
+                        </div>
+                        {g.items.map((l, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 0', fontSize: 12.5 }}>
+                            <span style={{ width: 20, textAlign: 'center', flexShrink: 0 }}>{l.icon}</span>
+                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.label}</span>
+                            {l.at && <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{new Date(l.at).toLocaleDateString()}</span>}
+                            <span style={{ fontWeight: 800, color: '#b07714', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>+{l.pts} ⚡</span>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', borderTop: '1px solid var(--hairline)', marginTop: 10, paddingTop: 8 }}>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 800 }}>Total</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--brand)', fontVariantNumeric: 'tabular-nums' }}>{(data.points?.total || 0).toLocaleString()} ⚡</span>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Sticker shelf */}

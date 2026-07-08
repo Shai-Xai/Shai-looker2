@@ -130,6 +130,10 @@ test('gamify awards stickers + points and the cockpit reads the journey', async 
   const pathfinder = r.body.stickers.find((s) => s.key === 'fundamentals');
   assert.equal(pathfinder.earned, true);
   assert.ok(r.body.points.total >= 350 + 250, 'steps + phase bonus counted');
+  // The ledger itemises the total exactly — no mystery numbers.
+  assert.equal(r.body.ledger.reduce((n, l) => n + l.pts, 0), r.body.points.total);
+  assert.ok(r.body.ledger.some((l) => l.kind === 'sticker' && /Pathfinder/.test(l.label)));
+  assert.equal(r.body.points.steps + r.body.points.phases + r.body.points.activity, r.body.points.total);
   assert.ok(r.body.unseen.some((u) => u.key === 'phase:fundamentals'), 'unlock is queued for the toast');
   await app.req('POST', `/api/my/journey/${e.id}/seen`, { as: user });
   r = await app.req('GET', `/api/my/journey/${e.id}`, { as: user });
