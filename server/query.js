@@ -98,9 +98,20 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // A filter set to this means "no constraint" — drop the field from the query
   // entirely. Sending "" instead would make Looker filter for blank values.
   const ANY_VALUE = ' __ANY_VALUE__';
+  // A range filter the user cleared to BOTH bounds empty ("[,]", "( , )", "[,)")
+  // is not a real constraint — but Looker reads an empty range as "match nothing"
+  // and zeroes the tile (the days-before-event dashboard showing 0 for a real
+  // event). Clearing a range means "no filter", so drop it like ANY_VALUE so a
+  // blanked range behaves the same as a truly-empty one. A HALF-open range
+  // ("[10,]" = >=10, "[,360]" = <=360) is a real constraint and is kept.
+  const EMPTY_RANGE = /^[[(]\s*,\s*[\])]$/;
   function stripAnyValue(filters) {
     const out = {};
-    for (const [k, v] of Object.entries(filters || {})) if (v !== ANY_VALUE) out[k] = v;
+    for (const [k, v] of Object.entries(filters || {})) {
+      if (v === ANY_VALUE) continue;
+      if (typeof v === 'string' && EMPTY_RANGE.test(v.trim())) continue;
+      out[k] = v;
+    }
     return out;
   }
 

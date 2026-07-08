@@ -915,6 +915,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **Cleared range filters no longer blank a dashboard** ✅ (fix): a
+  range filter (e.g. "Days before event") that a client cleared to empty was being
+  sent to Looker as an empty range `[,]`, which Looker reads as "match nothing" —
+  so a real event with thousands of sales showed **0**. A cleared range now correctly
+  means "no filter", matching a truly-empty one, so the data shows.
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
   **Worth a look** suggestion into a campaign no longer forces every idea into the
   abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
