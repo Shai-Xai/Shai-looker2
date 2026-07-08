@@ -150,6 +150,43 @@ export const GUIDES = {
     ],
   },
 
+  owlchat: {
+    id: 'owlchat',
+    title: 'Ask the Owl a question',
+    steps: [
+      { owl: true, title: 'Meet your analyst', body: 'The Owl 🦉 is your on-demand data analyst. Ask it anything about your numbers in plain language — “how are ticket sales pacing?”, “which price type sells best?”' },
+      { icon: '💬', title: 'Start anywhere', body: 'Tap the 🦉 on any tile or dashboard, or open a chat from your home page. It answers from your live data, never from guesswork.' },
+      { icon: '🔁', title: 'Keep digging', body: 'It’s a conversation — ask “why?”, “compare to last month”, “and by gender?” and it keeps going.' },
+    ],
+  },
+  whatsapp: {
+    id: 'whatsapp',
+    title: 'Chat to the Owl on WhatsApp',
+    steps: [
+      { icon: '💬', title: 'Your numbers, in your pocket', body: 'The same Owl that answers in Pulse can chat to you on WhatsApp — ask a question from anywhere and get the live answer back.' },
+      { icon: '🔗', title: 'Get your number linked', body: 'Linking is done by your Howler team for security. Send them a message with the WhatsApp number you want connected.', cta: { label: 'Message the team', to: '/inbox' } },
+      { icon: '🌅', title: 'Morning digests too', body: 'Once linked, you can also get your daily briefing dropped straight into WhatsApp.' },
+    ],
+  },
+  connector: {
+    id: 'connector',
+    title: 'Connect Claude or ChatGPT',
+    steps: [
+      { icon: '🔌', title: 'Pulse inside your AI assistant', body: 'Connect Pulse to Claude or ChatGPT and your assistant can answer with your live event data — dashboards, campaigns, segments, goals.' },
+      { icon: '🔑', title: 'Create a connector key', body: 'In Settings → Integrations, create an API key. That key is what you paste into Claude or ChatGPT as a connector.', cta: { label: 'Open Integrations', to: '/settings?section=integrations' } },
+      { icon: '🤖', title: 'Add it in your assistant', body: 'In Claude: Settings → Connectors → Add custom connector. In ChatGPT: Settings → Connectors. Full step-by-steps live in the API guide linked next to your keys.' },
+    ],
+  },
+  journey: {
+    id: 'journey',
+    title: 'Build your first journey',
+    steps: [
+      { icon: '🧭', title: 'What a journey is', body: 'A journey is a multi-step automation that reacts to what people do — e.g. email an abandoned cart, wait two days, then follow up differently for those who opened vs. those who didn’t.' },
+      { owl: true, title: 'Ask the Owl to draft it', body: 'The fastest way: tell the Owl what you want (“win back abandoned carts with a 3-step journey”) and it drafts the whole tree — audience, copy and branches.', cta: { label: 'Open Journeys', to: '/engage/journeys' } },
+      { icon: '✅', title: 'You stay in control', body: 'A journey is always a draft until you review and approve it. Nothing sends without your say-so.' },
+    ],
+  },
+
   goals: {
     id: 'goals',
     title: 'Set your event goals',
