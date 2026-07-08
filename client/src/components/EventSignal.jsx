@@ -1143,21 +1143,24 @@ function VenueMapView({ rows, apiBase, suiteId, day = '', onSelect }) {
   for (const r of rows) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
   // Operator mode: one timeline read per monitor (cached) gives every device its
   // station + operator + freshness — the dots fan out around their station's pin.
+  const dhrs = day ? `day:${day}` : 'start'; // 📅 operators/drills read the picked festival day, else the live event so far
   useEffect(() => {
     if (mode !== 'operator') return undefined;
     let alive = true;
-    [...new Set(sts.map((s) => s.mid))].filter((mid) => !devs[mid]).forEach((mid) => {
-      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=60`)
+    [...new Set(sts.map((s) => s.mid))].filter((mid) => !devs[`${mid}|${day}`]).forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=${dhrs}&interval=60`)
         .then((r) => r.json())
-        .then((d) => { if (alive && d) setDevs((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
-        .catch(() => { if (alive) setDevs((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
+        .then((d) => { if (alive && d) setDevs((p) => ({ ...p, [`${mid}|${day}`]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
+        .catch(() => { if (alive) setDevs((p) => ({ ...p, [`${mid}|${day}`]: { list: [], onlineMin: 15 } })); });
     });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor on first toggle
-  }, [mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per monitor+day on toggle/day change
+  }, [mode, day]);
   const devsFor = (s) => {
-    const pack = devs[s.mid]; if (!pack) return null;
-    const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+    const pack = devs[`${s.mid}|${day}`]; if (!pack) return null;
+    // Live: online = fresh in the last couple of buckets. Past day: "online" is meaningless
+    // history, so treat any device that TRADED that day as present (else every operator reads dark).
+    const isOnD = (v) => (day ? ((v.total || 0) > 0 || (v.counts || []).some(Boolean)) : (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean)));
     return pack.list.filter((v) => (v.station || '') === s.name).map((v) => ({ ...v, isOn: isOnD(v) }));
   };
   const placed = sts.filter((s) => pins[s.name]);
@@ -1654,7 +1657,7 @@ function VenueMapView({ rows, apiBase, suiteId, day = '', onSelect }) {
 // Tap a station node → the river DRILLS IN: that station's devices each become a
 // stream (labelled by operator), so you see which barman's device is pouring and
 // which is dry. ← back returns to the all-stations river.
-function FlowRiverView({ rows, apiBase, onSelect }) {
+function FlowRiverView({ rows, apiBase, onSelect, day = '' }) {
   const cvRef = useRef(null);
   const nodesRef = useRef([]);
   const rowsRef = useRef(rows); rowsRef.current = rows;
@@ -1663,16 +1666,19 @@ function FlowRiverView({ rows, apiBase, onSelect }) {
   const [loading, setLoading] = useState('');
   const drill = (s) => {
     setLoading(s.name);
-    fetch(`${apiBase}/monitors/${encodeURIComponent(s.mid)}/timeline?hours=start&interval=30&station=${encodeURIComponent(s.sn || '')}`)
+    // Past day → read that whole day's devices (else event-so-far). Day totals rank operators
+    // by who traded MOST that day; live ranks by the last hour's rate.
+    const hrs = day ? `day:${day}` : 'start';
+    fetch(`${apiBase}/monitors/${encodeURIComponent(s.mid)}/timeline?hours=${hrs}&interval=30&station=${encodeURIComponent(s.sn || '')}`)
       .then((r) => r.json()).then((d) => {
         const devs = (d && d.devices) || [];
         const onlineMin = (d && d.onlineMin) || 15;
-        const isOn = (v) => (v.lagMin != null ? v.lagMin <= onlineMin : (v.active || []).slice(-2).some(Boolean));
+        const isOn = (v) => (day ? ((v.total || 0) > 0 || (v.counts || []).some(Boolean)) : (v.lagMin != null ? v.lagMin <= onlineMin : (v.active || []).slice(-2).some(Boolean)));
         const nodes = devs.map((v) => {
           const c = v.counts || [];
-          const rate = (c[c.length - 1] || 0) + (c[c.length - 2] || 0); // last hour, txns
-          return { key: v.device, label: v.operator || v.device, sub: `${v.operator ? v.device + ' · ' : ''}${rate.toLocaleString('en-ZA')}/h`, rate, alarm: !isOn(v), warn: false };
-        }).sort((a, b) => b.rate - a.rate).slice(0, 40);
+          const rate = day ? (v.total || c.reduce((a, b) => a + (b || 0), 0)) : (c[c.length - 1] || 0) + (c[c.length - 2] || 0); // day total, or last hour live
+          return { key: v.device, label: v.operator || v.device, sub: `${v.operator ? v.device + ' · ' : ''}${rate.toLocaleString('en-ZA')}${day ? ' total' : '/h'}`, rate, alarm: !isOn(v), warn: false };
+        }).sort((a, b) => b.rate - a.rate).slice(0, 120);
         setFocus({ s, nodes });
       }).catch(() => {}).finally(() => setLoading(''));
   };
@@ -1782,7 +1788,7 @@ function FlowRiverView({ rows, apiBase, onSelect }) {
 // chain, so a blockage is visible at the exact tier it lives in. Per station the
 // busiest operators are named (dark ones always shown); the rest fold into "+n".
 const TYPE_COLS = ['#ff8fa3', '#b39ddb', '#80cbc4', '#ffd166', '#8b7cf6'];
-function CascadeView({ rows, apiBase, onSelect }) {
+function CascadeView({ rows, apiBase, onSelect, day = '' }) {
   const cvRef = useRef(null);
   const hitRef = useRef([]); // clickable node positions → station rows
   const [packs, setPacks] = useState({}); // mid -> { list, onlineMin }
@@ -1790,8 +1796,9 @@ function CascadeView({ rows, apiBase, onSelect }) {
   const packsRef = useRef(packs); packsRef.current = packs;
   useEffect(() => {
     let alive = true;
+    const hrs = day ? `day:${day}` : 'start'; // 📅 a picked day nests that day's operators under each station
     [...new Set(rows.map((r) => r.mid))].forEach((mid) => {
-      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=start&interval=30`)
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=${hrs}&interval=30`)
         .then((r) => r.json())
         .then((d) => { if (alive && d) setPacks((p) => ({ ...p, [mid]: { list: d.devices || [], onlineMin: d.onlineMin || 15 } })); })
         .catch(() => { if (alive) setPacks((p) => ({ ...p, [mid]: { list: [], onlineMin: 15 } })); });
@@ -1821,11 +1828,11 @@ function CascadeView({ rows, apiBase, onSelect }) {
           const pack = packsRef.current[s.mid];
           let ops = null;
           if (pack) {
-            const isOnD = (v) => (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean));
+            const isOnD = (v) => (day ? ((v.total || 0) > 0 || (v.counts || []).some(Boolean)) : (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean)));
             const all = pack.list.filter((v) => (v.station || '') === s.name)
-              .map((v) => { const c = v.counts || []; return { name: v.operator || v.device, rate: (c[c.length - 1] || 0) + (c[c.length - 2] || 0), on: isOnD(v) }; })
+              .map((v) => { const c = v.counts || []; return { name: v.operator || v.device, rate: day ? (v.total || c.reduce((a2, b2) => a2 + (b2 || 0), 0)) : (c[c.length - 1] || 0) + (c[c.length - 2] || 0), on: isOnD(v) }; })
               .sort((a, b) => b.rate - a.rate);
-            const named = all.filter((o, i) => i < 5 || !o.on).slice(0, 9);
+            const named = all.filter((o, i) => i < 5 || !o.on).slice(0, 12);
             const rest = all.filter((o) => !named.includes(o));
             ops = named;
             if (rest.length) ops = [...named, { name: `+${rest.length} more`, rate: rest.reduce((a2, o) => a2 + o.rate, 0), on: true, agg: true }];
@@ -1969,13 +1976,22 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
   const open = openMons.length ? openMons : (monitors || []);
   const allClosed = !openMons.length && (monitors || []).length > 0;
   const backToLive = () => { setScrubIdx(null); setReplay(null); };
+  // Once the event is fully OVER there's no live to show — land on the last festival day
+  // so River/Network/Map/Heat open on real data, not a frozen/empty "live" view. One-shot
+  // (a ref guard) so "▶ Back to LIVE" still works if the user deliberately wants it.
+  const didDefaultDay = useRef(false);
+  useEffect(() => {
+    if (didDefaultDay.current || !allClosed || day) return;
+    const last = [...new Set((monitors || []).flatMap((m) => m.days || []))].sort().slice(-1)[0];
+    if (last) { didDefaultDay.current = true; setDay(last); }
+  }, [allClosed, day, monitors]);
   // 📅 past festival days with coverage (from the observed log) — one inline picker
   // beside the view pill, driving Stations/Rhythm/deep-dives AND the Board (via the
   // replay strip, auto-parked at the day's close). Live-only views ignore it.
   const dayLbl = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
   const todaySAST = new Date(Date.now() + 2 * 3600000).toISOString().slice(0, 10);
   const dayOpts = [...new Set((monitors || []).flatMap((m) => m.days || []).filter((d) => d < todaySAST))].sort().slice(-7);
-  const dayAware = view === 'board' || view === 'stations' || view === 'rhythm' || view === 'map'; // the views a past day applies to (Map → Heat replays that day)
+  const dayAware = view === 'board' || view === 'stations' || view === 'rhythm' || view === 'map' || view === 'river' || view === 'network'; // the views a past day applies to
   useEffect(() => {
     if (day && view === 'board') setScrubIdx(1e9); // huge → PulseStrip clamps to the day's last bin, board shows its close
     else if (!day) { setScrubIdx(null); setReplay(null); }
@@ -2175,9 +2191,9 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       {/* key on the filter set: changing chips while drilled into a station's devices
           resets the river to the (re-filtered) all-stations level — otherwise the
           drill ignores the new filter and the chips look dead. */}
-      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'river' && <FlowRiverView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter + '·' + day} rows={statusRows} apiBase={apiBase} onSelect={setSel} day={day} />}
 
-      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} onSelect={setSel} />}
+      {view === 'network' && <CascadeView key={picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter + '·' + day} rows={statusRows} apiBase={apiBase} onSelect={setSel} day={day} />}
 
       {view === 'board' && <>
       <FlowMeter rows={boardRows} suiteId={(open.find((m) => m.suiteId) || {}).suiteId || ''} />
