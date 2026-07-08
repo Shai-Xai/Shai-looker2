@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-08 (Dashboard fix: cleared range filters no longer blank a tile · plus ✨ What's in Pulse feature matrix · 🎖️ Onboarding level 2 on staging) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-08 (✨ What's in Pulse feature matrix · 🎖️ Onboarding level 2 on staging) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -929,18 +929,6 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-07-08** — **Days-to-go dashboards no longer zero out after an event** ✅ (fix):
-  on a "current vs past event" dashboard with the days-to-go sync, the source tile
-  that reads "N days to go" was itself being filtered by the very days-before window
-  it sets. When that static window excluded the current event, the source read
-  nothing, the sync never fired, the window stayed wrong, and the whole Current Event
-  column showed **0** (with the "N days to go" label missing). The source now reads
-  the true days-to-go regardless of the window, so the sync fires and the data shows.
-- **2026-07-08** — **Cleared range filters no longer blank a dashboard** ✅ (fix): a
-  range filter (e.g. "Days before event") that a client cleared to empty was being
-  sent to Looker as an empty range `[,]`, which Looker reads as "match nothing" —
-  so a real event with thousands of sales showed **0**. A cleared range now correctly
-  means "no filter", matching a truly-empty one, so the data shows.
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
   **Worth a look** suggestion into a campaign no longer forces every idea into the
   abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands

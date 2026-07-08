@@ -133,13 +133,6 @@ export default function ViewPage() {
     if (!src?.query) return;
     const overrides = {};
     for (const [fname, qfield] of Object.entries(src.listenTo || {})) {
-      // Self-deadlock guard: NEVER gate the days-to-go source tile by the very
-      // days-before filter this sync SETS. If the current static window (e.g.
-      // "[-3,360]") excludes the event, the source returns nothing → n is null →
-      // the sync bails → the window is never corrected → the current-event tiles
-      // read 0 forever (and the "N days to go" label vanishes). Force it to ANY so
-      // the source reads the true days-to-go, then apply-mode drives the real window.
-      if (sync.mode === 'apply' && sync.filterName && fname === sync.filterName) { overrides[qfield] = ANY_VALUE; continue; }
       const v = baseVals[fname];
       if (v === ANY_VALUE) overrides[qfield] = ANY_VALUE;
       else if (v && String(v).trim()) overrides[qfield] = String(v).trim();
