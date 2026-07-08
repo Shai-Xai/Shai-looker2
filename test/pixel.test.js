@@ -102,6 +102,46 @@ test('gated consent mode ships the consent gate', async () => {
   assert.ok(out.text.includes('"consent":"gated"') && out.text.includes('pulseGrantConsent'), 'gated loader waits for consent');
 });
 
+// ── hosted test page ───────────────────────────────────────────────────────────
+
+test('test page installs the snippet and reflects the entity config', async () => {
+  const h = makeHarness({ integrations: { e1: { pixelMetaId: '111', pixelTiktokId: 'C4A7' } } });
+  const out = await h.invoke('GET /px-test', { query: { e: 'e1' }, user: null });
+  assert.match(out.headers['Content-Type'], /text\/html/);
+  assert.ok(out.text.includes('/px.js?e=e1'), 'the real snippet is on the page');
+  assert.ok(out.text.includes('chk-fbq') && out.text.includes('chk-ttq'), 'diagnostics for configured pixels');
+  assert.ok(!out.text.includes('chk-gtag'), 'no diagnostic for an unconfigured platform');
+  assert.ok(out.text.includes('data-pulse-event="Lead"'), 'exercises the attribute binding');
+});
+
+test('test page in gated mode shows the consent button; unknown entity gets help text', async () => {
+  const h = makeHarness({ integrations: { e1: { pixelMetaId: '111', pixelConsent: 'gated' } } });
+  const gated = await h.invoke('GET /px-test', { query: { e: 'e1' }, user: null });
+  assert.ok(gated.text.includes('Grant consent'), 'gated mode surfaces the consent button');
+  const ghost = await h.invoke('GET /px-test', { query: { e: 'nope' }, user: null });
+  assert.equal(ghost.status, 200);
+  assert.match(ghost.text, /Unknown client/);
+});
+
+test('test page escapes a hostile entity name', async () => {
+  const h = makeHarness({ entities: ['e1'] });
+  // getEntity returns name = id in the harness; swap in a hostile name.
+  const out = await (async () => {
+    const Database2 = require('better-sqlite3');
+    const sqlite = new Database2(':memory:');
+    const db = { db: sqlite, getEntity: (id) => (id === 'e1' ? { id, name: '<script>alert(1)</script>' } : null), getEntityIntegrations: () => ({}) };
+    const routes = {};
+    const cap = (m) => (p, ...hs) => { routes[`${m} ${p}`] = hs; };
+    pixel.mount({ get: cap('GET'), post: cap('POST'), put: cap('PUT'), delete: cap('DELETE') }, { db, auth: { requireAdmin: (q, s, n) => n(), requireAuth: (q, s, n) => n() }, rateLimit: () => (q, s, n) => n(), meta: { connection: () => ({}) }, tiktok: { connection: () => ({}) } });
+    const o = { headers: {}, text: '' };
+    const res = { setHeader: (k, v) => { o.headers[k] = v; }, send: (t) => { o.text = t; }, status: () => res, json: () => res, end: () => res };
+    await routes['GET /px-test'][0]({ query: { e: 'e1' }, protocol: 'https', get: () => 'pulse.test' }, res);
+    return o;
+  })();
+  assert.ok(!out.text.includes('<script>alert(1)</script>'), 'name is HTML-escaped');
+  assert.ok(out.text.includes('&lt;script&gt;'), 'escaped form present');
+});
+
 // ── event collection ───────────────────────────────────────────────────────────
 
 test('collector inserts whitelisted events and ignores junk', async () => {

@@ -585,6 +585,7 @@ function PulsePixelSection({ collapsible, lockProps, value, pixelEntityId, pxMet
       {onPixelStatus && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
           <button type="button" style={packBtn} onClick={checkInstall} disabled={pxStatus === 'checking'}>{pxStatus === 'checking' ? 'Checking…' : 'Check install'}</button>
+          <a href={`${typeof window !== 'undefined' ? window.location.origin : ''}/px-test?e=${pixelEntityId}`} target="_blank" rel="noreferrer" style={{ ...packBtn, textDecoration: 'none', display: 'inline-block' }} title="A hosted page with this client's snippet already installed — fire test events and watch the diagnostics">🧪 Open test page ↗</a>
           {live && <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--success, #10b981)' }}>✓ Receiving events — last {new Date(pxStatus.lastEventAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {pxStatus.events24h} in 24h</span>}
           {pxStatus && pxStatus !== 'checking' && !pxStatus.error && !pxStatus.lastEventAt && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>No events received yet — install the snippet, then open the site once.</span>}
           {pxStatus?.error && <span style={{ fontSize: 12.5, color: 'var(--error, #ef4444)' }}>✗ {pxStatus.error}</span>}
