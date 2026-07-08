@@ -21,11 +21,21 @@ export default function OnboardingCard({ entityId }) {
   // per entity so it stays the way you left it.
   const [open, setOpen] = useState(false);
   const [openPhase, setOpenPhase] = useState(null); // phase key the user opened, or null → current
+  const [journey, setJourney] = useState(null); // badges + points (gamification layer)
+  const [toast, setToast] = useState(null); // a just-unlocked badge to celebrate
   useEffect(() => {
-    if (!entityId) { setData(null); return; }
+    if (!entityId) { setData(null); setJourney(null); return; }
     setOpen(localStorage.getItem(`howler_onboarding_open:${entityId}`) === '1');
     setOpenPhase(null);
     api.getMyOnboarding(entityId).then(setData).catch(() => setData(null));
+    // The shelf summary also sweeps for new awards — surface the first unseen one.
+    api.getMyJourney(entityId).then((j) => {
+      setJourney(j);
+      if ((j.unseen || []).length) {
+        setToast(j.unseen[0]);
+        api.ackMyJourney(entityId).catch(() => {});
+      }
+    }).catch(() => setJourney(null));
   }, [entityId]);
   const toggle = () => setOpen((v) => { const n = !v; localStorage.setItem(`howler_onboarding_open:${entityId}`, n ? '1' : '0'); return n; });
 
@@ -50,7 +60,10 @@ export default function OnboardingCard({ entityId }) {
     <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 4px', opacity: s.done ? 0.62 : 1 }}>
       <span style={{ fontSize: 18, width: 24, textAlign: 'center', flexShrink: 0 }}>{s.done ? '✅' : s.icon}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, textDecoration: s.done ? 'line-through' : 'none' }}>{s.title}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, textDecoration: s.done ? 'line-through' : 'none' }}>
+          {s.title}
+          {!s.done && s.pts ? <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 800, color: '#b07714', whiteSpace: 'nowrap' }}>+{s.pts} ⚡</span> : null}
+        </div>
         {!s.done && <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.4 }}>{s.desc}</div>}
       </div>
       {!s.done && (
@@ -76,6 +89,12 @@ export default function OnboardingCard({ entityId }) {
           </span>
         </button>
         <span style={{ flex: 1 }} />
+        {journey && (
+          <button type="button" onClick={() => navigate('/journey')} title="Your stickers, badges & points"
+            style={{ background: 'rgba(var(--brand-rgb),0.09)', border: '1px solid rgba(var(--brand-rgb),0.3)', color: 'var(--brand)', fontSize: 12, fontWeight: 800, padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontVariantNumeric: 'tabular-nums' }}>
+            ⚡ {(journey.points?.total || 0).toLocaleString()}
+          </button>
+        )}
         <button type="button" onClick={dismiss} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, cursor: 'pointer' }}>Dismiss</button>
       </div>
       <div style={{ height: 6, borderRadius: 999, background: 'rgba(128,128,128,0.15)', overflow: 'hidden', marginBottom: open ? 14 : 0 }}>
@@ -90,7 +109,11 @@ export default function OnboardingCard({ entityId }) {
             <div key={p.key} style={{ border: expanded ? '1.5px solid var(--brand)' : '1px solid var(--hairline)', borderRadius: 12, overflow: 'hidden', opacity: state === 'next' && !expanded ? 0.75 : 1 }}>
               <button type="button" onClick={() => setOpenPhase(expanded ? '__none' : p.key)} aria-expanded={expanded}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: p.complete ? 'rgba(var(--brand-rgb),0.07)' : 'none', border: 'none', padding: '11px 12px', cursor: 'pointer', color: 'var(--text)', minHeight: 44 }}>
-                <span style={{ fontSize: 17, flexShrink: 0 }}>{p.complete ? '✅' : p.icon}</span>
+                {p.complete && p.sticker ? (
+                  <span title={`${p.sticker} — earned!`} style={{ width: 26, height: 26, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, flexShrink: 0, background: 'radial-gradient(circle at 32% 28%, rgba(255,255,255,0.55), rgba(255,255,255,0) 55%), linear-gradient(150deg, #ff5d7c, #d81b4b)', border: '1.5px solid #fff', boxShadow: 'var(--shadow-sm)' }}>{(p.sticker || '').split(' ')[0]}</span>
+                ) : (
+                  <span style={{ fontSize: 17, flexShrink: 0 }}>{p.complete ? '✅' : p.icon}</span>
+                )}
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontSize: 13.5, fontWeight: 800 }}>
                     <span style={{ color: 'var(--muted)', fontWeight: 700 }}>Phase {i + 1} · </span>{p.title}
@@ -113,6 +136,17 @@ export default function OnboardingCard({ entityId }) {
       </div>
       )}
       {guide && <GuideModal guide={guide} entityId={entityId} onClose={() => setGuide(null)} />}
+      {toast && (
+        <div role="status" style={{ position: 'fixed', left: 14, right: 14, bottom: 18, zIndex: 60, maxWidth: 380, margin: '0 auto', display: 'flex', gap: 11, alignItems: 'center', padding: '13px 15px', borderRadius: 16, background: 'var(--card)', border: '1.5px solid var(--brand)', boxShadow: 'var(--shadow-sm)' }}>
+          <span style={{ fontSize: 22 }}>🎉</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>{toast.label} unlocked!</div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>+{toast.points} ⚡ · see your shelf in Your journey</div>
+          </div>
+          <button type="button" onClick={() => { setToast(null); navigate('/journey'); }} style={goBtn}>View</button>
+          <button type="button" onClick={() => setToast(null)} style={{ ...tickBtn, padding: '6px 9px' }} aria-label="Dismiss">✕</button>
+        </div>
+      )}
     </section>
   );
 }
