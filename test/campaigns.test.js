@@ -352,7 +352,12 @@ test('a phone-only SMS opt-out is enforced at the next send, across number forma
   h.db.setSetting('unsub_secret', 'test-unsub-secret');
   const payload = Buffer.from(JSON.stringify({ e: '082 555 0001', n: ent.id })).toString('base64url');
   const sig = require('crypto').createHmac('sha256', 'test-unsub-secret').update(payload).digest('base64url').slice(0, 16);
-  const un = await app.req('GET', `/u/${payload}.${sig}`, {});
+  // GET is just the confirm page — link scanners prefetching it must NOT
+  // unsubscribe anyone. The button POSTs, and THAT records the opt-out.
+  const preview = await app.req('GET', `/u/${payload}.${sig}`, {});
+  assert.equal(preview.status, 200);
+  assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM action_suppressions WHERE entity_id=?').get(ent.id).n, 0);
+  const un = await app.req('POST', `/u/${payload}.${sig}`, {});
   assert.equal(un.status, 200);
   // Stored canonicalised (normalised msisdn), so any later format matches.
   const sup = h.db.db.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(ent.id).map((r) => r.email);

@@ -104,53 +104,65 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 
 ## 🟡 Hardening (schedule, don't rush)
 
-- [ ] Drip sequences: advance `next_at` BEFORE sending (claim-first, like the
-  digest scheduler) so a deploy mid-batch can't re-send a step; enforce the
-  SMS cap on sequence runs; ledger drip sends per step.
-- [ ] HTML-escape merge-field values in `html`/`blocks` email modes (recipient
-  name containing markup currently renders live in the branded email).
-- [ ] `/u` unsubscribe fires on bare GET — corporate link scanners prefetch it
-  and silently unsubscribe people. Render a confirm button that POSTs (the
-  RFC 8058 one-click POST is already supported). Also: the "has an unsub
-  link" check is `/unsubscrib/i` on the copy — detect an actual `/u/` href
-  instead.
-- [ ] Dry-render the first recipient at approve time and reject if any
-  `{{token}}` survives (typo'd merge tags currently ship literally).
-- [ ] Minimum password length in `db.createUser` (only the reset flow enforces
-  ≥8 today; admin/team creation accepts anything).
-- [ ] Real Content-Security-Policy (`default-src 'self'; script-src 'self'`)
-  — currently only `frame-ancestors`; React escaping is the sole XSS defence.
-- [ ] Inbound-email webhook: drop `req.query.secret` (leaks into logs), accept
-  header/body only, compare with `timingSafeEqual` (`server/os.js:648`).
-- [ ] Pin `{ algorithms: ['HS256'] }` on the embed-token `jwt.verify`
-  (`server/auth.js:153`) — the session path already does.
-- [ ] bcrypt cost 10 → 12 (rehash on login); dummy-compare for unknown users
-  to equalise login timing.
-- [ ] Stop parsing campaign `config` (which can hold 2MB base64 hero images)
-  on every open-pixel hit (`server/actionTracking.js` trackedAction) and stop
-  shipping image blobs in the campaign list; move images to the existing
-  `/mail-assets` storage.
-- [ ] Ticket upload body limit 150MB → ~25MB (`server/tickets.js:134`) — two
-  concurrent big uploads can OOM the 512MB instance.
-- [ ] Looker queue: cap depth + add a wait deadline (~15s interactive) so a
-  Looker outage fails fast instead of stacking minute-long spinners
-  (`server/looker.js` requestQueue).
-- [ ] Sweep unwrapped `async (req, res)` handlers into `asyncHandler`
-  (goals.js, digests.js, owlUploads.js, fanOwl.js) — an escaped rejection
-  hangs the request.
-- [ ] `assignPromo` check-then-write: make the UPDATE conditional
-  (`AND email=''`) so a future `await` between check and write can't hand two
-  people one promo code.
+- [x] Drip sequences claim-first — **Done 2026-07-08:** `next_at`/`step_index`
+  advance atomically BEFORE the send (a deploy mid-batch now misses a step,
+  never duplicates one — same trade the digest scheduler makes), and the
+  per-client SMS cap is enforced on sequence runs (campaign-lifetime count).
+- [x] HTML-escape merge fields in `html`/`blocks` modes — **Done 2026-07-08:**
+  substituted recipient values are escaped (and use function replacers, so
+  `$&`-style values can't expand); template mode already escaped downstream.
+- [x] `/u` unsubscribe on bare GET — **Done 2026-07-08:** GET renders a
+  confirm page whose button POSTs; suppression only happens on POST (human
+  confirm or the RFC 8058 one-click), so scanner prefetches are harmless. The
+  custom-HTML "has an unsub link" check now looks for the recipient's actual
+  `/u/` URL, not the word "unsubscribe".
+- [x] Approve-time dry render — **Done 2026-07-08:** the first recipient is
+  rendered before the send claims; any surviving `{{token}}` blocks with a
+  clear error. (One-off blasts; drip steps still rely on preview.)
+- [x] Password policy + bcrypt — **Done 2026-07-08:** ≥8 chars enforced in
+  `db.createUser`/`updateUser` (every path); bcrypt cost 10→12 with lazy
+  rehash on login; unknown-email logins burn a dummy compare so timing can't
+  enumerate accounts.
+- [x] CSP — **Done 2026-07-08:** `script-src 'self' https://apis.google.com
+  https://www.gstatic.com; object-src 'none'; base-uri 'self'` app-wide
+  (Google hosts = Drive picker). No `default-src` on purpose (data-URL logos,
+  inline styles, ECharts stay open). The few server-rendered pages with their
+  own inline scripts (digest feedback, sales/docs pages) relax per-response
+  via `allowInlineScripts`.
+- [x] Inbound-email webhook secret — **Done 2026-07-08:** header/body only
+  (no more `?secret=` in logs), `timingSafeEqual` compare, fails closed when
+  unconfigured.
+- [x] Embed-token HS256 pin — **Done 2026-07-08** (verify + sign).
+- [x] Tracking hot path — **Done 2026-07-08:** `/o` and `/c` no longer parse
+  the full campaign `config` (which can hold MB of base64 imagery) per hit —
+  only the small fields via `json_extract`. (Moving images out of `config`
+  into `/mail-assets` storage remains a nice-to-have.)
+- [x] Ticket upload cap — **Done 2026-07-08:** server 150MB→60MB, client
+  20MB/file + 40MB total (was 30MB/file, no total).
+- [x] Looker queue — **Done 2026-07-08:** bounded queue (100 waiters) + 20s
+  wait deadline; beyond either, a friendly retryable "data engine is busy"
+  error instead of minute-long spinners. Tune via `LOOKER_QUEUE_MAX` /
+  `LOOKER_QUEUE_WAIT_MS`.
+- [x] asyncHandler sweep — **Done 2026-07-08:** the unwrapped async handlers
+  in goals.js (6), digests.js, owlUploads.js (2) and fanOwl.js wrapped.
+- [x] `assignPromo` conditional claim — **Done 2026-07-08** (`AND email=''`,
+  retries the next free code on a lost race).
+- [x] Stuck-job sweep — **Done 2026-07-08:** boot + daily sweep pages ops for
+  scheduled jobs stuck in `started:…` older than 15 min
+  (`server/retention.js`).
+- [x] Retention pruning — **Done 2026-07-08:** daily prune (`ai_usage` +
+  `usage_events` > 13 months, `action_opens`/`clicks` > 12 months —
+  campaign headline counters live on the action row and survive).
+  Deliberately NOT pruned: `os_attachments` + settlement PDFs — client
+  business data; deleting it is a product decision.
 - [ ] Backup cadence: nightly = up to 24h data loss. Cheap: second
   `BACKUP_HOUR_UTC` run. Better: Litestream → R2 for continuous replication.
-- [ ] Boot sweep for jobs stuck in `last_status LIKE 'started:%'` older than
-  ~15 min (a crash mid-digest currently leaves no trace anyone acts on).
 - [ ] Second dedupe pass on `both`-channel sends: the same human appearing
-  once email-only and once phone-only is still contacted twice.
-- [ ] Retention/pruning for the unbounded growers: `ai_usage`,
-  `usage_events`, `os_attachments` (files on disk), settlement PDFs
-  (base64 in-DB), `action_opens`/`action_clicks` (the 5GB disk +
-  watchdog buys time; pruning closes it).
+  once email-only and once phone-only is still contacted twice. (Needs a
+  shared identity across the two rows — a data-model question, not a quick
+  fix; formats of the SAME contact do dedupe since the normalised-phone key.)
+- [ ] Move campaign hero/block images out of the `config` JSON into
+  `/mail-assets` storage so the campaign LIST stops shipping image blobs.
 
 ## ⚪ Accepted limits (revisit as client count grows)
 

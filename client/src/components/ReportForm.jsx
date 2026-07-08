@@ -12,7 +12,10 @@ const TYPES = [
   ['idea', '💡 Idea', 'A new capability or innovation'],
 ];
 const URGENCIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
-const MAX_FILES = 4, MAX_MB = 30;
+// Per-file and TOTAL caps. Attachments ride as base64 JSON to a small server —
+// the server parses the whole body in memory (60mb limit there), so the total
+// here must stay comfortably under it after the ~1.37× base64 overhead.
+const MAX_FILES = 4, MAX_MB = 20, MAX_TOTAL_MB = 40;
 const MAX_REC_SECS = 45; // cap a screen recording so the upload stays small
 // Screen recording uses getDisplayMedia — desktop browsers only (mobile Safari/
 // Chrome don't expose it). On a phone the video-file picker records via camera.
@@ -81,7 +84,12 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
       try {
         // Downscale images to keep the upload small; videos pass through as-is.
         const data = isImage ? await downscaleImage(f) : await readAsDataURL(f);
-        setFiles((prev) => prev.length < MAX_FILES ? [...prev, { name: f.name, mime: isImage ? 'image/jpeg' : f.type, data, isImage }] : prev);
+        setFiles((prev) => {
+          if (prev.length >= MAX_FILES) return prev;
+          const total = prev.reduce((n, x) => n + (x.data?.length || 0), 0) + data.length;
+          if (total > MAX_TOTAL_MB * 1024 * 1024 * 1.37) { setError(`Attachments together must stay under ${MAX_TOTAL_MB}MB — remove one first.`); return prev; }
+          return [...prev, { name: f.name, mime: isImage ? 'image/jpeg' : f.type, data, isImage }];
+        });
       } catch { setError('Could not read that file.'); }
     }
   }

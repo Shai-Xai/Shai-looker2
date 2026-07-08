@@ -152,7 +152,7 @@ function endImpersonation(req, res) {
 // attachUser accepts it below and marks the request `req.embedAuth`.
 const EMBED_TOKEN_TTL_S = 2 * 60 * 60; // one working session; the portal mints a fresh one per open
 function issueEmbedToken(user, ttlSeconds = EMBED_TOKEN_TTL_S) {
-  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { expiresIn: ttlSeconds });
+  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { algorithm: 'HS256', expiresIn: ttlSeconds });
 }
 
 // Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
@@ -194,7 +194,8 @@ function attachUser(req, _res, next) {
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers?.authorization || '');
     if (m && m[1].split('.').length === 3) {
       try {
-        const p = jwt.verify(m[1], getSecret());
+        // HS256 pinned — same algorithm-confusion defence as the session path.
+        const p = jwt.verify(m[1], getSecret(), { algorithms: ['HS256'] });
         if (p.emb) { req.user = cachedUser(p.sub) || null; req.embedAuth = !!req.user; }
       } catch { /* not an embed token — ignore */ }
     }
