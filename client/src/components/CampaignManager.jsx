@@ -5,7 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
-import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening } from './JourneyTree.jsx';
+import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening, flattenMessages as journeyFlatten } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -437,7 +437,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const [rates, setRates] = useState(null); // per-channel rate card → estimated cost before send
   useEffect(() => { api.getMyBilling(entityId).then(setRates).catch(() => setRates(null)); }, [entityId]);
   const [preview, setPreview] = useState('');
-  const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
+  const [previewAll, setPreviewAll] = useState(() => !!cfg.journey?.nodes?.length); // sequence: render every step (journeys: on by default — branch emails must preview too)
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
   const [previewSms, setPreviewSms] = useState(''); // rendered SMS text (channel = sms)
   const [stepPreviews, setStepPreviews] = useState([]); // [{label, html|sms}]
@@ -557,22 +557,27 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), JSON.stringify(f.theme), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
+  // Journey campaigns preview the WHOLE tree — every message node, branches
+  // included, labelled with its branch path — not just the opening trunk.
   useEffect(() => {
     if (!previewAll || !isSequence) return;
     let alive = true;
     const base = payload();
+    const isJourney = f.journey?.nodes?.length > 0;
+    const list = isJourney
+      ? journeyFlatten(f.journey.nodes).map((n, i) => ({ ...n, __label: `${i + 1}. ${n.branchPath ? `if ${n.branchPath} · ` : ''}${n.channel === 'sms' ? 'SMS' : 'Email'} · +${n.delayHours % 24 === 0 && n.delayHours >= 24 ? `${n.delayHours / 24}d` : `${n.delayHours}h`}` }))
+      : f.steps.map((st, i) => ({ ...st, __label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}` }));
     (async () => {
       const out = [];
-      for (let i = 0; i < f.steps.length; i++) {
-        const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
-        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
-        catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
+      for (const st of list) {
+        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || (st.channel === 'sms' ? st.body : ''), ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', ...(st.channel ? { channel: st.channel } : {}), ...(st.ctaUrl ? { ctaUrl: st.ctaUrl } : {}) };
+        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: st.__label, html: r.html || '', sms: r.sms || '' }); }
+        catch { out.push({ label: st.__label, html: '', sms: '' }); }
       }
       if (alive) setStepPreviews(out);
     })();
     return () => { alive = false; };
-  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.journey), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);

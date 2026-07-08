@@ -157,6 +157,30 @@ test('engine: timeout branch fires only after the window expires (SMS per-node c
   assert.equal(row(sql, 'a2', 'q@x.com').status, 'done');
 });
 
+test('engine: an in_segment branch watches its OWN list (authored order, per-branch segments)', async () => {
+  const sql = makeDb();
+  const journey = j.validateJourney({ name: 'T', nodes: [
+    msg({ subject: 'opener' }),
+    { type: 'decision', question: 'On the attended list?', waitHours: 24, branches: [
+      { label: 'Attended', when: 'in_segment', segmentName: 'Attended', segmentId: 'seg9', nodes: [msg({ subject: 'thanks-for-coming' })] },
+      { label: 'No response', nodes: [msg({ subject: 'missed-you' })] },
+    ] },
+  ] });
+  const a = { id: 'a4', entityId: 'e1', title: 'T', config: { journey }, results: {} };
+  const reachable = new Map([['in@x.com', { emailOk: true, attributes: {} }], ['out@x.com', { emailOk: true, attributes: {} }]]);
+  const { deps, sends } = makeDeps(sql, { reachable, convSet: new Set() });
+  deps.sysUser = { role: 'admin' };
+  deps.audienceFor = async (entityId, cfg) => (cfg.audience.segmentId === 'seg9' ? { list: [{ email: 'in@x.com' }] } : { list: [] });
+  enrol(sql, 'a4', 'in@x.com'); enrol(sql, 'a4', 'out@x.com');
+  await j.processAction(a, deps); // openers send, both park at the decision
+  sql.prepare("UPDATE action_enrollments SET next_at=?").run(new Date(Date.now() - 1000).toISOString());
+  await j.processAction(a, deps); // in@ is on the watched list → routed; out@ keeps waiting
+  const subjects = sends.map((s) => s.subject);
+  assert.ok(subjects.includes('thanks-for-coming'), 'segment member routed down the in_segment branch');
+  assert.ok(!subjects.includes('missed-you'), 'non-member has not taken the timeout branch yet');
+  assert.equal(row(sql, 'a4', 'out@x.com').status, 'active');
+});
+
 test('engine: attribute split routes VIP vs everyone-else instantly; bought routes to converted', async () => {
   const sql = makeDb();
   const journey = j.validateJourney({ name: 'T', nodes: [

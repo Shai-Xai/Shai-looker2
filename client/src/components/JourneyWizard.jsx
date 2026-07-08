@@ -62,6 +62,12 @@ export default function JourneyWizard({ entityId }) {
     } catch (e) { setLiveState('error'); setLiveErr((e && e.message) || 'Could not create the draft.'); }
   };
   const duplicate = async (a) => { try { await api.duplicateAction(entityId, a.id); loadDrafts(); } catch { /* list unchanged */ } };
+  const [confirmDel, setConfirmDel] = useState(null); // two-tap delete: first tap arms, second deletes
+  const del = async (a) => {
+    if (confirmDel !== a.id) { setConfirmDel(a.id); setTimeout(() => setConfirmDel((c) => (c === a.id ? null : c)), 4000); return; }
+    setConfirmDel(null);
+    try { await api.deleteAction(entityId, a.id); loadDrafts(); } catch { /* list unchanged */ }
+  };
 
   const liveDecisions = live ? countDecisions(live.nodes) : 0;
 
@@ -129,6 +135,7 @@ export default function JourneyWizard({ entityId }) {
                     <button onClick={() => toggleDraft(a, open)} style={{ ...smallBtn, ...(open ? { background: 'var(--brand)', color: '#fff', borderColor: 'var(--brand)' } : {}) }}>{open ? 'Hide tree' : '🧭 View tree'}</button>
                     <button onClick={() => duplicate(a)} style={smallBtn}>Duplicate</button>
                     <a href={`/engage/campaigns?action=${a.id}`} style={{ ...smallBtn, textDecoration: 'none', display: 'inline-block' }}>Edit in Campaigns</a>
+                    <button onClick={() => del(a)} style={{ ...smallBtn, ...(confirmDel === a.id ? { background: '#dc2626', color: '#fff', borderColor: '#dc2626' } : { color: '#dc2626' }) }}>{confirmDel === a.id ? 'Really delete?' : 'Delete'}</button>
                   </div>
                   {j.summary && !open && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>{j.summary}</div>}
                   {open && (() => {

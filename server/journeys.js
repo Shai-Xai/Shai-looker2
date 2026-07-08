@@ -40,7 +40,13 @@ function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }
           label: String(b?.label || 'Branch').slice(0, 60),
           ...(kind === 'split'
             ? { values: Array.isArray(b?.values) && b.values.length ? b.values.slice(0, 12).map((v) => String(v).slice(0, 80)) : null } // null = "everyone else"
-            : { when: ['bought', 'clicked', 'opened', 'timeout'].includes(b?.when) ? b.when : inferWhen(b?.label) }),
+            : {
+              when: ['bought', 'clicked', 'opened', 'timeout', 'in_segment'].includes(b?.when) ? b.when : inferWhen(b?.label),
+              // 'in_segment': this branch watches its OWN list — fires when the person
+              // is currently in that saved segment (e.g. a "Buyers" segment, an
+              // attended-list). Different decisions can watch different segments.
+              ...(b?.when === 'in_segment' ? { segmentName: String(b.segmentName || '').slice(0, 120), segmentId: String(b.segmentId || '').slice(0, 60) } : {}),
+            }),
           nodes: cleanNodes(b?.nodes, depth + 1, ctx),
         }))
         .filter((b) => b.nodes.length);
@@ -66,6 +72,8 @@ function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }
         ctaText: String(n.ctaText || '').slice(0, 60),
         heroImage: String(n.heroImage || '').slice(0, 1500000), // per-mailer artwork (data-URL/URL) — renders via the existing per-step hero path
         ctaUrl: String(n.ctaUrl || '').slice(0, 500), // per-mailer link override (falls back to the campaign buy link)
+        contentMode: n.contentMode === 'html' ? 'html' : 'template', // per-mailer: built template or full custom HTML
+        customHtml: String(n.customHtml || '').slice(0, 300000), // rendered via the existing per-step html path (links auto-tracked, unsubscribe guaranteed)
       });
     }
   }
@@ -158,7 +166,7 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
   const schema = {
     name: 'draftJourney',
     description:
-      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION, which comes in two kinds: (a) BEHAVIOUR — waits then branches on what they DID: {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label, when:"bought"|"clicked"|"opened"|"timeout", nodes:[...]}]} — always include a when on each branch ("timeout" = no response, the catch-all); (b) SPLIT — forks INSTANTLY on who they ARE: {type:"decision", kind:"split", question (e.g. "VIP or GA?"), field: a curated dimension (e.g. "core_ticket_types.name", buyer city/country, age, gender), branches:[{label, values:["VIP","VVIP"], nodes:[...]}, {label:"Everyone else", values:null, nodes:[...]}]} — use a split when the user wants different treatment per ticket type/category, gender, age or location (e.g. VIPs get one flow, GA another). 2-3 branches per decision (max 4); nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. TARGETING — establish the audience BEFORE calling this tool (it is the heart of the journey; ask the user one short question if they haven\'t named who it\'s for): pass segmentName for an EXISTING saved segment, OR filters to build a NEW cohort from curated dimensions (e.g. {"core_purchasers.country":"Spain"}) — on confirm the cohort is auto-SAVED as a reusable segment and the journey pointed at it, so tell the user the segment gets saved too. Provide at most ONE of segmentName/filters; contact/PII fields cannot define the audience. Only draft without an audience if the user explicitly wants to pick it later in Engage. The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it: give one line on the flow, STATE the audience size from the returned reach and that a new cohort will be saved as a segment in Engage → Segments, ask the user to confirm the audience is right (or offer: another saved segment, refined filters, or building it from a dashboard tile\'s 🎯 Create segment button / an uploaded list in Engage → Segments, then targeting it here by name), and tell them to tap the button. If reach is zero/missing, flag it and verify the filter values before proceeding.',
+      'DRAFT a multi-step, multi-channel marketing JOURNEY (an automated sequence with branching), for the user to confirm — you do NOT send or activate anything. Use when the user wants an automated flow with steps/conditions over time ("abandoned cart: email, then SMS if they don\'t open", "win-back with a follow-up for non-openers") rather than a single blast (that\'s draftCampaign). YOU author the whole tree, copy included, as the tool input: `nodes` is an ordered array where each node is EITHER a MESSAGE {type:"message", channel:"email"|"sms", delayHours, subject (email only, <60 chars), body (email 50-120 words / SMS <=300 chars; may use {{name}} once and {{ticketType}} if natural; no invented prices/discounts), ctaText (2-4 words)} OR a DECISION, which comes in two kinds: (a) BEHAVIOUR — waits then branches on what they DID: {type:"decision", question (e.g. "After 2 days, did they open it?"), waitHours, branches:[{label, when:"bought"|"clicked"|"opened"|"in_segment"|"timeout", nodes:[...]}]} — always include a when on each branch ("timeout" = no response, the catch-all). A branch may instead watch a SAVED SEGMENT: {when:"in_segment", segmentName:"Buyers"} fires when the person is currently in that segment — use it when the user wants a specific list to define the condition (e.g. "if they end up on the attended list…"), and different decisions can watch different segments. Branches evaluate in the order you author them, first match wins; (b) SPLIT — forks INSTANTLY on who they ARE: {type:"decision", kind:"split", question (e.g. "VIP or GA?"), field: a curated dimension (e.g. "core_ticket_types.name", buyer city/country, age, gender), branches:[{label, values:["VIP","VVIP"], nodes:[...]}, {label:"Everyone else", values:null, nodes:[...]}]} — use a split when the user wants different treatment per ticket type/category, gender, age or location (e.g. VIPs get one flow, GA another). 2-3 branches per decision (max 4); nest at most 2 deep; keep the whole tree to ~6-10 nodes. A "bought" branch usually thanks and stops. TARGETING — establish the audience BEFORE calling this tool (it is the heart of the journey; ask the user one short question if they haven\'t named who it\'s for): pass segmentName for an EXISTING saved segment, OR filters to build a NEW cohort from curated dimensions (e.g. {"core_purchasers.country":"Spain"}) — on confirm the cohort is auto-SAVED as a reusable segment and the journey pointed at it, so tell the user the segment gets saved too. Provide at most ONE of segmentName/filters; contact/PII fields cannot define the audience. Only draft without an audience if the user explicitly wants to pick it later in Engage. The user taps "Create draft journey" → it lands as a DRAFT in Engage → Campaigns where a human reviews and approves; the branching runs as the engine ships (the opening messages run as a timed sequence today — say so honestly if asked). After calling it: give one line on the flow, STATE the audience size from the returned reach and that a new cohort will be saved as a segment in Engage → Segments, ask the user to confirm the audience is right (or offer: another saved segment, refined filters, or building it from a dashboard tile\'s 🎯 Create segment button / an uploaded list in Engage → Segments, then targeting it here by name), and tell them to tap the button. If reach is zero/missing, flag it and verify the filter values before proceeding.',
     input_schema: {
       type: 'object',
       properties: {
@@ -198,11 +206,16 @@ function compile(nodes) {
   return { map, entryId: (nodes && nodes[0] && nodes[0].id) || null };
 }
 
-// Behaviour decision: first-match-wins by SEVERITY (bought > clicked > opened);
-// the timeout branch only fires once the wait window has expired. Pure.
+// Behaviour decision: branches evaluate in AUTHORED order, first-match-wins —
+// so the author controls precedence when conditions overlap. Predicates:
+// bought / clicked / opened (from signals), in_segment (signals.inSegment(branch)
+// — each branch can watch its own saved list). The timeout branch only fires
+// once the wait window has expired. Pure.
 function pickBranch(decision, signals) {
-  for (const when of ['bought', 'clicked', 'opened']) {
-    if (signals[when]) { const b = decision.branches.find((x) => x.when === when); if (b) return b; }
+  for (const b of decision.branches) {
+    if (b.when === 'timeout') continue;
+    if (b.when === 'in_segment') { if (signals.inSegment && signals.inSegment(b)) return b; continue; }
+    if (signals[b.when]) return b;
   }
   if (signals.expired) return decision.branches.find((x) => x.when === 'timeout') || null;
   return null; // keep waiting
@@ -230,10 +243,22 @@ function engineOn(sql) {
 // Same safety net as the classic loop: consent per channel per send, suppression
 // ejects, conversion routes (bought) rather than silently exiting.
 async function processAction(a, deps) {
-  const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults } = deps;
+  const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser } = deps;
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN node_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN wait_until TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   const { map, entryId } = compile(stampIfNeeded(a.config.journey).nodes);
+  // Per-branch segment watches: any in_segment branch resolves ITS segment live,
+  // once per tick — different decisions can watch different lists (a "Buyers"
+  // segment at one decision, an attended-list at another). Unresolvable → no match.
+  const segSets = new Map();
+  if (audienceFor) {
+    const segIds = new Set();
+    for (const { node } of map.values()) if (node.type === 'decision' && node.kind !== 'split') for (const b of node.branches) if (b.when === 'in_segment' && b.segmentId) segIds.add(b.segmentId);
+    for (const sid of segIds) {
+      try { const { list } = await audienceFor(a.entityId, { audience: { mode: 'segment', segmentId: sid } }, sysUser); segSets.set(sid, new Set(list.map((m) => String(m.email || '').toLowerCase()))); }
+      catch (err) { console.error('[journeys] branch segment resolve failed', a.id, sid, err.message); }
+    }
+  }
   const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
   const upd = (e, fields) => sql.prepare(`UPDATE action_enrollments SET ${Object.keys(fields).map((k) => `${k}=?`).join(', ')}, updated_at=? WHERE action_id=? AND email=?`).run(...Object.values(fields), now(), a.id, e.email);
   let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
@@ -241,6 +266,7 @@ async function processAction(a, deps) {
     bought: convSet ? convSet.has(String(email || '').toLowerCase()) : !reachable.has(email),
     clicked: !!sql.prepare('SELECT 1 FROM action_clicks WHERE action_id=? AND email=? LIMIT 1').get(a.id, email),
     opened: !!sql.prepare('SELECT 1 FROM action_opens WHERE action_id=? AND email=? LIMIT 1').get(a.id, email),
+    inSegment: (b) => { const s = b.segmentId && segSets.get(b.segmentId); return !!(s && s.has(String(email || '').toLowerCase())); },
   });
   for (const e of due) {
     if (sup.has(e.email)) { upd(e, { status: 'unsubscribed' }); continue; }
@@ -342,4 +368,25 @@ function nodeByStep(journey, step) {
   return find(stampIfNeeded(journey)?.nodes);
 }
 
-module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction, nodeByStep };
+// Link in_segment branches to their saved segments by name (at create time, when
+// the segment list is at hand) — the engine then resolves by id each tick.
+function linkBranchSegments(nodes, segments) {
+  const lc = (s) => String(s || '').toLowerCase();
+  const walk = (ns) => {
+    for (const n of ns || []) {
+      if (n.type !== 'decision') continue;
+      for (const b of n.branches || []) {
+        if (b.when === 'in_segment' && !b.segmentId && b.segmentName) {
+          const hit = (segments || []).find((s) => lc(s.name) === lc(b.segmentName))
+            || (segments || []).find((s) => lc(s.name).includes(lc(b.segmentName)) || lc(b.segmentName).includes(lc(s.name)));
+          if (hit) { b.segmentId = hit.id; b.segmentName = hit.name; }
+        }
+        walk(b.nodes);
+      }
+    }
+  };
+  walk(nodes);
+  return nodes;
+}
+
+module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction, nodeByStep, linkBranchSegments };

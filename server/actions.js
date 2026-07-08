@@ -1746,7 +1746,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       const convSet = await convertedEmails(a);
       const sup = suppressed(a.entityId);
       // Branching journeys (staging-gated): the tree engine walks decision nodes; classic linear drips continue below.
-      if (a.config.journey?.nodes?.length && require('./journeys').engineOn(sql)) { try { await require('./journeys').processAction(a, { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults }); } catch (err) { console.error('[journeys] tick failed', a.id, err.message); } continue; }
+      if (a.config.journey?.nodes?.length && require('./journeys').engineOn(sql)) { try { await require('./journeys').processAction(a, { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser }); } catch (err) { console.error('[journeys] tick failed', a.id, err.message); } continue; }
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
       let n2 = 0;

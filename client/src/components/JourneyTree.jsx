@@ -67,14 +67,27 @@ function MessageCard({ node, stats, onEdit, templates }) {
   const applyTemplate = (id) => {
     const t = (templates || []).find((x) => String(x.id) === String(id));
     if (!t) return;
-    onEdit(node.id, {
-      ...(t.subject ? { subject: t.subject } : {}),
-      ...(t.body ? { body: t.body } : {}),
-      ...(t.ctaText ? { ctaText: t.ctaText } : {}),
-      ...(t.heroImage ? { heroImage: t.heroImage } : {}),
-    });
+    if ((t.contentMode || 'template') === 'html') {
+      onEdit(node.id, { contentMode: 'html', customHtml: t.customHtml || '', ...(t.subject ? { subject: t.subject } : {}) });
+    } else {
+      onEdit(node.id, {
+        contentMode: 'template',
+        ...(t.subject ? { subject: t.subject } : {}),
+        ...(t.body ? { body: t.body } : {}),
+        ...(t.ctaText ? { ctaText: t.ctaText } : {}),
+        ...(t.heroImage ? { heroImage: t.heroImage } : {}),
+      });
+    }
   };
-  const usableTemplates = (templates || []).filter((t) => (t.contentMode || 'template') === 'template');
+  // Built-template + custom-HTML templates apply per mailer; block-designer ones
+  // stay whole-campaign (a node isn't a block canvas).
+  const usableTemplates = (templates || []).filter((t) => (t.contentMode || 'template') !== 'blocks');
+  const pickHtmlFile = async (e) => {
+    const f = e.target.files && e.target.files[0]; if (e.target) e.target.value = '';
+    if (!f) return;
+    try { const t = await f.text(); onEdit(node.id, { contentMode: 'html', customHtml: t.slice(0, 300000) }); } catch { /* ignore */ }
+  };
+  const isHtml = node.contentMode === 'html';
   return (
     <div style={{ padding: 13, border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', width: '100%', boxSizing: 'border-box', textAlign: 'left' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
@@ -83,23 +96,39 @@ function MessageCard({ node, stats, onEdit, templates }) {
       </div>
       {onEdit ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {node.channel === 'email' && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[['template', 'Built template'], ['html', 'Custom HTML']].map(([k, lbl]) => (
+                <button key={k} type="button" onClick={() => onEdit(node.id, { contentMode: k })} style={{ flex: 1, border: '1px solid var(--hairline)', borderRadius: 7, padding: '3px 6px', fontSize: 11, fontWeight: 700, cursor: 'pointer', background: (node.contentMode || 'template') === k ? 'var(--brand)' : 'var(--bg)', color: (node.contentMode || 'template') === k ? '#fff' : 'var(--muted)' }}>{lbl}</button>
+              ))}
+            </div>
+          )}
           {node.channel === 'email' && usableTemplates.length > 0 && (
             <select style={{ ...editIn, color: 'var(--muted)' }} value="" onChange={(e) => applyTemplate(e.target.value)}>
               <option value="">📝 Apply a template…</option>
-              {usableTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {usableTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}{(t.contentMode || 'template') === 'html' ? ' (HTML)' : ''}</option>)}
             </select>
           )}
           {node.channel === 'email' && <input style={{ ...editIn, fontWeight: 700 }} value={node.subject} placeholder="Subject" onChange={(e) => onEdit(node.id, { subject: e.target.value })} />}
-          {node.channel === 'email' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {node.heroImage
-                ? <><img src={node.heroImage} alt="" style={{ height: 34, borderRadius: 6, maxWidth: 90, objectFit: 'cover' }} /><button type="button" onClick={() => onEdit(node.id, { heroImage: '' })} style={{ border: '1px solid var(--hairline)', background: 'none', color: 'var(--muted)', borderRadius: 7, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>✕ remove</button></>
-                : <label style={{ border: '1px dashed var(--hairline)', borderRadius: 7, padding: '4px 10px', fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer' }}>🖼 Add artwork<input type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} /></label>}
-            </div>
+          {node.channel === 'email' && isHtml ? (
+            <>
+              <textarea style={{ ...editIn, resize: 'vertical', lineHeight: 1.4, fontFamily: 'ui-monospace, monospace', fontSize: 11 }} rows={6} value={node.customHtml || ''} placeholder="<html>… full email HTML (links auto-tracked; unsubscribe added if missing)" onChange={(e) => onEdit(node.id, { customHtml: e.target.value })} />
+              <label style={{ border: '1px dashed var(--hairline)', borderRadius: 7, padding: '4px 10px', fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer', alignSelf: 'flex-start' }}>⬆ Upload .html file<input type="file" accept=".html,.htm,text/html" onChange={pickHtmlFile} style={{ display: 'none' }} /></label>
+            </>
+          ) : (
+            <>
+              {node.channel === 'email' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {node.heroImage
+                    ? <><img src={node.heroImage} alt="" style={{ height: 34, borderRadius: 6, maxWidth: 90, objectFit: 'cover' }} /><button type="button" onClick={() => onEdit(node.id, { heroImage: '' })} style={{ border: '1px solid var(--hairline)', background: 'none', color: 'var(--muted)', borderRadius: 7, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>✕ remove</button></>
+                    : <label style={{ border: '1px dashed var(--hairline)', borderRadius: 7, padding: '4px 10px', fontSize: 11.5, color: 'var(--muted)', cursor: 'pointer' }}>🖼 Add artwork<input type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} /></label>}
+                </div>
+              )}
+              <textarea style={{ ...editIn, resize: 'vertical', lineHeight: 1.45 }} rows={4} value={node.body} placeholder={node.channel === 'sms' ? 'SMS message' : 'Email body'} onChange={(e) => onEdit(node.id, { body: e.target.value })} />
+            </>
           )}
-          <textarea style={{ ...editIn, resize: 'vertical', lineHeight: 1.45 }} rows={4} value={node.body} placeholder={node.channel === 'sms' ? 'SMS message' : 'Email body'} onChange={(e) => onEdit(node.id, { body: e.target.value })} />
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <input style={{ ...editIn, maxWidth: 130 }} value={node.ctaText} placeholder="Button label" onChange={(e) => onEdit(node.id, { ctaText: e.target.value })} />
+            {!isHtml && <input style={{ ...editIn, maxWidth: 130 }} value={node.ctaText} placeholder="Button label" onChange={(e) => onEdit(node.id, { ctaText: e.target.value })} />}
             <input style={{ ...editIn, flex: 1, minWidth: 120 }} value={node.ctaUrl || ''} placeholder="Link (blank = campaign buy link)" onChange={(e) => onEdit(node.id, { ctaUrl: e.target.value })} />
           </div>
         </div>
@@ -169,6 +198,16 @@ export function patchNode(nodes, id, patch) {
     if (n.type === 'decision') return { ...n, branches: n.branches.map((b) => ({ ...b, nodes: patchNode(b.nodes, id, patch) })) };
     return n;
   });
+}
+// EVERY message in the tree, depth-first, each labelled with its branch path —
+// drives "preview all" so branch emails preview too, not just the opening trunk.
+export function flattenMessages(nodes, path = []) {
+  const out = [];
+  for (const n of nodes || []) {
+    if (n.type === 'message') out.push({ ...n, branchPath: path.join(' → ') });
+    else for (const b of n.branches || []) out.push(...flattenMessages(b.nodes, [...path, b.label]));
+  }
+  return out;
 }
 // The opening (pre-decision) messages — mirrored into the classic `steps` so
 // previews + the linear fallback stay coherent with tree edits.

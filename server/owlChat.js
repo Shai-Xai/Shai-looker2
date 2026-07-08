@@ -905,6 +905,9 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     let journey;
     try { journey = journeys.validateJourney(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
     if (!entityId) return res.status(400).json({ error: 'entityId is required.' });
+    // Branches that watch a saved segment ("if they're in Buyers") link to it by
+    // id now, while the segment list is at hand — the engine resolves it per tick.
+    try { const segApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null; if (segApi?.listSegments) journeys.linkBranchSegments(journey.nodes, segApi.listSegments(entityId)); } catch { /* unlinked branches simply never match */ }
     const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
     if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
     let savedSegment = null; // set when a new chat cohort is persisted as a segment below
