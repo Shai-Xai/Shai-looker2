@@ -99,6 +99,37 @@ function issueCookie(res, user) {
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
+// ── 👁 View as user (admin impersonation) ───────────────────────────────────────
+// The admin's session cookie is stashed in a return cookie, the main session is
+// swapped for a SHORT (2h) token for the target user carrying an `imp` claim
+// (who's driving), and a NON-httpOnly hint cookie tells the UI to show the
+// banner. The impersonated session is a real client session — admin routes
+// reject it (role client) — and it dies with the target's tokenVersion like any
+// other. Exit verifies the return cookie decodes to a live ADMIN before
+// restoring it, so a forged/expired return can never mint admin access.
+const IMP_RETURN = 'howler_admin_return';
+const IMP_HINT = 'howler_viewing_as'; // read by the client shell (UI banner only — no authority)
+function issueImpersonationCookie(req, res, target, admin) {
+  const adminToken = req.cookies?.[COOKIE] || '';
+  const token = jwt.sign({ sub: target.id, tv: target.tokenVersion || 0, imp: admin.id }, getSecret(), { algorithm: 'HS256', expiresIn: '2h' });
+  res.cookie(IMP_RETURN, adminToken, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 * 1000 });
+  res.cookie(IMP_HINT, encodeURIComponent(target.email || ''), { ...COOKIE_OPTS, httpOnly: false, maxAge: 2 * 60 * 60 * 1000 });
+  res.cookie(COOKIE, token, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 * 1000 });
+}
+function endImpersonation(req, res) {
+  const ret = req.cookies?.[IMP_RETURN];
+  res.clearCookie(IMP_RETURN, COOKIE_OPTS);
+  res.clearCookie(IMP_HINT, { ...COOKIE_OPTS, httpOnly: false });
+  if (!ret) { clearCookie(res); return null; }
+  try {
+    const { sub, tv, stage, imp } = jwt.verify(ret, getSecret(), { algorithms: ['HS256'] });
+    const admin = cachedUser(sub);
+    if (stage || imp || !admin || admin.role !== 'admin' || (tv || 0) !== (admin.tokenVersion || 0)) { clearCookie(res); return null; }
+    res.cookie(COOKIE, ret, { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return admin;
+  } catch { clearCookie(res); return null; }
+}
+
 // ─── Embed session tokens (organizer-portal Owl — server/owlEmbed.js) ─────────
 // A short-lived bearer JWT (marked with an `emb` claim) that authenticates the
 // chromeless /embed/owl page WITHOUT a cookie: inside a cross-site iframe the
@@ -508,7 +539,7 @@ module.exports = {
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
-  issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin, invalidateUser,
+  issueCookie, clearCookie, issueEmbedToken, issueImpersonationCookie, endImpersonation, attachUser, requireAuth, requireAdmin, invalidateUser,
   issue2faPending, verify2faPending,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,

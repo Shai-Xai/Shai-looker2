@@ -3261,7 +3261,11 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
                       </select>}
                 </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <button style={miniBtnOutline} onClick={() => removeAccess(u)}>Remove access</button>
+                  {u.role !== 'admin' && (
+                    <button style={miniBtnOutline} title="See Pulse exactly as this user does (their role, dashboards, flags). A banner with Exit brings you back."
+                      onClick={() => api.impersonateUser(u.id).then(() => { window.location.href = '/'; }).catch((e) => alert(e.message))}>👁 View as</button>
+                  )}
+                  <button style={{ ...miniBtnOutline, marginLeft: 6 }} onClick={() => removeAccess(u)}>Remove access</button>
                   <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => del(u)}>Delete</button>
                 </td>
               </tr>

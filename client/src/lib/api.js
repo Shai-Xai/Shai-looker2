@@ -540,6 +540,8 @@ export const api = {
   setFlagDefault: (key, value) => fetch('/api/admin/flags/default', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
   setFlagOverride: (entityId, key, value) => fetch(`/api/admin/flags/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) }).then(json),
   myFlags: (entityId) => fetch(`/api/my/flags/${entityId}`).then(json),
+  impersonateUser: (userId) => fetch(`/api/admin/impersonate/${userId}`, { method: 'POST' }).then(json),
+  impersonateExit: () => fetch('/api/impersonate/exit', { method: 'POST' }).then(json),
   getSendingDomain: (entityId, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`).then(json),
   saveSendingDomain: (entityId, body, scope = 'admin') => fetch(scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   verifySendingDomain: (entityId, scope = 'admin') => fetch(`${scope === 'my' ? `/api/my/sending-domain/${entityId}` : `/api/admin/entities/${entityId}/sending-domain`}/verify`, { method: 'POST' }).then(json),

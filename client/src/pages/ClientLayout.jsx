@@ -773,6 +773,20 @@ export default function ClientLayout() {
             "Preview" buttons put you in client mode, which previewMode alone
             misses) with a one-tap exit back to the console. Compact on mobile so
             the Exit button always fits. */}
+        {/* 👁 View-as banner: an admin is inside a client USER's session (hint
+            cookie set by the server; the session itself carries the authority). */}
+        {(() => {
+          const m = document.cookie.match(/(?:^|;\s*)howler_viewing_as=([^;]+)/);
+          if (!m) return null;
+          return (
+            <div style={{ ...previewBar, background: 'linear-gradient(90deg, #7C3AED, #A855F7)' }}>
+              <span style={{ fontWeight: 700 }}>👁 Viewing as {decodeURIComponent(m[1])}</span>
+              {!isMobile && <span style={{ opacity: 0.85 }}>You see exactly what they see — their role, dashboards and features.</span>}
+              <div style={{ flex: 1 }} />
+              <button style={exitPreviewBtn} onClick={() => api.impersonateExit().then(() => { window.location.href = '/admin'; }).catch(() => { window.location.href = '/login'; })}>Exit</button>
+            </div>
+          );
+        })()}
         {isAdmin && !!activeEntityId && (
           <div style={previewBar}>
             <span style={{ fontWeight: 700 }}>👁 Client preview{(() => { const n = suites.find((s) => s.entityId === activeEntityId)?.entityName || active?.name; return n ? ` — ${n}` : ''; })()}</span>
