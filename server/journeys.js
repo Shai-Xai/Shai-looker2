@@ -64,6 +64,8 @@ function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }
         subject: String(n.subject || '').slice(0, 200),
         body: String(n.body || '').slice(0, 8000),
         ctaText: String(n.ctaText || '').slice(0, 60),
+        heroImage: String(n.heroImage || '').slice(0, 1500000), // per-mailer artwork (data-URL/URL) — renders via the existing per-step hero path
+        ctaUrl: String(n.ctaUrl || '').slice(0, 500), // per-mailer link override (falls back to the campaign buy link)
       });
     }
   }
@@ -327,4 +329,17 @@ function stampIfNeeded(journey) {
   try { return validateJourney(journey); } catch { return journey; }
 }
 
-module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction };
+// The message node bearing a given tracking step number (for per-node link
+// resolution in the click redirect). Stamps old trees on the fly.
+function nodeByStep(journey, step) {
+  const find = (nodes) => {
+    for (const n of nodes || []) {
+      if (n.type === 'message' && n.step === step) return n;
+      if (n.type === 'decision') for (const b of n.branches) { const hit = find(b.nodes); if (hit) return hit; }
+    }
+    return null;
+  };
+  return find(stampIfNeeded(journey)?.nodes);
+}
+
+module.exports = { mount, owlTool, validateJourney, openingSteps, promptRegistry, compile, pickBranch, pickSplit, engineOn, processAction, nodeByStep };

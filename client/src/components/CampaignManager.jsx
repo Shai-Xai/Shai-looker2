@@ -1030,17 +1030,18 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
 
           {isSequence && f.journey?.nodes?.length > 0 && (
-            <Field label="🧭 Journey (every message is editable — branches included)">
+            <Field label="🧭 Journey (every message is fully editable — branches included)">
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, button — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
+                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, artwork, button and its link (blank link = the campaign buy link below), or apply a saved template — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
               </div>
               <JourneyTree
                 nodes={f.journey.nodes}
+                templates={templates}
                 onEdit={(id, patch) => setF((s) => {
                   const nodes = journeyPatch(s.journey.nodes, id, patch);
                   // Mirror the opening (pre-decision) trunk into `steps` so the email
                   // preview + the linear fallback stay coherent with tree edits.
-                  const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText }));
+                  const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText, heroImage: n.heroImage || '' }));
                   return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
                 })}
               />

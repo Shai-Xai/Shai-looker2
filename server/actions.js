@@ -732,7 +732,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index
+    const baseClick = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index (journey nodes may carry their own link)
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => fillAttrs(String(s || '')
@@ -796,7 +796,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
+    const base = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index (journey nodes may carry their own link)
     const fullLink = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
     const link = shortLink(fullLink); // SMS: long tracked URL → tiny /k/ redirect
     const tok = (s) => fillAttrs(String(s || '')
