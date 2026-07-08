@@ -102,11 +102,22 @@ function mount(app, { db, auth, onboarding }) {
       const act = ACTIVITY.find((b) => b.key === a.key);
       return { key: a.key, points: a.points, label: ph ? ph.sticker : (a.key === 'activated' ? '🏆 Fully Activated' : (act ? `${act.icon} ${act.title}` : a.key)) };
     });
+    // The itemised ledger — every line the total is made of, so the number is
+    // never a mystery: each completed step, each phase bonus, each badge.
+    const phaseTitles = Object.fromEntries(onboarding.phases.map((p, i) => [p.key, `Phase ${i + 1} · ${p.title}`]));
+    const ledger = [
+      ...prog.steps.filter((s) => s.done).map((s) => ({ kind: 'step', icon: s.icon, label: s.title, group: phaseTitles[s.phase] || s.phase, pts: s.pts })),
+      ...stickers.filter((s) => s.earned).map((s) => ({ kind: 'sticker', icon: (s.sticker || '').split(' ')[0], label: `${s.sticker} — phase complete`, group: 'Phase stickers', pts: s.pts, at: s.awardedAt })),
+      ...(got.activated ? [{ kind: 'activated', icon: '🏆', label: 'Fully activated — every phase done', group: 'Phase stickers', pts: onboarding.bonuses.activated, at: got.activated.awarded_at }] : []),
+      ...badges.filter((b) => b.earned).map((b) => ({ kind: 'badge', icon: b.icon, label: b.title, group: 'Activity badges', pts: b.pts, at: b.awardedAt })),
+    ];
+    const stepPts = prog.steps.filter((s) => s.done).reduce((n, s) => n + s.pts, 0);
+    const phasePts = stickers.filter((s) => s.earned).length * onboarding.bonuses.phase + (got.activated ? onboarding.bonuses.activated : 0);
     return {
-      stickers, badges, unseen,
+      stickers, badges, unseen, ledger,
       activated: { earned: !!got.activated, pts: onboarding.bonuses.activated },
       // prog.points already includes steps + phase bonuses + the activation bonus.
-      points: { journey: prog.points, activity: activityPts, total: prog.points + activityPts },
+      points: { journey: prog.points, steps: stepPts, phases: phasePts, activity: activityPts, total: prog.points + activityPts },
       journey: { done: prog.done, total: prog.total, currentPhase: prog.currentPhase, complete: prog.complete },
     };
   }
