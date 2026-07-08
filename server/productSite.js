@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { allowInlineScripts } = require('./http'); // per-page CSP relax: these static docs carry their own inline <script>
 
 // ── The curated catalogue ──────────────────────────────────────────────────────
 // Keep in step with docs/PRODUCT_OVERVIEW_SALES.md (statuses mirror its key:
@@ -354,6 +355,7 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
   // The living sales-overview page + its markdown source, with admin-hidden `##`
   // sections stripped before they reach the browser. (Moved here from index.js.)
   app.get(['/product-overview-sales', '/product-overview-sales.html'], (_req, res) => {
+    allowInlineScripts(res); // static doc with its own inline script
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(OVERVIEW_HTML);
   });
@@ -370,10 +372,12 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
   // channel cards + sections still honour the admin's Shown/Hidden choices),
   // and the full matrix on its own page at /sales/features.
   app.get(['/sales', '/sales.html', '/pulse-sales'], (_req, res) => {
+    allowInlineScripts(res);
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(SALES_HTML);
   });
   app.get(['/sales/features', '/sales/features.html', '/pulse-sales-features'], (_req, res) => {
+    allowInlineScripts(res);
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(SALES_FEATURES_HTML);
   });

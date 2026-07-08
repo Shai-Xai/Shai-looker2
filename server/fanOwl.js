@@ -675,7 +675,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
   const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
   const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
-  app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, async (req, res) => {
+  app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
     const b = req.body || {};
     const session = getSession.get(String(b.sessionId || ''));
     const site = session && siteById.get(session.site_id);
@@ -779,7 +779,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a snag — try again.' });
       else { res.write('\n\n[error: the Owl hit a snag — please try again.]'); res.end(); }
     } finally { clearInterval(heartbeat); }
-  });
+  }));
 
   console.log('[fanOwl] fan-facing Owl (booking guide) mounted');
   return { saveConfig, configView }; // exposed for tests

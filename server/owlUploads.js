@@ -11,6 +11,7 @@
 // Dependency-free: a small CSV parser handles files and the Sheet CSV export. XLSX
 // (binary) would need a parser lib — not supported yet (export to CSV / publish-CSV).
 
+const { asyncHandler } = require('./http'); // a rejected async handler must reach errorMiddleware, not hang the request
 const crypto = require('crypto');
 const { owlAllowed } = require('./owlChat');
 
@@ -93,7 +94,7 @@ function mount(app, { db, auth }) {
   const getUpload = (id) => { const r = getRow.get(id); return r ? { ...rowToMeta(r), rows: J(r.rows, []) } : null; };
 
   // POST — attach a CSV file (csv text) or a Google Sheet (sheetUrl).
-  app.post('/api/owl/uploads', auth.requireAuth, async (req, res) => {
+  app.post('/api/owl/uploads', auth.requireAuth, asyncHandler(async (req, res) => {
     if (!gate(req, res)) return;
     const { entityId, name, csv, sheetUrl } = req.body || {};
     if (!entityId || !canEntity(req.user, entityId)) return res.status(403).json({ error: 'Pick a client you have access to.' });
@@ -108,7 +109,7 @@ function mount(app, { db, auth }) {
       ins.run(id, entityId, req.user.id, String(name || 'Upload').slice(0, 120), source, String(sheetUrl || ''), JSON.stringify(columns), JSON.stringify(rows), rows.length, ts, ts);
       res.json({ ok: true, upload: rowToMeta(getRow.get(id)) });
     } catch (e) { res.status(400).json({ error: (e && e.message) || 'Import failed.' }); }
-  });
+  }));
 
   // GET — list this client's attached sources (metadata + columns, no rows).
   app.get('/api/owl/uploads', auth.requireAuth, (req, res) => {
@@ -119,7 +120,7 @@ function mount(app, { db, auth }) {
   });
 
   // POST refresh — re-fetch a live Sheet source.
-  app.post('/api/owl/uploads/:id/refresh', auth.requireAuth, async (req, res) => {
+  app.post('/api/owl/uploads/:id/refresh', auth.requireAuth, asyncHandler(async (req, res) => {
     if (!gate(req, res)) return;
     const r = getRow.get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found.' });
@@ -130,7 +131,7 @@ function mount(app, { db, auth }) {
       updRows.run(JSON.stringify(columns), JSON.stringify(rows), rows.length, now(), r.id);
       res.json({ ok: true, upload: rowToMeta(getRow.get(r.id)) });
     } catch (e) { res.status(400).json({ error: (e && e.message) || 'Refresh failed.' }); }
-  });
+  }));
 
   app.delete('/api/owl/uploads/:id', auth.requireAuth, (req, res) => {
     if (!gate(req, res)) return;

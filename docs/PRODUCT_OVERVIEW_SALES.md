@@ -4,11 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-<<<<<<< HEAD
-> **Last updated:** 2026-07-08 (✨ What's in Pulse: the client-facing feature matrix — in-app grid + explained sales-site index · plus 🚀 Client onboarding journey) · **Maintained:** updated as features ship (see the
-=======
-> **Last updated:** 2026-07-08 (🎖️ Onboarding level 2 on staging: five phases incl. Meet the Owl · badges & Pulse Points · AM cockpit + scorecard) · **Maintained:** updated as features ship (see the
->>>>>>> staging
+> **Last updated:** 2026-07-08 (✨ What's in Pulse feature matrix · 🎖️ Onboarding level 2 on staging) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -933,7 +929,6 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-<<<<<<< HEAD
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
   **Worth a look** suggestion into a campaign no longer forces every idea into the
   abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
@@ -952,7 +947,6 @@ see "The continuous comms loop" above.)*
   with a "ask about this in your demo" link. All fed by the one curated catalogue
   (now with a per-feature description), still governed by the admin Shown/Hidden
   toggles.
-=======
 - **2026-07-08** — **🎖️ Onboarding level 2: gamification + the AM cockpit** 🧪
   (staging): the journey grows to **five phases** with a dedicated **Meet the
   Owl** layer (Owl-built audiences/campaign drafts and feedback are auto-detected
@@ -962,7 +956,6 @@ see "The continuous comms loop" above.)*
   shelf, points on the Getting-started card and unlock toasts. New **AM cockpit**
   (journey bars, stalled flags, one-tap nudge) and **AM scorecard/leaderboard**
   in Admin → Onboarding.
->>>>>>> staging
 - **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
   checklist became a **four-phase layered journey** (fundamentals → goals & first
   sends → the Owl everywhere → automate & amplify) with almost every step

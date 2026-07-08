@@ -968,14 +968,23 @@ function removeMembership(userId, entityId) {
 function bumpTokenVersion(id) {
   db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?').run(id);
 }
+// One password policy for EVERY creation/change path (admin console, client
+// team invites, resets) — enforcing it only in the reset flow left admin-made
+// accounts free to be "a". Bump BCRYPT_COST here and logins rehash lazily.
+const MIN_PASSWORD = 8;
+const BCRYPT_COST = 12;
+function assertPasswordOk(password) {
+  if (String(password || '').length < MIN_PASSWORD) throw new Error(`Password must be at least ${MIN_PASSWORD} characters`);
+}
 function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '', howlerRole = '', roles = [] }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
+  assertPasswordOk(password);
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(e)) throw new Error('A user with that email already exists');
   const id = uuid();
   const r = role === 'admin' ? 'admin' : 'client';
   db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,howler_role,roles,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', normRoles(roles), now());
+    .run(id, e, bcrypt.hashSync(password, BCRYPT_COST), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', normRoles(roles), now());
   setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
@@ -989,7 +998,8 @@ function updateUser(id, patch) {
     const clash = db.prepare('SELECT id FROM users WHERE email=? AND id!=?').get(email, id);
     if (clash) throw new Error('That email is already used by another login.');
   }
-  const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
+  if (patch.password) assertPasswordOk(patch.password);
+  const hash = patch.password ? bcrypt.hashSync(patch.password, BCRYPT_COST) : cur.password_hash;
   const tokenVersion = (cur.token_version || 0) + (patch.password ? 1 : 0); // password change → old session JWTs die
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
@@ -1011,10 +1021,26 @@ function touchLastLogin(userId) {
 // Async so the bcrypt hash comparison (~60-100ms of CPU) doesn't block the single
 // event loop on every login — bcryptjs's async path yields between rounds, so
 // concurrent requests aren't stalled waiting on a sign-in.
+// A pre-computed hash keeps unknown-email logins the same duration as
+// known-email ones — a fast return would let an attacker enumerate accounts
+// by response timing. Lazily computed so module load stays cheap.
+let DUMMY_HASH = '';
 async function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
-  if (!u) return null;
-  return (await bcrypt.compare(password || '', u.passwordHash)) ? u : null;
+  if (!u) {
+    if (!DUMMY_HASH) DUMMY_HASH = bcrypt.hashSync('timing-equalizer', BCRYPT_COST);
+    await bcrypt.compare(password || '', DUMMY_HASH); // burn the same work, then fail
+    return null;
+  }
+  if (!(await bcrypt.compare(password || '', u.passwordHash))) return null;
+  // Lazy cost upgrade: hashes minted before BCRYPT_COST went up re-hash on the
+  // next successful login (we only hold the plaintext here). No token bump —
+  // the password didn't change.
+  const rounds = Number((u.passwordHash.match(/^\$2[aby]\$(\d\d)\$/) || [])[1] || 0);
+  if (rounds && rounds < BCRYPT_COST) {
+    try { db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await bcrypt.hash(password, BCRYPT_COST), u.id); } catch { /* upgrade is best-effort */ }
+  }
+  return u;
 }
 
 // ─── Dashboards (content kept as JSON blob) ───────────────────────────────────

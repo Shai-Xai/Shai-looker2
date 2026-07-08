@@ -188,7 +188,7 @@ test('milestone emails go only to the account team on the account — never all 
   const uF = h.makeClient('u@foxtrot.test', [foxtrot.id]);
   await api.evaluate(); // welcomes both
 
-  const finish = async (eid, user) => { for (const k of ['explore', 'install', 'notifications', 'digest', 'branding', 'team']) await app.req('POST', `/api/my/onboarding/${eid}/${k}`, { as: user, body: { done: true } }); };
+  const finish = async (eid, user) => { for (const k of ['explore', 'install', 'notifications', 'owlchat', 'digest', 'branding', 'team']) await app.req('POST', `/api/my/onboarding/${eid}/${k}`, { as: user, body: { done: true } }); };
   await finish(echo.id, uE); await finish(foxtrot.id, uF);
   await api.evaluate();
 

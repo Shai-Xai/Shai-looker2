@@ -76,6 +76,14 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
     res.json(enrichSuite(su));
   });
   app.delete('/api/admin/suites/:id', auth.requireAdmin, (req, res) => { db.deleteSuite(req.params.id); res.status(204).end(); });
+  // Duplicate a suite (clone its sets + client-owned dashboards, remap every id)
+  // so an AM can stand up a new event just like an existing one, then repoint it.
+  const { duplicateSuite } = require('./suiteDuplicate')(db);
+  app.post('/api/admin/suites/:id/duplicate', auth.requireAdmin, (req, res) => {
+    const su = duplicateSuite(req.params.id, { name: (req.body || {}).name, entityId: (req.body || {}).entityId });
+    if (!su) return res.status(404).json({ error: 'Suite not found' });
+    res.status(201).json(enrichSuite(su));
+  });
 
   // Distinct filter fields across all dashboards (for the locked-filter editor).
   app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
