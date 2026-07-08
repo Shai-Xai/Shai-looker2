@@ -15,7 +15,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
-const { asyncHandler, errorMiddleware, serverError } = require('./http'); const mailer = require('./mailer');
+const { asyncHandler, errorMiddleware, serverError, allowInlineScripts } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
@@ -57,11 +57,19 @@ process.on('unhandledRejection', (reason) => {
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 // Security headers (dependency-free, helmet essentials): frame-ancestors 'self' — cross-origin framing (clickjacking) stays blocked,
-// SELF-framing allowed for the admin /split view's two same-origin panes. Plus nosniff, Referrer-Policy, HSTS in prod. Full CSP deferred.
+// SELF-framing allowed for the admin /split view's two same-origin panes. Plus nosniff, Referrer-Policy, HSTS in prod.
+// CSP: script-src is the XSS backstop — a stored-XSS slip (message body, ticket,
+// inbound email HTML) can no longer execute injected inline <script> or pull one
+// from an attacker host; React escaping stops being the ONLY line of defence.
+// apis.google.com + gstatic are the Google Drive picker (DriveSourcesCard).
+// No default-src on purpose: images/styles/fonts/connect stay open (data-URL
+// logos, inline styles and the ECharts canvas are everywhere). The few
+// server-rendered pages with their own inline <script> (digest feedback, docs)
+// override this header per-response.
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'SAMEORIGIN');
-  res.set('Content-Security-Policy', "frame-ancestors 'self'");
+  res.set('Content-Security-Policy', "script-src 'self' https://apis.google.com https://www.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'");
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
@@ -2504,6 +2512,7 @@ pixel.mount(app, { db, auth, rateLimit, meta, tiktok }); // Pulse Pixel — /px.
 
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
+require('./retention').mount({ db, notifyOps: (m) => ops.alert('housekeeping', m) }); // daily prune of unbounded event tables + stuck-scheduled-job sweep
 
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });
@@ -2877,6 +2886,7 @@ require('./productSite').mount(app, { db, auth });
 const API_GUIDE_HTML = path.join(__dirname, '../docs/client-api-guide.html');
 const API_GUIDE_MD = path.join(__dirname, '../docs/CLIENT_API_GUIDE.md');
 app.get(['/api-guide', '/client-api-guide', '/client-api-guide.html'], (_req, res) => {
+  allowInlineScripts(res); // static doc with its own inline script
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(API_GUIDE_HTML);
 });

@@ -142,7 +142,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'The product board is disabled' }));
   // Reports can carry base64 screenshots/images/short videos — bigger than the
   // app-wide 5mb JSON cap (index.js excludes /api/my/tickets from the global parser).
-  const bigJson = express.json({ limit: '150mb' });
+  // 60mb, matched to the client's caps (ReportForm: 20MB/file, 40MB total,
+  // ~1.37× base64): the old 150mb meant two concurrent big uploads could OOM
+  // the 512MB instance — body + parse copies is ~3× the wire size.
+  const bigJson = express.json({ limit: '60mb' });
   const isAdmin = (u) => u && u.role === 'admin';
 
   const TYPES = ['bug', 'improvement', 'idea'];

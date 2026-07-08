@@ -52,4 +52,12 @@ function serverError(res, err, context = '') {
   if (!res.headersSent) res.status(500).json({ error: 'Something went wrong on our end.' });
 }
 
-module.exports = { HttpError, asyncHandler, errorMiddleware, serverError };
+// Per-response CSP opt-out for the handful of SERVER-RENDERED pages that carry
+// their own inline <script> (digest feedback page, sales/docs pages). The
+// app-wide header (index.js) pins script-src 'self'; these static, no-user-data
+// pages relax it for themselves only — the SPA and API keep the strict policy.
+function allowInlineScripts(res) {
+  res.set('Content-Security-Policy', "script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'");
+}
+
+module.exports = { HttpError, asyncHandler, errorMiddleware, serverError, allowInlineScripts };
