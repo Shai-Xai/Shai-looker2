@@ -161,6 +161,7 @@ function DecisionSplit({ node, stats, onEdit, templates }) {
             <div className="jt-branch" key={i}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#fff', background: color, borderRadius: 980, padding: '2px 10px', whiteSpace: 'nowrap' }}>
                 <span style={{ opacity: 0.85 }}>if</span> {b.label}
+                {b.when === 'in_segment' && <span style={{ background: 'rgba(255,255,255,0.22)', borderRadius: 980, padding: '1px 7px', fontSize: 10.5 }}>👥 {b.segmentName || 'segment'}{b.segmentId ? '' : ' ⚠ not linked'}</span>}
               </span>
               <div className="jt-link" />
               <NodeColumn nodes={b.nodes || []} stats={stats} onEdit={onEdit} templates={templates} />
@@ -207,6 +208,22 @@ export function flattenMessages(nodes, path = []) {
     if (n.type === 'message') out.push({ ...n, branchPath: path.join(' → ') });
     else for (const b of n.branches || []) out.push(...flattenMessages(b.nodes, [...path, b.label]));
   }
+  return out;
+}
+// Every saved segment the tree's decisions WATCH (in_segment branches) — so the
+// editor can show which sources drive which parts of the journey at a glance.
+export function watchedSegments(nodes) {
+  const out = [];
+  const walk = (ns) => {
+    for (const n of ns || []) {
+      if (n.type !== 'decision') continue;
+      for (const b of n.branches || []) {
+        if (b.when === 'in_segment') out.push({ segmentName: b.segmentName || '(unnamed)', segmentId: b.segmentId || '', question: n.question, branch: b.label });
+        walk(b.nodes);
+      }
+    }
+  };
+  walk(nodes);
   return out;
 }
 // The opening (pre-decision) messages — mirrored into the classic `steps` so

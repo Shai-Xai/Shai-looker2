@@ -5,7 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
-import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening, flattenMessages as journeyFlatten } from './JourneyTree.jsx';
+import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening, flattenMessages as journeyFlatten, watchedSegments as journeyWatched } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1039,6 +1039,19 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
                 Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, artwork, button and its link (blank link = the campaign buy link below), or apply a saved template — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
               </div>
+              {(() => {
+                const watched = journeyWatched(f.journey.nodes);
+                return (
+                  <div style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 9, padding: '7px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <div><strong>Who enters:</strong> the audience configured above{f.audienceMode === 'segment' ? ' (a saved segment)' : ''} — everyone enrolled starts at the top of the tree.</div>
+                    {watched.length > 0
+                      ? watched.map((w, i) => (
+                        <div key={i}><strong>Watched list:</strong> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>👥 “{w.segmentName}”</a>{w.segmentId ? '' : <span style={{ color: '#dc2626', fontWeight: 700 }}> ⚠ not linked to a saved segment — this branch will never fire</span>} — decides “{w.branch}” at “{w.question}”</div>
+                      ))
+                      : <div style={{ color: 'var(--muted)' }}><strong>Watched lists:</strong> none — decisions here use opens, clicks and the campaign’s conversion source.</div>}
+                  </div>
+                );
+              })()}
               <JourneyTree
                 nodes={f.journey.nodes}
                 templates={templates}
