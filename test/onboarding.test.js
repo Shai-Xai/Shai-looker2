@@ -170,6 +170,38 @@ test('gamify awards stickers + points and the cockpit reads the journey', async 
   await app.close();
 });
 
+test('milestone emails go only to the account team on the account — never all admins', async () => {
+  const stubs = makeStubs();
+  const app = await startApp(mountWith(stubs));
+  reset();
+  const api = require('../server/onboarding').mount({ get: () => {}, post: () => {}, put: () => {} }, { db: h.db, auth: h.auth, mailer: stubs.mailer, os: stubs.os });
+  // Age earlier tests' entities out of the welcome window; two admins exist.
+  h.db.db.prepare('UPDATE entities SET created_at=?').run(new Date(Date.now() - 60 * 86400000).toISOString());
+  const owner = h.makeAdmin('owner-am@test.local');
+  const bystander = h.makeAdmin('bystander-am@test.local');
+
+  // Echo HAS an account owner; Foxtrot has nobody configured.
+  const echo = h.makeEntity('Echo', 'Echo Org');
+  h.db.db.prepare('UPDATE entities SET howler_owner_user_id=? WHERE id=?').run(owner.id, echo.id);
+  const foxtrot = h.makeEntity('Foxtrot', 'Foxtrot Org');
+  const uE = h.makeClient('u@echo.test', [echo.id]);
+  const uF = h.makeClient('u@foxtrot.test', [foxtrot.id]);
+  await api.evaluate(); // welcomes both
+
+  const finish = async (eid, user) => { for (const k of ['explore', 'install', 'notifications', 'owlchat', 'digest', 'branding', 'team']) await app.req('POST', `/api/my/onboarding/${eid}/${k}`, { as: user, body: { done: true } }); };
+  await finish(echo.id, uE); await finish(foxtrot.id, uF);
+  await api.evaluate();
+
+  const milestones = stubs.sent.filter((m) => /completed onboarding phase/.test(m.subject || ''));
+  const echoMail = milestones.find((m) => /Echo/.test(m.subject));
+  assert.ok(echoMail, 'owner notified for Echo');
+  assert.deepEqual(echoMail.to, ['owner-am@test.local']);
+  assert.ok(!milestones.some((m) => (Array.isArray(m.to) ? m.to : [m.to]).includes('bystander-am@test.local')), 'uninvolved admins never emailed');
+  assert.ok(!milestones.some((m) => /Foxtrot/.test(m.subject || '')), 'no account team configured → no team email at all');
+
+  await app.close();
+});
+
 test('clients that predate the email layer are baselined silently', async () => {
   const stubs = makeStubs();
   const app = await startApp(mountWith(stubs));

@@ -165,7 +165,16 @@ function mount(app, { db, auth, mailer, os }) {
   const markMail = (eid, key, baseline) => { try { sql.prepare('INSERT INTO onboarding_mail_log (entity_id,key,sent_at) VALUES (?,?,?) ON CONFLICT(entity_id,key) DO UPDATE SET sent_at=excluded.sent_at').run(eid, key, baseline ? 'baseline' : new Date().toISOString()); } catch { /* ignore */ } };
   const clientUserIds = (eid) => { try { return sql.prepare('SELECT user_id FROM user_entities WHERE entity_id=?').all(eid).map((r) => r.user_id); } catch { return []; } };
   const emailsOf = (ids) => ids.map((id) => db.getUser(id)).filter((u) => u && u.email && u.notifyEmail !== false).map((u) => u.email);
-  const teamEmails = (e) => { const ids = [e.howlerOwnerUserId, ...(e.howlerSupportIds || [])].filter(Boolean); return emailsOf(ids.length ? ids : db.listUsers().filter((u) => u.role === 'admin').map((u) => u.id)); };
+  // The account team for milestone emails: the per-client "Account team" list
+  // (configured in Setup checklist → Reminders, shared with the setup nudges),
+  // else the entity's owner + support. NEVER all admins — a client with no
+  // account team configured simply doesn't email the team (set the owner!).
+  const teamEmails = (e) => {
+    let ids = [];
+    try { ids = sql.prepare("SELECT user_id FROM setup_nudge_recipients WHERE entity_id=? AND audience='admin'").all(e.id).map((r) => r.user_id); } catch { /* table mounts later */ }
+    if (!ids.length) ids = [e.howlerOwnerUserId, ...(e.howlerSupportIds || [])].filter(Boolean);
+    return emailsOf([...new Set(ids)]);
+  };
 
   // The plain-text body for a phase's step list — rides inside the branded
   // notification shell (which renders text with line breaks preserved).
