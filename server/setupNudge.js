@@ -109,14 +109,13 @@ function mount(app, { db, auth, mailer, insights, resolveRecipe, audienceFor, an
 
   // ── Recipients ──────────────────────────────────────────────────────────────
   const cfgRecipients = (eid, audience) => { try { return sql.prepare('SELECT user_id FROM setup_nudge_recipients WHERE entity_id=? AND audience=?').all(eid, audience).map((r) => r.user_id); } catch { return []; } };
-  const allAdmins = () => db.listUsers().filter((u) => u.role === 'admin');
   const clientUsersOf = (eid) => { try { return sql.prepare('SELECT user_id FROM user_entities WHERE entity_id=?').all(eid).map((r) => r.user_id); } catch { return []; } };
-  // Admin recipients: configured override, else the entity's owner + support, else all admins.
+  // Admin recipients: configured override, else the entity's owner + support.
+  // NEVER all admins — a client with no account team configured nudges nobody
+  // (the fix is to set the owner, not to spam the whole company).
   function adminRecipients(e) {
     const cfg = cfgRecipients(e.id, 'admin'); if (cfg.length) return cfg;
-    const owner = [e.howlerOwnerUserId, ...(e.howlerSupportIds || [])].filter(Boolean);
-    if (owner.length) return owner;
-    return allAdmins().map((u) => u.id);
+    return [e.howlerOwnerUserId, ...(e.howlerSupportIds || [])].filter(Boolean);
   }
   // Client recipients: configured override, else all the client's users.
   const clientRecipients = (e) => { const cfg = cfgRecipients(e.id, 'client'); return cfg.length ? cfg : clientUsersOf(e.id); };
