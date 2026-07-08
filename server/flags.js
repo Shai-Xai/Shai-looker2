@@ -45,6 +45,7 @@ const REGISTRY = [
     { key: 'engage.segments', name: 'Segments', def: true, desc: 'Reusable audiences from tiles.' },
     { key: 'engage.audiences', name: 'Ad audiences', def: true, desc: 'Push segments to Meta/TikTok ads.' },
     { key: 'engage.templates', name: 'Templates', def: true, desc: 'Campaign templates.' },
+    { key: 'engage.journeys', name: 'Journeys', def: false, beta: true, desc: 'Owl-built branching journeys — decisions, audience splits, per-mailer editing. OFF hides the tab + removes the Owl tool. (Branch EXECUTION additionally needs the JOURNEY_ENGINE switch.)' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
   { key: 'digests', emoji: '🗓', name: 'Digests', def: true, desc: 'Scheduled role-based briefing emails.' },
@@ -97,6 +98,7 @@ const OWL_TOOL_FLAGS = {
   createLiveUpdate: 'owl.create_live_updates',
   createSegment: 'owl.create_segments',
   draftCampaign: 'owl.draft_campaigns',
+  draftJourney: 'engage.journeys', // one switch: the feature flag also offers/removes the Owl tool
   draftReport: 'owl.save_reports',
 };
 
@@ -109,6 +111,8 @@ const GATES = [
   ['/api/actions', 'engage.campaigns'],
   ['/api/actions-summary', 'engage.campaigns'],
   ['/api/segments', 'engage.segments'],
+  ['/api/journeys', 'engage.journeys'],
+  ['/api/owl/act/draft-journey', 'engage.journeys'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

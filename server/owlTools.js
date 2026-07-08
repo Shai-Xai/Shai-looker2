@@ -962,6 +962,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     // Optional per-campaign language override for the drafted copy (blank → client default).
     const lang = String(args.language || '').slice(0, 5).toLowerCase();
     // Audience: EITHER a saved segment (by name) OR a custom cohort built from the chat.
+    if (ctx.status) ctx.status('Sizing the audience…');
     let audience; let summary = ''; let reach = null;
     const segName = String(args.segmentName || '').trim();
     if (segName) {
@@ -1005,6 +1006,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     // plain subject/body copy if the designer is unavailable or returns nothing usable.
     const audienceCount = (reach && reach.total) || 0;
     const su = suiteId && db && db.getSuite ? db.getSuite(suiteId) : null;
+    if (ctx.status) ctx.status('Writing and designing the email…');
     let designed = null;
     try { if (typeof designEmailFn === 'function') designed = await designEmailFn({ entityId, goal, audienceCount, eventSuiteId: suiteId || '', eventName: su?.name || '' }); } catch { designed = null; }
     let copy = {};

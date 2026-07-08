@@ -2488,8 +2488,11 @@ function recentMessages(entityId, userId, limit = 6) {
 waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
 
 // Onboarding journey — the phased client onboarding pack (auto-detected steps,
-// welcome pack + phase-completion emails on both surfaces).
-require('./onboarding').mount(app, { db, auth, mailer, os });
+// welcome pack + phase-completion emails on both surfaces), plus the badges &
+// Pulse Points layer and the account team's cockpit + scorecard over it.
+const onboardingApi = require('./onboarding').mount(app, { db, auth, mailer, os });
+require('./gamify').mount(app, { db, auth, onboarding: onboardingApi });
+require('./onboardingCockpit').mount(app, { db, auth, onboarding: onboardingApi });
 
 // Client setup wizard config — lets AMs edit the back-end setup wizard (step
 // wording, order, and their own custom guidance steps) from the admin UI.

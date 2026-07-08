@@ -2,6 +2,7 @@ import { useParams, useSearchParams, useNavigate, useOutletContext } from 'react
 import { useAuth } from '../lib/auth.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
+import { useMyFlags, flagOn } from '../lib/flags.js';
 import PageHeader from '../components/PageHeader.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -36,7 +37,12 @@ export default function EngagePage() {
   const entityId = previewEntityId || (isAdmin ? null : activeEntityId);
   const [params] = useSearchParams();
 
-  const active = TABS.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';
+  // Feature-flagged tabs (Admin → Product → Flags): hidden when the client's
+  // effective flag is off. Server routes enforce the same flags for real.
+  const myFlags = useMyFlags(entityId);
+  const tabs = TABS.filter((t) => t.key !== 'journeys' || flagOn(myFlags, 'engage.journeys'));
+
+  const active = tabs.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';
   const go = (key) => { if (key !== active) vtNavigate(navigate, `/engage/${key}`); };
 
   // "Make it happen" + approval deep links ride in on the Campaigns tab.
@@ -59,7 +65,7 @@ export default function EngagePage() {
           tab's content scrolls under it. Page-bg background masks that content;
           negative side margins + padding let it span the main's edge padding. */}
       <div className="no-scrollbar" style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const on = t.key === active;
           return (
             <button

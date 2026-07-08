@@ -5,7 +5,7 @@ import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
-import JourneyTree, { countDecisions as journeyDecisions } from './JourneyTree.jsx';
+import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening, flattenMessages as journeyFlatten, watchedSegments as journeyWatched } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -440,7 +440,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const [rates, setRates] = useState(null); // per-channel rate card → estimated cost before send
   useEffect(() => { api.getMyBilling(entityId).then(setRates).catch(() => setRates(null)); }, [entityId]);
   const [preview, setPreview] = useState('');
-  const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
+  const [previewAll, setPreviewAll] = useState(() => !!cfg.journey?.nodes?.length); // sequence: render every step (journeys: on by default — branch emails must preview too)
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
   const [previewSms, setPreviewSms] = useState(''); // rendered SMS text (channel = sms)
   const [stepPreviews, setStepPreviews] = useState([]); // [{label, html|sms}]
@@ -560,22 +560,27 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), JSON.stringify(f.theme), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
+  // Journey campaigns preview the WHOLE tree — every message node, branches
+  // included, labelled with its branch path — not just the opening trunk.
   useEffect(() => {
     if (!previewAll || !isSequence) return;
     let alive = true;
     const base = payload();
+    const isJourney = f.journey?.nodes?.length > 0;
+    const list = isJourney
+      ? journeyFlatten(f.journey.nodes).map((n, i) => ({ ...n, __label: `${i + 1}. ${n.branchPath ? `if ${n.branchPath} · ` : ''}${n.channel === 'sms' ? 'SMS' : 'Email'} · +${n.delayHours % 24 === 0 && n.delayHours >= 24 ? `${n.delayHours / 24}d` : `${n.delayHours}h`}` }))
+      : f.steps.map((st, i) => ({ ...st, __label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}` }));
     (async () => {
       const out = [];
-      for (let i = 0; i < f.steps.length; i++) {
-        const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
-        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
-        catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
+      for (const st of list) {
+        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || (st.channel === 'sms' ? st.body : ''), ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', ...(st.channel ? { channel: st.channel } : {}), ...(st.ctaUrl ? { ctaUrl: st.ctaUrl } : {}) };
+        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: st.__label, html: r.html || '', sms: r.sms || '' }); }
+        catch { out.push({ label: st.__label, html: '', sms: '' }); }
       }
       if (alive) setStepPreviews(out);
     })();
     return () => { alive = false; };
-  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.journey), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);
@@ -1033,15 +1038,38 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
 
           {isSequence && f.journey?.nodes?.length > 0 && (
-            <Field label="🧭 Journey design (the full branching tree)">
+            <Field label="🧭 Journey (every message is fully editable — branches included)">
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. The steps below are the opening sequence this campaign sends today; the branches route people once the journey engine ships. To change the design, ask the Owl (it appears on the Journeys tab too).
+                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, artwork, button and its link (blank link = the campaign buy link below), or apply a saved template — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
               </div>
-              <JourneyTree nodes={f.journey.nodes} />
+              {(() => {
+                const watched = journeyWatched(f.journey.nodes);
+                return (
+                  <div style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 9, padding: '7px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <div><strong>Who enters:</strong> the audience configured above{f.audienceMode === 'segment' ? ' (a saved segment)' : ''} — everyone enrolled starts at the top of the tree.</div>
+                    {watched.length > 0
+                      ? watched.map((w, i) => (
+                        <div key={i}><strong>Watched list:</strong> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>👥 “{w.segmentName}”</a>{w.segmentId ? '' : <span style={{ color: '#dc2626', fontWeight: 700 }}> ⚠ not linked to a saved segment — this branch will never fire</span>} — decides “{w.branch}” at “{w.question}”</div>
+                      ))
+                      : <div style={{ color: 'var(--muted)' }}><strong>Watched lists:</strong> none — decisions here use opens, clicks and the campaign’s conversion source.</div>}
+                  </div>
+                );
+              })()}
+              <JourneyTree
+                nodes={f.journey.nodes}
+                templates={templates}
+                onEdit={(id, patch) => setF((s) => {
+                  const nodes = journeyPatch(s.journey.nodes, id, patch);
+                  // Mirror the opening (pre-decision) trunk into `steps` so the email
+                  // preview + the linear fallback stay coherent with tree edits.
+                  const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText, heroImage: n.heroImage || '' }));
+                  return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
+                })}
+              />
             </Field>
           )}
 
-          {isSequence && (
+          {isSequence && !(f.journey?.nodes?.length > 0) && (
             <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>

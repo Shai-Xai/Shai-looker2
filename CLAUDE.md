@@ -53,6 +53,20 @@ enforce entity ownership; the admin equivalents live under
 When a setting layers (platform default → client override), blank client fields
 should inherit the tier below, and the UI should show what's inherited.
 
+## Feature flags — every new feature registers one (non-negotiable)
+Admin → Product → Flags (`server/flags.js`) is the ONE control panel for what
+each client sees. **Whenever you ship a new client-facing feature or surface, in
+the SAME change:**
+- add its flag to the `REGISTRY` in `server/flags.js` (as a `kids` entry of the
+  area it belongs to, e.g. `engage.journeys`; new/risky features default
+  `def: false, beta: true` and get flipped on per client from the matrix);
+- add its client API route prefix(es) to `GATES` so the server enforces the flag
+  (UI hiding is cosmetic — the route gate is the real boundary);
+- if it ships an Owl act-tool, map the tool in `OWL_TOOL_FLAGS` (flag off = the
+  tool is simply never offered to the model);
+- hide its UI (nav entry / tab) via `useMyFlags` + `flagOn`.
+A feature that can't be turned off per client from the matrix is not done.
+
 ## Architecture notes
 - Disposable modules: self-contained features own their tables + routes and mount
   with one line (e.g. `server/os.js`, `server/mailer.js`). Easy to remove.

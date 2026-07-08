@@ -34,11 +34,13 @@ test('journey exposes four phases, ticks manual steps, and guards the tenant bou
 
   let r = await app.req('GET', `/api/my/onboarding/${e.id}`, { as: user });
   assert.equal(r.status, 200);
-  assert.equal(r.body.phases.length, 4);
-  assert.deepEqual(r.body.phases.map((p) => p.key), ['fundamentals', 'engage', 'owl', 'automate']);
+  assert.equal(r.body.phases.length, 5);
+  assert.deepEqual(r.body.phases.map((p) => p.key), ['fundamentals', 'meetowl', 'engage', 'owl', 'automate']);
   assert.equal(r.body.currentPhase, 'fundamentals');
-  // Every step belongs to a declared phase, and totals add up.
+  assert.ok(r.body.phases.every((p) => p.sticker), 'every phase carries its sticker');
+  // Every step belongs to a declared phase, totals add up, and steps carry points.
   assert.equal(r.body.phases.reduce((n, p) => n + p.total, 0), r.body.total);
+  assert.ok(r.body.steps.every((s) => s.pts > 0), 'every step is worth points');
 
   // Tick a manual step → reflected; unknown step → 400; outsider → 403.
   r = await app.req('POST', `/api/my/onboarding/${e.id}/explore`, { as: user, body: { done: true } });
@@ -82,18 +84,120 @@ test('welcome pack sends once when the first login exists; phase completion foll
   assert.equal(out.welcomes, 0, 'welcome never repeats');
 
   // Complete every phase-1 step (manual ticks override auto) → one phase email,
-  // introducing Phase 2, plus a milestone heads-up to the account team.
+  // introducing Phase 2 (Meet the Owl), plus a milestone heads-up to the team.
   const before = stubs.sent.length;
-  for (const key of ['explore', 'install', 'notifications', 'owlchat', 'digest', 'branding', 'team']) {
+  for (const key of ['explore', 'install', 'notifications', 'digest', 'branding', 'team']) {
     await app.req('POST', `/api/my/onboarding/${e.id}/${key}`, { as: user, body: { done: true } });
   }
   out = await api.evaluate();
   assert.equal(out.phaseMails, 1);
   const phaseMail = stubs.sent.slice(before).find((m) => (m.subject || '').includes('Next up'));
   assert.ok(phaseMail, 'phase-completion email sent');
-  assert.match(phaseMail.subject, /Goals & first sends/);
+  assert.match(phaseMail.subject, /Meet the Owl/);
+  assert.match(phaseMail.text || phaseMail.html || '', /Pathfinder/); // the sticker is celebrated
   out = await api.evaluate();
   assert.equal(out.phaseMails, 0, 'phase email never repeats');
+
+  await app.close();
+});
+
+test('gamify awards stickers + points and the cockpit reads the journey', async () => {
+  const stubs = makeStubs();
+  const onboardingApi = { current: null };
+  const app = await startApp((a) => {
+    onboardingApi.current = require('../server/onboarding').mount(a, { db: h.db, auth: h.auth, mailer: stubs.mailer, os: stubs.os });
+    require('../server/gamify').mount(a, { db: h.db, auth: h.auth, onboarding: onboardingApi.current });
+    require('../server/onboardingCockpit').mount(a, { db: h.db, auth: h.auth, onboarding: onboardingApi.current });
+  });
+  reset();
+  try { h.db.db.exec('DELETE FROM badge_awards; DELETE FROM journey_pulse;'); } catch { /* new */ }
+  const e = h.makeEntity('Delta', 'Delta Org');
+  const user = h.makeClient('u@delta.test', [e.id]);
+  const admin = h.makeAdmin('admin@delta.test');
+
+  // Empty shelf: five stickers, none earned, points reflect auto-done steps only.
+  let r = await app.req('GET', `/api/my/journey/${e.id}`, { as: user });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.stickers.length, 5);
+  assert.equal(r.body.stickers.filter((s) => s.earned).length, 0);
+  assert.ok(Array.isArray(r.body.badges) && r.body.badges.length >= 5);
+
+  // Finish phase 1 → the Pathfinder sticker awards, once, with the phase bonus.
+  for (const key of ['explore', 'install', 'notifications', 'digest', 'branding', 'team']) {
+    await app.req('POST', `/api/my/onboarding/${e.id}/${key}`, { as: user, body: { done: true } });
+  }
+  r = await app.req('GET', `/api/my/journey/${e.id}`, { as: user });
+  const pathfinder = r.body.stickers.find((s) => s.key === 'fundamentals');
+  assert.equal(pathfinder.earned, true);
+  assert.ok(r.body.points.total >= 350 + 250, 'steps + phase bonus counted');
+  // The ledger itemises the total exactly — no mystery numbers.
+  assert.equal(r.body.ledger.reduce((n, l) => n + l.pts, 0), r.body.points.total);
+  assert.ok(r.body.ledger.some((l) => l.kind === 'sticker' && /Pathfinder/.test(l.label)));
+  assert.equal(r.body.points.steps + r.body.points.phases + r.body.points.activity, r.body.points.total);
+  assert.ok(r.body.unseen.some((u) => u.key === 'phase:fundamentals'), 'unlock is queued for the toast');
+  await app.req('POST', `/api/my/journey/${e.id}/seen`, { as: user });
+  r = await app.req('GET', `/api/my/journey/${e.id}`, { as: user });
+  assert.equal(r.body.unseen.length, 0, 'toast acked');
+
+  // Outsider can't read the shelf.
+  const outsider = h.makeClient('x@delta-out.test', [h.makeEntity('DeltaOut', 'DO Org').id]);
+  r = await app.req('GET', `/api/my/journey/${e.id}`, { as: outsider });
+  assert.equal(r.status, 403);
+
+  // Cockpit: Delta shows phase 2 current with the Pathfinder milestone; admin only.
+  r = await app.req('GET', '/api/admin/onboarding/cockpit', { as: user });
+  assert.equal(r.status, 403);
+  r = await app.req('GET', '/api/admin/onboarding/cockpit', { as: admin });
+  assert.equal(r.status, 200);
+  const row = r.body.rows.find((x) => x.id === e.id);
+  assert.ok(row, 'client appears in the cockpit');
+  assert.equal(row.currentPhase.key, 'meetowl');
+  assert.equal(row.phases.filter((p) => p.complete).length, 1);
+  assert.match(row.lastMilestone.label, /Pathfinder/);
+
+  // One-tap nudge lists the open steps of the current phase on both surfaces.
+  const beforeNudge = stubs.announced.length;
+  r = await app.req('POST', `/api/admin/onboarding/cockpit/${e.id}/nudge`, { as: admin });
+  assert.equal(r.body.ok, true);
+  assert.equal(stubs.announced.length, beforeNudge + 1);
+
+  // Scorecard aggregates per owning AM (Delta has no owner → may be absent),
+  // but the endpoint always answers and is admin-only.
+  r = await app.req('GET', '/api/admin/onboarding/scorecard', { as: admin });
+  assert.equal(r.status, 200);
+  assert.ok(Array.isArray(r.body.cards));
+
+  await app.close();
+});
+
+test('milestone emails go only to the account team on the account — never all admins', async () => {
+  const stubs = makeStubs();
+  const app = await startApp(mountWith(stubs));
+  reset();
+  const api = require('../server/onboarding').mount({ get: () => {}, post: () => {}, put: () => {} }, { db: h.db, auth: h.auth, mailer: stubs.mailer, os: stubs.os });
+  // Age earlier tests' entities out of the welcome window; two admins exist.
+  h.db.db.prepare('UPDATE entities SET created_at=?').run(new Date(Date.now() - 60 * 86400000).toISOString());
+  const owner = h.makeAdmin('owner-am@test.local');
+  const bystander = h.makeAdmin('bystander-am@test.local');
+
+  // Echo HAS an account owner; Foxtrot has nobody configured.
+  const echo = h.makeEntity('Echo', 'Echo Org');
+  h.db.db.prepare('UPDATE entities SET howler_owner_user_id=? WHERE id=?').run(owner.id, echo.id);
+  const foxtrot = h.makeEntity('Foxtrot', 'Foxtrot Org');
+  const uE = h.makeClient('u@echo.test', [echo.id]);
+  const uF = h.makeClient('u@foxtrot.test', [foxtrot.id]);
+  await api.evaluate(); // welcomes both
+
+  const finish = async (eid, user) => { for (const k of ['explore', 'install', 'notifications', 'owlchat', 'digest', 'branding', 'team']) await app.req('POST', `/api/my/onboarding/${eid}/${k}`, { as: user, body: { done: true } }); };
+  await finish(echo.id, uE); await finish(foxtrot.id, uF);
+  await api.evaluate();
+
+  const milestones = stubs.sent.filter((m) => /completed onboarding phase/.test(m.subject || ''));
+  const echoMail = milestones.find((m) => /Echo/.test(m.subject));
+  assert.ok(echoMail, 'owner notified for Echo');
+  assert.deepEqual(echoMail.to, ['owner-am@test.local']);
+  assert.ok(!milestones.some((m) => (Array.isArray(m.to) ? m.to : [m.to]).includes('bystander-am@test.local')), 'uninvolved admins never emailed');
+  assert.ok(!milestones.some((m) => /Foxtrot/.test(m.subject || '')), 'no account team configured → no team email at all');
 
   await app.close();
 });

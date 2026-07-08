@@ -700,7 +700,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index
+    const baseClick = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index (journey nodes may carry their own link)
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     const tok = (s) => fillAttrs(String(s || '')
@@ -764,7 +764,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
+    const base = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index (journey nodes may carry their own link)
     const fullLink = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
     const link = shortLink(fullLink); // SMS: long tracked URL → tiny /k/ redirect
     const tok = (s) => fillAttrs(String(s || '')
@@ -1612,10 +1612,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
       try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
-      // 'list' conversion mode: confirm conversions against a separate attendance/
-      // orders source (null = the default 'left the audience' model).
+      // 'list' conversion mode: separate attendance/orders source (null = default 'left the audience' model).
       const convSet = await convertedEmails(a);
       const sup = suppressed(a.entityId);
+      // Branching journeys (staging-gated): the tree engine walks decision nodes; classic linear drips continue below.
+      if (a.config.journey?.nodes?.length && require('./journeys').engineOn(sql)) { try { await require('./journeys').processAction(a, { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser }); } catch (err) { console.error('[journeys] tick failed', a.id, err.message); } continue; }
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
       let n2 = 0;
@@ -1625,9 +1626,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
         if (isSuppressed(sup, e)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
-        // Conversion / drop-out. 'list' mode: converted = in the conversion source;
-        // left-the-audience-but-not-in-list just ends ('done'). Default mode:
-        // converted = gone from the abandoned audience (bought or expired).
+        // Conversion/drop-out. 'list' mode: converted = in the source; left-audience-but-not-in-list ends ('done'). Default: converted = gone from the audience.
         if (convSet) {
           if (convSet.has(String(e.email || '').toLowerCase())) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
           if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
