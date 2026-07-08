@@ -58,7 +58,17 @@ export default function ClientLayout() {
     const h = () => openAsk();
     window.addEventListener('howler:open-analyst', h);
     return () => window.removeEventListener('howler:open-analyst', h);
-  }, []);  
+  }, []);
+  // "Make it happen" on a home suggestion hands the campaign build to the Owl:
+  // open the native chat and seed it with the goal so it drafts the right audience.
+  // Only wired when the native Owl is on — otherwise ClientHome falls back to the
+  // campaign editor itself, so this listener never fires for those users.
+  const [owlSeed, setOwlSeed] = useState(null);
+  useEffect(() => {
+    const h = (e) => { if (!owlNativeChatEnabled(user)) return; setOwlSeed(e.detail || null); openAsk(); };
+    window.addEventListener('howler:owl-build', h);
+    return () => window.removeEventListener('howler:owl-build', h);
+  }, [user]);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('howler_nav_collapsed') === '1'); // desktop
   const toggleCollapsed = () => setCollapsed((c) => { localStorage.setItem('howler_nav_collapsed', c ? '0' : '1'); return !c; });
   const navDrag = useSheetDrag(() => setNavOpen(false)); // mobile bottom-sheet dismiss
@@ -833,7 +843,7 @@ export default function ClientLayout() {
         </button>
       )}
       {owlNativeChatEnabled(user)
-        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} dashboardId={id} clients={owlClients} events={owlEvents} isAdmin={isAdmin} />
+        ? <OwlChat open={askOpen} onClose={() => setAskOpen(false)} suiteId={suiteId} entityId={activeEntityId} dashboardId={id} clients={owlClients} events={owlEvents} isAdmin={isAdmin} seed={owlSeed} onSeedUsed={() => setOwlSeed(null)} />
         : <AnalystDrawer open={askOpen} prewarm={prewarmAsk} onClose={() => setAskOpen(false)} previewEntityId={activeEntityId} />}
     </div>
   );

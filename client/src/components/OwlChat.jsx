@@ -26,7 +26,7 @@ const FALLBACK_STARTERS = [
 //
 // `embed` renders the panel full-bleed with no close/dock chrome — the chromeless
 // shell used by the organizer-portal iframe (pages/OwlEmbedPage.jsx, docs/OWL_EMBED.md).
-export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId, clients = [], events = [], isAdmin = false, embed = false }) {
+export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId, clients = [], events = [], isAdmin = false, embed = false, seed = null, onSeedUsed }) {
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState([]); // [{ role:'user'|'owl', text }]
   const [input, setInput] = useState('');
@@ -209,6 +209,19 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   useEffect(() => { if (open) api.owlStarters(selEntity || '').then((r) => setStarters(r.starters || [])).catch(() => {}); }, [open, selEntity]);
   // Load the client's attached data sources (for the 📎 panel + so the Owl can query them).
   useEffect(() => { if (!open || !attachEntity) { setUploads([]); return; } api.owlUploads(attachEntity).then((r) => setUploads(r.uploads || [])).catch(() => {}); }, [open, attachEntity]);
+  // Seeded build ("Make it happen" on a home suggestion): once open, scope to the
+  // suggestion's event and auto-send its goal in OPERATOR mode so the Owl drafts
+  // the campaign (+ its audience) for review. Guarded so it fires once per seed;
+  // clearing the seed (onSeedUsed) resets the guard for the next build.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (!seed) { seededRef.current = false; return; }
+    if (!open || seededRef.current) return;
+    seededRef.current = true;
+    if (seed.suiteId) setSelSuite(seed.suiteId);
+    send(seed.prompt, { mode: 'operator', suiteId: seed.suiteId || undefined });
+    onSeedUsed && onSeedUsed();
+  }, [open, seed]); // eslint-disable-line react-hooks/exhaustive-deps
   // Esc closes (only while open).
   useEffect(() => {
     if (!open) return;
@@ -238,7 +251,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, setStatus);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: (opts.suiteId ?? selSuite) || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, setStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();

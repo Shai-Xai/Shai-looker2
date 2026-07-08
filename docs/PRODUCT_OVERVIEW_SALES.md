@@ -915,6 +915,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
+  **Worth a look** suggestion into a campaign no longer forces every idea into the
+  abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
+  the suggestion to the Owl, which reads the idea (e.g. "email past buyers over 35")
+  and drafts the campaign **with the matching audience** for review; otherwise it
+  opens the campaign editor pre-filled with the goal and a blank audience to pick.
+  Also fixed a routing bug where a multi-event client's suggestion could open another
+  event's audience — resolution is now hard-scoped to the suggestion's own event.
 - **2026-07-08** — **✨ What's in Pulse (client-facing feature matrix)** ✅ (new):
   the client app's **Product** section gains two tabs — **✨ What's in Pulse**, an
   app-launcher grid of Pulse's areas where every feature opens a plain-language
