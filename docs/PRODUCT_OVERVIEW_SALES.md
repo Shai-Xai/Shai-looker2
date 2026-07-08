@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-08 (🚀 Client onboarding journey: four layered phases with auto-detected progress + welcome pack & phase-milestone emails) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-08 (✨ What's in Pulse: the client-facing feature matrix — in-app grid + explained sales-site index · plus 🚀 Client onboarding journey) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -583,6 +583,13 @@ Meta and TikTok accounts in one click. Change pixels any time without a develope
   **Shown / Hidden toggle**, so anything still in the works (or not ready for
   internal announcement) stays off the public pages until it's ready — admins
   always see the full picture, dimmed.
+- **✨ What's in Pulse (client-facing feature matrix)** ✅ — the same catalogue,
+  rendered for clients: in the app under **Product → ✨ What's in Pulse** as a
+  tap-through grid of section tiles (each feature explained in plain language,
+  with "Ask us to switch it on / Interested?" CTAs that file a request on the
+  Product board), and on the public **`/sales/features`** page as expandable
+  rows with a "ask about this in your demo" prompt. One source, every surface —
+  the Shown/Hidden toggles govern all of it.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -908,6 +915,16 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **✨ What's in Pulse (client-facing feature matrix)** ✅ (new):
+  the client app's **Product** section gains two tabs — **✨ What's in Pulse**, an
+  app-launcher grid of Pulse's areas where every feature opens a plain-language
+  "what it does for you" explanation (statuses in client wording: ✓ Live · Ask us
+  · Early access · On the way), with one-tap CTAs that pre-fill a request on the
+  Product board — and **💬 Your requests** (the existing reports view). The public
+  **`/sales/features`** index gains the same explanations as tap-to-expand rows
+  with a "ask about this in your demo" link. All fed by the one curated catalogue
+  (now with a per-feature description), still governed by the admin Shown/Hidden
+  toggles.
 - **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
   checklist became a **four-phase layered journey** (fundamentals → goals & first
   sends → the Owl everywhere → automate & amplify) with almost every step

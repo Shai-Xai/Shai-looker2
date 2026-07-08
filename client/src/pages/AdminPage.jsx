@@ -725,7 +725,7 @@ function FeatureSection({ section, onToggle }) {
         const dim = dimSection || f.hidden;
         return (
           <tr key={f.id} style={dim ? { opacity: 0.55 } : undefined}>
-            <td style={{ ...td, width: '100%', textDecoration: f.hidden ? 'line-through' : 'none' }}>{f.label}</td>
+            <td style={{ ...td, width: '100%', textDecoration: f.hidden ? 'line-through' : 'none' }} title={f.desc || undefined}>{f.label}</td>
             <td style={{ ...td, textAlign: 'right' }}><StatusBadge status={f.status} /></td>
             <td style={{ ...td, textAlign: 'right' }}>
               <VisToggle hidden={f.hidden} onToggle={() => onToggle('feature', f.id, !f.hidden)} />

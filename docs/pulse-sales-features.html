@@ -40,8 +40,18 @@ main{max-width:1060px;margin:0 auto;padding:20px 22px 90px;}
 .sec h3 .e{font-size:20px;}
 .sec p.blurb{font-size:13.5px;color:var(--muted);margin:7px 0 12px;}
 .sec ul{list-style:none;}
-.sec li{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:13.5px;color:#2c2c30;border-top:1px solid var(--soft);}
+.sec li{border-top:1px solid var(--soft);}
 .sec li:first-child{border-top:none;}
+/* Each feature is expandable: the summary row, then the plain-language "what it
+   does for you" + a demo CTA. Tap-friendly (min 40px rows) — no hover needed. */
+.sec details{width:100%;}
+.sec summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:8px 0;font-size:13.5px;color:#2c2c30;min-height:40px;}
+.sec summary::-webkit-details-marker{display:none;}
+.sec summary .fname{flex:1;font-weight:550;}
+.sec .idot{flex:none;width:16px;height:16px;border-radius:50%;border:1.3px solid #b9b9c0;color:#8e8e95;font-size:10px;font-weight:700;display:grid;place-items:center;font-style:normal;}
+.sec details[open] .idot{border-color:var(--brand);color:var(--brand);}
+.sec .fdesc{font-size:12.5px;color:var(--muted);padding:0 0 11px;line-height:1.55;}
+.sec .fdesc a{color:var(--brand);font-weight:700;text-decoration:none;}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:980px;font-size:10.5px;font-weight:750;white-space:nowrap;flex:none;margin-top:1px;}
 .badge.live{color:#1a8a4a;background:rgba(26,138,74,.12);}
 .badge.setup{color:#9a6a00;background:rgba(214,158,46,.16);}
@@ -78,8 +88,9 @@ footer a{color:var(--muted);}
 <main>
   <div class="head">
     <h1>Every feature, <span class="grad">honestly labelled.</span></h1>
-    <p>The complete, living index of what Pulse does — updated as features ship. For the short
-    version, read <a href="/sales" style="color:var(--brand);text-decoration:none;font-weight:700;">the story</a> first.</p>
+    <p>The complete, living index of what Pulse does — updated as features ship. Tap any feature
+    to see what it actually does for you. For the short version, read
+    <a href="/sales" style="color:var(--brand);text-decoration:none;font-weight:700;">the story</a> first.</p>
   </div>
   <div class="legend" id="legend" hidden>
     <span class="badge live">✅ Live</span>
@@ -123,7 +134,12 @@ footer a{color:var(--muted);}
         (s.blurb ? '<p class="blurb">' + esc(s.blurb) + '</p>' : '') +
         '<ul>' + s.features.map((f) => {
           const [cls, label] = BADGE[f.status] || BADGE.live;
-          return '<li><span class="badge ' + cls + '">' + label + '</span><span>' + esc(f.label) + '</span></li>';
+          const row = '<span class="badge ' + cls + '">' + label + '</span><span class="fname">' + esc(f.label) + '</span>';
+          if (!f.desc) return '<li>' + row + '</li>'; // nothing to expand — plain row
+          const ask = 'mailto:support@howler.co.za?subject=' + encodeURIComponent('Pulse demo — ' + f.label.split(' — ')[0]);
+          return '<li><details><summary>' + row + '<i class="idot">i</i></summary>' +
+            '<div class="fdesc">' + esc(f.desc) + ' <a href="' + ask + '">Ask about this in your demo →</a></div>' +
+          '</details></li>';
         }).join('') + '</ul>' +
       '</section>'
     )).join('');

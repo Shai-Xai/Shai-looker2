@@ -298,6 +298,9 @@ export const api = {
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  // Product feature matrix — the public catalogue (also powers the sales site and
+  // the client-facing "What's in Pulse" grid). Read-mostly; safe to cache briefly.
+  productSite: () => cachedGet('/api/product/site', 5 * 60000),
   // Admin — Product: the feature matrix + what the public pages get to show
   adminProductMatrix: () => fetch('/api/admin/product/matrix').then(json),
   adminSetProductVisibility: (kind, id, hidden) => fetch('/api/admin/product/visibility', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, hidden }) }).then(json),
