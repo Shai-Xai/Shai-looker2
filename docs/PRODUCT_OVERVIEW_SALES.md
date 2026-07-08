@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (🎯 Pulse Pixel: one website snippet carries all ad pixels + one-click retargeting audiences · 🔗 Links grouped into categories) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-08 (🚀 Client onboarding journey: four layered phases with auto-detected progress + welcome pack & phase-milestone emails) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -844,6 +844,35 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 
 ---
 
+## 14. Client onboarding journey — layered, guided activation  🧪
+**The pitch:** "New clients don't get dumped into a tool — Pulse walks them (and
+your account team) through it in layers, from first login to full automation,
+and celebrates each milestone on the way."
+
+- **Four phases, one journey.** The "Getting started" card on the client's home
+  page is a layered path: **1 · The fundamentals** (dashboards, the installed
+  app, notifications, asking the Owl, the weekly digest, branding, team) →
+  **2 · Goals & first sends** (goals, alerts, a first audience, a first simple
+  email) → **3 · The Owl everywhere** (WhatsApp, Claude & ChatGPT connectors) →
+  **4 · Automate & amplify** (journeys, Meta/TikTok ad accounts, the Pulse
+  Pixel). The current phase is open and actionable; what's next stays visible.
+- **Progress ticks itself.** Almost every step auto-detects from real usage —
+  a dashboard opened, the app installed, a question asked, a connector used, a
+  journey drafted — so the journey reflects reality, not homework.
+- **A branded welcome pack email** goes out automatically when the client's
+  first login exists (in their branding, introducing Phase 1), and a
+  **"phase complete — here's what's next" email + inbox message** lands as each
+  layer finishes. The **account team gets a heads-up on every milestone**, so
+  the AM knows exactly when to start the next conversation.
+- **Every step has a "Show me how"** walkthrough, written for a phone screen.
+- **Dual-surface:** the AM sees the same journey per client (Admin → client →
+  Setup checklist → **Client onboarding journey**) with live progress, can tick
+  manual steps on the client's behalf, re-send the welcome pack, or opt a
+  client out of the emails. Wording is editable in Admin → Onboarding →
+  **Journey emails**.
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates. *(The conversational/agentic
 Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
@@ -879,6 +908,17 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
+  checklist became a **four-phase layered journey** (fundamentals → goals & first
+  sends → the Owl everywhere → automate & amplify) with almost every step
+  **auto-detected from real usage** (dashboard opened, app installed, Owl asked,
+  WhatsApp linked, Claude/ChatGPT connector used, journey built…). A **branded
+  welcome pack email** sends automatically when the client's first login exists,
+  and each completed phase triggers a **congratulations + "here's what's next"
+  email & inbox message**, with a factual milestone heads-up to the account team.
+  Dual-surface: AMs see the same journey per client (Setup checklist → Client
+  onboarding journey), can tick manual steps, re-send the welcome pack, or opt a
+  client out; wording is editable in Admin → Onboarding → Journey emails.
 - **2026-07-07** — **🎯 Pulse Pixel — website retargeting** 🧪 (new): one snippet on
   the client's website/ticket shop loads their **Meta / Google / TikTok pixels**
   (managed from Pulse — changeable without touching the site), fires the standard

@@ -2478,8 +2478,9 @@ function recentMessages(entityId, userId, limit = 6) {
 // here, after its content builder (buildDigestContent) + role lenses exist.
 waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
 
-// Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
-require('./onboarding').mount(app, { db, auth });
+// Onboarding journey — the phased client onboarding pack (auto-detected steps,
+// welcome pack + phase-completion emails on both surfaces).
+require('./onboarding').mount(app, { db, auth, mailer, os });
 
 // Client setup wizard config — lets AMs edit the back-end setup wizard (step
 // wording, order, and their own custom guidance steps) from the admin UI.

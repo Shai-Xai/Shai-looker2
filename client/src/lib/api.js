@@ -409,8 +409,15 @@ export const api = {
   testSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
-  // Onboarding checklist
+  // Onboarding journey (client) + admin management of a client's journey & emails
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
+  getClientOnboarding: (entityId) => fetch(`/api/admin/entities/${entityId}/onboarding`).then(json),
+  setClientOnboardingStep: (entityId, key, done) => fetch(`/api/admin/entities/${entityId}/onboarding/step/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
+  setClientOnboardingMail: (entityId, on) => fetch(`/api/admin/entities/${entityId}/onboarding-mail`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) }).then(json),
+  sendOnboardingWelcome: (entityId) => fetch(`/api/admin/entities/${entityId}/onboarding/welcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  getOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/settings').then(json),
+  saveOnboardingMailSettings: (b) => fetch('/api/admin/onboarding-mail/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
   dismissMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed: true }) }).then(json),
   // Digest archive + feedback (the knowledge-base loop) — entity-aware
