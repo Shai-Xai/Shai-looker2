@@ -111,6 +111,23 @@ function mount(app, { db, auth, rateLimit, meta, tiktok, fetchImpl }) {
     res.send(loaderJs({ entityId, origin, metaId: c.metaPixelId, googleId: c.googleTagId, tiktokId: c.tiktokPixelId, consent: c.consentMode }));
   });
 
+  // ── hosted test page ─────────────────────────────────────────────────────────
+  // A ready-made page with the snippet already installed, so an install can be
+  // verified end-to-end without touching any real website: open it, watch the
+  // diagnostics go green, fire the standard events with the buttons, then confirm
+  // with "Check install" in Pulse + each platform's event tester. Public like the
+  // loader (pixel ids are publishable; the page can do nothing an installed
+  // snippet couldn't).
+  app.get('/px-test', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    const entityId = String(req.query.e || '').trim();
+    const ent = entityId ? db.getEntity(entityId) : null;
+    if (!ent) return res.send('<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:40px"><h2>Pulse Pixel test page</h2><p>Unknown client — open this page with your client id: <code>/px-test?e=&lt;clientId&gt;</code> (copy the link from the 🎯 Pulse Pixel section in Pulse).</p>');
+    const origin = `${req.protocol}://${req.get('host')}`;
+    res.send(testPageHtml({ entityId, name: ent.name || entityId, origin, cfg: config(entityId) }));
+  });
+
   // ── event collection ─────────────────────────────────────────────────────────
   // Beacons arrive as text/plain (a CORS "simple request" — no preflight from
   // foreign websites) so the global JSON body parser skips them; read raw here.
@@ -316,6 +333,80 @@ if(window.pulseConsent===true)grant();
 }else{inject();}
 })();
 `;
+}
+
+// The hosted test page (GET /px-test?e=…). Mobile-first, no dependencies. It
+// installs the real snippet, then: shows which pixel globals actually appeared
+// (an ad-blocker check), pings the Pulse collector, and offers buttons that fire
+// each standard event — one via data-pulse-event to exercise that binding too.
+function testPageHtml({ entityId, name, origin, cfg }) {
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const row = (label, id) => `<div class="chk" id="${id}"><span class="dot">…</span> ${label}</div>`;
+  const platforms = [
+    cfg.metaPixelId ? `◇ Meta Pixel <code>${esc(cfg.metaPixelId)}</code>` : '',
+    cfg.googleTagId ? `G Google tag <code>${esc(cfg.googleTagId)}</code>` : '',
+    cfg.tiktokPixelId ? `♪ TikTok Pixel <code>${esc(cfg.tiktokPixelId)}</code>` : '',
+  ].filter(Boolean).join(' · ') || '<b>No pixel ids configured yet</b> — save at least one in Pulse first (the beacon to Pulse still works, so "Check install" can go green).';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse Pixel test — ${esc(name)}</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#f5f5f7;color:#1c1c1e}
+  .wrap{max-width:640px;margin:0 auto;padding:22px 16px 60px}
+  .card{background:#fff;border:1px solid #e3e3e6;border-radius:14px;padding:16px 16px;margin-bottom:14px}
+  h1{font-size:19px;margin:0 0 4px}h2{font-size:14px;margin:0 0 10px}
+  .muted{color:#6e6e73;font-size:12.5px;line-height:1.5}
+  .chk{font-size:13.5px;margin:7px 0;font-weight:600}
+  .dot{display:inline-block;width:18px}
+  .ok .dot::before{content:"✓";color:#10b981}.ok .dot{color:transparent}
+  .bad .dot::before{content:"✗";color:#ef4444}.bad .dot{color:transparent}
+  button{display:block;width:100%;box-sizing:border-box;margin:8px 0;padding:13px;font-size:14px;font-weight:700;border:1px solid #d8d8dc;border-radius:12px;background:#fff;cursor:pointer;min-height:44px}
+  button:active{background:#f0f0f2}
+  .buy{background:#10b981;border-color:#10b981;color:#fff}
+  #log{font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.7;color:#3a3a3c;max-height:220px;overflow:auto;white-space:pre-wrap}
+  code{background:#f0f0f2;padding:1px 5px;border-radius:5px;font-size:11.5px}
+  .consent{background:#b45309;border-color:#b45309;color:#fff}
+</style></head><body><div class="wrap">
+<div class="card"><h1>🎯 Pulse Pixel test page</h1>
+  <div class="muted">Client: <b>${esc(name)}</b> · the snippet below is live on THIS page — loading it already fired a <b>PageView</b>.</div>
+  <div class="muted" style="margin-top:6px">${platforms}</div>
+</div>
+<div class="card"><h2>1 · Did the pixels load?</h2>
+  ${cfg.consentMode === 'gated' ? '<button class="consent" id="grant">🔓 Grant consent (this client is in GDPR mode — pixels wait for this)</button>' : ''}
+  ${cfg.metaPixelId ? row('Meta Pixel (fbq) present', 'chk-fbq') : ''}
+  ${cfg.googleTagId ? row('Google tag (gtag) present', 'chk-gtag') : ''}
+  ${cfg.tiktokPixelId ? row('TikTok Pixel (ttq) present', 'chk-ttq') : ''}
+  ${row('Pulse collector reachable', 'chk-beacon')}
+  <div class="muted">A ✗ on a pixel usually means an ad-blocker on this device. Final confirmation always comes from the platform's own tester — Meta <b>Events Manager → Test events</b>, TikTok <b>Events → Test</b>, Google <b>Tag Assistant</b> — and from <b>Check install</b> in Pulse.</div>
+</div>
+<div class="card"><h2>2 · Fire test events</h2>
+  <button onclick="fire('ViewContent')">👀 View tickets (ViewContent)</button>
+  <button onclick="fire('AddToCart')">🛒 Add to cart (AddToCart)</button>
+  <button onclick="fire('InitiateCheckout')">💳 Start checkout (InitiateCheckout)</button>
+  <button class="buy" onclick="fire('Purchase',{value:150,currency:'ZAR'})">✅ Purchase — R150 (Purchase)</button>
+  <button data-pulse-event="Lead" data-pulse-value="0" onclick="log('Lead — fired via the data-pulse-event attribute binding')">⭐ Lead (via data-pulse-event attribute)</button>
+  <div class="muted">Fire a few, wait ~a minute, then hit <b>Check install</b> in Pulse — the 24h counts should tick up. In Meta/TikTok test tools you should see the same events arrive.</div>
+</div>
+<div class="card"><h2>3 · What happened on this page</h2><div id="log">waiting…</div></div>
+</div>
+<script async src="${origin}/px.js?e=${encodeURIComponent(entityId)}"></script>
+<script>
+var L=document.getElementById('log');L.textContent='';
+function log(m){L.textContent+=new Date().toTimeString().slice(0,8)+'  '+m+'\\n';L.scrollTop=L.scrollHeight;}
+function fire(ev,p){try{window.pulse('track',ev,p);log(ev+(p&&p.value?' (value '+p.value+' '+(p.currency||'')+')':'')+' — sent to every loaded pixel + Pulse');}catch(e){log('✗ '+ev+' failed: '+e.message);}}
+function mark(id,ok){var el=document.getElementById(id);if(el)el.className='chk '+(ok?'ok':'bad');}
+var g=document.getElementById('grant');if(g)g.onclick=function(){try{window.pulseGrantConsent&&window.pulseGrantConsent();log('consent granted — pixels injecting now');g.disabled=true;g.textContent='✓ Consent granted';setTimeout(checks,2500);}catch(e){log('✗ consent grant failed: '+e.message);}};
+function checks(){
+  ${cfg.metaPixelId ? "mark('chk-fbq',!!window.fbq);log((window.fbq?'✓':'✗')+' fbq '+(window.fbq?'present':'missing — ad-blocker?'));" : ''}
+  ${cfg.googleTagId ? "mark('chk-gtag',!!window.gtag);log((window.gtag?'✓':'✗')+' gtag '+(window.gtag?'present':'missing — ad-blocker?'));" : ''}
+  ${cfg.tiktokPixelId ? "mark('chk-ttq',!!window.ttq);log((window.ttq?'✓':'✗')+' ttq '+(window.ttq?'present':'missing — ad-blocker?'));" : ''}
+}
+// The collector answers 204 to a valid-entity ping — proves Pulse can hear this page.
+fetch('${origin}/px',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({e:'${entityId}',ev:'PageView',url:location.href,vid:'px-test'})})
+  .then(function(r){mark('chk-beacon',r.status===204);log((r.status===204?'✓':'✗')+' Pulse collector answered '+r.status);})
+  .catch(function(e){mark('chk-beacon',false);log('✗ Pulse collector unreachable: '+e.message);});
+log('page loaded — PageView fired by the snippet${cfg.consentMode === 'gated' ? ' (WAITING for consent — tap the orange button)' : ''}');
+setTimeout(checks,2500);
+</script></body></html>`;
 }
 
 module.exports = { mount, applyPatch, view, PACK, EVENTS };
