@@ -80,6 +80,7 @@ export default function ClientLayout() {
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
   const onProduct = location.pathname.startsWith('/product');
+  const onJourney = location.pathname.startsWith('/journey');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
   const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
@@ -451,6 +452,19 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
+          {/* Your journey — stickers, badges & Pulse Points (always reachable,
+              even after the Getting-started card retires). */}
+          {!opsOnly && (
+          <button
+            ref={onJourney ? activeRef : null}
+            className={`nav-row${onJourney ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onJourney ? 600 : 500 }}
+            onClick={() => { if (!onJourney) vtNavigate(navigate, '/journey'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>⚡</span>
+            <span style={ellip}>Your journey</span>
+          </button>
+          )}
           {/* Product — report bugs/ideas and track them (everyone, incl. ops-only). */}
           {fl('report') && (<>
           <button
@@ -664,6 +678,16 @@ export default function ClientLayout() {
                       <span style={ellip}>Inbox</span>
                       {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
                     </button>
+                  )}
+                  {!opsOnly && (
+                  <button
+                    className={`nav-row${onJourney ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onJourney ? 700 : 500 }}
+                    onClick={() => { if (!onJourney) vtNavigate(navigate, '/journey'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
+                    <span style={ellip}>Your journey</span>
+                  </button>
                   )}
                   {fl('report') && (<>
                   <button
