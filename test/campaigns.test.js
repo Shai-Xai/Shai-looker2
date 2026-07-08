@@ -304,3 +304,77 @@ test('a resumed campaign skips recipients already in the send ledger — nobody 
   const rows = h.db.db.prepare('SELECT recipient FROM action_sends WHERE action_id=? ORDER BY recipient').all(aid).map((r) => r.recipient);
   assert.deepEqual(rows, ['r1@x.com', 'r2@x.com', 'r3@x.com']);
 });
+
+// ── 7. Concurrent-approval double-send protection ────────────────────────────
+// The approve route resolves the audience (a slow live Looker pull) BEFORE
+// flipping status, so two overlapping approvals both used to pass the 'draft'
+// check and each blast the full audience. The atomic claim (status+audience
+// written in one conditional UPDATE) must let exactly ONE through.
+test('two concurrent approvals send the campaign exactly once — the loser is rejected', async () => {
+  const ent = h.makeEntity('Race Co', 'race-org');
+  const owner = h.makeClient('race@test.local', [ent.id], 'owner');
+  // A slow tile resolution widens the race window the claim must close.
+  resolveImpl = async () => {
+    await sleep(150);
+    return { fields: [{ name: 'email', label: 'Email' }], rows: [{ email: 'race1@x.com' }, { email: 'race2@x.com' }, { email: 'race3@x.com' }] };
+  };
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: { title: 'Race', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  const aid = created.body.action.id;
+
+  const [r1, r2] = await Promise.all([
+    app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner }),
+    app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner }),
+  ]);
+  // Exactly one approval wins; the other is turned away (409 lost the claim;
+  // 400 if it arrived after the winner had already flipped the status).
+  const statuses = [r1.status, r2.status].sort();
+  assert.equal(statuses.filter((s) => s === 200).length, 1, `expected exactly one 200, got ${statuses}`);
+  assert.ok([400, 409].includes(statuses[1]), `loser should be rejected, got ${statuses}`);
+
+  await waitForStatus(ent.id, aid, 'done', owner);
+  // THE invariant: every recipient reached exactly once, never twice.
+  assert.deepEqual(sent.email.sort(), ['race1@x.com', 'race2@x.com', 'race3@x.com']);
+});
+
+// ── 8. SMS opt-out for phone-only recipients ─────────────────────────────────
+// A phone-only recipient's unsubscribe token carries their PHONE (they have no
+// email). Suppression used to be checked against email only, so their opt-out
+// was recorded but never enforced — the next campaign texted them anyway.
+test('a phone-only SMS opt-out is enforced at the next send, across number formats', async () => {
+  const ent = h.makeEntity('OptOut Co', 'optout-org');
+  const owner = h.makeClient('optout@test.local', [ent.id], 'owner');
+
+  // The recipient taps the /u opt-out link from an SMS. Build the same signed
+  // token the engine mints (payload carries the phone as the contact).
+  h.db.setSetting('unsub_secret', 'test-unsub-secret');
+  const payload = Buffer.from(JSON.stringify({ e: '082 555 0001', n: ent.id })).toString('base64url');
+  const sig = require('crypto').createHmac('sha256', 'test-unsub-secret').update(payload).digest('base64url').slice(0, 16);
+  const un = await app.req('GET', `/u/${payload}.${sig}`, {});
+  assert.equal(un.status, 200);
+  // Stored canonicalised (normalised msisdn), so any later format matches.
+  const sup = h.db.db.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(ent.id).map((r) => r.email);
+  assert.deepEqual(sup, ['27825550001']);
+
+  // Next campaign: the opted-out person appears in a DIFFERENT format (+27…),
+  // one friend who did not opt out, and that friend duplicated in a second
+  // format (dedupe must collapse them to one SMS).
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: {
+      title: 'SMS blast', channel: 'sms', subject: 'S', body: 'Hello', smsBody: 'Hello',
+      audience: { mode: 'paste', pasted: '+27 82 555 0001\n0825550002\n+27 82 555 0002' },
+    },
+  });
+  const aid = created.body.action.id;
+  const approve = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  assert.equal(approve.status, 200);
+  await waitForStatus(ent.id, aid, 'done', owner);
+
+  // The opted-out number was NOT texted; the friend got exactly ONE SMS.
+  assert.equal(sent.sms.length, 1);
+  assert.match(sent.sms[0], /825550002/);
+  assert.equal(sent.email.length, 0);
+});

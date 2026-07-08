@@ -8,6 +8,8 @@
 // cellVal copes with both. `member` shape: { email, name, ticket, phone, anchorRaw,
 // emailOk, smsOk, attributes }.
 
+const { normaliseMsisdn } = require('./messaging'); // pure helper — needs no init()
+
 const MAX_AUDIENCE = 25000;      // DEFAULT safety cap per campaign (per-client override via the audience_cap:<entityId> setting)
 const MAX_AUDIENCE_HARD = 500000; // absolute ceiling an admin can set a per-client cap to (Looker fetch limits scale to the cap)
 const MAX_SMS_DEFAULT = 5000;    // DEFAULT per-campaign SMS sub-cap (per-client override via sms_cap:<entityId>; 0 blocks SMS)
@@ -51,8 +53,24 @@ function buildRows(rows, opts = {}) {
   return { raw, filteredOut };
 }
 
+// Canonical identity key for a recipient: lowercased email, else the normalised
+// msisdn (so '+27 82…' and '082…' collapse to one person), else the raw phone.
+const contactKey = (r) => String(r?.email || '').toLowerCase() || normaliseMsisdn(r?.phone) || String(r?.phone || '').trim();
+
+// Is this recipient on the suppression set? Suppressions are keyed by whatever
+// contact the unsubscribe token carried — an email OR a phone (phone-only SMS
+// recipients have no email) — so check BOTH identities, with the phone tested
+// raw and normalised (rows written before phones were normalised at /u time).
+function isSuppressed(sup, r) {
+  if (!sup || !sup.size || !r) return false;
+  const email = String(r.email || '').toLowerCase();
+  if (email && sup.has(email)) return true;
+  const phone = String(r.phone || '').trim();
+  return !!phone && (sup.has(phone.toLowerCase()) || sup.has(normaliseMsisdn(phone)));
+}
+
 // Dedupe (by email-or-phone) + suppression + per-channel reach. `suppressed` is a Set
-// of suppressed emails. Mirrors the shared tail of audienceFor verbatim.
+// of suppressed contacts (emails and/or phones). Mirrors the shared tail of audienceFor verbatim.
 function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   const sup = suppressed || new Set();
   const lim = Number.isFinite(cap) && cap > 0 ? Math.min(cap, MAX_AUDIENCE_HARD) : MAX_AUDIENCE;
@@ -60,10 +78,10 @@ function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   const list = [];
   let excluded = 0;
   for (const r of raw || []) {
-    const key = r.email || r.phone; // phone-only recipients have no email
+    const key = contactKey(r);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    if (r.email && sup.has(r.email)) { excluded += 1; continue; }
+    if (isSuppressed(sup, r)) { excluded += 1; continue; }
     list.push(r);
     if (list.length >= lim) break;
   }
@@ -78,4 +96,4 @@ function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   return { list, excluded, noConsent, reach };
 }
 
-module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };
+module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience, contactKey, isSuppressed };

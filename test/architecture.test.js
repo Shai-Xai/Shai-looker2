@@ -21,7 +21,7 @@ const DEFAULT_CAP = 1500; // any new/untracked server file must stay under this
 // Per-file ceilings (lines). Lower these as files shrink; never raise them.
 const BUDGETS = {
   'index.js': 2950,    // composition root — keep extracting; ratchet down (integrations patch/views → integrationsConfig.js)
-  'actions.js': 1875,   // tracking routes extracted to actionTracking.js
+  'actions.js': 1865,   // tracking → actionTracking.js, tokens/suppression → actionTokens.js
   'db.js': 1620,     // tile-library cluster extracted to tileLibrary.js — locked in lower
   'insights.js': 1150,
   'goals.js': 1100,

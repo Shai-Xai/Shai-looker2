@@ -19,7 +19,7 @@ const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, go
 
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
-const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
+const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience, contactKey, isSuppressed } = require('./audienceMap');
 // Block-builder email content (Mailchimp-style stacked blocks → email-safe HTML).
 const emailBlocks = require('./emailBlocks');
 const cleanBlocks = emailBlocks.cleanBlocks;
@@ -260,45 +260,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     return action;
   }
 
-  const suppressed = (entityId) => new Set(sql.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(entityId).map((r) => r.email));
+  // Signed recipient tokens (/u opt-out, open/click attribution), SMS short
+  // links and the phone-aware suppression set — extracted to actionTokens.js.
+  const { unsubToken, parseUnsubToken, registerTarget, shortLink, suppressed, canonicalContact } = require('./actionTokens')({ db, sql, mailer });
   // Resolver for `query`-source segments (cohorts the Owl builds in chat) — scoped
   // people-query over the curated catalogue. Shares audienceMap shaping; we apply our
   // own suppression below, exactly like the tile/paste paths.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db });
-  const unsubSecret = () => {
-    let s = db.getSetting('unsub_secret', '');
-    if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('unsub_secret', s); }
-    return s;
-  };
-  const unsubToken = (entityId, email) => {
-    const payload = Buffer.from(JSON.stringify({ e: email, n: entityId })).toString('base64url');
-    const sig = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
-    return `${payload}.${sig}`;
-  };
-  // Store a URL → a tiny deterministic HMAC code (identical URLs collapse to one
-  // row). Powers the SMS /k/<code> short links and per-link /c/?k=<code> tracking
-  // of custom HTML. Returns '' if the store is unavailable (callers keep raw URL).
-  const registerTarget = (url) => {
-    if (!url) return '';
-    try {
-      const code = crypto.createHmac('sha256', unsubSecret()).update(url).digest('base64url').slice(0, 8);
-      sql.prepare('INSERT OR IGNORE INTO action_short_links (code, target, at) VALUES (?,?,?)').run(code, url, now());
-      return code;
-    } catch { return ''; }
-  };
-  // Shorten a long absolute URL to a /k/<code> redirect so SMS stays in one segment.
-  const shortLink = (targetUrl) => {
-    if (!targetUrl) return targetUrl;
-    const code = registerTarget(targetUrl);
-    return code ? `${mailer.baseUrl()}/k/${code}` : targetUrl;
-  };
-  const parseUnsubToken = (token) => {
-    const [payload, sig] = String(token || '').split('.');
-    if (!payload || !sig) return null;
-    const want = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
-    if (sig !== want) return null;
-    try { const j = JSON.parse(Buffer.from(payload, 'base64url').toString()); return j.e && j.n ? j : null; } catch { return null; }
-  };
 
   // Sanitise an audience config (one source). At depth 0 it also carries a
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
@@ -518,7 +486,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   async function combineSources(entityId, cfg, user, depth) {
     const combine = ['union', 'intersect', 'exclude'].includes(cfg.audience.combine) ? cfg.audience.combine : 'union';
     const blocks = (cfg.audience.sources || []).slice(0, 10);
-    const keyOf = (m) => String(m.email || m.phone || '').toLowerCase();
+    const keyOf = contactKey; // canonical email-else-normalised-phone identity (shared with finalizeAudience)
     const subs = [];
     const lists = [];
     for (const b of blocks) {
@@ -814,7 +782,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Execute: send to every recipient in the snapshot. Runs detached; the UI
   // polls status. Mailer failures are counted, never crash the loop.
+  // activeRuns: in-process re-entrancy guard — the boot-resume sweep (or any
+  // second caller) must never start a parallel loop over a campaign this
+  // process is already sending; two loops share one ledger read and would
+  // double-send everyone not yet ledgered.
+  const activeRuns = new Set();
   async function runCampaign(actionId) {
+    if (activeRuns.has(actionId)) return;
+    activeRuns.add(actionId);
+    try { await runCampaignInner(actionId); } finally { activeRuns.delete(actionId); }
+  }
+  async function runCampaignInner(actionId) {
     const a = getAction(actionId);
     if (!a || a.status !== 'running') return;
     const branding = mailer.resolveBranding(a.entityId, a.config?.eventSuiteId || '');
@@ -1205,9 +1183,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       const summ = approvalSummary(getAction(a.id));
       if (!summ.complete) return res.json({ ok: true, pending: true, remaining: summ.pending });
       // All approvals in → tell the sender, then flip to draft and continue
-      // into the send logic below.
+      // into the send logic below. Conditional on still-pending so a concurrent
+      // final approver can't knock an already-claimed (running) campaign back.
       notifySender(a, { approved: true, by: req.user.email });
-      sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=?").run(now(), a.id);
+      sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=? AND status='pending'").run(now(), a.id);
     } else if (a.status !== 'draft') {
       return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
     } else if (requireApprovalFor(a.entityId)) {
@@ -1222,8 +1201,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // fully automatically — no per-send approval. The check enrolls new
     // abandoners (sequence) or queues child drafts (recurring single-send).
     if (isSequence || a.recurring) {
-      sql.prepare('UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
+      // Atomic activation: only one concurrent approve may flip draft → auto.
+      const claim = sql.prepare("UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='draft'")
         .run('auto', req.user.email, now(), now(), a.id);
+      if (claim.changes !== 1) return res.status(409).json({ error: 'Already activated — another approval got there first' });
       if (isSequence) enrollSequence(getAction(a.id)).catch((e) => console.error('[actions] initial enroll failed', a.id, e.message));
       return res.json({ ok: true, activated: true });
     }
@@ -1234,13 +1215,19 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let list;
       if (a.config.audience.mode === 'snapshot') {
         const sup = suppressed(a.entityId);
-        list = a.audience.filter((r) => !sup.has(r.email));
+        list = a.audience.filter((r) => !isSuppressed(sup, r));
       } else {
         ({ list } = await audienceFor(a.entityId, a.config, req.user));
       }
       if (!list.length) return res.status(400).json({ error: 'Audience is empty — nothing to send' });
-      sql.prepare('UPDATE actions SET status=?, audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
-        .run('running', JSON.stringify(list), req.user.email, now(), now(), a.id);
+      // Atomically CLAIM the send: audience resolution above is slow (a live Looker
+      // pull), so two overlapping approvals could both reach this point — status +
+      // audience are written in ONE conditional statement and only the winner
+      // (changes === 1) may start runCampaign. The loser gets a 409, never a
+      // second blast (mirrors runScheduledSend's claim).
+      const claim = sql.prepare("UPDATE actions SET status='running', audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='draft'")
+        .run(JSON.stringify(list), req.user.email, now(), now(), a.id);
+      if (claim.changes !== 1) return res.status(409).json({ error: 'Already sending — another approval got there first' });
       // Remember who this campaign family has reached, for recurring dedupe.
       const rootId = a.parentId || a.id;
       const ins = sql.prepare('INSERT OR IGNORE INTO action_sent (root_id, email, at) VALUES (?,?,?)');
@@ -1284,7 +1271,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const claim = sql.prepare("UPDATE actions SET status='running', updated_at=? WHERE id=? AND status='scheduled'").run(now(), a.id);
     if (claim.changes !== 1) return;
     let list;
-    if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !sup.has(r.email)); }
+    if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !isSuppressed(sup, r)); }
     else { ({ list } = await audienceFor(a.entityId, a.config, { id: 'scheduler', email: 'scheduler@pulse', role: 'admin', entityIds: [] })); }
     if (!list.length) { saveResults(a.id, { ...a.results, lastError: 'Audience was empty at the scheduled time' }); setStatus(a.id, 'failed'); return; }
     sql.prepare("UPDATE actions SET audience=?, updated_at=? WHERE id=?").run(JSON.stringify(list), now(), a.id);
@@ -1754,7 +1741,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // (re-checked every 20) rather than draining the whole due list.
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
-        if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        if (isSuppressed(sup, e)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         // Conversion / drop-out. 'list' mode: converted = in the conversion source;
         // left-the-audience-but-not-in-list just ends ('done'). Default mode:
         // converted = gone from the abandoned audience (bought or expired).
@@ -1845,7 +1832,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Open pixel /o, tracked click /c, SMS short link /k, unsubscribe /u — the
   // burst-hot paths a blast generates. Extracted to actionTracking.js: indexed
   // token lookup, never parses the audience blob.
-  require('./actionTracking').mount(app, { sql, now, saveResults, parseUnsubToken });
+  require('./actionTracking').mount(app, { sql, now, saveResults, parseUnsubToken, canonicalContact });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —
