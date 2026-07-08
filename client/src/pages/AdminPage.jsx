@@ -4011,6 +4011,14 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     return out;
   })();
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
+  // Stand up a new event just like this one: clones the sets + client-owned
+  // dashboards (ids remapped), then the AM renames + repoints the event.
+  const duplicate = async () => {
+    const nm = prompt('Name for the duplicated suite:', `${suite.name} (copy)`);
+    if (nm == null) return; // cancelled
+    try { await api.adminDuplicateSuite(suite.id, { name: nm.trim() || undefined }); onChange(); }
+    catch (e) { alert('Could not duplicate: ' + e.message); }
+  };
   // Open this suite exactly as the client sees it (preview), jumping to its
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
   const preview = async () => {
@@ -4029,6 +4037,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
       <Row>
         <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
+        <button style={previewBtn} onClick={duplicate} title="Clone this suite (sets + dashboards) as a new one">⧉ Duplicate</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
