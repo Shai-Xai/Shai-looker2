@@ -1682,6 +1682,19 @@ function FlowRiverView({ rows, apiBase, onSelect, day = '' }) {
         setFocus({ s, nodes });
       }).catch(() => {}).finally(() => setLoading(''));
   };
+  // 📅 past day → pull each monitor's day devices so the TOP-LEVEL station nodes (size,
+  // count, status) reflect that day, not the live/closing roster. Remounts on day change.
+  const dpRef = useRef({}); // mid -> devices[] for the picked day
+  useEffect(() => {
+    if (!day) return () => {};
+    let alive = true;
+    [...new Set((rowsRef.current || []).map((r) => r.mid))].forEach((mid) => {
+      fetch(`${apiBase}/monitors/${encodeURIComponent(mid)}/timeline?hours=day:${day}&interval=60`)
+        .then((r) => r.json()).then((d) => { if (alive && d) dpRef.current[mid] = d.devices || []; }).catch(() => {});
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one read per monitor on mount (keyed by day)
+  }, []);
   useEffect(() => {
     const cv = cvRef.current; if (!cv) return () => {};
     const ctx = cv.getContext('2d');
@@ -1695,12 +1708,22 @@ function FlowRiverView({ rows, apiBase, onSelect, day = '' }) {
       let list;
       if (f) list = f.nodes;
       else {
+        // Past day → each station's size/count/status from that day's devices; else live rows.
+        const dayStat = (s) => {
+          if (!day) return null;
+          const devs = (dpRef.current[s.mid] || []).filter((v) => (v.station || '') === s.name);
+          if (!devs.length) return null;
+          const total = devs.reduce((a, v) => a + (v.total || (v.counts || []).reduce((x, y) => x + (y || 0), 0)), 0);
+          const traded = devs.filter((v) => (v.total || 0) > 0 || (v.counts || []).some(Boolean)).length;
+          return { txnH: total, on: traded, off: Math.max(0, devs.length - traded), status: total > 0 ? 'fresh' : 'stale' };
+        };
+        const eff = (s) => { const ds = dayStat(s); return ds ? { ...s, ...ds } : s; };
         const sts = []; const seenN = new Set();
         for (const r of rowsRef.current) { if (!r.name || seenN.has(r.name)) continue; seenN.add(r.name); sts.push(r); }
-        sts.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
+        sts.sort((a, b) => (eff(b).txnH || 0) - (eff(a).txnH || 0));
         const top = sts.slice(0, 22);
-        for (const s of sts.slice(22)) if (s.status === 'stale') top.push(s);
-        list = top.map((s) => ({ key: s.name, label: s.name, sub: `${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}/h`, rate: s.txnH || 0, alarm: isAlarm(s), warn: (s.off || 0) > 0, s }));
+        for (const s of sts.slice(22)) if (eff(s).status === 'stale') top.push(s);
+        list = top.map((s0) => { const s = eff(s0); return { key: s.name, label: s.name, sub: `${s.on || 0}/${(s.on || 0) + (s.off || 0)} · ${(s.txnH || 0).toLocaleString('en-ZA')}${day ? ' total' : '/h'}`, rate: s.txnH || 0, alarm: isAlarm(s), warn: (s.off || 0) > 0, s: s0 }; });
       }
       const w = cv.clientWidth || 720;
       const hgt = Math.max(340, list.length * 30 + 70);
@@ -1826,18 +1849,22 @@ function CascadeView({ rows, apiBase, onSelect, day = '' }) {
         list.sort((a, b) => (b.txnH || 0) - (a.txnH || 0));
         for (const s of list) {
           const pack = packsRef.current[s.mid];
-          let ops = null;
+          let ops = null; let sEff = s;
           if (pack) {
+            const devs = pack.list.filter((v) => (v.station || '') === s.name);
             const isOnD = (v) => (day ? ((v.total || 0) > 0 || (v.counts || []).some(Boolean)) : (v.lagMin != null ? v.lagMin <= pack.onlineMin : (v.active || []).slice(-2).some(Boolean)));
-            const all = pack.list.filter((v) => (v.station || '') === s.name)
+            const all = devs
               .map((v) => { const c = v.counts || []; return { name: v.operator || v.device, rate: day ? (v.total || c.reduce((a2, b2) => a2 + (b2 || 0), 0)) : (c[c.length - 1] || 0) + (c[c.length - 2] || 0), on: isOnD(v) }; })
               .sort((a, b) => b.rate - a.rate);
             const named = all.filter((o, i) => i < 5 || !o.on).slice(0, 12);
             const rest = all.filter((o) => !named.includes(o));
             ops = named;
             if (rest.length) ops = [...named, { name: `+${rest.length} more`, rate: rest.reduce((a2, o) => a2 + o.rate, 0), on: true, agg: true }];
+            // 📅 past day: recompute the STATION node itself (size/label/status) from the day's
+            // devices, not the live roster — so the whole canvas reflects the picked day.
+            if (day) { const traded = all.filter((o) => o.on).length; const total = all.reduce((a2, o) => a2 + o.rate, 0); sEff = { ...s, txnH: total, on: traded, off: Math.max(0, all.length - traded), status: total > 0 ? 'fresh' : 'stale' }; }
           }
-          model.push({ s, type, col, ops });
+          model.push({ s: sEff, type, col, ops });
         }
       }
       return model;
