@@ -669,6 +669,7 @@ test('a Looker timeout tells the model to change the query shape, not retry it',
   assert.match(res.message, /do NOT retry the same query/, 'anti-retry guidance on timeouts');
 });
 
+
 // ── ChottuLink act-tools: createLink + applyLinkTemplate (draft-only) ─────────
 // The tools must DRAFT (confirm:true, never touch ChottuLink) and mirror the
 // Links UI's validation. The upstream API is a stub — commits happen elsewhere.
@@ -720,4 +721,33 @@ test('applyLinkTemplate resolves the set for the current event and demands the b
   assert.equal(res.action.items.length, 2);
   const noSuite = await t.applyLinkTemplate.run({ baseUrl: 'https://h' }, { user });
   assert.equal(noSuite.ok, false, 'a template run needs an event in context');
+});
+
+test('a heavy cross-view breakdown that times out is auto-CHUNKED and answered', async () => {
+  // The live failure: sales measure × buyer demographic joins every sale to every
+  // buyer and times out — but the SAME query filtered to a few values completes.
+  const calls = [];
+  const stub = { ...queryEngine, runLookerQuery: async (path, body) => {
+    calls.push(body);
+    if (body.fields.length === 1 && body.fields[0] === 'cashless_x_cust.country') return [{ 'cashless_x_cust.country': 'IT' }, { 'cashless_x_cust.country': 'FR' }, { 'cashless_x_cust.country': 'DE' }];
+    if (body.filters['cashless_x_cust.country']) return String(body.filters['cashless_x_cust.country']).split(',').map((v) => ({ 'cashless_x_cust.country': v, 'cashless_x_sales.revenue': v === 'FR' ? 900 : 100 }));
+    throw new Error('Query timed out after 120s');
+  } };
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_sales.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_cust.country', label: 'Country Of Birth', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: stub, auth: h.auth, db: h.db, catalogue: cat });
+  const ent = h.makeEntity('Ultra Shard', 'Ultra Shard Co');
+  const user = h.makeClient('owl-shard@client.test', [ent.id]);
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dimensions: ['cashless_x_cust.country'] }, ctx(user));
+  assert.equal(res.ok, true, 'answered despite the timeout');
+  assert.equal(res.rows.length, 3);
+  assert.equal(res.rows[0]['cashless_x_cust.country'], 'FR', 'merged rows sorted by the measure');
+  assert.match(res.note, /CHUNKING/, 'the note says how it was computed');
+  const chunk = calls.find((b) => b.filters['cashless_x_cust.country']);
+  assert.equal(chunk.filters[h.ORG_FIELD], 'Ultra Shard Co', 'chunk queries keep the organiser scope lock');
+  // Re-ask: served from the warm cache — zero further Looker calls.
+  const n = calls.length;
+  const again = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dimensions: ['cashless_x_cust.country'] }, ctx(user));
+  assert.equal(again.ok, true);
+  assert.match(again.note, /warm cache/);
+  assert.equal(calls.length, n, 'no new Looker calls on the re-ask');
 });

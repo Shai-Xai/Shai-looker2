@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-07 (test-first staging → production releases) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-08 (✨ What's in Pulse: the client-facing feature matrix — in-app grid + explained sales-site index · plus 🚀 Client onboarding journey) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -448,6 +448,11 @@ one-by-one in the ChottuLink dashboard.
 - **Engage → Links** — clients create and manage their own links: name it, pick
   the event, paste the destination, done. Each link is **tied to a Pulse event**
   and shows its **click counts** (total / 7 / 30 days).
+- **Grouped by category** ✅ — the Links landing shows **category tiles** (link +
+  click counts per tile); tap one to drill into just that category's links, with a
+  clear **← All categories** back link. Every link starts in the **App** category
+  (they open the Howler app); file links under your own categories ("Socials",
+  "Website"…) from the link editor. Mobile-first: big tap targets, stacking tiles.
 - **UTM tags & app behaviour** built in — every link can carry campaign tags and
   choose app-vs-browser opening per platform.
 - **Import (pick & choose)** — the import screen lists everything on the
@@ -480,6 +485,30 @@ one-by-one in the ChottuLink dashboard.
 
 **Pitch:** "Every link your event needs — created in one click from Pulse, tracked
 per event, and ready to drop into posts, bios, emails and QR codes."
+### 5h. Pulse Pixel — website retargeting  🧪 (new)
+- **One snippet, all pixels.** Install a single Pulse script tag on the client's
+  website or ticket shop and it loads their **Meta Pixel, Google tag and TikTok
+  Pixel** for them — configured (and changeable later) entirely inside Pulse, so
+  the site never needs touching again.
+- **Remarketing lists build automatically** in each ad platform from its own
+  pixel: all visitors, ticket-page viewers, checkout abandoners, purchasers.
+- **One-click standard audiences** — Pulse creates the standard retargeting
+  audience pack (visitors 180d/30d · viewed tickets 30d · checkout abandoners 14d
+  · purchasers 180d) directly in the client's **Meta** and **TikTok** ad accounts
+  via their connected APIs. (Google's audience definitions are a guided one-time
+  manual step — no self-serve API — the tag itself is fully automatic.)
+- **Install check built in** — every event also beacons back to Pulse, so admin
+  and the client can see "✓ receiving events" the moment the snippet is live
+  (and Pulse builds a first-party behaviour log for future segments).
+- **Consent-aware** — a GDPR mode holds all pixels off until the site's cookie
+  banner grants consent.
+- Dual-surface: Howler configures it in Admin → client → Integrations; clients
+  self-serve in Settings → Integrations. *Meta/TikTok audience-pack API calls not
+  yet exercised against live ad accounts (same caveat as audience sync).*
+
+**Pitch:** "Add one line to your website and your retargeting is done — every ad
+pixel managed from Pulse, and the standard remarketing audiences created in your
+Meta and TikTok accounts in one click. Change pixels any time without a developer."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -554,6 +583,13 @@ per event, and ready to drop into posts, bios, emails and QR codes."
   **Shown / Hidden toggle**, so anything still in the works (or not ready for
   internal announcement) stays off the public pages until it's ready — admins
   always see the full picture, dimmed.
+- **✨ What's in Pulse (client-facing feature matrix)** ✅ — the same catalogue,
+  rendered for clients: in the app under **Product → ✨ What's in Pulse** as a
+  tap-through grid of section tiles (each feature explained in plain language,
+  with "Ask us to switch it on / Interested?" CTAs that file a request on the
+  Product board), and on the public **`/sales/features`** page as expandable
+  rows with a "ask about this in your demo" prompt. One source, every surface —
+  the Shown/Hidden toggles govern all of it.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -815,6 +851,35 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 
 ---
 
+## 14. Client onboarding journey — layered, guided activation  🧪
+**The pitch:** "New clients don't get dumped into a tool — Pulse walks them (and
+your account team) through it in layers, from first login to full automation,
+and celebrates each milestone on the way."
+
+- **Four phases, one journey.** The "Getting started" card on the client's home
+  page is a layered path: **1 · The fundamentals** (dashboards, the installed
+  app, notifications, asking the Owl, the weekly digest, branding, team) →
+  **2 · Goals & first sends** (goals, alerts, a first audience, a first simple
+  email) → **3 · The Owl everywhere** (WhatsApp, Claude & ChatGPT connectors) →
+  **4 · Automate & amplify** (journeys, Meta/TikTok ad accounts, the Pulse
+  Pixel). The current phase is open and actionable; what's next stays visible.
+- **Progress ticks itself.** Almost every step auto-detects from real usage —
+  a dashboard opened, the app installed, a question asked, a connector used, a
+  journey drafted — so the journey reflects reality, not homework.
+- **A branded welcome pack email** goes out automatically when the client's
+  first login exists (in their branding, introducing Phase 1), and a
+  **"phase complete — here's what's next" email + inbox message** lands as each
+  layer finishes. The **account team gets a heads-up on every milestone**, so
+  the AM knows exactly when to start the next conversation.
+- **Every step has a "Show me how"** walkthrough, written for a phone screen.
+- **Dual-surface:** the AM sees the same journey per client (Admin → client →
+  Setup checklist → **Client onboarding journey**) with live progress, can tick
+  manual steps on the client's behalf, re-send the welcome pack, or opt a
+  client out of the emails. Wording is editable in Admin → Onboarding →
+  **Journey emails**.
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates. *(The conversational/agentic
 Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
@@ -850,11 +915,59 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **✨ What's in Pulse (client-facing feature matrix)** ✅ (new):
+  the client app's **Product** section gains two tabs — **✨ What's in Pulse**, an
+  app-launcher grid of Pulse's areas where every feature opens a plain-language
+  "what it does for you" explanation (statuses in client wording: ✓ Live · Ask us
+  · Early access · On the way), with one-tap CTAs that pre-fill a request on the
+  Product board — and **💬 Your requests** (the existing reports view). The public
+  **`/sales/features`** index gains the same explanations as tap-to-expand rows
+  with a "ask about this in your demo" link. All fed by the one curated catalogue
+  (now with a per-feature description), still governed by the admin Shown/Hidden
+  toggles.
+- **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
+  checklist became a **four-phase layered journey** (fundamentals → goals & first
+  sends → the Owl everywhere → automate & amplify) with almost every step
+  **auto-detected from real usage** (dashboard opened, app installed, Owl asked,
+  WhatsApp linked, Claude/ChatGPT connector used, journey built…). A **branded
+  welcome pack email** sends automatically when the client's first login exists,
+  and each completed phase triggers a **congratulations + "here's what's next"
+  email & inbox message**, with a factual milestone heads-up to the account team.
+  Dual-surface: AMs see the same journey per client (Setup checklist → Client
+  onboarding journey), can tick manual steps, re-send the welcome pack, or opt a
+  client out; wording is editable in Admin → Onboarding → Journey emails.
+- **2026-07-07** — **🎯 Pulse Pixel — website retargeting** 🧪 (new): one snippet on
+  the client's website/ticket shop loads their **Meta / Google / TikTok pixels**
+  (managed from Pulse — changeable without touching the site), fires the standard
+  events, and beacons to Pulse for a built-in "✓ receiving events" install check.
+  **One click creates the standard retargeting audience pack** (visitors 180/30d,
+  viewed tickets 30d, checkout abandoners 14d, purchasers 180d) in the connected
+  Meta + TikTok ad accounts; Google audiences are a guided one-time manual step.
+  GDPR consent mode included. Dual-surface (Admin → Integrations + client
+  self-service); platform API calls not yet verified against live ad accounts.
+- **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
+  page gains a **Live updates** tab — while the event runs, Pulse sends the team a
+  compact multi-metric snapshot every 15–120 min (gates in with **+change** and
+  **pace/hr**, bar revenue, **top-3 bars/vendors**, Event Ops device health, optional
+  **"% of last year"** vs a chosen past event). Manual **Go live** switch or a
+  scheduled window; delivered to the inbox (one thread for the whole night) + app
+  push, email, SMS and **WhatsApp** (24h service-window rule respected). The **Owl
+  can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`
+  permission as Alerts.
+- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+- **2026-07-07** — **🔗 Links grouped into categories** ✅ (Engage → Links): the Links
+  landing now opens on **category tiles** — tap one (e.g. **App**, home of every
+  Chotulink/Howler-app link) to see just that category's links, with a clear
+  **← All categories** back link. File links under your own categories from the
+  link editor (existing list or type a new one). Mobile-first; dual-surface (same
+  grouping in Admin → client → 🔗 Deep links).
 - **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
   can now be built to a **staging** environment first, checked there, then **promoted to
   production** — so changes are verified before they hit the live app. In your **My reports**
-  view a new **Testing** step appears in the journey (Building → Testing → Ready for you), and
-  you're notified when your request is previewing on staging and again when it goes live.
+  view a new **Testing** step appears in the journey (Building → Testing → Ready for you).
+  **You're the tester**: when your request lands on staging you get a link to try it and an
+  **Approve / Send back** choice — nothing goes live until you (and every other reporter with
+  work on staging) approve it, and you're notified the moment it's in production.
 - **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
   answers product questions — *how do I…*, *what's new*, *what can I do* — right in
   Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
@@ -978,7 +1091,14 @@ see "The continuous comms loop" above.)*
   zones, every device a countable tick (green = sending, red = dark), this hour's
   scans/transactions per station with a mini trend. Runs off the Data health
   checks already in place — no extra load — and admins get the same board per
-  event on the Data health page. Floorplan overlay and day-replay are next.
+  event on the Data health page. Floorplan overlay and day-replay are next.- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+  Tune now always feed the briefing — a phase-scoped pick (e.g. "gates board on
+  Event Day") whose event has **no dates/phase set** feeds anyway instead of
+  silently vanishing, and the Tune modal warns to set the key dates. A
+  whole-dashboard pick no longer crowds out the reader's other picks, and admins
+  get a **🔍 Diagnose focus tiles** panel on the home briefing showing why each
+  pick did or didn't make that briefing.
+
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking

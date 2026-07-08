@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // Reusable integrations editor for Looker + Anthropic credentials. Secrets are
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -20,6 +20,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearKey, setClearKey] = useState(false);
   const [resendKey, setResendKey] = useState('');
   const [clearResendKey, setClearResendKey] = useState(false);
+  const [resendWebhookSecret, setResendWebhookSecret] = useState('');
+  const [clearResendWebhookSecret, setClearResendWebhookSecret] = useState(false);
   const [mailFrom, setMailFrom] = useState(value?.resend?.from || '');
   const [invKey, setInvKey] = useState('');
   const [clearInvKey, setClearInvKey] = useState(false);
@@ -36,6 +38,10 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   // Organic-insights assets (inbound social metrics): the Page / IG account we read.
   const [metaPageId, setMetaPageId] = useState(value?.meta?.pageId || '');
   const [metaIgUserId, setMetaIgUserId] = useState(value?.meta?.igUserId || '');
+  const [pxMeta, setPxMeta] = useState(value?.pixel?.metaPixelId || '');
+  const [pxGoogle, setPxGoogle] = useState(value?.pixel?.googleTagId || '');
+  const [pxTiktok, setPxTiktok] = useState(value?.pixel?.tiktokPixelId || '');
+  const [pxConsent, setPxConsent] = useState(value?.pixel?.consentMode || 'auto');
   const [ttToken, setTtToken] = useState('');
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
@@ -47,6 +53,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [chottuKey, setChottuKey] = useState('');
   const [clearChottuKey, setClearChottuKey] = useState(false);
   const [chottuDomain, setChottuDomain] = useState(value?.chottu?.domain || '');
+  const [pxStatus, setPxStatus] = useState(null);   // install check result (GET pixel/status)
+  const [pxCopied, setPxCopied] = useState(false);
+  const [pxPack, setPxPack] = useState({});         // channel -> result message
   const [testState, setTestState] = useState('');
   const [slackTestState, setSlackTestState] = useState('');
   const [busyKey, setBusyKey] = useState('');
@@ -78,6 +87,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       p.resend = { from: mailFrom };
       if (resendKey) p.resend.apiKey = resendKey;
       if (clearResendKey) p.resend.clearApiKey = true;
+      if (resendWebhookSecret) p.resend.webhookSecret = resendWebhookSecret;
+      if (clearResendWebhookSecret) p.resend.clearWebhookSecret = true;
     }
     if (showInventive && want('inventive')) {
       p.inventive = { endpoint: invEndpoint };
@@ -96,6 +107,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       p.tiktok = { advertiserId: ttAdvertiser };
       if (ttToken) p.tiktok.accessToken = ttToken;
       if (clearTtToken) p.tiktok.clearAccessToken = true;
+    }
+    if (showPixel && want('pixel')) {
+      p.pixel = { metaPixelId: pxMeta, googleTagId: pxGoogle, tiktokPixelId: pxTiktok, consentMode: pxConsent };
     }
     if (showSlack && want('slack')) {
       p.slack = { channel: slackChannel };
@@ -119,7 +133,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       // Clear the transient (write-only) inputs for whatever we just saved.
       if (!only || only === 'looker') { setClientSecret(''); setClearSecret(false); }
       if (!only || only === 'anthropic') { setAnthropicKey(''); setClearKey(false); }
-      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); }
+      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); setResendWebhookSecret(''); setClearResendWebhookSecret(false); }
       if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
       if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
@@ -239,6 +253,18 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           </div>
           <SaveRow k="tiktok" />
         </Section>
+      )}
+
+      {/* Pulse Pixel — one snippet on the client's site/ticket shop, all ad pixels */}
+      {showPixel && (
+        <PulsePixelSection
+          collapsible={collapsible} lockProps={lockProps('pixel')} value={value} pixelEntityId={pixelEntityId}
+          pxMeta={pxMeta} setPxMeta={setPxMeta} pxGoogle={pxGoogle} setPxGoogle={setPxGoogle}
+          pxTiktok={pxTiktok} setPxTiktok={setPxTiktok} pxConsent={pxConsent} setPxConsent={setPxConsent}
+          pxStatus={pxStatus} setPxStatus={setPxStatus} pxCopied={pxCopied} setPxCopied={setPxCopied}
+          pxPack={pxPack} setPxPack={setPxPack} onPixelStatus={onPixelStatus} onCreatePixelAudiences={onCreatePixelAudiences}
+          SaveRow={SaveRow}
+        />
       )}
 
       {/* Slack — per-client outbound notifications */}
@@ -365,6 +391,19 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             style={input}
             autoComplete="off"
           />
+          <Lbl>Webhook signing secret <span style={{ textTransform: 'none', fontWeight: 400 }}>· bounces &amp; spam complaints</span></Lbl>
+          <div style={note}>
+            Protects the shared sending domain: in <b>Resend → Webhooks</b>, add the endpoint <code>{`${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/resend`}</code> with the events <code>email.bounced</code> + <code>email.complained</code>, then paste its signing secret here. Dead/complaining addresses are auto-suppressed from all future campaign sends{typeof value?.resend?.suppressedCount === 'number' ? <> — <b>{value.resend.suppressedCount}</b> suppressed so far</> : null}.
+          </div>
+          <input
+            type="password" autoComplete="off"
+            value={resendWebhookSecret} onChange={(e) => setResendWebhookSecret(e.target.value)}
+            placeholder={value?.resend?.webhookSecretSet ? 'Set — leave blank to keep' : 'whsec_…'}
+            style={input} disabled={clearResendWebhookSecret}
+          />
+          {value?.resend?.webhookSecretSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearResendWebhookSecret} onChange={(e) => setClearResendWebhookSecret(e.target.checked)} /> Remove this secret</label>
+          )}
           {value?.resend?.lastError && <div style={{ ...note, color: 'var(--error, #ef4444)', marginTop: 8 }}>Last send failed: {value.resend.lastError}</div>}
           {(value?.resend?.recent || []).length > 0 && (
             <>
@@ -482,6 +521,90 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       )}
 
     </div>
+  );
+}
+
+// ── Pulse Pixel card ──────────────────────────────────────────────────────────
+// One snippet on the client's website / ticket shop carries ALL their ad pixels
+// (Meta / Google / TikTok) — configured here, changeable without ever touching
+// the site again. Shows the copy-paste snippet, a live "receiving events" check,
+// and the one-click standard retargeting audience packs (Meta / TikTok APIs;
+// Google is a guided manual step — no self-serve API for audience lists).
+function PulsePixelSection({ collapsible, lockProps, value, pixelEntityId, pxMeta, setPxMeta, pxGoogle, setPxGoogle, pxTiktok, setPxTiktok, pxConsent, setPxConsent, pxStatus, setPxStatus, pxCopied, setPxCopied, pxPack, setPxPack, onPixelStatus, onCreatePixelAudiences, SaveRow }) {
+  const snippet = `<script async src="${typeof window !== 'undefined' ? window.location.origin : ''}/px.js?e=${pixelEntityId}"></script>`;
+  const anySaved = !!(value?.pixel?.metaPixelId || value?.pixel?.googleTagId || value?.pixel?.tiktokPixelId);
+  const checkInstall = async () => {
+    if (!onPixelStatus) return;
+    setPxStatus('checking');
+    try { setPxStatus(await onPixelStatus()); } catch (e) { setPxStatus({ error: e.message }); }
+  };
+  useEffect(() => { if (anySaved && onPixelStatus && pxStatus === null) checkInstall(); }, [anySaved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runPack = async (channel) => {
+    if (!onCreatePixelAudiences) return;
+    setPxPack((s) => ({ ...s, [channel]: '…' }));
+    try {
+      const r = await onCreatePixelAudiences(channel);
+      setPxPack((s) => ({ ...s, [channel]: r.error ? `✗ ${r.error}` : `✓ ${r.created} created · ${r.existed} already existed${r.errors ? ` · ${r.errors} failed` : ''}` }));
+    } catch (e) { setPxPack((s) => ({ ...s, [channel]: `✗ ${e.message}` })); }
+  };
+  const packBtn = { padding: '8px 14px', fontSize: 12.5, fontWeight: 700, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, cursor: 'pointer' };
+  const live = pxStatus && pxStatus !== 'checking' && !pxStatus.error && pxStatus.lastEventAt;
+  return (
+    <Section title="🎯 Pulse Pixel (website retargeting)" collapsible={collapsible} {...lockProps} guide={<>
+      <div style={note}>
+        <b>Install once, manage forever.</b> One snippet on the website / ticket shop loads all the ad pixels configured below and fires the standard events — so <b>remarketing lists build automatically</b> in Meta, Google and TikTok. Adding or changing a pixel later is a Pulse setting; the site never needs touching again.
+      </div>
+      <HowTo title="How to find each pixel / tag ID" steps={[
+        <><b>Meta Pixel ID:</b> <a href="https://business.facebook.com/events_manager" target="_blank" rel="noreferrer">Meta Events Manager</a> → Data sources → your pixel — the numeric ID under the pixel name. (No pixel yet? Create one there in two clicks.)</>,
+        <><b>Google tag ID:</b> <a href="https://ads.google.com" target="_blank" rel="noreferrer">Google Ads</a> → Tools → Data manager → Google tag — the <code>AW-…</code> (or <code>G-…</code>) ID.</>,
+        <><b>TikTok Pixel ID:</b> <a href="https://ads.tiktok.com" target="_blank" rel="noreferrer">TikTok Ads Manager</a> → Tools → Events → Web events — the pixel code (e.g. <code>C4A7…</code>).</>,
+      ]} />
+      <HowTo title="Google: create the remarketing audiences (one-time, manual)" steps={[
+        <>Google has no simple API for this, so it's a one-time manual step: in <a href="https://ads.google.com" target="_blank" rel="noreferrer">Google Ads</a> open <b>Tools → Shared library → Audience manager → Segments</b>.</>,
+        <>Create <b>Website visitors</b> segments: “All visitors · 180d”, “All visitors · 30d” (membership duration 180/30 days).</>,
+        <>Add event-based segments if you fire them: “begin_checkout · 14d” excluding “purchase · 14d” (abandoners) and “purchase · 180d” (buyers).</>,
+        <>They fill automatically from the Google tag this pixel serves — nothing else to install.</>,
+      ]} />
+    </>}>
+      <Lbl>Install snippet <span style={{ textTransform: 'none', fontWeight: 400 }}>· paste before <code>&lt;/head&gt;</code> on every page</span></Lbl>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input readOnly value={snippet} onFocus={(e) => e.target.select()} style={{ ...input, fontFamily: 'monospace', fontSize: 11.5 }} />
+        <button type="button" style={{ ...packBtn, flexShrink: 0 }} onClick={() => { navigator.clipboard?.writeText(snippet).then(() => { setPxCopied(true); setTimeout(() => setPxCopied(false), 1600); }).catch(() => {}); }}>{pxCopied ? '✓ Copied' : 'Copy'}</button>
+      </div>
+      {onPixelStatus && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <button type="button" style={packBtn} onClick={checkInstall} disabled={pxStatus === 'checking'}>{pxStatus === 'checking' ? 'Checking…' : 'Check install'}</button>
+          {live && <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--success, #10b981)' }}>✓ Receiving events — last {new Date(pxStatus.lastEventAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {pxStatus.events24h} in 24h</span>}
+          {pxStatus && pxStatus !== 'checking' && !pxStatus.error && !pxStatus.lastEventAt && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>No events received yet — install the snippet, then open the site once.</span>}
+          {pxStatus?.error && <span style={{ fontSize: 12.5, color: 'var(--error, #ef4444)' }}>✗ {pxStatus.error}</span>}
+        </div>
+      )}
+      <Lbl>Meta Pixel ID</Lbl>
+      <input value={pxMeta} onChange={(e) => setPxMeta(e.target.value)} placeholder="e.g. 123456789012345" style={input} autoComplete="off" />
+      <Lbl>Google tag ID</Lbl>
+      <input value={pxGoogle} onChange={(e) => setPxGoogle(e.target.value)} placeholder="AW-… or G-…" style={input} autoComplete="off" />
+      <Lbl>TikTok Pixel ID</Lbl>
+      <input value={pxTiktok} onChange={(e) => setPxTiktok(e.target.value)} placeholder="e.g. C4A7…" style={input} autoComplete="off" />
+      <Lbl>Consent handling</Lbl>
+      <select value={pxConsent} onChange={(e) => setPxConsent(e.target.value)} style={{ ...input, cursor: 'pointer' }}>
+        <option value="auto">Fire immediately (default)</option>
+        <option value="gated">Wait for consent — GDPR sites (fire after window.pulseGrantConsent())</option>
+      </select>
+      {pxConsent === 'gated' && <div style={note}>Pixels stay OFF until the site's cookie banner calls <code>window.pulseGrantConsent()</code> (or dispatches a <code>pulse-consent</code> event). Wire that into the “accept” button of the consent tool.</div>}
+
+      {onCreatePixelAudiences && (
+        <>
+          <Lbl>Standard retargeting audiences <span style={{ textTransform: 'none', fontWeight: 400 }}>· one click, created in the ad account</span></Lbl>
+          <div style={note}>Creates the standard pack — all visitors (180d/30d) · viewed tickets (30d) · checkout abandoners (14d) · purchasers (180d) — directly in the connected ad account. Safe to re-click: existing ones are kept, only missing ones are created.</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+            <button type="button" style={packBtn} disabled={!(value?.pixel?.metaPixelId && value?.meta?.tokenSet && value?.meta?.adAccountId) || pxPack.meta === '…'} title={!(value?.pixel?.metaPixelId && value?.meta?.tokenSet && value?.meta?.adAccountId) ? 'Needs the Meta Pixel ID saved + the Meta connection (token & ad account) above' : ''} onClick={() => runPack('meta')}>{pxPack.meta === '…' ? 'Creating…' : '◇ Create in Meta'}</button>
+            <button type="button" style={packBtn} disabled={!(value?.pixel?.tiktokPixelId && value?.tiktok?.tokenSet && value?.tiktok?.advertiserId) || pxPack.tiktok === '…'} title={!(value?.pixel?.tiktokPixelId && value?.tiktok?.tokenSet && value?.tiktok?.advertiserId) ? 'Needs the TikTok Pixel ID saved + the TikTok connection (token & advertiser id) above' : ''} onClick={() => runPack('tiktok')}>{pxPack.tiktok === '…' ? 'Creating…' : '♪ Create in TikTok'}</button>
+          </div>
+          {['meta', 'tiktok'].map((ch) => (pxPack[ch] && pxPack[ch] !== '…' ? <div key={ch} style={{ fontSize: 12.5, marginTop: 6, fontWeight: 600, color: pxPack[ch].startsWith('✓') ? 'var(--success, #10b981)' : 'var(--error, #ef4444)' }}>{ch === 'meta' ? '◇' : '♪'} {pxPack[ch]}</div> : null))}
+        </>
+      )}
+      <SaveRow k="pixel" />
+    </Section>
   );
 }
 

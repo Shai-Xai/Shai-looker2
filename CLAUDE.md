@@ -123,9 +123,10 @@ wizard automatically; the tour copy is the part that still needs a manual update
   ticket is dispatched to Claude for **staging**, its build brief tells you to open
   the PR against `staging` (NOT main) — follow the brief; the ticket's target wins
   over the "always main" default above. Merging that PR lands the ticket "on
-  staging" to verify; the admin later hits **Promote to production**, which opens a
-  release PR merging `staging` → `main` (a release train — it ships everything on
-  staging at once). Tickets dispatched to **production** still PR straight to `main`.
+  staging", where the REPORTER is asked to test and approve it; **Promote to
+  production** (a release PR merging `staging` → `main`; a release train — it ships
+  everything on staging at once) is blocked until every staged ticket is
+  reporter-approved. Tickets dispatched to **production** still PR straight to `main`.
   The GitHub webhook + ticket DB live on **production Pulse only** (staging is just
   where code gets tested), so point the repo webhook at the production URL.
 - No other branch needs syncing.

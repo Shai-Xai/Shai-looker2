@@ -18,7 +18,7 @@ const MAX_REC_SECS = 45; // cap a screen recording so the upload stays small
 // Chrome don't expose it). On a phone the video-file picker records via camera.
 const canScreenRecord = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia && typeof window !== 'undefined' && !!window.MediaRecorder;
 
-export default function ReportForm({ open, onClose, screen, onSubmitted }) {
+export default function ReportForm({ open, onClose, screen, onSubmitted, prefill }) {
   const isMobile = useIsMobile();
   const [type, setType] = useState('bug');
   const [title, setTitle] = useState('');
@@ -38,17 +38,24 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   const [recSecs, setRecSecs] = useState(0);
   const recRef = useRef(null);
 
-  // Fresh form each time it opens; pull the current screen's tiles and keep them
-  // in sync (a dashboard may finish loading its definition after the form opens).
+  // Fresh form each time it opens — optionally pre-typed (e.g. the "Interested?
+  // Tell us" CTA on the What's in Pulse matrix seeds a ready-to-send request).
+  // Also pull the current screen's tiles and keep them in sync (a dashboard may
+  // finish loading its definition after the form opens).
   useEffect(() => {
     if (!open) return undefined;
     reset();
+    if (prefill) {
+      if (prefill.type) setType(prefill.type);
+      if (prefill.title) setTitle(prefill.title);
+      if (prefill.body) setBody(prefill.body);
+    }
     const sync = () => setTiles(getReportTiles());
     sync();
     window.addEventListener(REPORT_TILES_EVENT, sync);
     return () => window.removeEventListener(REPORT_TILES_EVENT, sync);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, prefill]);
 
   // Stop any in-flight recording if the modal is closed or unmounts, so the
   // browser's screen-share doesn't keep running in the background.

@@ -298,6 +298,9 @@ export const api = {
   adminCreateSet: (s) => fetch('/api/admin/sets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSet: (id, s) => fetch(`/api/admin/sets/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSet: (id) => fetch(`/api/admin/sets/${id}`, { method: 'DELETE' }),
+  // Product feature matrix — the public catalogue (also powers the sales site and
+  // the client-facing "What's in Pulse" grid). Read-mostly; safe to cache briefly.
+  productSite: () => cachedGet('/api/product/site', 5 * 60000),
   // Admin — Product: the feature matrix + what the public pages get to show
   adminProductMatrix: () => fetch('/api/admin/product/matrix').then(json),
   adminSetProductVisibility: (kind, id, hidden) => fetch('/api/admin/product/visibility', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, hidden }) }).then(json),
@@ -327,6 +330,7 @@ export const api = {
   adminTicketAssignees: () => fetch('/api/admin/tickets/assignees').then(json),
   adminTicketGithubIssue: (id, mode, target) => fetch(`/api/admin/tickets/${id}/github-issue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(mode ? { mode } : {}), ...(target ? { target } : {}) }) }).then(json),
   adminPromoteTicket: (id) => fetch(`/api/admin/tickets/${id}/promote`, { method: 'POST' }).then(json),
+  adminTicketRedispatch: (id, target) => fetch(`/api/admin/tickets/${id}/redispatch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target ? { target } : {}) }).then(json),
   adminDeleteTicket: (id) => fetch(`/api/admin/tickets/${id}`, { method: 'DELETE' }).then(json),
   getGithubConfig: () => fetch('/api/admin/github').then(json),
   saveGithubConfig: (b) => fetch('/api/admin/github', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -408,8 +412,15 @@ export const api = {
   testSetupNudgeSettings: () => fetch('/api/admin/setup-nudge/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   setSetupWizardProgress: (entityId, itemKey, done) => fetch(`/api/admin/setup-wizard/progress/${entityId}/${encodeURIComponent(itemKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
 
-  // Onboarding checklist
+  // Onboarding journey (client) + admin management of a client's journey & emails
   getMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}`).then(json),
+  getClientOnboarding: (entityId) => fetch(`/api/admin/entities/${entityId}/onboarding`).then(json),
+  setClientOnboardingStep: (entityId, key, done) => fetch(`/api/admin/entities/${entityId}/onboarding/step/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
+  setClientOnboardingMail: (entityId, on) => fetch(`/api/admin/entities/${entityId}/onboarding-mail`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) }).then(json),
+  sendOnboardingWelcome: (entityId) => fetch(`/api/admin/entities/${entityId}/onboarding/welcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  getOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/settings').then(json),
+  saveOnboardingMailSettings: (b) => fetch('/api/admin/onboarding-mail/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  testOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
   setMyOnboardingStep: (entityId, key, done) => fetch(`/api/my/onboarding/${entityId}/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
   dismissMyOnboarding: (entityId) => fetch(`/api/my/onboarding/${entityId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed: true }) }).then(json),
   // Digest archive + feedback (the knowledge-base loop) — entity-aware
@@ -422,6 +433,7 @@ export const api = {
   createCampaignTemplate: (entityId, b) => fetch(`/api/campaign-templates/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateCampaignTemplate: (entityId, id, b) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteCampaignTemplate: (entityId, id) => fetch(`/api/campaign-templates/${entityId}/${id}`, { method: 'DELETE' }).then(json),
+  // Engage Links — per-client links grouped into typed categories (dual-surface)
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
@@ -565,6 +577,10 @@ export const api = {
   sendMailTest: (entityId) => fetch('/api/admin/mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   getMailLog: (params = {}) => fetch(`/api/admin/mail-log?${new URLSearchParams(params)}`).then(json),
   getMyMailLog: (entityId, params = {}) => fetch(`/api/my/mail-log/${entityId}?${new URLSearchParams(params)}`).then(json),
+  getPixelStatus: (id) => fetch(`/api/admin/entities/${id}/pixel/status`).then(json),
+  createPixelAudiences: (id, channel) => fetch(`/api/admin/entities/${id}/pixel/audiences`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
+  myPixelStatus: (entityId) => fetch(`/api/my/pixel/${entityId}/status`).then(json),
+  myCreatePixelAudiences: (entityId, channel) => fetch(`/api/my/pixel/${entityId}/audiences`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }) }).then(json),
   getEntityIntegrations: (id) => fetch(`/api/admin/entities/${id}/integrations`).then(json),
   saveEntityIntegrations: (id, p) => fetch(`/api/admin/entities/${id}/integrations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   getMyIntegrations: () => fetch('/api/my/integrations').then(json),
@@ -704,6 +720,8 @@ export const api = {
   syncSegmentTikTok: (entityId, id) => fetch(`/api/segments/${entityId}/${id}/sync/tiktok`, { method: 'POST' }).then(json),
   actionFieldValues: (entityId, b) => fetch(`/api/actions/${entityId}/field-values`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   actionDraftCopy: (entityId, b) => fetch(`/api/actions/${entityId}/draft-copy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  journeyRecipes: (entityId) => fetch(`/api/journeys/${entityId}/recipes`).then(json),
+  owlDraftJourney: (body) => fetch('/api/owl/act/draft-journey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   actionPreviewEmail: (entityId, b) => fetch(`/api/actions/${entityId}/preview-email`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   designImage: (entityId, b) => fetch(`/api/actions/${entityId}/design-image`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   actionTestSend: (entityId, b) => fetch(`/api/actions/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

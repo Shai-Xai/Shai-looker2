@@ -14,6 +14,7 @@
 // docs/specs/AGENTIC_OWL_P1_PLAN.md (§4).
 
 const defaultCatalogue = require('./owlCatalogueSeed');
+const owlShard = require('./owlShard'); // heavy-query chunking + warm cache
 // The alert option lists live in server/alerts.js — import them so createAlert's tool
 // schema + validation track that module automatically (add an operator/channel/priority
 // there and the Owl can immediately set + ask for it; no second list to keep in sync).
@@ -1323,17 +1324,45 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
         else return refuse('no_scope', `I can't tell which client's data to use for ${cat.label}.`);
       }
       stampReportingTz(body, { user, suiteId, entityId });
-      let rows;
-      try { rows = await query.runLookerQuery('/queries/run/json', body); }
-      catch (e) {
-        const msg = e && e.message ? String(e.message).slice(0, 140) : '';
-        // Heavy joins (e.g. every sale × buyer demographics) hit Looker's own timeout;
-        // retrying the identical query just burns minutes (seen live: spend by country
-        // of birth). Tell the model to change shape or answer honestly — never re-run as-is.
-        const timedOut = /time.{0,3}out|deadline|504|502|cancel/i.test(msg);
-        return refuse('query_failed', `I couldn't run that ${cat.label} query${msg ? ` (${msg})` : ''}.${timedOut ? ` This looks like a heavy join timing out on the data platform — do NOT retry the same query. Either narrow it (filter to a subset / top values via a category or country filter) or pair the measure with a dimension from its OWN view family (matching field-name prefix), which avoids the heavy join. If neither fits, tell the user plainly this cut is too heavy to compute live right now and offer those narrower options.` : ''}`);
+      // Warm cache: a previously CHUNKED assembly of this exact scoped query (heavy
+      // demographic cuts get re-asked all day) answers instantly for ~6h.
+      const cacheKey = JSON.stringify(body);
+      const warm = owlShard.cacheGet(cacheKey);
+      if (warm) {
+        const age = Math.max(1, Math.round((Date.now() - warm.at) / 60000));
+        return { ok: true, rows: warm.rows, count: warm.rows.length, measure, dimensions, explore: cat.explore, queryBody: body, note: `${warm.note} Served from the warm cache (computed ${age} min ago) — mention the freshness.` };
       }
-      const note = [crossDateNote, snapped.length ? `Resolved fields: ${snapped.join('; ')}.` : '', resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
+      // A single cross-view breakdown (e.g. sales measure × buyer demographic) is the
+      // known heavy-join shape: give the direct attempt a short leash, then CHUNK.
+      const crossFamily = dimensions.length === 1 && measureList.length >= 1 && String(dimensions[0]).split('.')[0] !== String(measure).split('.')[0];
+      let rows; let shardNote;
+      const _q0 = Date.now();
+      try {
+        if (crossFamily) {
+          const primary = query.runLookerQuery('/queries/run/json', body);
+          primary.catch(() => { /* abandoned after the leash — don't crash the process */ });
+          rows = await Promise.race([primary, new Promise((_, rej) => setTimeout(() => rej(new Error('probe timed out (heavy cross-view join)')), 30000))]);
+        } else {
+          rows = await query.runLookerQuery('/queries/run/json', body);
+        }
+        // The dashboards feel instant because Looker's cache is warmed by every view;
+        // the Owl's ad-hoc shapes miss it and pay the full fan-out join each time. So
+        // keep OUR OWN slow successes warm too — common questions repeat all day.
+        if (Date.now() - _q0 > 8000 && Array.isArray(rows)) owlShard.cacheSet(cacheKey, rows, 'Slow live query kept warm.');
+      } catch (e) {
+        const msg = e && e.message ? String(e.message).slice(0, 140) : '';
+        const timedOut = /time.{0,3}out|deadline|504|502|cancel/i.test(msg);
+        // Chunked fallback: re-run the heavy query per batch of dimension values
+        // (single-value filters complete fine) and merge — see server/owlShard.js.
+        if (timedOut && crossFamily) {
+          const s = await owlShard.shardQuery(query, body, dimensions[0], measure, { deadlineMs: 40000 }).catch(() => null);
+          if (s) { rows = s.rows; shardNote = s.note; if (s.complete) owlShard.cacheSet(cacheKey, s.rows, s.note); }
+        }
+        if (!rows) {
+          return refuse('query_failed', `I couldn't run that ${cat.label} query${msg ? ` (${msg})` : ''}.${timedOut ? ` This looks like a heavy join timing out on the data platform${crossFamily ? ' (automatic chunking was attempted and also could not complete)' : ''} — do NOT retry the same query. Either narrow it (filter to a subset / top values via a category or country filter) or pair the measure with a dimension from its OWN view family (matching field-name prefix), which avoids the heavy join. If neither fits, tell the user plainly this cut is too heavy to compute live right now and offer those narrower options.` : ''}`);
+        }
+      }
+      const note = [crossDateNote, shardNote, snapped.length ? `Resolved fields: ${snapped.join('; ')}.` : '', resultNote(rows, measureList, dimensions, args.filters)].filter(Boolean).join(' ') || undefined;
       return { ok: true, rows: Array.isArray(rows) ? rows : [], count: Array.isArray(rows) ? rows.length : 0, measure, dimensions, explore: cat.explore, queryBody: body, ...(note ? { note } : {}) };
     }
     // Enum caps: past these we stop inlining every field name into the schema (a
@@ -1444,6 +1473,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     createLiveUpdate: { schema: createLiveUpdateSchema, run: runCreateLiveUpdate },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },
     draftCampaign: { schema: draftCampaignSchema, run: runDraftCampaign },
+    draftJourney: { ...require('./journeys').owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, resolveQueryAudience }), menu: { cmd: 'journey', label: 'Build a journey', icon: '🧭', example: 'Build an abandoned-cart journey — email first, SMS if they don’t open' } },
     // ChottuLink deep-link act-tools (createLink, applyLinkTemplate) live in
     // their own factory — server/owlLinkTools.js (line-budget discipline).
     ...require('./owlLinkTools')({ db, getChottuApi }),

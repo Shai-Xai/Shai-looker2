@@ -23,11 +23,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Channel adapters: record every recipient instead of sending. resolveImpl is
 // swapped per-test to control the resolved audience (the Looker tile resolver).
-const sent = { email: [], sms: [] };
+const sent = { email: [], sms: [], unsubUrls: [] };
 let resolveImpl = async () => ({ rows: [], fields: [] });
 
 const mailer = {
-  send: async ({ to }) => { sent.email.push(to); return { ok: true }; },
+  send: async ({ to, unsubUrl }) => { sent.email.push(to); if (unsubUrl) sent.unsubUrls.push(unsubUrl); return { ok: true }; },
   baseUrl: () => 'http://test.local',
   resolveBranding: () => ({ senderName: 'Test Sender' }),
   campaignEmail: ({ subject, bodyText }) => ({ html: `<p>${bodyText || ''}</p>`, text: bodyText || '' }),
@@ -54,7 +54,7 @@ before(async () => {
   });
 });
 
-beforeEach(() => { sent.email = []; sent.sms = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
+beforeEach(() => { sent.email = []; sent.sms = []; sent.unsubUrls = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
 after(async () => { if (app) await app.close(); });
 
 // Wait for an async campaign send to reach a terminal status (runCampaign runs
@@ -303,4 +303,151 @@ test('a resumed campaign skips recipients already in the send ledger — nobody 
   // Every delivery is ledgered for the next resume.
   const rows = h.db.db.prepare('SELECT recipient FROM action_sends WHERE action_id=? ORDER BY recipient').all(aid).map((r) => r.recipient);
   assert.deepEqual(rows, ['r1@x.com', 'r2@x.com', 'r3@x.com']);
+});
+
+// ── 7. Concurrent-approval double-send protection ────────────────────────────
+// The approve route resolves the audience (a slow live Looker pull) BEFORE
+// flipping status, so two overlapping approvals both used to pass the 'draft'
+// check and each blast the full audience. The atomic claim (status+audience
+// written in one conditional UPDATE) must let exactly ONE through.
+test('two concurrent approvals send the campaign exactly once — the loser is rejected', async () => {
+  const ent = h.makeEntity('Race Co', 'race-org');
+  const owner = h.makeClient('race@test.local', [ent.id], 'owner');
+  // A slow tile resolution widens the race window the claim must close.
+  resolveImpl = async () => {
+    await sleep(150);
+    return { fields: [{ name: 'email', label: 'Email' }], rows: [{ email: 'race1@x.com' }, { email: 'race2@x.com' }, { email: 'race3@x.com' }] };
+  };
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: { title: 'Race', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  const aid = created.body.action.id;
+
+  const [r1, r2] = await Promise.all([
+    app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner }),
+    app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner }),
+  ]);
+  // Exactly one approval wins; the other is turned away (409 lost the claim;
+  // 400 if it arrived after the winner had already flipped the status).
+  const statuses = [r1.status, r2.status].sort();
+  assert.equal(statuses.filter((s) => s === 200).length, 1, `expected exactly one 200, got ${statuses}`);
+  assert.ok([400, 409].includes(statuses[1]), `loser should be rejected, got ${statuses}`);
+
+  await waitForStatus(ent.id, aid, 'done', owner);
+  // THE invariant: every recipient reached exactly once, never twice.
+  assert.deepEqual(sent.email.sort(), ['race1@x.com', 'race2@x.com', 'race3@x.com']);
+});
+
+// ── 8. SMS opt-out for phone-only recipients ─────────────────────────────────
+// A phone-only recipient's unsubscribe token carries their PHONE (they have no
+// email). Suppression used to be checked against email only, so their opt-out
+// was recorded but never enforced — the next campaign texted them anyway.
+test('a phone-only SMS opt-out is enforced at the next send, across number formats', async () => {
+  const ent = h.makeEntity('OptOut Co', 'optout-org');
+  const owner = h.makeClient('optout@test.local', [ent.id], 'owner');
+
+  // The recipient taps the /u opt-out link from an SMS. Build the same signed
+  // token the engine mints (payload carries the phone as the contact).
+  h.db.setSetting('unsub_secret', 'test-unsub-secret');
+  const payload = Buffer.from(JSON.stringify({ e: '082 555 0001', n: ent.id })).toString('base64url');
+  const sig = require('crypto').createHmac('sha256', 'test-unsub-secret').update(payload).digest('base64url').slice(0, 16);
+  const un = await app.req('GET', `/u/${payload}.${sig}`, {});
+  assert.equal(un.status, 200);
+  // Stored canonicalised (normalised msisdn), so any later format matches.
+  const sup = h.db.db.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(ent.id).map((r) => r.email);
+  assert.deepEqual(sup, ['27825550001']);
+
+  // Next campaign: the opted-out person appears in a DIFFERENT format (+27…),
+  // one friend who did not opt out, and that friend duplicated in a second
+  // format (dedupe must collapse them to one SMS).
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: {
+      title: 'SMS blast', channel: 'sms', subject: 'S', body: 'Hello', smsBody: 'Hello',
+      audience: { mode: 'paste', pasted: '+27 82 555 0001\n0825550002\n+27 82 555 0002' },
+    },
+  });
+  const aid = created.body.action.id;
+  const approve = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  assert.equal(approve.status, 200);
+  await waitForStatus(ent.id, aid, 'done', owner);
+
+  // The opted-out number was NOT texted; the friend got exactly ONE SMS.
+  assert.equal(sent.sms.length, 1);
+  assert.match(sent.sms[0], /825550002/);
+  assert.equal(sent.email.length, 0);
+});
+
+// ── 9. Approval governance hardening ─────────────────────────────────────────
+test('a submitter cannot be their own only approver (four-eyes stays four eyes)', async () => {
+  const ent = h.makeEntity('SelfOK Co', 'selfok-org');
+  const author = h.makeClient('self-author@test.local', [ent.id], 'owner');
+  const peer = h.makeClient('self-peer@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: author, body: { title: 'Self', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 's1@x.com' } },
+  });
+  const aid = created.body.action.id;
+
+  // Only themselves → rejected.
+  const solo = await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, {
+    as: author, body: { approvers: [{ type: 'user', userId: author.id, email: author.email }] },
+  });
+  assert.equal(solo.status, 400);
+  assert.match(solo.body.error, /other than yourself/);
+
+  // Themselves + a peer → fine (the peer is the real gate).
+  const ok = await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, {
+    as: author, body: { approvers: [{ type: 'user', userId: author.id, email: author.email }, { type: 'user', userId: peer.id, email: peer.email }] },
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.pending, true);
+});
+
+test('an approved live automation is locked against edits for approval-required clients', async () => {
+  const ent = h.makeEntity('AutoLock Co', 'autolock-org');
+  const author = h.makeClient('lock-author@test.local', [ent.id], 'owner');
+  const approver = h.makeClient('lock-approver@test.local', [ent.id], 'owner');
+  h.db.setSetting(`approval_required:${ent.id}`, '1');
+
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: author,
+    body: { title: 'Drip', channel: 'email', campaignMode: 'sequence', steps: [{ delayHours: 24, subject: 'S1', body: 'B1' }], audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  const aid = created.body.action.id;
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, { as: author, body: { approvers: [{ type: 'user', userId: approver.id, email: approver.email }] } });
+  const appr = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: approver });
+  assert.equal(appr.status, 200);
+  assert.equal(appr.body.activated, true); // sequence activates → status 'auto'
+
+  // Editing the LIVE approved automation is refused — pause → draft → resubmit.
+  const edit = await app.req('PUT', `/api/actions/${ent.id}/${aid}`, {
+    as: author, body: { title: 'Sneaky rewrite', channel: 'email', campaignMode: 'sequence', steps: [{ delayHours: 1, subject: 'SPAM', body: 'SPAM' }], audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  assert.equal(edit.status, 400);
+  assert.match(edit.body.error, /resubmit/);
+});
+
+// ── 10. Deliverability plumbing ──────────────────────────────────────────────
+test('every campaign email send carries its one-click unsubscribe URL, and POST /u works (RFC 8058)', async () => {
+  const ent = h.makeEntity('Unsub Co', 'unsub-org');
+  const owner = h.makeClient('unsub@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner, body: { title: 'Headers', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 'u1@x.com\nu2@x.com' } },
+  });
+  const aid = created.body.action.id;
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  await waitForStatus(ent.id, aid, 'done', owner);
+
+  // Each of the two sends passed an unsubUrl → mailer sets the
+  // List-Unsubscribe + one-click headers Gmail/Yahoo require of bulk senders.
+  assert.equal(sent.email.length, 2);
+  assert.equal(sent.unsubUrls.length, 2);
+
+  // Mail providers unsubscribe by POSTing to that URL (no page, no GET).
+  const token = sent.unsubUrls[0].split('/u/')[1];
+  const r = await fetch(`${app.base}/u/${token}`, { method: 'POST' });
+  assert.equal(r.status, 200);
+  const sup = h.db.db.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(ent.id).map((x) => x.email);
+  assert.deepEqual(sup, ['u1@x.com']);
 });

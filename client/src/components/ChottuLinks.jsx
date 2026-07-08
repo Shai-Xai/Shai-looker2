@@ -10,6 +10,7 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
   const [data, setData] = useState(null);
   const [suites, setSuites] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | link id
+  const [category, setCategory] = useState(null); // null = category tiles landing; string = drilled into one
   const [importing, setImporting] = useState(false);
   const [statsOpen, setStatsOpen] = useState({}); // per event group: 📈 panel visible
   const [busy, setBusy] = useState('');
@@ -17,7 +18,7 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
   const [error, setError] = useState('');
 
   const load = () => api.chottuLinks(scope, entityId).then(setData).catch((e) => setError(e.message));
-  useEffect(() => { setData(null); setEditing(null); load(); }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setData(null); setEditing(null); setCategory(null); load(); }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     (scope === 'admin' ? api.adminListSuites() : api.mySuites())
       .then((all) => setSuites((all || []).filter((s) => s.entityId === entityId)))
@@ -33,8 +34,24 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
   };
 
   const suiteName = (id) => suites.find((s) => s.id === id)?.name || 'Unknown event';
+  // The category layer: links group into typed categories ("App" is the default —
+  // every chottu link opens the Howler app). Landing shows the tiles; picking one
+  // drills into just that category's links (still grouped by event inside).
+  const categories = useMemo(() => {
+    const by = new Map();
+    for (const l of (data?.links || [])) {
+      const c = l.category || 'App';
+      if (!by.has(c)) by.set(c, { name: c, count: 0, clicks: 0 });
+      const e = by.get(c); e.count += 1; e.clicks += l.clicks?.total || 0;
+    }
+    // "App" is the front door — always there (even before the first link), so the
+    // landing is categories from day one: tap App → the Chotulink toolkit inside.
+    if (!by.has('App')) by.set('App', { name: 'App', count: 0, clicks: 0 });
+    return [...by.values()].sort((a, b) => (a.name === 'App' ? -1 : b.name === 'App' ? 1 : a.name.localeCompare(b.name)));
+  }, [data]);
+  const categoryNames = categories.map((c) => c.name);
   const groups = useMemo(() => {
-    const links = data?.links || [];
+    const links = (data?.links || []).filter((l) => !category || (l.category || 'App') === category);
     const by = new Map();
     for (const l of links) {
       const k = l.suiteId || '';
@@ -45,7 +62,7 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
     const out = [...by.entries()].map(([k, ls]) => ({ suiteId: k, title: k ? suiteName(k) : 'Not linked to an event', links: ls }));
     out.sort((a, b) => (a.suiteId ? 0 : 1) - (b.suiteId ? 0 : 1));
     return out;
-  }, [data, suites]);
+  }, [data, suites, category]);
 
   if (error && !data) return <p style={{ color: 'var(--error,#ef4444)', fontSize: 14 }}>{error}</p>;
   if (!data) return <p style={{ color: 'var(--muted)' }}>Loading…</p>;
@@ -55,10 +72,11 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
     catch { window.prompt('Copy the link:', url); }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
-      {/* Connection / setup state */}
-      <div style={card}>
+  // The ChottuLink connection card — the plumbing belongs INSIDE the App category
+  // (its links are what the connection powers). Only the unconfigured state shows
+  // up front: without a connection nothing else here works yet.
+  const connCard = (
+    <div style={card}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: data.configured ? 'var(--success,#10b981)' : 'var(--muted)' }} />
           <div style={{ fontSize: 13.5, minWidth: 0, flex: 1 }}>
@@ -104,32 +122,63 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
           </div>
         )}
       </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 720 }}>
+      {!data.configured && connCard}
 
       {(notice || error) && (
         <div style={{ fontSize: 13, fontWeight: 600, color: error ? 'var(--error,#ef4444)' : 'var(--success,#10b981)' }}>{error || notice}</div>
       )}
 
-      {importing && scope === 'admin' && (
+      {/* LANDING: category tiles are the front door — always shown (App exists
+          from day one, before any links). Tap a tile to open that category;
+          everything link-level (create, templates, the list) lives inside. */}
+      {category === null && data.configured && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+          {categories.map((c) => (
+            <button key={c.name} onClick={() => setCategory(c.name)} style={{ ...card, minHeight: 92, textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ fontSize: 20 }}>{c.name === 'App' ? '📱' : '🔗'}</div>
+              <div style={{ fontWeight: 700, fontSize: 14.5 }}>{c.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.count} link{c.count === 1 ? '' : 's'} · {c.clicks} clicks</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* INSIDE a category: clear back navigation, then the toolkit — new link
+          (filed here by default), templates (App only — they mint app link sets),
+          and this category's links grouped by event. */}
+      {category !== null && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button style={{ ...linkBtn, minHeight: 40, fontSize: 13.5 }} onClick={() => setCategory(null)}>← All categories</button>
+          <span style={{ fontWeight: 700, fontSize: 14.5 }}>{category === 'App' ? '📱' : '🔗'} {category}</span>
+        </div>
+      )}
+
+      {category === 'App' && data.configured && connCard}
+      {importing && scope === 'admin' && category === 'App' && (
         <ImportPicker
           entityId={entityId} suites={suites}
           onDone={async (msg) => { setImporting(false); if (msg) { flash(msg); await load(); } }}
         />
       )}
 
-      {data.configured && (editing === 'new'
-        ? <LinkEditor scope={scope} entityId={entityId} suites={suites} onDone={async (changed) => { setEditing(null); if (changed) { flash('Link created — the short URL is live.'); await load(); } }} />
-        : <button style={btnPrimary} onClick={() => setEditing('new')}>＋ New link</button>
+      {category !== null && data.configured && (editing === 'new'
+        ? <LinkEditor scope={scope} entityId={entityId} suites={suites} categories={categoryNames} initialCategory={category} onDone={async (changed) => { setEditing(null); if (changed) { flash('Link created — the short URL is live.'); await load(); } }} />
+        : <button style={btnPrimary} onClick={() => setEditing('new')}>＋ New link in {category}</button>
       )}
 
-      {data.configured && <ChottuTemplates entityId={entityId} scope={scope} suites={suites} onLinksChanged={load} />}
+      {category === 'App' && data.configured && <ChottuTemplates entityId={entityId} scope={scope} suites={suites} onLinksChanged={load} />}
 
-      {groups.length === 0 && data.configured && (
+      {category !== null && groups.length === 0 && (
         <p style={{ color: 'var(--muted)', fontSize: 14 }}>
-          No links yet. Create the first one{scope === 'admin' ? ', or import what already exists in ChottuLink.' : '.'}
+          No links in {category} yet. Create the first one{scope === 'admin' && category === 'App' ? ', or import what already exists in ChottuLink.' : '.'}
         </p>
       )}
 
-      {groups.map((g) => (
+      {category !== null && groups.map((g) => (
         <div key={g.suiteId || 'none'} style={card}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
             <div style={{ fontWeight: 700, fontSize: 14.5, minWidth: 0 }}>{g.title}</div>
@@ -165,7 +214,7 @@ export default function ChottuLinks({ entityId, scope = 'my' }) {
               </div>
               {editing === l.id && (
                 <LinkEditor
-                  scope={scope} entityId={entityId} suites={suites} link={l}
+                  scope={scope} entityId={entityId} suites={suites} link={l} categories={categoryNames}
                   onDone={async (changed) => { setEditing(null); if (changed) await load(); }}
                 />
               )}
@@ -362,9 +411,14 @@ const extractEventId = (v) => (String(v || '').match(/event\/(\d+)/) || [])[1] |
 const composeDest = (p, eventId, code) => p.url.replace('{id}', eventId || '{id}').replace('{code}', (code || '').trim() || '{code}');
 
 // Create/edit one link — stacked single-column form (mobile-first).
-function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
+function LinkEditor({ scope, entityId, suites, link = null, categories = [], initialCategory = 'App', onDone }) {
   const [name, setName] = useState(link?.linkName || '');
   const [suiteId, setSuiteId] = useState(link?.suiteId || '');
+  // Category: pick an existing one or type a new one (new links default to the
+  // category being viewed, so "add a link in here" lands where you'd expect).
+  const [category, setCategory] = useState(link?.category || initialCategory);
+  const [newCat, setNewCat] = useState(false);
+  const catOptions = [...new Set(['App', ...categories, ...(link?.category ? [link.category] : [])])];
   const [destination, setDestination] = useState(link?.destinationUrl || '');
   // Destination picker — new links start on the catalogue; editing an existing
   // link starts on Custom with its URL (switching to a preset recomposes it).
@@ -401,9 +455,9 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
     setBusy(true); setError('');
     try {
       if (link) {
-        await api.chottuUpdateLink(scope, entityId, link.id, { linkName: name, suiteId, destinationUrl: destination, iosBehavior: behavior, androidBehavior: behavior, utm, social });
+        await api.chottuUpdateLink(scope, entityId, link.id, { linkName: name, suiteId, destinationUrl: destination, iosBehavior: behavior, androidBehavior: behavior, utm, social, category });
       } else {
-        await api.chottuCreateLink(scope, entityId, { linkName: name, suiteId, destinationUrl: destination, path, iosBehavior: behavior, androidBehavior: behavior, utm, social });
+        await api.chottuCreateLink(scope, entityId, { linkName: name, suiteId, destinationUrl: destination, path, iosBehavior: behavior, androidBehavior: behavior, utm, social, category });
       }
       onDone(true);
     } catch (e) { setError(e.message); setBusy(false); }
@@ -429,6 +483,19 @@ function LinkEditor({ scope, entityId, suites, link = null, onDone }) {
             <option value="">Not linked to an event</option>
             {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+        </Field>
+        <Field label="Category" hint="Where this link files on the Links landing — App is home for links that open the Howler app.">
+          {newCat ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input style={input} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="New category — e.g. Socials" autoFocus autoComplete="off" />
+              <button type="button" style={{ ...btnGhost, flexShrink: 0 }} onClick={() => { setNewCat(false); setCategory(link?.category || initialCategory); }}>Cancel</button>
+            </div>
+          ) : (
+            <select style={input} value={category} onChange={(e) => { if (e.target.value === '＋new') { setNewCat(true); setCategory(''); } else setCategory(e.target.value); }}>
+              {catOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value="＋new">＋ New category…</option>
+            </select>
+          )}
         </Field>
         <Field label="I want the link to…">
           <select

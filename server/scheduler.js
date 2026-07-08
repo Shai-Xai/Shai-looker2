@@ -8,6 +8,7 @@
 // injected as `generateContent`; this module owns scheduling + recipients +
 // rendering-to-email (via mailer) + the send log.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
@@ -372,7 +373,7 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
       const { content } = await render(job, '');
       const r = await messaging.sendSms({ to: phone, text: buildDigestSms(job, content) });
       return r.ok ? res.json({ ok: true, to: phone }) : res.status(502).json({ error: r.error || r.reason || 'SMS failed' });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
+    } catch (e) { return serverError(res, e); }
   }
 
   // Render a preview email from an (unsaved) job config.

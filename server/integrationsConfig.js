@@ -12,6 +12,8 @@
 //
 // Usage: `require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret })`.
 
+const pixel = require('./pixel'); // stateless applyPatch/view for the Pulse Pixel slice
+
 function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
   function applyIntegrationsPatch(body, set) {
     // `set(key, value)` writes a field; called only for fields the caller changed.
@@ -36,6 +38,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
     if (tt.clearAccessToken) set('tiktokAccessToken', '');
     if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || ''));
     slack.applyPatch(body, set); // Slack: webhook / bot token / channel
+    pixel.applyPatch(body, set); // Pulse Pixel: pixel/tag ids + consent mode (server/pixel.js)
     const ch = body.chottu || {}; // ChottuLink deep links (server/chottuLink.js)
     if (ch.apiKey) set('chottuApiKey', String(ch.apiKey));
     if (ch.clearApiKey) set('chottuApiKey', '');
@@ -88,6 +91,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
       meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
       tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
       slack: slack.view(i),
+      pixel: pixel.view(i),
       chottu: { keySet: !!i.chottuApiKey, keyHint: maskSecret(i.chottuApiKey), domain: i.chottuDomain || '' },
       locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
     };
@@ -95,7 +99,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
 
   // Per-entity integration keys that can be frozen. A frozen section's changes are
   // dropped server-side (defence in depth — the UI also disables it).
-  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu'];
+  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel'];
   function dropFrozenSections(entityId, body) {
     const locks = db.getEntityIntegrationLocks(entityId);
     const b = { ...(body || {}) };

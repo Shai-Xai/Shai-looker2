@@ -39,6 +39,47 @@ function init(deps) {
     if (!cols.includes('kind')) db.db.exec("ALTER TABLE mail_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'");
     if (!cols.includes('entity_id')) db.db.exec("ALTER TABLE mail_log ADD COLUMN entity_id TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[mailer] mail_log migration skipped:', e.message); }
+  // GLOBAL suppression list — addresses the provider told us are dead (hard
+  // bounce) or hostile (spam complaint), fed by the Resend webhook
+  // (server/mailWebhooks.js). Platform-wide, not per entity: all clients share
+  // one sending domain, so one client re-mailing a dead address burns
+  // deliverability for everyone.
+  db.db.exec(`CREATE TABLE IF NOT EXISTS mail_suppressions (
+    email  TEXT PRIMARY KEY,   -- lowercased address
+    reason TEXT NOT NULL,      -- bounced | complained
+    at     TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+  )`);
+}
+
+// ── Global suppressions (bounces / complaints) ────────────────────────────────
+function addSuppression(email, reason, detail = '') {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e || !e.includes('@') || !db) return false;
+  db.db.prepare('INSERT OR REPLACE INTO mail_suppressions (email, reason, at, detail) VALUES (?,?,?,?)')
+    .run(e, reason === 'complained' ? 'complained' : 'bounced', new Date().toISOString(), String(detail || '').slice(0, 300));
+  return true;
+}
+function removeSuppression(email) {
+  if (!db) return false;
+  return db.db.prepare('DELETE FROM mail_suppressions WHERE email=?').run(String(email || '').trim().toLowerCase()).changes > 0;
+}
+function listSuppressions(limit = 500) {
+  try { return db.db.prepare('SELECT email, reason, at, detail FROM mail_suppressions ORDER BY at DESC LIMIT ?').all(Math.min(limit, 5000)); } catch { return []; }
+}
+// Why a recipient must not get this kind of email ('' = fine to send).
+// Bounced = the address is DEAD — nothing should go there, any kind.
+// Complained = they flagged us as spam — no more MARKETING (campaign kinds);
+// operational mail (approvals, digests to logged-in users, resets) still flows.
+const MARKETING_KINDS = new Set(['campaign', 'digest']);
+function suppressionReason(email, kind) {
+  if (!db) return '';
+  try {
+    const row = db.db.prepare('SELECT reason FROM mail_suppressions WHERE email=?').get(String(email || '').trim().toLowerCase());
+    if (!row) return '';
+    if (row.reason === 'bounced') return 'bounced';
+    return MARKETING_KINDS.has(kind) ? 'complained' : '';
+  } catch { return ''; }
 }
 
 function log(recipient, subject, status, detail = '', kind = 'other', entityId = '') {
@@ -101,6 +142,9 @@ function status() {
     enabled: enabled(),
     lastError,
     lastSentAt,
+    // Bounce/complaint webhook (mailWebhooks.js): set = suppressions flow in.
+    webhookSecretSet: !!((db && db.getSetting('resend_webhook_secret')) || process.env.RESEND_WEBHOOK_SECRET),
+    suppressedCount: (() => { try { return db.db.prepare('SELECT COUNT(*) n FROM mail_suppressions').get().n; } catch { return 0; } })(),
   };
 }
 
@@ -114,28 +158,50 @@ let customFromFor = () => '';
 function setCustomFrom(fn) { customFromFor = typeof fn === 'function' ? fn : () => ''; }
 
 // The provider call. ALL Resend specifics live here.
-async function deliver({ to, subject, html, text, from: fromOverride, replyTo }) {
+// 429s are retried (twice, honouring Retry-After): a rate-limited request was
+// NOT accepted by Resend, so retrying can never double-send. Other errors —
+// including 5xx, where Resend may have accepted the send — are NOT retried;
+// an ambiguous retry risks a duplicate email, and a missed one is the lesser evil.
+async function deliver({ to, subject, html, text, from: fromOverride, replyTo, headers }) {
   const body = { from: fromOverride || from(), to: Array.isArray(to) ? to : [to], subject, html, text };
   if (replyTo) body.reply_to = replyTo; // e.g. the client's CC-the-Owl inbound address
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    // Don't hang forever on a stuck Resend socket — a hung send would otherwise
-    // pin the scheduler's tick flag and stall all future digests. (global fetch)
-    signal: AbortSignal.timeout(20000),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.message || `Resend responded ${res.status}`);
-  return data; // { id }
+  if (headers && Object.keys(headers).length) body.headers = headers;
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      // Don't hang forever on a stuck Resend socket — a hung send would otherwise
+      // pin the scheduler's tick flag and stall all future digests. (global fetch)
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.status === 429 && attempt < 2) {
+      const after = Number(res.headers.get('retry-after'));
+      await new Promise((r) => setTimeout(r, Number.isFinite(after) && after > 0 ? Math.min(after, 10) * 1000 : 800 * (attempt + 1)));
+      continue;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.message || `Resend responded ${res.status}`);
+    return data; // { id }
+  }
 }
 
 // Best-effort send. Returns { ok } | { skipped, reason } | { ok:false, error }.
 // `fromName` sets the display name in front of the verified address (per-client
 // branding); the address itself never changes (single verified domain).
-async function send({ to, subject, html, text, fromName, kind = 'other', entity = '', replyTo }) {
-  const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
+// `unsubUrl` (campaign sends) becomes the RFC 8058 one-click unsubscribe headers
+// Gmail/Yahoo require for bulk senders — the /u endpoint accepts their POST.
+async function send({ to, subject, html, text, fromName, kind = 'other', entity = '', replyTo, unsubUrl }) {
+  let recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!recipients.length) return { skipped: true, reason: 'no recipients' };
+  // Provider-reported dead/hostile addresses never get re-mailed (protects the
+  // shared sending domain's reputation for every client).
+  const blocked = recipients.filter((r) => suppressionReason(r, kind));
+  if (blocked.length) {
+    recipients = recipients.filter((r) => !suppressionReason(r, kind));
+    log(blocked.join(', '), subject, 'skipped', `suppressed (${suppressionReason(blocked[0], kind)})`, kind, entity);
+    if (!recipients.length) return { skipped: true, reason: `suppressed (${suppressionReason(blocked[0], kind)})` };
+  }
   if (!enabled()) { log(recipients.join(', '), subject, 'skipped', 'mail disabled (mail_enabled=0)', kind, entity); return { skipped: true, reason: 'mail disabled (mail_enabled=0)' }; }
   if (!apiKey()) { log(recipients.join(', '), subject, 'skipped', 'no Resend API key configured', kind, entity); return { skipped: true, reason: 'no Resend API key configured' }; }
   try {
@@ -144,7 +210,8 @@ async function send({ to, subject, html, text, fromName, kind = 'other', entity 
     // back to the platform address — a bad lookup must never block a send.
     let custom = ''; try { custom = entity ? String(customFromFor(entity) || '') : ''; } catch { custom = ''; }
     const fromHdr = custom ? (fromName && fromName.trim() ? `${fromName.trim()} <${custom}>` : custom) : (fromName ? fromWithName(fromName) : undefined);
-    const r = await deliver({ to: recipients, subject, html, text, from: fromHdr, replyTo });
+    const headers = unsubUrl ? { 'List-Unsubscribe': `<${unsubUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : undefined;
+    const r = await deliver({ to: recipients, subject, html, text, from: fromHdr, replyTo, headers });
     lastSentAt = new Date().toISOString();
     lastError = '';
     log(recipients.join(', '), subject, 'sent', r.id || '', kind, entity);
@@ -497,4 +564,5 @@ function previewBranding({ edits, entityId, suiteId } = {}) {
 module.exports = {
   init, isConfigured, send, status, recent, recipientLog, notificationEmail, baseUrl, fromAddress, setCustomFrom,
   DEFAULTS, getPlatformTemplate, setPlatformTemplate, resolveBranding, previewBranding, digestEmail, campaignEmail, campaignBlocksEmail,
+  addSuppression, removeSuppression, listSuppressions, suppressionReason,
 };
