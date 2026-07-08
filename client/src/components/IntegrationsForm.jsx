@@ -353,15 +353,26 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       {/* Resend (email) — platform-level only */}
       {showResend && (
         <Section title="✉️ Email (Resend)" collapsible={collapsible} {...lockProps('resend')}>
+          {/* Environment brake (OUTBOUND_DISABLED, e.g. a staging server): can't be
+              changed from the app — call it out plainly so no one fights the toggle. */}
+          {value?.resend?.envOutboundOff && (
+            <div style={{ border: '1.5px solid var(--brand)', background: 'rgba(var(--brand-rgb,10,132,255),0.08)', borderRadius: 10, padding: '10px 12px', marginBottom: 12, fontSize: 12.5, lineHeight: 1.45 }}>
+              🌐 <b>Email is disabled for this environment</b> (<code>OUTBOUND_DISABLED</code>). This is normally a <b>staging</b> server, blocked so it can never email real clients. The pause toggle below can’t override it — real sends happen on <b>production</b>. To change it, edit the environment’s config in Render.
+            </div>
+          )}
           {/* Emergency brake: instantly no-ops ALL outbound email (every client,
-              every campaign/digest/notification) without touching Resend keys. */}
-          <div style={{ border: `1.5px solid ${value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--hairline)'}`, background: value?.resend?.enabled === false ? 'rgba(239,68,68,0.08)' : 'transparent', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-              <input type="checkbox" checked={value?.resend?.enabled === false} onChange={(e) => onSave({ resend: { enabled: !e.target.checked } })} />
+              every campaign/digest/notification) without touching Resend keys.
+              Reflects ONLY the in-app pause setting, so it never snaps back when the
+              env brake above is what's really off. */}
+          <div style={{ border: `1.5px solid ${value?.resend?.paused ? 'var(--error,#ef4444)' : 'var(--hairline)'}`, background: value?.resend?.paused ? 'rgba(239,68,68,0.08)' : 'transparent', borderRadius: 10, padding: '10px 12px', marginBottom: 12, opacity: value?.resend?.envOutboundOff ? 0.6 : 1 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: value?.resend?.envOutboundOff ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>
+              <input type="checkbox" checked={!!value?.resend?.paused} disabled={value?.resend?.envOutboundOff} onChange={(e) => onSave({ resend: { enabled: !e.target.checked } })} />
               ⏸ Pause ALL outbound email (emergency stop)
             </label>
-            <div style={{ fontSize: 12, color: value?.resend?.enabled === false ? 'var(--error,#ef4444)' : 'var(--muted)', marginTop: 4 }}>
-              {value?.resend?.enabled === false ? '⛔ Email is OFF — nothing is being sent. Untick to resume.' : 'Takes effect immediately, across all clients. Already-sent emails can’t be recalled.'}
+            <div style={{ fontSize: 12, color: value?.resend?.paused ? 'var(--error,#ef4444)' : 'var(--muted)', marginTop: 4 }}>
+              {value?.resend?.envOutboundOff ? 'Overridden by the environment block above — this toggle has no effect here.'
+                : value?.resend?.paused ? '⛔ Email is paused — nothing is being sent. Untick to resume.'
+                  : 'Takes effect immediately, across all clients. Already-sent emails can’t be recalled.'}
             </div>
           </div>
           <div style={note}>

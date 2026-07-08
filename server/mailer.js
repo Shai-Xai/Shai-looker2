@@ -128,7 +128,13 @@ const baseUrl = () => (setting('app_base_url', 'APP_URL') || 'https://howler-pul
 // OUTBOUND_DISABLED=1 hard-kills ALL sending regardless of the DB kill switch —
 // the belt-and-braces a STAGING server sets so it can never email real customers
 // even with production data + real Resend keys loaded.
-const enabled = () => process.env.OUTBOUND_DISABLED !== '1' && (!db || db.getSetting('mail_enabled', '1') !== '0');
+// Two independent blockers: the ENV brake (OUTBOUND_DISABLED — a staging server
+// sets it so it can never email real customers, and the UI can't override it),
+// and the in-app pause toggle (mail_enabled setting). Keep them separable so the
+// admin panel can explain WHICH one is off instead of a toggle that snaps back.
+const envOutboundOff = () => process.env.OUTBOUND_DISABLED === '1';
+const pausedSetting = () => !!db && db.getSetting('mail_enabled', '1') === '0';
+const enabled = () => !envOutboundOff() && !pausedSetting();
 
 function isConfigured() { return !!apiKey() && enabled(); }
 
@@ -140,6 +146,10 @@ function status() {
     envFallback: !(db && db.getSetting('resend_api_key')) && !!process.env.RESEND_API_KEY,
     from: from(),
     enabled: enabled(),
+    // Why it's off, so the UI can say the right thing (env brake can't be
+    // unticked from the app; only the pause toggle reflects the checkbox).
+    envOutboundOff: envOutboundOff(),
+    paused: pausedSetting(),
     lastError,
     lastSentAt,
     // Bounce/complaint webhook (mailWebhooks.js): set = suppressions flow in.
