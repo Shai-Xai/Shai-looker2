@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId } from 'react';
+import { useState, useEffect, useRef, useMemo, useId, Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -409,6 +409,143 @@ function OnboardingMailGlobalSettings() {
   );
 }
 
+// ── The AM scorecard — recognition for the account team ──────────────────────
+// Monthly activation score + medals per AM, with the team leaderboard. Every
+// number is computed from real journey/inbox data server-side; the top scorer
+// takes the Golden Owl. Recognition only — nothing here feeds comp.
+function AmScorecard() {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.getOnboardingScorecard().then(setData).catch(() => setData(null)); }, []);
+  if (!data || !(data.cards || []).length) return null;
+  const me = data.cards.find((c) => c.userId === data.me);
+  const medal = (i) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '');
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🏆 AM scorecard</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {me ? <>Your activation score: <b style={{ color: 'var(--text)' }}>{me.score}/100</b> · {me.activatedAll} activated all-time{me.stalled ? ` · ⚠ ${me.stalled} stalled` : ' · clean sheet'}</> : 'Team activation leaderboard — this month.'}
+          </span>
+        </span>
+        {data.cards[0] && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>🏆 {data.cards[0].name}</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr>{['', 'Account manager', 'Activated', 'Median days', 'Stalled', 'First reply', 'Owl book', 'Score'].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+              <tbody>
+                {data.cards.map((c, i) => (
+                  <tr key={c.userId} style={c.userId === data.me ? { background: 'rgba(var(--brand-rgb),0.05)' } : null}>
+                    <td style={scTd}>{medal(i)}</td>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{c.name}{c.userId === data.me ? ' · you' : ''}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>{(c.badges || []).join(' · ')}</div></td>
+                    <td style={scTd}>{c.activatedAll}{c.activated30 ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}> (+{c.activated30})</span> : ''}</td>
+                    <td style={scTd}>{c.medianActivationDays != null ? `${c.medianActivationDays}d` : '—'}</td>
+                    <td style={{ ...scTd, color: c.stalled ? 'var(--error)' : 'var(--muted)', fontWeight: c.stalled ? 800 : 400 }}>{c.stalled || '0'}</td>
+                    <td style={scTd}>{c.medianReplyHours != null ? `${c.medianReplyHours}h` : '—'}</td>
+                    <td style={scTd}>{c.owlAdoption}%</td>
+                    <td style={{ ...scTd, fontWeight: 800 }}>{c.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ ...hint, marginTop: 8, marginBottom: 0 }}>Score = activations this month ×30 + speed vs team median + zero-stalled bonus + reply time + Owl adoption. Resets monthly; medals are for bragging rights, not reviews. Time-in-app is deliberately not counted.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+const scTh = { textAlign: 'left', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '7px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
+const scTd = { padding: '8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', verticalAlign: 'top' };
+
+// ── The AM cockpit — every client's journey, sorted by who needs a call ───────
+function OnboardingCockpit() {
+  const [data, setData] = useState(null);
+  const [filter, setFilter] = useState('attention');
+  const [openRow, setOpenRow] = useState(null);
+  const [nudged, setNudged] = useState({}); // entityId → status text
+  const load = () => api.getOnboardingCockpit().then(setData).catch(() => setData(null));
+  useEffect(() => { load(); }, []);
+  if (!data) return <div style={cardStyle}><Muted>Loading client journeys…</Muted></div>;
+  const rows = (data.rows || []).filter((r) => (
+    filter === 'attention' ? (r.warning || r.stalled) && !r.complete
+      : filter === 'active' ? !r.complete
+        : filter === 'activated' ? r.complete : true
+  ));
+  const nudge = async (id) => {
+    setNudged((n) => ({ ...n, [id]: '…' }));
+    try { const r = await api.nudgeOnboarding(id); setNudged((n) => ({ ...n, [id]: r.ok ? '✓ sent' : '—' })); }
+    catch { setNudged((n) => ({ ...n, [id]: '✗ failed' })); }
+  };
+  const fchip = (key, label, n) => (
+    <button key={key} onClick={() => setFilter(key)} style={{ ...folderChip, cursor: 'pointer', ...(filter === key ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff', fontWeight: 700 } : null) }}>{label}{n != null ? ` · ${n}` : ''}</button>
+  );
+  const s = data.stats || {};
+  const stat = (label, val, color) => (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 14px', minWidth: 120, flex: 1 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{val}</div>
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        {stat('Onboarding now', s.onboarding ?? '—')}
+        {stat(`⚠ Stalled > ${data.stallDays}d`, s.stalled ?? '—', s.stalled ? 'var(--error)' : undefined)}
+        {stat('Fully activated', s.activated ?? '—', 'var(--brand)')}
+        {stat('Median to first send', s.medianFirstSendDays != null ? `${s.medianFirstSendDays}d` : '—')}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {fchip('attention', 'Needs attention', (data.rows || []).filter((r) => (r.warning || r.stalled) && !r.complete).length)}
+        {fchip('active', 'Onboarding', (data.rows || []).filter((r) => !r.complete).length)}
+        {fchip('activated', 'Activated', (data.rows || []).filter((r) => r.complete).length)}
+        {fchip('all', 'All', (data.rows || []).length)}
+      </div>
+      {rows.length === 0 ? <div style={cardStyle}><Muted>{filter === 'attention' ? 'Nobody needs attention — every journey is moving. 🎉' : 'No clients here.'}</Muted></div> : (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)' }}>
+          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr>{['Client', 'Journey', 'Current phase', 'Idle', 'Last milestone', 'AM', ''].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{r.name}{!r.hasLogins && <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)' }}>no logins yet</div>}</td>
+                    <td style={scTd}>
+                      <span style={{ display: 'inline-flex', gap: 2, width: 110 }}>
+                        {(r.phases || []).map((p) => (
+                          <i key={p.key} title={`${p.icon} ${p.done}/${p.total}`} style={{ height: 8, flex: 1, borderRadius: 99, display: 'inline-block', background: p.complete ? 'var(--brand)' : (r.currentPhase && r.currentPhase.key === p.key ? 'rgba(var(--brand-rgb),0.28)' : 'var(--hairline)'), boxShadow: r.currentPhase && r.currentPhase.key === p.key ? 'inset 0 0 0 1.5px var(--brand)' : 'none' }} />
+                        ))}
+                      </span>
+                    </td>
+                    <td style={scTd}>{r.complete ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}>🏆 Fully activated</span> : (r.currentPhase ? `${r.currentPhase.icon} ${r.currentPhase.idx} · ${r.currentPhase.title}` : '—')}</td>
+                    <td style={{ ...scTd, fontWeight: r.stalled ? 800 : 400, color: r.stalled ? 'var(--error)' : (r.warning ? '#a36207' : 'var(--muted)') }}>{r.complete ? '—' : (r.daysInactive != null ? `${r.stalled ? '⚠ ' : ''}${r.daysInactive}d` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.lastMilestone ? `${r.lastMilestone.label} · ${new Date(r.lastMilestone.at).toLocaleDateString()}` : (r.welcomeSentAt && r.welcomeSentAt !== 'baseline' ? `✉️ Welcome · ${new Date(r.welcomeSentAt).toLocaleDateString()}` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.am ? r.am.name : '—'}</td>
+                    <td style={{ ...scTd, textAlign: 'right' }}>
+                      {!r.complete && r.hasLogins && <button style={{ ...miniBtn, marginRight: 6 }} onClick={() => nudge(r.id)}>{nudged[r.id] || 'Nudge'}</button>}
+                      <button style={miniBtnOutline} onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>{openRow === r.id ? 'Close ▴' : 'Detail ▾'}</button>
+                    </td>
+                  </tr>
+                  {openRow === r.id && (
+                    <tr><td colSpan={7} style={{ padding: '4px 10px 12px', background: 'rgba(var(--brand-rgb),0.04)' }}>
+                      <ClientOnboardingJourney entity={{ id: r.id, name: r.name }} />
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ ...hint, marginTop: 8 }}>Sorted by who needs attention. <b>Idle</b> = days since a journey step last completed (amber at {data.warnDays}d, red at {data.stallDays}d). <b>Nudge</b> sends a "here's what's still open" note to the client's inbox + email, listing exactly the open steps of their current phase.</p>
+    </div>
+  );
+}
+
 function OnboardingInsights() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
@@ -416,6 +553,8 @@ function OnboardingInsights() {
 
   if (err || !stats) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <AmScorecard />
+      <OnboardingCockpit />
       <OnboardingMailGlobalSettings />
       <NudgeGlobalSettings />
       <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
@@ -448,6 +587,8 @@ function OnboardingInsights() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <AmScorecard />
+      <OnboardingCockpit />
       <OnboardingMailGlobalSettings />
       <NudgeGlobalSettings />
       <div>
@@ -2626,7 +2767,7 @@ function ClientOnboardingJourney({ entity }) {
   const sentLabel = (v) => !v ? 'not yet' : (v === 'baseline' ? 'skipped (pre-dates emails)' : new Date(v).toLocaleDateString());
   return (
     <div style={cardStyle}>
-      <p style={{ ...hint, marginTop: 0 }}>What the client sees as “Getting started” on their home page — four layers from fundamentals to full automation. Steps auto-tick from real usage (dashboards opened, app installed, Owl asked, connector used…); tick the manual ones on their behalf if you’ve walked them through it.</p>
+      <p style={{ ...hint, marginTop: 0 }}>What the client sees as “Getting started” on their home page — five layers from fundamentals to full automation. Steps auto-tick from real usage (dashboards opened, app installed, Owl asked, connector used…); tick the manual ones on their behalf if you’ve walked them through it.</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {(data.phases || []).map((p, i) => (
           <div key={p.key}>
@@ -2797,7 +2938,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
           <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open.journey ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🚀 Client onboarding journey</span>
-            {!open.journey && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The client’s four-phase “Getting started” path — live progress, welcome pack & phase emails.</span>}
+            {!open.journey && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The client’s five-phase “Getting started” path — live progress, welcome pack & phase emails.</span>}
           </span>
         </button>
         {open.journey && <div style={{ marginTop: 8 }}><ClientOnboardingJourney entity={entity} /></div>}

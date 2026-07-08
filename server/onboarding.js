@@ -58,45 +58,63 @@ function mount(app, { db, auth, mailer, os }) {
   };
   // Claude/ChatGPT connected: the client's MCP connector has actually been used.
   const connectorDone = (e) => count("SELECT COUNT(*) n FROM api_audit WHERE entity_id=? AND surface='mcp'", e) > 0;
+  // Owl mastery signals: a tile insight generated; an audience/campaign the Owl
+  // (any agent surface) created — provenance lives in created_via; feedback filed.
+  const insightDone = (e) => count("SELECT COUNT(*) n FROM ai_usage WHERE entity_id=? AND kind='tile_insight'", e) > 0;
+  const AGENT_VIA = "('owl','whatsapp','claude','chatgpt')";
+  const owlSegmentDone = (e) => count(`SELECT COUNT(*) n FROM segments WHERE entity_id=? AND created_via IN ${AGENT_VIA}`, e) > 0;
+  const owlCampaignDone = (e) => count(`SELECT COUNT(*) n FROM actions WHERE entity_id=? AND created_via IN ${AGENT_VIA}`, e) > 0;
+  const feedbackDone = (e) => count("SELECT COUNT(*) n FROM tickets WHERE entity_id=? AND reporter_role='client'", e) > 0;
   // A journey or drip sequence exists (the Owl's journeys land as draft campaigns
   // with a `journey` tree in config; drips carry campaignMode:'sequence').
   const journeyDone = (e) => count(`SELECT COUNT(*) n FROM actions WHERE entity_id=? AND (recurring=1 OR instr(config,'"journey"')>0 OR instr(config,'"campaignMode":"sequence"')>0)`, e) > 0;
 
-  // The four layers of the journey. Order matters — the client's "current" phase
-  // is the first incomplete one, and the phase emails walk this ladder.
+  // The five layers of the journey. Order matters — the client's "current" phase
+  // is the first incomplete one, and the phase emails walk this ladder. Each
+  // phase carries its collectible sticker (the gamification layer awards it and
+  // the phase email celebrates it by name).
   const PHASES = [
-    { key: 'fundamentals', icon: '🧭', title: 'The fundamentals', tagline: 'Find your feet — your live dashboards, the app on your phone, your daily read.' },
-    { key: 'engage', icon: '🎯', title: 'Goals & first sends', tagline: 'Set targets, get to know your audiences, and send your first email.' },
-    { key: 'owl', icon: '🦉', title: 'The Owl everywhere', tagline: 'Take your data analyst with you — WhatsApp, Claude and ChatGPT.' },
-    { key: 'automate', icon: '⚙️', title: 'Automate & amplify', tagline: 'Journeys that run themselves, and your ad accounts wired in.' },
+    { key: 'fundamentals', icon: '🧭', title: 'The fundamentals', sticker: '🧭 Pathfinder', tagline: 'Find your feet — your live dashboards, the app on your phone, your daily read.' },
+    { key: 'meetowl', icon: '🦉', title: 'Meet the Owl', sticker: '🦉 Owl Whisperer', tagline: 'Your on-demand analyst — it answers, builds and drafts for you.' },
+    { key: 'engage', icon: '🎯', title: 'Goals & first sends', sticker: '🎯 Sharpshooter', tagline: 'Set targets, get to know your audiences, and send your first email.' },
+    { key: 'owl', icon: '💬', title: 'The Owl everywhere', sticker: '💬 Everywhere Owl', tagline: 'Take your data analyst with you — WhatsApp, Claude and ChatGPT.' },
+    { key: 'automate', icon: '⚙️', title: 'Automate & amplify', sticker: '⚙️ Automation Architect', tagline: 'Journeys that run themselves, and your ad accounts wired in.' },
   ];
 
   // Step catalogue. `auto` (when present) auto-completes the step from real state;
   // steps without `auto` are manual (a CTA + tick). `phase` keys into PHASES;
-  // `guide` keys into the front-end walkthrough content (client/src/lib/guides.js).
+  // `guide` keys into the front-end walkthrough content (client/src/lib/guides.js);
+  // `pts` is the step's Pulse Points value (the gamification layer sums these).
   // Step keys are stable (don't rename) so stored progress + auto-checks keep working.
   const STEPS = [
     // Phase 1 — The fundamentals
-    { key: 'explore', phase: 'fundamentals', guide: 'explore', icon: '📊', title: 'Take a tour of your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/', auto: exploredDone },
-    { key: 'install', phase: 'fundamentals', guide: 'install', icon: '📲', title: 'Put Pulse on your phone', desc: 'Install the app — a home-screen icon, full screen, always a tap away.', cta: '/', auto: installDone },
-    { key: 'notifications', phase: 'fundamentals', guide: 'notifications', icon: '🔔', title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you, even when Pulse is closed.', cta: '/settings?section=notifications', auto: notificationsDone },
-    { key: 'owlchat', phase: 'fundamentals', guide: 'owlchat', icon: '🦉', title: 'Ask the Owl a question', desc: 'Your on-demand analyst — ask anything about your numbers in plain language.', cta: '/', auto: owlChatDone },
-    { key: 'digest', phase: 'fundamentals', guide: 'digest', icon: '🗓', title: 'Set up your weekly briefing', desc: 'An automated briefing emailed to your team on the schedule you choose.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
-    { key: 'branding', phase: 'fundamentals', guide: 'branding', icon: '🎨', title: 'Add your logo & brand colour', desc: 'Upload your logo and pick your colour, so your emails and the whole app then look like you.', cta: '/settings?section=email', auto: brandingDone },
-    { key: 'team', phase: 'fundamentals', guide: 'team', icon: '👥', title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings?section=team', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
-    // Phase 2 — Goals & first sends
-    { key: 'goals', phase: 'engage', guide: 'goals', icon: '⭐', title: 'Set your event goals', desc: 'Pick the numbers that matter (a ticket or revenue target) and track them live against where they need to be.', cta: '/?goals=new', auto: (e) => count('SELECT COUNT(*) n FROM goals WHERE entity_id=?', e) > 0 },
-    { key: 'alerts', phase: 'engage', guide: 'alerts', icon: '🚨', title: 'Set up an alert', desc: 'Watch a number that matters (tickets, revenue, low stock) and get pinged the moment it crosses your threshold.', cta: '/alerts', auto: (e) => count('SELECT COUNT(*) n FROM alerts WHERE entity_id=?', e) > 0 },
-    { key: 'segment', phase: 'engage', guide: 'segment', icon: '🎯', title: 'Create your first audience', desc: 'Turn a dashboard tile or a list into a reusable audience you can message.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
-    { key: 'campaign', phase: 'engage', guide: 'campaign', icon: '📣', title: 'Send your first email campaign', desc: 'A simple email to an audience — winning back abandoned carts is a great first one.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
-    // Phase 3 — The Owl everywhere
-    { key: 'whatsapp', phase: 'owl', guide: 'whatsapp', icon: '💬', title: 'Chat to the Owl on WhatsApp', desc: 'Your numbers answered where you already are — ask your Howler team to link your number.', cta: '/inbox', auto: whatsappDone },
-    { key: 'connector', phase: 'owl', guide: 'connector', icon: '🔌', title: 'Connect Claude or ChatGPT', desc: 'Plug Pulse into your AI assistant, so it can answer with your live event data.', cta: '/settings?section=integrations', auto: connectorDone },
-    // Phase 4 — Automate & amplify
-    { key: 'journey', phase: 'automate', guide: 'journey', icon: '🧭', title: 'Build your first journey', desc: 'A multi-step automation that reacts to what people do — ask the Owl to draft one.', cta: '/engage/journeys', auto: journeyDone },
-    { key: 'channels', phase: 'automate', guide: 'channels', icon: '🔗', title: 'Connect Meta & TikTok', desc: 'Link your ad accounts to push audiences to Meta & TikTok Custom Audiences for targeting.', cta: '/settings?section=integrations', auto: adChannelsDone },
-    { key: 'pixel', phase: 'automate', icon: '🎯', title: 'Install the Pulse Pixel', desc: 'One snippet on your website or ticket shop — remarketing lists then build automatically in Meta, Google and TikTok.', cta: '/settings?section=integrations', auto: pixelDone },
+    { key: 'explore', phase: 'fundamentals', guide: 'explore', icon: '📊', pts: 50, title: 'Take a tour of your dashboards', desc: 'Open your suites and get a feel for your live data.', cta: '/', auto: exploredDone },
+    { key: 'install', phase: 'fundamentals', guide: 'install', icon: '📲', pts: 50, title: 'Put Pulse on your phone', desc: 'Install the app — a home-screen icon, full screen, always a tap away.', cta: '/', auto: installDone },
+    { key: 'notifications', phase: 'fundamentals', guide: 'notifications', icon: '🔔', pts: 50, title: 'Turn on notifications', desc: 'Get a nudge on your phone when something needs you, even when Pulse is closed.', cta: '/settings?section=notifications', auto: notificationsDone },
+    { key: 'digest', phase: 'fundamentals', guide: 'digest', icon: '🗓', pts: 100, title: 'Set up your weekly briefing', desc: 'An automated briefing emailed to your team on the schedule you choose.', cta: '/digests', auto: (e) => count("SELECT COUNT(*) n FROM scheduled_jobs WHERE entity_id=? AND type='digest'", e) > 0 },
+    { key: 'branding', phase: 'fundamentals', guide: 'branding', icon: '🎨', pts: 50, title: 'Add your logo & brand colour', desc: 'Upload your logo and pick your colour, so your emails and the whole app then look like you.', cta: '/settings?section=email', auto: brandingDone },
+    { key: 'team', phase: 'fundamentals', guide: 'team', icon: '👥', pts: 50, title: 'Invite your team', desc: 'Add the people who should get access and briefings.', cta: '/settings?section=team', auto: (e) => count('SELECT COUNT(*) n FROM user_entities WHERE entity_id=?', e) >= 2 },
+    // Phase 2 — Meet the Owl (in-app mastery; drafts only, nothing sends here)
+    { key: 'owlchat', phase: 'meetowl', guide: 'owlchat', icon: '🦉', pts: 50, title: 'Ask the Owl a question', desc: 'Your on-demand analyst — ask anything about your numbers in plain language.', cta: '/', auto: owlChatDone },
+    { key: 'insight', phase: 'meetowl', guide: 'insights', icon: '💡', pts: 50, title: 'Get a tile insight', desc: 'Tap the 🦉 on any dashboard tile for a plain-English read of the numbers.', cta: '/', auto: insightDone },
+    { key: 'owlsegment', phase: 'meetowl', guide: 'owlsegment', icon: '🎯', pts: 100, title: 'Have the Owl build you an audience', desc: '“Everyone who abandoned a cart this week” — just ask, and it becomes a reusable audience.', cta: '/', auto: owlSegmentDone },
+    { key: 'owlcampaign', phase: 'meetowl', guide: 'owlcampaign', icon: '📣', pts: 100, title: 'Have the Owl draft a campaign', desc: 'It writes the email; you review before anything sends.', cta: '/', auto: owlCampaignDone },
+    { key: 'feedback', phase: 'meetowl', guide: 'feedback', icon: '💡', pts: 50, title: 'Send feedback or report a bug', desc: 'Spotted something off, or wish Pulse did more? Tell us — we really do fix them.', cta: '/product', auto: feedbackDone },
+    // Phase 3 — Goals & first sends
+    { key: 'goals', phase: 'engage', guide: 'goals', icon: '⭐', pts: 100, title: 'Set your event goals', desc: 'Pick the numbers that matter (a ticket or revenue target) and track them live against where they need to be.', cta: '/?goals=new', auto: (e) => count('SELECT COUNT(*) n FROM goals WHERE entity_id=?', e) > 0 },
+    { key: 'alerts', phase: 'engage', guide: 'alerts', icon: '🚨', pts: 50, title: 'Set up an alert', desc: 'Watch a number that matters (tickets, revenue, low stock) and get pinged the moment it crosses your threshold.', cta: '/alerts', auto: (e) => count('SELECT COUNT(*) n FROM alerts WHERE entity_id=?', e) > 0 },
+    { key: 'segment', phase: 'engage', guide: 'segment', icon: '🎯', pts: 100, title: 'Create your first audience', desc: 'Turn a dashboard tile or a list into a reusable audience you can message.', cta: '/engage/segments', auto: (e) => count('SELECT COUNT(*) n FROM segments WHERE entity_id=?', e) > 0 },
+    { key: 'campaign', phase: 'engage', guide: 'campaign', icon: '📣', pts: 150, title: 'Send your first email campaign', desc: 'A simple email to an audience — winning back abandoned carts is a great first one.', cta: '/engage/campaigns', auto: (e) => count('SELECT COUNT(*) n FROM actions WHERE entity_id=?', e) > 0 },
+    // Phase 4 — The Owl everywhere
+    { key: 'whatsapp', phase: 'owl', guide: 'whatsapp', icon: '💬', pts: 100, title: 'Chat to the Owl on WhatsApp', desc: 'Your numbers answered where you already are — ask your Howler team to link your number.', cta: '/inbox', auto: whatsappDone },
+    { key: 'connector', phase: 'owl', guide: 'connector', icon: '🔌', pts: 100, title: 'Connect Claude or ChatGPT', desc: 'Plug Pulse into your AI assistant, so it can answer with your live event data.', cta: '/settings?section=integrations', auto: connectorDone },
+    // Phase 5 — Automate & amplify
+    { key: 'journey', phase: 'automate', guide: 'journey', icon: '🧭', pts: 150, title: 'Build your first journey', desc: 'A multi-step automation that reacts to what people do — ask the Owl to draft one.', cta: '/engage/journeys', auto: journeyDone },
+    { key: 'channels', phase: 'automate', guide: 'channels', icon: '🔗', pts: 100, title: 'Connect Meta & TikTok', desc: 'Link your ad accounts to push audiences to Meta & TikTok Custom Audiences for targeting.', cta: '/settings?section=integrations', auto: adChannelsDone },
+    { key: 'pixel', phase: 'automate', icon: '🎯', pts: 100, title: 'Install the Pulse Pixel', desc: 'One snippet on your website or ticket shop — remarketing lists then build automatically in Meta, Google and TikTok.', cta: '/settings?section=integrations', auto: pixelDone },
   ];
+  // Bonus points the gamification layer awards on top of steps.
+  const PHASE_BONUS = 250; const ACTIVATED_BONUS = 500;
 
   function progress(entityId) {
     const manual = {};
@@ -104,16 +122,21 @@ function mount(app, { db, auth, mailer, os }) {
     const steps = STEPS.map((s) => {
       const autoDone = s.auto ? !!s.auto(entityId) : false;
       const manualDone = manual[s.key] === 1;
-      return { key: s.key, phase: s.phase, guide: s.guide, icon: s.icon, title: s.title, desc: s.desc, cta: s.cta, auto: !!s.auto, done: autoDone || manualDone };
+      return { key: s.key, phase: s.phase, guide: s.guide, icon: s.icon, pts: s.pts || 50, title: s.title, desc: s.desc, cta: s.cta, auto: !!s.auto, done: autoDone || manualDone };
     });
     const phases = PHASES.map((p) => {
       const ps = steps.filter((s) => s.phase === p.key);
       const done = ps.filter((s) => s.done).length;
-      return { key: p.key, icon: p.icon, title: p.title, tagline: p.tagline, done, total: ps.length, complete: done === ps.length };
+      return { key: p.key, icon: p.icon, title: p.title, sticker: p.sticker, tagline: p.tagline, done, total: ps.length, complete: done === ps.length };
     });
     const current = phases.find((p) => !p.complete);
     const done = steps.filter((s) => s.done).length;
-    return { steps, phases, currentPhase: current ? current.key : null, done, total: steps.length, complete: done === steps.length, dismissed: manual.__dismissed === 1 };
+    const complete = done === steps.length;
+    // Journey-derived Pulse Points: steps + a bonus per finished phase (+ the
+    // full-activation bonus). Activity-badge points ride on top in gamify.js.
+    const points = steps.filter((s) => s.done).reduce((n, s) => n + s.pts, 0)
+      + phases.filter((p) => p.complete).length * PHASE_BONUS + (complete ? ACTIVATED_BONUS : 0);
+    return { steps, phases, currentPhase: current ? current.key : null, done, total: steps.length, points, complete, dismissed: manual.__dismissed === 1 };
   }
   const setState = (entityId, key, done) => sql.prepare('INSERT INTO onboarding_state (entity_id,key,done,updated_at) VALUES (?,?,?,?) ON CONFLICT(entity_id,key) DO UPDATE SET done=excluded.done, updated_at=excluded.updated_at').run(entityId, key, done ? 1 : 0, new Date().toISOString());
 
@@ -181,9 +204,10 @@ function mount(app, { db, auth, mailer, os }) {
     const idx = PHASES.findIndex((p) => p.key === phase.key);
     const next = PHASES[idx + 1];
     const title = `Phase ${idx + 1} complete: ${phase.title} ✅`;
+    const earned = phase.sticker ? `You've earned the ${phase.sticker} sticker — it's on your shelf in Pulse.\n\n` : '';
     const body = next
-      ? `${copy('phaseIntro')}\n\nNext up — Phase ${idx + 2} · ${next.icon} ${next.title}\n${next.tagline}\n\n${stepLines(next.key)}`
-      : copy('finaleIntro');
+      ? `${copy('phaseIntro')}\n\n${earned}Next up — Phase ${idx + 2} · ${next.icon} ${next.title}\n${next.tagline}\n\n${stepLines(next.key)}`
+      : `${copy('finaleIntro')}\n\n${earned}`.trim();
     const subject = next ? `${phase.title} — done ✅ Next up: ${next.title}` : 'You’re fully set up on Pulse 🎉';
     const ok = deliver(e, { title, body, subject, mailKey: `phase:${phase.key}` });
     if (ok) {
@@ -196,6 +220,18 @@ function mount(app, { db, auth, mailer, os }) {
       }
     }
     return ok;
+  }
+
+  // A one-tap AM nudge (the cockpit's button): a value-led "here's what's still
+  // open in your current phase" note on both surfaces. No throttle — it's manual.
+  function sendNudge(e) {
+    const prog = progress(e.id);
+    const cur = prog.phases.find((p) => !p.complete);
+    if (!cur) return false;
+    const idx = PHASES.findIndex((p) => p.key === cur.key);
+    const open = prog.steps.filter((s) => s.phase === cur.key && !s.done);
+    const body = `A little push from your Howler team 👋\n\nYou're ${cur.done} of ${cur.total} through Phase ${idx + 1} · ${cur.icon} ${cur.title} — here's what's still open:\n\n${open.map((s) => `${s.icon} ${s.title} — ${s.desc}`).join('\n')}`;
+    return deliver(e, { title: `Almost there: ${cur.title}`, body, subject: `A few steps from your next Pulse milestone`, mailKey: `nudge:${cur.key}` });
   }
 
   // The periodic evaluator: welcomes newly-stood-up clients (first login exists)
@@ -309,7 +345,7 @@ function mount(app, { db, auth, mailer, os }) {
   });
 
   console.log('[onboarding] phased journey + email layer mounted');
-  return { progress, evaluate };
+  return { progress, evaluate, nudge: sendNudge, phases: PHASES, bonuses: { phase: PHASE_BONUS, activated: ACTIVATED_BONUS } };
 }
 
 module.exports = { mount };

@@ -187,6 +187,34 @@ export const GUIDES = {
     ],
   },
 
+  owlsegment: {
+    id: 'owlsegment',
+    title: 'Have the Owl build you an audience',
+    steps: [
+      { owl: true, title: 'Just describe who you mean', body: 'Open an Owl chat and say something like “build me an audience of everyone who abandoned a cart this week” or “VIP buyers from last year”.' },
+      { icon: '✅', title: 'Confirm and it’s saved', body: 'The Owl shows you the audience and its size; one tap and it’s saved as a reusable segment you can message any time.' },
+      { icon: '♻️', title: 'It stays live', body: 'Owl-built audiences update with your data, exactly like ones built by hand in Engage → Segments.' },
+    ],
+  },
+  owlcampaign: {
+    id: 'owlcampaign',
+    title: 'Have the Owl draft a campaign',
+    steps: [
+      { owl: true, title: 'Tell it the job', body: '“Draft a win-back email for abandoned carts with a 10% promo” — the Owl writes the email and picks the audience with you.' },
+      { icon: '📝', title: 'It’s only ever a draft', body: 'Nothing sends. The draft lands in Engage → Campaigns for you to review, edit and approve like any other campaign.' },
+      { icon: '📈', title: 'Then watch it work', body: 'Once you approve and send, opens, clicks and conversions track automatically.' },
+    ],
+  },
+  feedback: {
+    id: 'feedback',
+    title: 'Send feedback or report a bug',
+    steps: [
+      { icon: '💬', title: 'Two taps from anywhere', body: 'Use the 💬 Report button (in the sidebar) whenever something looks off or you wish Pulse did more.' },
+      { icon: '📦', title: 'Track it in Product', body: 'Your reports get their own tracker — see status move from received to shipped in the Product section.', cta: { label: 'Open Product', to: '/product' } },
+      { icon: '🐛', title: 'We really do fix them', body: 'Reports go straight onto our board. Ship a fix from your report and you’ll earn the Bug Hunter badge.' },
+    ],
+  },
+
   goals: {
     id: 'goals',
     title: 'Set your event goals',

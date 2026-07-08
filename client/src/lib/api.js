@@ -415,6 +415,12 @@ export const api = {
   setClientOnboardingStep: (entityId, key, done) => fetch(`/api/admin/entities/${entityId}/onboarding/step/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) }).then(json),
   setClientOnboardingMail: (entityId, on) => fetch(`/api/admin/entities/${entityId}/onboarding-mail`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) }).then(json),
   sendOnboardingWelcome: (entityId) => fetch(`/api/admin/entities/${entityId}/onboarding/welcome`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  // Gamification (badges + Pulse Points) & the AM cockpit/scorecard
+  getMyJourney: (entityId) => fetch(`/api/my/journey/${entityId}`).then(json),
+  ackMyJourney: (entityId) => fetch(`/api/my/journey/${entityId}/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  getOnboardingCockpit: () => fetch('/api/admin/onboarding/cockpit').then(json),
+  nudgeOnboarding: (entityId) => fetch(`/api/admin/onboarding/cockpit/${entityId}/nudge`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  getOnboardingScorecard: () => fetch('/api/admin/onboarding/scorecard').then(json),
   getOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/settings').then(json),
   saveOnboardingMailSettings: (b) => fetch('/api/admin/onboarding-mail/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   testOnboardingMailSettings: () => fetch('/api/admin/onboarding-mail/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
