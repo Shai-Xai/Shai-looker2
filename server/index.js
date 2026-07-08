@@ -15,7 +15,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
-const { asyncHandler, errorMiddleware } = require('./http'); const mailer = require('./mailer');
+const { asyncHandler, errorMiddleware, serverError } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
@@ -75,7 +75,9 @@ const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/adm
   || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
   // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
   // Bug reports can carry a screenshot/image/video (base64) — tickets.js parses that too.
-  || p === '/api/inbound/email' || p === '/api/my/tickets' || p === '/api/github/webhook';
+  || p === '/api/inbound/email' || p === '/api/my/tickets' || p === '/api/github/webhook'
+  // Resend delivery webhooks verify a svix signature over the RAW bytes — mailWebhooks.js reads the body itself.
+  || p === '/api/webhooks/resend';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
@@ -117,6 +119,8 @@ auth.seedAdmin();
 require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db, notifyOps: (m) => ops.alert('mailer', m) });
+// Resend bounce/complaint webhooks → global suppressions (protects the shared sending domain).
+require('./mailWebhooks').mount(app, { db, auth, mailer, notifyOps: (m) => ops.alert('mailer', m) });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
@@ -150,10 +154,16 @@ const owlUploads = require('./owlUploads').mount(app, { db, auth }); const drive
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getChottuApi: () => chottuApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
-// Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
+// Health touches SQLite so a wedged DB fails the check (→ Render restarts), and
+// consults the disk watchdog — a ≥95% disk fails health BEFORE writes start
+// throwing SQLITE_FULL, because reads alone stay green on a full disk.
+const diskGuard = require('./diskGuard');
+diskGuard.start({ dir: process.env.DATA_DIR || require('path').join(__dirname, 'data'), notifyOps: (m) => ops.alert('disk', m) });
 app.get('/health', (_req, res) => {
+  const disk = diskGuard.status();
+  if (disk.critical) return res.status(500).json({ status: 'disk_full', usedPct: Math.round(disk.usedPct * 100) });
   try { db.db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
-  catch (e) { res.status(500).json({ status: 'db_error', error: e.message }); }
+  catch (e) { console.error('[health] db check failed:', e.message); res.status(500).json({ status: 'db_error' }); }
 });
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
@@ -266,7 +276,7 @@ app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }
     res.json({ ok: true, counts });
   } catch (err) {
     console.error('[POST /api/admin/import]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -720,7 +730,7 @@ app.post('/api/admin/goals/nudge-test', auth.requireAdmin, async (req, res) => {
       ? await push.sendToUser(req.user.id, { title: 'Your goals this week (test)', body: text, url: '/goals' })
       : 0;
     res.json({ sent, wouldSend: !!(attention.length || wins.length), body: text, wins: wins.length, attention: attention.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 setInterval(() => goalNudgeSweep(), 60 * 60 * 1000); // hourly; fires the first morning of each ISO week
 setTimeout(() => goalNudgeSweep(), 30000); // shortly after boot, in case it's the window
@@ -752,9 +762,8 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
     await aiUsage.run({ entityId: su.entityId, kind: 'goals' }, () => insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/goals/:suiteId/brief]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the briefing could not be completed]'); res.end(); console.error('[POST /api/goals/:suiteId/brief]', err.message); }
+    else serverError(res, err, 'POST /api/goals/:suiteId/brief');
   }
 });
 
@@ -781,7 +790,7 @@ app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_0
     res.json({ plan });
   } catch (err) {
     console.error('[POST /api/goals/:id/gap-plan]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -815,7 +824,7 @@ app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
       suiteLocks: db.lockedFiltersForSuite(suiteId, dashboardId),
       tiles: out,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
@@ -1076,6 +1085,9 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
+  // Webhook signing secret (bounce/complaint events → suppressions). Write-only.
+  if (re.webhookSecret) db.setSetting('resend_webhook_secret', String(re.webhookSecret).trim());
+  if (re.clearWebhookSecret) db.setSetting('resend_webhook_secret', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
   // Global kill switch: '0' makes every outbound email a no-op (all clients).
   if (re.enabled !== undefined) db.setSetting('mail_enabled', re.enabled ? '1' : '0');
@@ -1515,9 +1527,8 @@ app.post('/api/insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 30
     await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/insight]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the insight could not be completed]'); res.end(); console.error('[POST /api/insight]', err.message); }
+    else serverError(res, err, 'POST /api/insight');
   }
 });
 
@@ -1579,9 +1590,8 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
     await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/dashboard-insight]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the insight could not be completed]'); res.end(); console.error('[POST /api/dashboard-insight]', err.message); }
+    else serverError(res, err, 'POST /api/dashboard-insight');
   }
 });
 
@@ -1697,7 +1707,7 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
     res.json(snap);
   } catch (err) {
     console.error('[GET /api/my/snapshot]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -1920,7 +1930,7 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -1935,7 +1945,7 @@ app.get('/api/my/briefing/events', auth.requireAuth, async (req, res) => {
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing/events]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -2651,7 +2661,7 @@ app.post('/api/my/refine-text', auth.requireAuth, async (req, res) => {
   try {
     const refined = await aiUsage.run({ entityId, kind: 'refine' }, () => insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey }));
     res.json({ text: refined });
-  } catch (e) { console.error('[POST /api/my/refine-text]', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('[POST /api/my/refine-text]', e.message); serverError(res, e); }
 });
 app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
@@ -2827,7 +2837,7 @@ app.post('/api/admin/library/:id/describe', auth.requireAdmin, async (req, res) 
     res.json(saved);
   } catch (err) {
     console.error('[POST /api/admin/library/:id/describe]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -2840,7 +2850,7 @@ app.get('/api/looker-dashboard/:id', auth.requireAdmin, async (req, res) => {
       folder: data.dashboard.folder?.name || null,
       tileCount: data.elements.length, filterCount: data.filters.length,
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
@@ -2851,7 +2861,7 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
   try {
     const source = await fetchDashboard(sourceDashboardId);
     res.json(await recreateDashboard(source, newTitle, targetFolderId));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 // ─── Living docs ──────────────────────────────────────────────────────────────

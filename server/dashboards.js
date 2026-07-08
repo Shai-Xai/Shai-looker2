@@ -9,6 +9,7 @@
 // boundary across the whole app (see server/query.js). collectFolderTree is
 // private to this module.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
 
 function mount(app, {
@@ -88,7 +89,7 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -114,7 +115,7 @@ app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
       byId.get(d.folderId).dashboards.push({ id: d.id, title: d.title });
     }
     res.json({ id: String(root.id), name: root.name, folders: order.map((fid) => byId.get(fid)), total: tree.length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 // Recursively collect every dashboard in a folder and its subfolders.
@@ -176,7 +177,7 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
     res.json({ folder: rootName, imported, total: list.length, failed, folders: folders.length });
   } catch (err) {
     console.error('[POST /api/dashboards/import-folder]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -285,11 +286,11 @@ app.post('/api/admin/folders/delete', auth.requireAdmin, (req, res) => {
 // ─── LookML metadata (admin builds tiles) ──────────────────────────────────────
 app.get('/api/looker/models', auth.requireAdmin, async (_req, res) => {
   try { res.json(await looker.listModels()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { serverError(res, err); }
 });
 app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, res) => {
   try { res.json(await looker.getExploreFields(req.params.model, req.params.explore)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { serverError(res, err); }
 });
 
 // ─── Query execution (the calculation engine) — scoped per tenant ──────────────
@@ -338,8 +339,11 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
     }
     res.json(data);
   } catch (err) {
-    console.error('[POST /api/run-query]', err.message);
-    res.status(500).json({ error: err.message });
+    // Admins get the raw Looker error (they're EDITING tiles and need "unknown
+    // field …" detail); clients get the sanitized generic message — Looker's
+    // error body carries internal URLs/model names that must not reach them.
+    if (req.user?.role === 'admin') { console.error('[POST /api/run-query]', err.message); return res.status(500).json({ error: err.message }); }
+    serverError(res, err, 'POST /api/run-query');
   }
 });
 
@@ -357,8 +361,8 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
     const data = await runLookerQuery('/queries/run/json_detail', query);
     res.json({ query, data });
   } catch (err) {
-    console.error('[POST /api/drill]', err.message);
-    res.status(500).json({ error: err.message });
+    if (req.user?.role === 'admin') { console.error('[POST /api/drill]', err.message); return res.status(500).json({ error: err.message }); }
+    serverError(res, err, 'POST /api/drill');
   }
 });
 

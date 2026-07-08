@@ -62,41 +62,45 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 
 ## 🟠 First weeks after onboarding starts
 
-- [ ] **Sender-reputation protection** (all clients share one Resend domain —
-  one bad list poisons everyone): add `List-Unsubscribe` +
-  `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers to campaign
-  sends (`server/mailer.js`), and a Resend bounce/complaint webhook that
-  writes into `action_suppressions`. Gmail/Yahoo require one-click unsub
-  above ~5k/day.
-- [ ] **Self-approval loophole**: `submit` accepts any approvers list — a
-  marketer can nominate themself and approve their own blast
-  (`server/actions.js`, submit route). Reject a list where every approver is
-  the submitter.
-- [ ] **Approved automations stay editable**: a live `auto` sequence can be
-  rewritten (copy, audience, `ignoreConsent`) with no re-approval
-  (`server/actions.js` PUT allows status `auto`). Force pause → draft →
-  resubmit on material change for approval-required clients.
-- [ ] **Raw error leakage on core routes**: `/api/run-query` and `/api/drill`
-  return Looker's raw error body (internal URLs, model names) to clients
-  (`server/dashboards.js:342,361`); same pattern in ~15 other handlers.
-  Mechanical sweep: `res.status(500).json({ error: err.message })` →
-  `next(err)` so `errorMiddleware` sanitises.
-- [ ] **Send pacing vs Resend limits**: blasts run ~8/sec with no 429
-  retry/backoff — failures are counted, never retried, campaign still ends
-  "done", nobody alerted (`server/actions.js` runCampaign). Treat 429/5xx as
-  retryable (the ledger makes retry safe) and ops-alert when
-  `failed/total` is high.
-- [ ] **Approval blindness**: the approval summary shows neither the resolved
-  recipient count nor a warning when `ignoreConsent` is set; the audience is
-  re-resolved live after sign-off. Add count + a loud consent-bypass line to
-  `campaignSummaryLines`.
-- [ ] **Disk**: bump `sizeGB` 1 → 5 in `render.yaml`; add a 10-min
-  `statfs(DATA_DIR)` watchdog (ops-alert >80%, fail `/health` >95% — a full
-  disk currently fails silently because `/health` only reads). Unbounded
-  growers to prune: `ai_usage`, `usage_events`, `os_attachments`,
-  settlement PDFs (base64 in-DB), `action_opens`/`action_clicks`.
-- [ ] **5xx → ops alert**: one line in `server/http.js` errorMiddleware so
-  client-visible 500s page Slack (the per-kind throttle already exists).
+- [x] **Sender-reputation protection** — **Done 2026-07-08:** campaign emails
+  now carry `List-Unsubscribe` + `List-Unsubscribe-Post` one-click headers
+  (`mailer.send({ unsubUrl })`), `/u/:token` accepts the RFC 8058 POST, and a
+  new signed Resend webhook (`server/mailWebhooks.js`,
+  `POST /api/webhooks/resend`) turns `email.bounced` / `email.complained`
+  into a GLOBAL suppression tier enforced inside `mailer.send` (bounced =
+  blocked everywhere; complained = blocked for marketing kinds). Admin can
+  view/un-suppress via `/api/admin/mail-suppressions` and set the webhook
+  secret in Admin → Integrations → Email.
+  **⚙️ Needs one-time setup:** in [Resend](https://resend.com) → Webhooks add
+  `https://howler-pulse-v2.onrender.com/api/webhooks/resend` with events
+  `email.bounced` + `email.complained`, and paste the signing secret into
+  Admin → Integrations → Email.
+- [x] **Self-approval loophole** — **Done 2026-07-08:** submit rejects an
+  approvers list with nobody other than the submitter (test-pinned).
+- [x] **Approved automations stay editable** — **Done 2026-07-08:** for
+  approval-required clients, a live `auto` campaign refuses edits (pause →
+  draft → resubmit); clients without the approval gate keep in-place editing.
+- [x] **Raw error leakage on core routes** — **Done 2026-07-08:** all ~40
+  `res.status(500).json({ error: err.message })` sites swept onto a shared
+  sanitizing `serverError()` helper (`server/http.js`) — full detail logged +
+  ops-paged, generic message to clients. `/api/run-query` + `/api/drill` keep
+  raw Looker detail for ADMIN sessions only (tile editors need it).
+- [x] **Send pacing vs Resend limits** — **Done 2026-07-08:** `deliver()`
+  retries 429s (twice, honouring Retry-After — a rate-limited request was
+  never accepted, so retry can't double-send; 5xx deliberately NOT retried),
+  and a campaign finishing with ≥20% failures raises an ops alert.
+- [x] **Approval blindness** — **Done 2026-07-08:** submit resolves the
+  audience and the approval summary now shows the recipient reach (email/SMS
+  split, flagged as re-resolved at send) plus a loud `⚠ CONSENT BYPASS` line
+  when `ignoreConsent` is set (`server/actionApprovals.js`).
+- [x] **Disk** — **Done 2026-07-08:** `render.yaml` disk 1 → 5GB (applies on
+  next Blueprint sync — or grow it in the Render dashboard), plus
+  `server/diskGuard.js`: 10-min `statfs` watchdog, ops alert ≥80%, `/health`
+  fails ≥95% so Render surfaces it. Retention/pruning for `ai_usage`,
+  `usage_events`, `os_attachments`, in-DB settlement PDFs and
+  `action_opens`/`action_clicks` is still open (moved to 🟡).
+- [x] **5xx → ops alert** — **Done 2026-07-08:** `errorMiddleware` (and
+  `serverError`) page ops on every 500-class response, throttled per kind.
 
 ## 🟡 Hardening (schedule, don't rush)
 
@@ -106,9 +110,10 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 - [ ] HTML-escape merge-field values in `html`/`blocks` email modes (recipient
   name containing markup currently renders live in the branded email).
 - [ ] `/u` unsubscribe fires on bare GET — corporate link scanners prefetch it
-  and silently unsubscribe people. Render a confirm button that POSTs; keep
-  GET only for the one-click header flow. Also: the "has an unsub link" check
-  is `/unsubscrib/i` on the copy — detect an actual `/u/` href instead.
+  and silently unsubscribe people. Render a confirm button that POSTs (the
+  RFC 8058 one-click POST is already supported). Also: the "has an unsub
+  link" check is `/unsubscrib/i` on the copy — detect an actual `/u/` href
+  instead.
 - [ ] Dry-render the first recipient at approve time and reject if any
   `{{token}}` survives (typo'd merge tags currently ship literally).
 - [ ] Minimum password length in `db.createUser` (only the reset flow enforces
@@ -142,6 +147,10 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
   ~15 min (a crash mid-digest currently leaves no trace anyone acts on).
 - [ ] Second dedupe pass on `both`-channel sends: the same human appearing
   once email-only and once phone-only is still contacted twice.
+- [ ] Retention/pruning for the unbounded growers: `ai_usage`,
+  `usage_events`, `os_attachments` (files on disk), settlement PDFs
+  (base64 in-DB), `action_opens`/`action_clicks` (the 5GB disk +
+  watchdog buys time; pruning closes it).
 
 ## ⚪ Accepted limits (revisit as client count grows)
 

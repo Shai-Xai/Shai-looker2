@@ -16,6 +16,7 @@
 // today's note stays current until someone publishes it. Publishing a note — or
 // editing it (content edits flip source to 'manual') — freezes it forever; the
 // generator never touches published or human-edited notes.
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const path = require('path');
 const { execFile } = require('child_process');
 
@@ -155,7 +156,7 @@ module.exports.mount = function mountReleaseNotes(app, { db, auth, insights, adm
       res.json(await generateReleaseNoteDrafts(Number(req.body?.days) || 14, { force: true }));
     } catch (err) {
       console.error('[release-notes/generate]', err.message);
-      res.status(500).json({ error: err.message });
+      serverError(res, err);
     }
   });
 

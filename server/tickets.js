@@ -18,6 +18,7 @@
 // The AI prompt (TICKET_DRAFT_SYSTEM) is exported so insights.promptRegistry() can
 // surface it in the Admin AI audit without bloating insights.js (see owlChat).
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -446,7 +447,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
-      res.status(500).json({ error: e.message });
+      serverError(res, e);
     }
   });
 
@@ -475,7 +476,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       res.json({ releasePr: pr, staged: staged.length });
     } catch (e) {
       console.error('[tickets] promote failed:', e.message);
-      res.status(500).json({ error: e.message });
+      serverError(res, e);
     }
   });
 
@@ -507,7 +508,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       res.json({ ticket: ticketRow(getTicket(t.id)), comment: c });
     } catch (e) {
       console.error('[tickets] redispatch failed:', e.message);
-      res.status(500).json({ error: e.message });
+      serverError(res, e);
     }
   });
 

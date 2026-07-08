@@ -19,6 +19,7 @@
 // Prompt registered for the AI audit via insights.promptRegistry() (it lazy-
 // requires HELP_SYSTEM from here, so no load cycle).
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 const owlCatalogue = require('./owlCatalogue');
 const roles = require('./roles');
@@ -249,7 +250,7 @@ function mountHelpBot(app, { db, auth, insights, adminAnthropicKey }) {
   }
   app.post('/api/admin/help/draft', auth.requireAdmin, async (_req, res) => {
     try { res.json(await draftFromReleaseNotes({ force: true })); }
-    catch (err) { console.error('[help-draft]', err.message); res.status(500).json({ error: err.message }); }
+    catch (err) { console.error('[help-draft]', err.message); serverError(res, err); }
   });
   // Tick: piggybacks on publishing — checks 6-hourly, only calls the AI when a
   // release note was published since the last run. Kill switch: help_draft_auto.

@@ -733,7 +733,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
       }
       const text = `${tok(useHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
-      return { html: withPixel(html, rtok), text, subject };
+      return { html: withPixel(html, rtok), text, subject, unsubUrl };
     }
 
     // Hero image: hosted by action id (+ step index) for real sends (email clients
@@ -748,7 +748,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // logo URL resolves the event's logo.
     const evSuite = action.config?.eventSuiteId || '';
     const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: evSuite || action.entityId, branding: mailer.resolveBranding(action.entityId, evSuite), subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
-    return { html: withPixel(html, rtok), text, subject };
+    return { html: withPixel(html, rtok), text, subject, unsubUrl };
   }
 
   // Render an SMS for a recipient: plain text with tokens, a tracked short link
@@ -838,8 +838,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // sets both true at resolution, so this stays a simple per-channel check.
         if (wantsEmail && recipient.email && recipient.emailOk !== false && !emailDone) {
           attempted = true;
-          const { html, text, subject } = renderFor(a, recipient);
-          const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
+          const { html, text, subject, unsubUrl } = renderFor(a, recipient);
+          const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, unsubUrl, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
           if (r.ok) { ok = true; results.emailSent += 1; markSent.run(a.id, emailKey, 'email', now()); } else lastErr = r.error || r.reason || 'email failed';
         }
         if (wantsSms && recipient.phone && recipient.smsOk !== false && !smsDone && results.smsSent < smsCap) {
@@ -856,6 +856,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     saveResults(a.id, results);
     setStatus(a.id, results.sent > 0 || a.audience.length === 0 ? 'done' : 'failed');
     console.log(`[actions] campaign ${a.id} finished: ${results.sent} sent, ${results.failed} failed`);
+    // A blast that quietly lost a big slice of its audience must page a human —
+    // "done" with 30% failures is an incident, not a success.
+    const attemptedTotal = results.sent + results.failed;
+    if (results.failed >= 5 && results.failed / Math.max(attemptedTotal, 1) >= 0.2) {
+      try { require('./ops').alert('campaign', `Campaign "${a.title || a.id}" (${a.entityId}) finished with ${results.failed}/${attemptedTotal} failures — last error: ${results.lastError || 'unknown'}`); } catch { /* alerting must never break the loop */ }
+    }
   }
 
   // ── routes ──
@@ -1019,6 +1025,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft' && a.status !== 'auto') return res.status(400).json({ error: 'Only drafts can be edited' });
+    // Governance: an APPROVED live automation is what the approver signed off.
+    // For approval-required clients, editing it in place would bypass the gate —
+    // pause it back to draft and resubmit instead.
+    if (a.status === 'auto' && requireApprovalFor(a.entityId)) return res.status(400).json({ error: 'This automation was approved as-is — pause it to draft, edit, then resubmit for approval.' });
     const cfg = { ...cleanConfig(req.body || {}), clickToken: a.config.clickToken };
     const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('UPDATE actions SET title=?, config=?, recurring=?, updated_at=? WHERE id=?')
@@ -1312,148 +1322,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // The Howler admins who "own" a client = those linked to it (entityIds). They
   // get the 'Howler' approval pings — not every global admin. If somehow none
   // are linked, fall back to all admins so an approval is never a dead-end.
-  function howlerAdminsFor(entityId) {
-    const admins = db.listUsers().filter((u) => u.role === 'admin');
-    const linked = admins.filter((u) => (u.entityIds || []).includes(entityId));
-    return linked.length ? linked : admins;
-  }
-  // Pending campaigns where THIS user is an outstanding approver (hasn't signed
-  // off yet) — drives the "needs your approval" banner. { count, first }.
-  function awaitingApprovalFor(user, entityId) {
-    if (!user) return { count: 0, first: '' };
-    const rows = sql.prepare("SELECT * FROM actions WHERE entity_id=? AND status='pending'").all(entityId).map(rowToAction);
-    const canHowler = user.role === 'admin' && howlerAdminsFor(entityId).some((u) => u.id === user.id);
-    const myKeys = [`user:${user.id}`, ...(canHowler ? ['howler'] : [])];
-    let count = 0; let first = '';
-    for (const a of rows) {
-      const mine = approvalSummary(a).approvers.filter((x) => myKeys.includes(x.key) && !x.approved);
-      if (mine.length) { count += 1; if (!first) first = a.id; }
-    }
-    return { count, first };
-  }
-
-  // Approval outcomes the signed-in user (the campaign creator) hasn't seen yet
-  // — drives a guaranteed "your campaign was approved / sent back" banner.
-  function unseenOutcomesFor(user, entityId) {
-    if (!user?.email) return [];
-    return sql.prepare("SELECT id, title, config, outcome, outcome_by, outcome_note FROM actions WHERE entity_id=? AND outcome!='' AND outcome_seen=0 AND lower(created_by)=lower(?) ORDER BY outcome_at DESC")
-      .all(entityId, user.email)
-      .map((r) => ({ id: r.id, title: r.title || JSON.parse(r.config || '{}').subject || 'Your campaign', outcome: r.outcome, by: r.outcome_by || '', note: r.outcome_note || '' }));
-  }
-  // A short, human summary of a campaign's key settings — for the approval
-  // inbox message + email so approvers know what they're signing off.
-  function campaignSummaryLines(a) {
-    const c = a.config;
-    const isSeq = c.campaignMode === 'sequence';
-    const lines = [];
-    lines.push(`Channel: ${c.channel === 'both' ? 'Email + SMS' : c.channel === 'sms' ? 'SMS' : 'Email'}`);
-    lines.push(`Type: ${isSeq ? `Drip sequence — ${(c.steps || []).length} step${(c.steps || []).length === 1 ? '' : 's'}` : a.recurring ? 'Automated (daily check)' : 'One-off send'}`);
-    if (!isSeq && c.subject) lines.push(`Subject: ${c.subject}`);
-    const audSrc = c.audience?.mode === 'paste' ? 'Pasted list'
-      : c.audience?.mode === 'snapshot' ? 'Queued by automation'
-      : c.audience?.mode === 'segment' ? `Segment — ${segmentName(a.entityId, c.audience.segmentId) || 'saved'}`
-      : 'Dashboard tile';
-    lines.push(`Audience: ${audSrc}`);
-    if (c.master) lines.push(`Master: ${c.master}`);
-    if (c.promo?.source && c.promo.source !== 'none') lines.push(`Offer: ${c.promo.code || c.promo.type}`);
-    lines.push(`Approvers: ${approvalSummary(a).approvers.map((x) => x.label).join(', ') || '—'}`);
-    return lines;
-  }
-  // The actual campaign copy, for the approval message + email so approvers can
-  // see what they're signing off without opening the app. Returns plain text
-  // (inbox) and an HTML card that approximates the email (notification email).
-  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const fmtDelay = (h) => (h % 24 === 0 && h >= 24 ? `+${h / 24}d` : `+${h}h`);
-  function campaignContentPreview(a) {
-    const c = a.config;
-    const isSeq = c.campaignMode === 'sequence';
-    const isEmail = c.channel !== 'sms';
-    const card = (subject, bodyText, hero) => `
-      <div style="border:1px solid #e6e6e6;border-radius:10px;padding:14px;margin:8px 0;background:#fff;">
-        ${hero ? `<img src="${esc(hero)}" alt="" style="max-width:100%;border-radius:6px;margin-bottom:10px;display:block;" />` : ''}
-        ${isEmail && subject ? `<div style="font-weight:700;font-size:15px;margin-bottom:6px;">${esc(subject)}</div>` : ''}
-        <div style="font-size:13px;line-height:1.5;color:#333;white-space:pre-wrap;">${esc(bodyText)}</div>
-      </div>`;
-    if (isSeq) {
-      const steps = c.steps || [];
-      const text = steps.map((s, i) => `— Step ${i + 1} (${fmtDelay(s.delayHours)}) —\n${isEmail && s.subject ? `Subject: ${s.subject}\n` : ''}${s.body || ''}`).join('\n\n');
-      const html = steps.map((s, i) => `<div style="font-size:11px;font-weight:700;color:#7c3aed;margin-top:10px;">Step ${i + 1} · ${fmtDelay(s.delayHours)}</div>${card(s.subject, s.body, i === 0 ? c.heroImage : '')}`).join('');
-      return { text, html };
-    }
-    const text = `${isEmail && c.subject ? `Subject: ${c.subject}\n` : ''}${c.body || ''}`;
-    return { text, html: card(c.subject, c.body, isEmail ? c.heroImage : '') };
-  }
-  function notifyApprovers(a, opts = {}) {
-    const note = String(opts.message || '').trim();
-    const path = `/actions?action=${a.id}`;
-    const link = `${mailer.baseUrl()}${path}`;
-    const title = 'Campaign approval needed';
-    const name = a.title || a.config.subject || 'A campaign';
-    const lines = campaignSummaryLines(a);
-    const content = campaignContentPreview(a);
-    const noteBlock = note ? `“${opts.fromName || 'The sender'}” says:\n${note}\n\n` : '';
-    const body = `${noteBlock}“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
-    const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
-    const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
-    if (push?.isEnabled?.()) {
-      const pushBody = note ? `${note.slice(0, 90)} — “${name}” needs approval.` : `“${name}” is waiting for your approval.`;
-      for (const ap of a.config.approvers || []) {
-        if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
-      }
-      for (const u of howler) push.sendToUser(u.id, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
-    }
-    // Email each approver too — a named person's address, or the Howler admins
-    // linked to this client.
-    if (mailer?.isConfigured?.()) {
-      const emails = new Set();
-      for (const ap of a.config.approvers || []) {
-        if (ap.type !== 'howler' && ap.email) emails.add(ap.email);
-      }
-      for (const u of howler) emails.add(u.email);
-      if (emails.size) {
-        const summaryHtml = lines.map((l) => { const [k, ...v] = l.split(':'); return `<b>${k}:</b>${v.join(':')}`; }).join('<br>');
-        const noteHtml = note ? `<div style="border-left:3px solid var(--brand,#ff385c);padding:6px 0 6px 12px;margin-bottom:14px;"><b>${esc(opts.fromName || 'The sender')}</b> says:<br>${esc(note)}</div>` : '';
-        const html = mailer.notificationEmail({
-          title, body: `${noteHtml}“${esc(name)}” is waiting for your approval.<br><br>${summaryHtml}<br><br><b>Preview${a.config.channel === 'sms' ? ' (SMS)' : ''}:</b>${content.html}Open it to approve, or send it back to draft.`,
-          ctaText: 'Review & approve', ctaPath: path, preheader: `Approval needed: ${name}`, entityId: a.entityId,
-        });
-        mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
-      }
-    }
-  }
-
-  // Tell the campaign's creator the outcome — approved (sending) or sent back to
-  // draft (with the reviewer's comment). Inbox + push + email, skipping the
-  // reviewer if they're also the sender.
-  function notifySender(a, { approved, note = '', by = '' }) {
-    const sender = (db.listUsers() || []).find((u) => u.email && a.createdBy && u.email.toLowerCase() === a.createdBy.toLowerCase());
-    if (!sender || sender.email.toLowerCase() === (by || '').toLowerCase()) return;
-    // Record the unseen outcome on the campaign — this drives a banner that
-    // ALWAYS shows to the creator next time they load Pulse, independent of
-    // whether push/email reached them.
-    sql.prepare("UPDATE actions SET outcome=?, outcome_by=?, outcome_note=?, outcome_at=?, outcome_seen=0 WHERE id=?")
-      .run(approved ? 'approved' : 'rejected', by || '', String(note || '').slice(0, 500), now(), a.id);
-    const name = a.title || a.config.subject || 'Your campaign';
-    const path = `/actions?action=${a.id}`;
-    const link = `${mailer.baseUrl()}${path}`;
-    const title = approved ? 'Campaign approved' : 'Campaign sent back to draft';
-    const body = approved
-      ? `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-      : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`;
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
-    if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: approved ? `“${name}” was approved.` : `“${name}” was sent back to draft.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
-    if (mailer?.isConfigured?.()) {
-      const html = mailer.notificationEmail({
-        title,
-        body: approved
-          ? `Good news — “${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-          : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `<br><br><b>Comment:</b> ${note}` : ''}<br><br>Open it to make changes and resubmit.`,
-        ctaText: 'Open campaign', ctaPath: path, preheader: title, entityId: a.entityId,
-      });
-      mailer.send({ to: sender.email, subject: `${title}: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
-    }
-  }
+  // Approval summaries + approver/creator notifications — extracted to
+  // actionApprovals.js (the summary is what approvers sign off on: it carries
+  // the resolved reach and a loud consent-bypass warning).
+  const { howlerAdminsFor, awaitingApprovalFor, unseenOutcomesFor, campaignSummaryLines, notifyApprovers, notifySender } =
+    require('./actionApprovals')({ db, sql, mailer, push, os, now, approvalSummary, segmentName, rowToAction });
 
   // The campaign's comms/approval conversation — so anyone viewing the campaign
   // sees the full log (who submitted, approvals, rejections, comments).
@@ -1470,18 +1343,28 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   });
 
   // Submit a draft for approval → status 'pending', notify the named approvers.
-  app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+  app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft') return res.status(400).json({ error: `Can't submit a ${a.status} campaign` });
     const approvers = Array.isArray(req.body?.approvers) ? req.body.approvers : (a.config.approvers || []);
     if (!approvers.length) return res.status(400).json({ error: 'Add at least one approver' });
+    // Four-eyes means FOUR eyes: a submitter can't be their own only approver —
+    // that defeats the whole approval_required governance gate.
+    if (!approvers.some((x) => x.type === 'howler' || (x.type === 'user' && String(x.userId || '') !== String(req.user.id)))) {
+      return res.status(400).json({ error: 'Choose at least one approver other than yourself' });
+    }
     const cfg = { ...a.config, approvers: cleanConfig({ ...req.body, approvers }).approvers };
     sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
     sql.prepare('UPDATE actions SET status=?, config=?, updated_at=? WHERE id=?').run('pending', JSON.stringify(cfg), now(), a.id);
-    notifyApprovers(getAction(a.id), { message: String(req.body?.message || '').slice(0, 2000), fromName: req.user.email });
-    res.json({ ok: true, pending: true });
+    // Resolve the audience now so approvers sign off on a NUMBER, not a source
+    // name (it re-resolves at send; the summary says so). Never block a submit
+    // on a resolver hiccup — the reach line is just omitted.
+    let reach = null;
+    try { ({ reach } = await audienceFor(a.entityId, a.config, req.user)); } catch { reach = null; }
+    notifyApprovers(getAction(a.id), { message: String(req.body?.message || '').slice(0, 2000), fromName: req.user.email, reach });
+    res.json({ ok: true, pending: true, reach });
   });
 
   // Reject a pending campaign → back to draft (clears approvals), notify creator.
@@ -1758,7 +1641,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;
-          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, step, e.step_index); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject, unsubUrl } = renderFor(a, rcpt, step, e.step_index); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, unsubUrl, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
           if (wantsSms && e.phone && consent.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step, e.step_index) }); if (r.ok) { ok = true; smsSent += 1; } }
           if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }

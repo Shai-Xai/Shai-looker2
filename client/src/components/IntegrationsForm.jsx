@@ -20,6 +20,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [clearKey, setClearKey] = useState(false);
   const [resendKey, setResendKey] = useState('');
   const [clearResendKey, setClearResendKey] = useState(false);
+  const [resendWebhookSecret, setResendWebhookSecret] = useState('');
+  const [clearResendWebhookSecret, setClearResendWebhookSecret] = useState(false);
   const [mailFrom, setMailFrom] = useState(value?.resend?.from || '');
   const [invKey, setInvKey] = useState('');
   const [clearInvKey, setClearInvKey] = useState(false);
@@ -85,6 +87,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       p.resend = { from: mailFrom };
       if (resendKey) p.resend.apiKey = resendKey;
       if (clearResendKey) p.resend.clearApiKey = true;
+      if (resendWebhookSecret) p.resend.webhookSecret = resendWebhookSecret;
+      if (clearResendWebhookSecret) p.resend.clearWebhookSecret = true;
     }
     if (showInventive && want('inventive')) {
       p.inventive = { endpoint: invEndpoint };
@@ -129,7 +133,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       // Clear the transient (write-only) inputs for whatever we just saved.
       if (!only || only === 'looker') { setClientSecret(''); setClearSecret(false); }
       if (!only || only === 'anthropic') { setAnthropicKey(''); setClearKey(false); }
-      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); }
+      if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); setResendWebhookSecret(''); setClearResendWebhookSecret(false); }
       if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
       if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
@@ -387,6 +391,19 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             style={input}
             autoComplete="off"
           />
+          <Lbl>Webhook signing secret <span style={{ textTransform: 'none', fontWeight: 400 }}>· bounces &amp; spam complaints</span></Lbl>
+          <div style={note}>
+            Protects the shared sending domain: in <b>Resend → Webhooks</b>, add the endpoint <code>{`${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/resend`}</code> with the events <code>email.bounced</code> + <code>email.complained</code>, then paste its signing secret here. Dead/complaining addresses are auto-suppressed from all future campaign sends{typeof value?.resend?.suppressedCount === 'number' ? <> — <b>{value.resend.suppressedCount}</b> suppressed so far</> : null}.
+          </div>
+          <input
+            type="password" autoComplete="off"
+            value={resendWebhookSecret} onChange={(e) => setResendWebhookSecret(e.target.value)}
+            placeholder={value?.resend?.webhookSecretSet ? 'Set — leave blank to keep' : 'whsec_…'}
+            style={input} disabled={clearResendWebhookSecret}
+          />
+          {value?.resend?.webhookSecretSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearResendWebhookSecret} onChange={(e) => setClearResendWebhookSecret(e.target.checked)} /> Remove this secret</label>
+          )}
           {value?.resend?.lastError && <div style={{ ...note, color: 'var(--error, #ef4444)', marginTop: 8 }}>Last send failed: {value.resend.lastError}</div>}
           {(value?.resend?.recent || []).length > 0 && (
             <>

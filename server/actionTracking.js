@@ -93,12 +93,19 @@ function mount(app, { sql, now, saveResults, parseUnsubToken, canonicalContact }
   // may be an email OR a phone (SMS opt-out for phone-only recipients) — stored
   // canonicalised (email lowercased / phone normalised) so send-time suppression
   // checks match it whatever format the next audience carries the contact in.
-  app.get('/u/:token', (req, res) => {
-    const t = parseUnsubToken(req.params.token);
+  const suppress = (token) => {
+    const t = parseUnsubToken(token);
     if (t) {
       sql.prepare('INSERT OR REPLACE INTO action_suppressions (entity_id, email, at, reason) VALUES (?,?,?,?)')
         .run(t.n, canonicalContact ? canonicalContact(t.e) : String(t.e).toLowerCase(), now(), 'unsubscribed');
     }
+    return t;
+  };
+  // RFC 8058 one-click unsubscribe: Gmail/Yahoo POST to the List-Unsubscribe URL
+  // (set by mailer.send for campaign mail). No page — just do it and say 200.
+  app.post('/u/:token', (req, res) => { suppress(req.params.token); res.json({ ok: true }); });
+  app.get('/u/:token', (req, res) => {
+    const t = suppress(req.params.token);
     res.set('Content-Type', 'text/html').send(`<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f5f7;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
       <div style="background:#fff;border:1px solid #e8e8ec;border-radius:14px;padding:32px 36px;text-align:center;max-width:420px;">
         <div style="font-size:26px;margin-bottom:10px;">${t ? '✓' : '⚠'}</div>

@@ -9,6 +9,7 @@
 // Remove the mount() line in index.js + this file to uninstall. Lifted VERBATIM
 // out of index.js — its collaborators arrive as injected deps.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 module.exports.mount = function mountClientModel(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals }) {
   // Phases in which tickets are actively selling (used to flag the "current event
   // on sale" — pre_launch hasn't opened, day_after/post_event are over).
@@ -59,7 +60,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
       res.status(201).json({ dashboard: { id: created.id, title: created.title } });
     } catch (err) {
       console.error('[POST entity dashboards/import]', err.message);
-      res.status(500).json({ error: err.message });
+      serverError(res, err);
     }
   });
 

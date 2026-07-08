@@ -23,11 +23,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Channel adapters: record every recipient instead of sending. resolveImpl is
 // swapped per-test to control the resolved audience (the Looker tile resolver).
-const sent = { email: [], sms: [] };
+const sent = { email: [], sms: [], unsubUrls: [] };
 let resolveImpl = async () => ({ rows: [], fields: [] });
 
 const mailer = {
-  send: async ({ to }) => { sent.email.push(to); return { ok: true }; },
+  send: async ({ to, unsubUrl }) => { sent.email.push(to); if (unsubUrl) sent.unsubUrls.push(unsubUrl); return { ok: true }; },
   baseUrl: () => 'http://test.local',
   resolveBranding: () => ({ senderName: 'Test Sender' }),
   campaignEmail: ({ subject, bodyText }) => ({ html: `<p>${bodyText || ''}</p>`, text: bodyText || '' }),
@@ -54,7 +54,7 @@ before(async () => {
   });
 });
 
-beforeEach(() => { sent.email = []; sent.sms = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
+beforeEach(() => { sent.email = []; sent.sms = []; sent.unsubUrls = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
 after(async () => { if (app) await app.close(); });
 
 // Wait for an async campaign send to reach a terminal status (runCampaign runs
@@ -377,4 +377,77 @@ test('a phone-only SMS opt-out is enforced at the next send, across number forma
   assert.equal(sent.sms.length, 1);
   assert.match(sent.sms[0], /825550002/);
   assert.equal(sent.email.length, 0);
+});
+
+// ── 9. Approval governance hardening ─────────────────────────────────────────
+test('a submitter cannot be their own only approver (four-eyes stays four eyes)', async () => {
+  const ent = h.makeEntity('SelfOK Co', 'selfok-org');
+  const author = h.makeClient('self-author@test.local', [ent.id], 'owner');
+  const peer = h.makeClient('self-peer@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: author, body: { title: 'Self', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 's1@x.com' } },
+  });
+  const aid = created.body.action.id;
+
+  // Only themselves → rejected.
+  const solo = await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, {
+    as: author, body: { approvers: [{ type: 'user', userId: author.id, email: author.email }] },
+  });
+  assert.equal(solo.status, 400);
+  assert.match(solo.body.error, /other than yourself/);
+
+  // Themselves + a peer → fine (the peer is the real gate).
+  const ok = await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, {
+    as: author, body: { approvers: [{ type: 'user', userId: author.id, email: author.email }, { type: 'user', userId: peer.id, email: peer.email }] },
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.pending, true);
+});
+
+test('an approved live automation is locked against edits for approval-required clients', async () => {
+  const ent = h.makeEntity('AutoLock Co', 'autolock-org');
+  const author = h.makeClient('lock-author@test.local', [ent.id], 'owner');
+  const approver = h.makeClient('lock-approver@test.local', [ent.id], 'owner');
+  h.db.setSetting(`approval_required:${ent.id}`, '1');
+
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: author,
+    body: { title: 'Drip', channel: 'email', campaignMode: 'sequence', steps: [{ delayHours: 24, subject: 'S1', body: 'B1' }], audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  const aid = created.body.action.id;
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/submit`, { as: author, body: { approvers: [{ type: 'user', userId: approver.id, email: approver.email }] } });
+  const appr = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: approver });
+  assert.equal(appr.status, 200);
+  assert.equal(appr.body.activated, true); // sequence activates → status 'auto'
+
+  // Editing the LIVE approved automation is refused — pause → draft → resubmit.
+  const edit = await app.req('PUT', `/api/actions/${ent.id}/${aid}`, {
+    as: author, body: { title: 'Sneaky rewrite', channel: 'email', campaignMode: 'sequence', steps: [{ delayHours: 1, subject: 'SPAM', body: 'SPAM' }], audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' } },
+  });
+  assert.equal(edit.status, 400);
+  assert.match(edit.body.error, /resubmit/);
+});
+
+// ── 10. Deliverability plumbing ──────────────────────────────────────────────
+test('every campaign email send carries its one-click unsubscribe URL, and POST /u works (RFC 8058)', async () => {
+  const ent = h.makeEntity('Unsub Co', 'unsub-org');
+  const owner = h.makeClient('unsub@test.local', [ent.id], 'owner');
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner, body: { title: 'Headers', channel: 'email', subject: 'S', body: 'B', audience: { mode: 'paste', pasted: 'u1@x.com\nu2@x.com' } },
+  });
+  const aid = created.body.action.id;
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  await waitForStatus(ent.id, aid, 'done', owner);
+
+  // Each of the two sends passed an unsubUrl → mailer sets the
+  // List-Unsubscribe + one-click headers Gmail/Yahoo require of bulk senders.
+  assert.equal(sent.email.length, 2);
+  assert.equal(sent.unsubUrls.length, 2);
+
+  // Mail providers unsubscribe by POSTing to that URL (no page, no GET).
+  const token = sent.unsubUrls[0].split('/u/')[1];
+  const r = await fetch(`${app.base}/u/${token}`, { method: 'POST' });
+  assert.equal(r.status, 200);
+  const sup = h.db.db.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(ent.id).map((x) => x.email);
+  assert.deepEqual(sup, ['u1@x.com']);
 });

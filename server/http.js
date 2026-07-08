@@ -34,8 +34,22 @@ function errorMiddleware(err, req, res, _next) {
   const error = safe && err && err.message ? err.message : 'Something went wrong on our end.';
   if (status >= 500) {
     console.error(`[error] ${req.method} ${req.originalUrl} →`, (err && err.stack) || err);
+    // A client just SAW a failure — page a human (throttled per kind in ops.js)
+    // instead of relying on someone reading the Render log stream.
+    try { require('./ops').alert('http5xx', `${req.method} ${req.originalUrl}: ${(err && err.message) || err}`); } catch { /* alerting must never break the response */ }
   }
   res.status(status).json({ error });
 }
 
-module.exports = { HttpError, asyncHandler, errorMiddleware };
+// For handlers with their own try/catch (e.g. mixed cleanup + response logic)
+// that would otherwise hand-roll `res.status(500).json({ error: e.message })`
+// and leak internals: same policy as errorMiddleware — full detail logged +
+// ops-paged, GENERIC message to the client. Prefer asyncHandler + throw where
+// the handler shape allows it.
+function serverError(res, err, context = '') {
+  console.error(`[error]${context ? ` ${context}` : ''} →`, (err && err.stack) || err);
+  try { require('./ops').alert('http5xx', `${context || 'handler'}: ${(err && err.message) || err}`); } catch { /* never break the response */ }
+  if (!res.headersSent) res.status(500).json({ error: 'Something went wrong on our end.' });
+}
+
+module.exports = { HttpError, asyncHandler, errorMiddleware, serverError };

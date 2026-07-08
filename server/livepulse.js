@@ -25,6 +25,7 @@
 //     window, so WhatsApp recipients only get the update if they've messaged the
 //     Owl in the last 24h (checked against owl_wa_msgs); others are skipped.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
@@ -625,7 +626,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     if (!p) return res.status(404).json({ error: 'Live update not found' });
     if (!canManage(req.user, p.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     try { const r = await sendUpdate(p, { manual: true }); res.json({ ok: true, message: r.message, channels: r.channels }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   // Live preview of the numbers a DRAFT would show (no send, no save) — the editor
@@ -636,7 +637,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     try { res.json(await previewDraft(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user })); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   // Send the preview to ME (the current user) only — a phone check before going live.
@@ -646,7 +647,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     try { const r = await sendPreviewToMe(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user }); res.json({ ok: true, ...r }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   app.get('/api/livepulse/:id/runs', auth.requireAuth, (req, res) => {
