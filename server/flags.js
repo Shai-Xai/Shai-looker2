@@ -46,6 +46,7 @@ const REGISTRY = [
     { key: 'engage.audiences', name: 'Ad audiences', def: true, desc: 'Push segments to Meta/TikTok ads.' },
     { key: 'engage.templates', name: 'Templates', def: true, desc: 'Campaign templates.' },
     { key: 'engage.journeys', name: 'Journeys', def: false, beta: true, desc: 'Owl-built branching journeys — decisions, audience splits, per-mailer editing. OFF hides the tab + removes the Owl tool. (Branch EXECUTION additionally needs the JOURNEY_ENGINE switch.)' },
+    { key: 'engage.links', name: 'Links', def: true, beta: true, desc: 'ChottuLink short links into the Howler app — created from Pulse, click-tracked. OFF hides the tab + removes the Owl link tools.' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
   { key: 'digests', emoji: '🗓', name: 'Digests', def: true, desc: 'Scheduled role-based briefing emails.' },
@@ -85,6 +86,7 @@ const REGISTRY = [
     { key: 'selfservice.domain', name: 'Sending domain', def: true, desc: 'Send from their own domain.' },
     { key: 'selfservice.team', name: 'Team', def: true, desc: 'Invite/manage their own users.' },
   ] },
+  { key: 'yourjourney', emoji: '⚡', name: 'Your journey', def: true, beta: true, desc: 'Client onboarding journey — stickers, badges & Pulse Points (nav entry + points ledger).' },
   { key: 'report', emoji: '💬', name: 'Report an issue', def: true, desc: 'In-app bug/idea reporting.' },
 ];
 
@@ -100,6 +102,8 @@ const OWL_TOOL_FLAGS = {
   draftCampaign: 'owl.draft_campaigns',
   draftJourney: 'engage.journeys', // one switch: the feature flag also offers/removes the Owl tool
   draftReport: 'owl.save_reports',
+  createLink: 'engage.links',
+  applyLinkTemplate: 'engage.links',
 };
 
 // Client-route prefixes → the flag that must be ON (admins always pass).
@@ -113,6 +117,11 @@ const GATES = [
   ['/api/segments', 'engage.segments'],
   ['/api/journeys', 'engage.journeys'],
   ['/api/owl/act/draft-journey', 'engage.journeys'],
+  ['/api/campaign-templates', 'engage.templates'],
+  ['/api/my/chottu', 'engage.links'],
+  ['/api/owl/act/create-chottu-link', 'engage.links'],
+  ['/api/owl/act/apply-chottu-template', 'engage.links'],
+  ['/api/my/onboarding', 'yourjourney'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

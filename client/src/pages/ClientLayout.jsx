@@ -462,9 +462,9 @@ export default function ClientLayout() {
               {inbox.unread > 0 && <span style={{ ...countChip, background: 'var(--brand)', color: '#fff' }}>{inbox.unread}</span>}
             </button>
           )}
-          {/* Your journey — stickers, badges & Pulse Points (always reachable,
-              even after the Getting-started card retires). */}
-          {!opsOnly && (
+          {/* Your journey — stickers, badges & Pulse Points (flag-gated per client;
+              stays reachable after the Getting-started card retires). */}
+          {!opsOnly && fl('yourjourney') && (
           <button
             ref={onJourney ? activeRef : null}
             className={`nav-row${onJourney ? ' active' : ''}`}
