@@ -67,6 +67,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
   const [followups, setFollowups] = useState([]); // suggested next questions for the latest answer
   const [persona, setPersona] = useState('quick'); // depth mode: 'quick' (fast) | 'analyst' (deep)
   const [status, setStatus] = useState(''); // live "thinking" label streamed while the Owl works
+  const [statusLog, setStatusLog] = useState([]); // the running list of steps this turn — shown ticked-off under the current one
+  const pushStatus = (s) => { setStatus(s); setStatusLog((l) => (s && l[l.length - 1] !== s ? [...l, s].slice(-6) : l)); };
   const [commands, setCommands] = useState([]); // "/" slash-command palette (from the tool registry)
   const [starters, setStarters] = useState([]); // empty-state prompt-starter pills (personalised + defaults)
   const [slashIdx, setSlashIdx] = useState(0);   // highlighted command in the palette
@@ -225,7 +227,8 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
     if (text == null) setInput('');
     setFollowups([]);
     const useMode = opts.mode || persona; // a one-off "dig deeper" overrides the toggle for this turn
-    setStatus(useMode === 'operator' ? 'Working out the best move…' : useMode === 'analyst' ? 'Digging in…' : 'Thinking…'); // show an immediate indicator before the first token
+    setStatusLog([]);
+    pushStatus(useMode === 'operator' ? 'Working out the best move…' : useMode === 'analyst' ? 'Digging in…' : 'Thinking…'); // show an immediate indicator before the first token
     // Append the question + an empty Owl bubble we stream into (tagged with the depth used).
     setMessages((m) => [...m, { role: 'user', text: q }, { role: 'owl', text: '', mode: useMode }]);
     setBusy(true);
@@ -238,7 +241,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
       return next;
     });
     try {
-      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, setStatus);
+      const { threadId: tid, sources, followups: fu, actions } = await api.owlChat({ suiteId: selSuite || undefined, entityId: selEntity || undefined, dashboardId: dashboardId || undefined, message: q, threadId, mode: useMode, signal: ac.signal, onThread: (t) => { liveTidRef.current = t; } }, appendToOwl, pushStatus);
       if (tid) { const isNew = tid !== threadId; setThreadId(tid); if (isNew) refreshThreads(); }
       if ((sources && sources.length) || (actions && actions.length)) setMessages((m) => {
         const next = m.slice();
@@ -342,7 +345,7 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
         background: m.role === 'user' ? 'var(--brand)' : 'var(--elevated, rgba(128,128,128,0.12))',
         color: m.role === 'user' ? '#fff' : 'var(--text)',
         borderTopRightRadius: m.role === 'user' ? 4 : 14, borderTopLeftRadius: m.role === 'user' ? 14 : 4,
-      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? <ThinkingDots label={status} onStop={stop} /> : '')) : m.text}</div>
+      }}>{m.role === 'owl' ? (m.text ? <OwlMd text={m.text} /> : (busy ? <ThinkingDots label={status} log={statusLog} onStop={stop} /> : '')) : m.text}</div>
     </div>
   );
 
@@ -643,9 +646,19 @@ export default function OwlChat({ open, onClose, suiteId, entityId, dashboardId,
 // the server (e.g. "Reading your ticket data…"), so a multi-second tool call never looks
 // frozen. Shown in the empty Owl bubble until the first answer token arrives. The ⏹ Stop
 // button aborts the turn (closing the stream — the server bails out of the loop too).
-function ThinkingDots({ label, onStop }) {
+function ThinkingDots({ label, log, onStop }) {
+  // The steps already done this turn tick off above the live one — the user
+  // watches the Owl WORK ("Checking your saved audiences ✓ → Drafting…"), not
+  // just a pulsing "thinking" state.
+  const done = (log || []).slice(0, -1).slice(-3);
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--muted)', flexWrap: 'wrap' }}>
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3, color: 'var(--muted)' }}>
+      {done.map((s, i) => (
+        <span key={i} style={{ fontSize: 12, opacity: 0.65, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: 'var(--brand)', fontWeight: 700 }}>✓</span> {String(s).replace(/…$/, '')}
+        </span>
+      ))}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <style>{'@keyframes owl-bd{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-3px);opacity:1}}'}</style>
       <span style={{ display: 'inline-flex', gap: 3 }} aria-hidden="true">
         {[0, 1, 2].map((i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block', animation: 'owl-bd 1.2s ease-in-out infinite', animationDelay: `${i * 0.16}s` }} />)}
@@ -657,6 +670,7 @@ function ThinkingDots({ label, onStop }) {
           ⏹ Stop
         </button>
       )}
+      </span>
     </span>
   );
 }

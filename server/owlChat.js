@@ -38,15 +38,24 @@ const TOOL_STATUS = {
   getPaidPerformance: 'Checking your ad performance…',
   productHelp: 'Checking the Pulse help notes…',
   createAlert: 'Setting up that alert…',
+  createSegment: 'Building that audience…',
+  draftCampaign: 'Drafting your campaign — audience, copy and design…',
+  draftJourney: 'Designing your journey — steps, timing and copy…',
+  createLiveUpdate: 'Drafting the live update…',
+  rememberFact: 'Noting that down…',
+  eventOps: 'Checking event ops…',
+  dataHealth: 'Checking data health…',
+  createLink: 'Minting your short link…',
+  applyLinkTemplate: 'Setting up your links…',
+  listAudiences: 'Checking your saved audiences…',
 };
+const toolLabel = (name) => TOOL_STATUS[name] || (name.startsWith('ask_') ? 'Reading that data source…' : 'Working on it…');
 function statusForTools(toolUses) {
   const names = [...new Set((toolUses || []).map((t) => t.name))];
-  if (names.length === 1) {
-    if (TOOL_STATUS[names[0]]) return TOOL_STATUS[names[0]];
-    if (names[0].startsWith('ask_')) return 'Reading that data source…'; // an extra explore (e.g. cashless)
-    return 'Working on it…';
-  }
-  return 'Gathering your data…';
+  if (names.length === 1) return toolLabel(names[0]);
+  // Several tools at once: name the first two so the user sees WHAT, not just "busy".
+  const labels = names.slice(0, 2).map((n) => toolLabel(n).replace(/…$/, ''));
+  return `${labels.join(' + ')}${names.length > 2 ? ` (+${names.length - 2} more)` : ''}…`;
 }
 
 // The chat Owl's system prompt. Unlike every other Owl surface (handed already-
@@ -234,8 +243,10 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
       return { text: textOf(blocks), trail, rounds: rounds + 1 };
     }
     console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → calling ${toolUses.map((t) => t.name).join(', ')}`);
-    // About to run tool(s) — say which kind of thing we're fetching.
+    // About to run tool(s) — say which kind of thing we're fetching. Tools can
+    // also narrate their own phases mid-run via ctx.status ("Sizing the audience…").
     if (onStatus) onStatus(statusForTools(toolUses));
+    const toolCtx = { ...ctx, status: (m) => { try { if (onStatus && m) onStatus(String(m).slice(0, 90)); } catch { /* stream gone */ } } };
     const runOne = async (tu) => {
       const key = `${tu.name}:${JSON.stringify(tu.input || {})}`;
       const prior = failed.get(key);
@@ -248,7 +259,7 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
         const finish = (r) => { if (!done) { done = true; clearTimeout(tt); clearInterval(sp); resolve(r); } };
         tt = setTimeout(() => finish({ ok: false, reason: 'tool_timeout', message: `${tu.name} took longer than ${Math.round(toolTimeoutMs / 1000)}s and was cut off — that cut is too heavy to compute live. Do NOT retry the identical call: narrow it (a filter, top-N, a shorter range) or answer with what you already have and say this cut timed out.` }), toolTimeoutMs);
         sp = setInterval(() => { if (stopped()) finish({ ok: false, reason: 'stopped', message: 'The user stopped this turn.' }); }, 300);
-        Promise.resolve().then(() => tool.run(tu.input || {}, ctx)).then(
+        Promise.resolve().then(() => tool.run(tu.input || {}, toolCtx)).then(
           (r) => finish(r && typeof r === 'object' ? r : { ok: false, reason: 'tool_error', message: `${tu.name} returned nothing.` }),
           (e) => finish({ ok: false, reason: 'tool_error', message: `${tu.name} failed internally: ${String((e && e.message) || e).slice(0, 160)}` }),
         );

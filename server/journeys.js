@@ -127,6 +127,7 @@ function owlTool({ db, getSegmentsApi, dimByName, filterableDims, catalogue, res
     if (!entityId) return refuse('no_client', 'Open or pick a client first — a journey belongs to a client.');
     let journey;
     try { journey = validateJourney(args); } catch (e) { return refuse('bad_journey', e.message); }
+    if (ctx.status) ctx.status(`Checking the audience for “${journey.name}”…`);
     // Audience grounding: a saved segment by name, OR a new cohort from curated
     // filters (same validation as createSegment/draftCampaign; PII refused).
     let audience = null; let audienceName = ''; let reach = null;
