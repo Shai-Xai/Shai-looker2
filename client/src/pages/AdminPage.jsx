@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId } from 'react';
+import { useState, useEffect, useRef, useMemo, useId, Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -339,6 +339,213 @@ function NudgeGlobalSettings() {
   );
 }
 
+// Global onboarding-journey email settings — the welcome pack + phase-completion
+// emails every client gets as they move through the layered journey. Wording is
+// editable here; each client can be opted out in its own Onboarding journey panel.
+function OnboardingMailGlobalSettings() {
+  const [s, setS] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [testMsg, setTestMsg] = useState('');
+  useEffect(() => { api.getOnboardingMailSettings().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
+  const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
+  const persist = () => api.saveOnboardingMailSettings({ enabled: s.enabled, welcomeWindowDays: s.welcomeWindowDays, copy: s.copy });
+  const save = async () => { try { await persist(); flash(setSaved); } catch (e) { alert(e.message); } };
+  // Save first so the preview reflects what's on screen, then email the admin.
+  const test = async () => { setTestMsg('Sending…'); try { await persist(); const r = await api.testOnboardingMailSettings(); setTestMsg(`✓ Sent to ${r.to}`); } catch (e) { setTestMsg(`✗ ${e.message || 'Send failed'}`); } };
+  const fld = { ...input, minWidth: 0, width: '100%' };
+  const txt = (k, label) => (
+    <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input value={s.copy[k]} onChange={(e) => setCopy(k, e.target.value)} placeholder={s.copyDefaults?.[k] || ''} style={fld} />
+    </label>
+  );
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🚀 Journey emails</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The welcome pack when a client’s first login exists, then a “phase complete — here’s what’s next” email as each onboarding layer finishes. Branded per client; each client can be opted out in its Onboarding journey panel.</span>
+        </span>
+        {!s.enabled && <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--error)', flexShrink: 0 }}>OFF</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 13.5 }}>Journey emails enabled</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>· global kill switch</span>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 220 }}>
+            <L>Welcome window (days)</L>
+            <input type="number" min="1" value={s.welcomeWindowDays} onChange={(e) => set('welcomeWindowDays', e.target.value)} style={fld} />
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Clients created longer ago than this never get a late welcome — they’re picked up silently.</span>
+          </label>
+          <div>
+            <L>Wording</L>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+              {txt('welcomeSubject', 'Welcome email subject')}
+              {txt('welcomeIntro', 'Welcome opening line')}
+              {txt('phaseIntro', 'Phase-complete opening line')}
+              {txt('finaleIntro', 'All-phases-done line')}
+              {txt('button', 'Button label')}
+              {txt('signoff', 'Sign-off line')}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>The phase name, its steps and the “what’s next” list are added automatically. Clear a field to fall back to the default.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button style={saveBtn} onClick={save}>Save</button>
+            {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+            <span style={{ flex: 1 }} />
+            <button style={miniBtnOutline} onClick={test}>Email me the welcome pack</button>
+            {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── The AM scorecard — recognition for the account team ──────────────────────
+// Monthly activation score + medals per AM, with the team leaderboard. Every
+// number is computed from real journey/inbox data server-side; the top scorer
+// takes the Golden Owl. Recognition only — nothing here feeds comp.
+function AmScorecard() {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.getOnboardingScorecard().then(setData).catch(() => setData(null)); }, []);
+  if (!data || !(data.cards || []).length) return null;
+  const me = data.cards.find((c) => c.userId === data.me);
+  const medal = (i) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '');
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🏆 AM scorecard</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {me ? <>Your activation score: <b style={{ color: 'var(--text)' }}>{me.score}/100</b> · {me.activatedAll} activated all-time{me.stalled ? ` · ⚠ ${me.stalled} stalled` : ' · clean sheet'}</> : 'Team activation leaderboard — this month.'}
+          </span>
+        </span>
+        {data.cards[0] && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>🏆 {data.cards[0].name}</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr>{['', 'Account manager', 'Activated', 'Median days', 'Stalled', 'First reply', 'Owl book', 'Score'].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+              <tbody>
+                {data.cards.map((c, i) => (
+                  <tr key={c.userId} style={c.userId === data.me ? { background: 'rgba(var(--brand-rgb),0.05)' } : null}>
+                    <td style={scTd}>{medal(i)}</td>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{c.name}{c.userId === data.me ? ' · you' : ''}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>{(c.badges || []).join(' · ')}</div></td>
+                    <td style={scTd}>{c.activatedAll}{c.activated30 ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}> (+{c.activated30})</span> : ''}</td>
+                    <td style={scTd}>{c.medianActivationDays != null ? `${c.medianActivationDays}d` : '—'}</td>
+                    <td style={{ ...scTd, color: c.stalled ? 'var(--error)' : 'var(--muted)', fontWeight: c.stalled ? 800 : 400 }}>{c.stalled || '0'}</td>
+                    <td style={scTd}>{c.medianReplyHours != null ? `${c.medianReplyHours}h` : '—'}</td>
+                    <td style={scTd}>{c.owlAdoption}%</td>
+                    <td style={{ ...scTd, fontWeight: 800 }}>{c.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ ...hint, marginTop: 8, marginBottom: 0 }}>Score = activations this month ×30 + speed vs team median + zero-stalled bonus + reply time + Owl adoption. Resets monthly; medals are for bragging rights, not reviews. Time-in-app is deliberately not counted.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+const scTh = { textAlign: 'left', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '7px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
+const scTd = { padding: '8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', verticalAlign: 'top' };
+
+// ── The AM cockpit — every client's journey, sorted by who needs a call ───────
+function OnboardingCockpit() {
+  const [data, setData] = useState(null);
+  const [filter, setFilter] = useState('attention');
+  const [openRow, setOpenRow] = useState(null);
+  const [nudged, setNudged] = useState({}); // entityId → status text
+  const load = () => api.getOnboardingCockpit().then(setData).catch(() => setData(null));
+  useEffect(() => { load(); }, []);
+  if (!data) return <div style={cardStyle}><Muted>Loading client journeys…</Muted></div>;
+  const rows = (data.rows || []).filter((r) => (
+    filter === 'attention' ? (r.warning || r.stalled) && !r.complete
+      : filter === 'active' ? !r.complete
+        : filter === 'activated' ? r.complete : true
+  ));
+  const nudge = async (id) => {
+    setNudged((n) => ({ ...n, [id]: '…' }));
+    try { const r = await api.nudgeOnboarding(id); setNudged((n) => ({ ...n, [id]: r.ok ? '✓ sent' : '—' })); }
+    catch { setNudged((n) => ({ ...n, [id]: '✗ failed' })); }
+  };
+  const fchip = (key, label, n) => (
+    <button key={key} onClick={() => setFilter(key)} style={{ ...folderChip, cursor: 'pointer', ...(filter === key ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff', fontWeight: 700 } : null) }}>{label}{n != null ? ` · ${n}` : ''}</button>
+  );
+  const s = data.stats || {};
+  const stat = (label, val, color) => (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 14px', minWidth: 120, flex: 1 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{val}</div>
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        {stat('Onboarding now', s.onboarding ?? '—')}
+        {stat(`⚠ Stalled > ${data.stallDays}d`, s.stalled ?? '—', s.stalled ? 'var(--error)' : undefined)}
+        {stat('Fully activated', s.activated ?? '—', 'var(--brand)')}
+        {stat('Median to first send', s.medianFirstSendDays != null ? `${s.medianFirstSendDays}d` : '—')}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {fchip('attention', 'Needs attention', (data.rows || []).filter((r) => (r.warning || r.stalled) && !r.complete).length)}
+        {fchip('active', 'Onboarding', (data.rows || []).filter((r) => !r.complete).length)}
+        {fchip('activated', 'Activated', (data.rows || []).filter((r) => r.complete).length)}
+        {fchip('all', 'All', (data.rows || []).length)}
+      </div>
+      {rows.length === 0 ? <div style={cardStyle}><Muted>{filter === 'attention' ? 'Nobody needs attention — every journey is moving. 🎉' : 'No clients here.'}</Muted></div> : (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)' }}>
+          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr>{['Client', 'Journey', 'Current phase', 'Idle', 'Last milestone', 'AM', ''].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{r.name}{!r.hasLogins && <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)' }}>no logins yet</div>}</td>
+                    <td style={scTd}>
+                      <span style={{ display: 'inline-flex', gap: 2, width: 110 }}>
+                        {(r.phases || []).map((p) => (
+                          <i key={p.key} title={`${p.icon} ${p.done}/${p.total}`} style={{ height: 8, flex: 1, borderRadius: 99, display: 'inline-block', background: p.complete ? 'var(--brand)' : (r.currentPhase && r.currentPhase.key === p.key ? 'rgba(var(--brand-rgb),0.28)' : 'var(--hairline)'), boxShadow: r.currentPhase && r.currentPhase.key === p.key ? 'inset 0 0 0 1.5px var(--brand)' : 'none' }} />
+                        ))}
+                      </span>
+                    </td>
+                    <td style={scTd}>{r.complete ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}>🏆 Fully activated</span> : (r.currentPhase ? `${r.currentPhase.icon} ${r.currentPhase.idx} · ${r.currentPhase.title}` : '—')}</td>
+                    <td style={{ ...scTd, fontWeight: r.stalled ? 800 : 400, color: r.stalled ? 'var(--error)' : (r.warning ? '#a36207' : 'var(--muted)') }}>{r.complete ? '—' : (r.daysInactive != null ? `${r.stalled ? '⚠ ' : ''}${r.daysInactive}d` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.lastMilestone ? `${r.lastMilestone.label} · ${new Date(r.lastMilestone.at).toLocaleDateString()}` : (r.welcomeSentAt && r.welcomeSentAt !== 'baseline' ? `✉️ Welcome · ${new Date(r.welcomeSentAt).toLocaleDateString()}` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.am ? r.am.name : '—'}</td>
+                    <td style={{ ...scTd, textAlign: 'right' }}>
+                      {!r.complete && r.hasLogins && <button style={{ ...miniBtn, marginRight: 6 }} onClick={() => nudge(r.id)}>{nudged[r.id] || 'Nudge'}</button>}
+                      <button style={miniBtnOutline} onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>{openRow === r.id ? 'Close ▴' : 'Detail ▾'}</button>
+                    </td>
+                  </tr>
+                  {openRow === r.id && (
+                    <tr><td colSpan={7} style={{ padding: '4px 10px 12px', background: 'rgba(var(--brand-rgb),0.04)' }}>
+                      <ClientOnboardingJourney entity={{ id: r.id, name: r.name }} />
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ ...hint, marginTop: 8 }}>Sorted by who needs attention. <b>Idle</b> = days since a journey step last completed (amber at {data.warnDays}d, red at {data.stallDays}d). <b>Nudge</b> sends a "here's what's still open" note to the client's inbox + email, listing exactly the open steps of their current phase.</p>
+    </div>
+  );
+}
+
 function OnboardingInsights() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
@@ -346,6 +553,9 @@ function OnboardingInsights() {
 
   if (err || !stats) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <AmScorecard />
+      <OnboardingCockpit />
+      <OnboardingMailGlobalSettings />
       <NudgeGlobalSettings />
       <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
     </div>
@@ -377,6 +587,9 @@ function OnboardingInsights() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
+      <AmScorecard />
+      <OnboardingCockpit />
+      <OnboardingMailGlobalSettings />
       <NudgeGlobalSettings />
       <div>
         <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
@@ -921,7 +1134,7 @@ const WIZARD_DEFAULTS = [
     blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
   { kind: 'builtin', key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
     req: 'at least one login', lock: 'Add (or link) at least one login to continue', does: 'Creates the people who can sign in.',
-    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients. Heads-up: once the first login exists, the client’s branded welcome pack email goes out automatically (manage it in the client’s Setup checklist → Client onboarding journey).' },
   { kind: 'builtin', key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true, does: 'Opens the per-client branding editor (logo, colours, sender).',
     blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
 ];
@@ -2534,6 +2747,67 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
   );
 }
 
+// The CLIENT's onboarding journey, seen from the AM side: the same four layered
+// phases the client sees on their home page, with live auto-detected progress.
+// The AM can tick manual steps on the client's behalf, send/re-send the welcome
+// pack, and opt the client out of the journey emails.
+function ClientOnboardingJourney({ entity }) {
+  const [data, setData] = useState(null);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { api.getClientOnboarding(entity.id).then(setData).catch(() => setData(null)); }, [entity.id]);
+  if (!data) return <div style={cardStyle}><Muted>Loading…</Muted></div>;
+  const tick = (key, done) => api.setClientOnboardingStep(entity.id, key, done).then(setData).catch(() => {});
+  const toggleMail = async (on) => { try { await api.setClientOnboardingMail(entity.id, on); setData((d) => ({ ...d, mail: { ...d.mail, on } })); } catch (e) { alert(e.message); } };
+  const sendWelcome = async () => {
+    setMsg('Sending…');
+    try { const r = await api.sendOnboardingWelcome(entity.id); setMsg(r.ok ? `✓ Sent to ${(r.sentTo || []).length} recipient${(r.sentTo || []).length === 1 ? '' : 's'}` : '✗ Nothing delivered'); api.getClientOnboarding(entity.id).then(setData).catch(() => {}); }
+    catch (e) { setMsg(`✗ ${e.message || 'Send failed'}`); }
+  };
+  const mail = data.mail || {};
+  const sentLabel = (v) => !v ? 'not yet' : (v === 'baseline' ? 'skipped (pre-dates emails)' : new Date(v).toLocaleDateString());
+  return (
+    <div style={cardStyle}>
+      <p style={{ ...hint, marginTop: 0 }}>What the client sees as “Getting started” on their home page — five layers from fundamentals to full automation. Steps auto-tick from real usage (dashboards opened, app installed, Owl asked, connector used…); tick the manual ones on their behalf if you’ve walked them through it.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(data.phases || []).map((p, i) => (
+          <div key={p.key}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: p.complete ? 'var(--brand)' : 'var(--text)' }}>{p.complete ? '✅' : p.icon} Phase {i + 1} · {p.title}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{p.done}/{p.total}</span>
+              {data.currentPhase === p.key && <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>current</span>}
+              {mail.phases?.[p.key] && mail.phases[p.key] !== 'baseline' && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>· congrats email {new Date(mail.phases[p.key]).toLocaleDateString()}</span>}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(data.steps || []).filter((s) => s.phase === p.key).map((s) => (
+                <button key={s.key} type="button" disabled={s.auto} onClick={() => tick(s.key, !s.done)}
+                  title={s.auto ? `${s.title} — auto-detected` : `${s.title} — tap to ${s.done ? 'untick' : 'tick'} on the client’s behalf`}
+                  style={{ ...folderChip, cursor: s.auto ? 'default' : 'pointer', borderColor: s.done ? 'var(--brand)' : 'var(--border)', color: s.done ? 'var(--brand)' : 'var(--muted)', fontWeight: s.done ? 700 : 400, opacity: s.auto && !s.done ? 0.8 : 1 }}>
+                  {s.done ? '✓ ' : ''}{s.icon} {s.title}{s.auto ? '' : ' ✎'}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 14, paddingTop: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!mail.on} onChange={(e) => toggleMail(e.target.checked)} />
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>Journey emails for this client</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>· welcome pack + phase congratulations (the account team is cc’d on milestones)</span>
+        </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Welcome pack: <b style={{ color: 'var(--text)' }}>{sentLabel(mail.welcomeSentAt)}</b></span>
+          <span style={{ flex: 1 }} />
+          <button style={miniBtnOutline} onClick={sendWelcome} disabled={!mail.hasLogins} title={mail.hasLogins ? '' : 'Create a client login first'}>{mail.welcomeSentAt && mail.welcomeSentAt !== 'baseline' ? 'Re-send welcome pack' : 'Send welcome pack now'}</button>
+          {msg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{msg}</span>}
+        </div>
+        {!mail.hasLogins && <p style={{ ...hint, margin: '8px 0 0' }}>The welcome pack sends automatically (within ~30 min) once the client’s first login exists.</p>}
+        {!mail.enabled && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8 }}>⚠ Journey emails are globally turned off (Admin → Onboarding → Journey emails).</div>}
+      </div>
+    </div>
+  );
+}
+
 // Account-level tasks — the client-wide foundation, set once.
 const AM_TASKS = [
   { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
@@ -2543,6 +2817,7 @@ const AM_TASKS = [
   { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
   { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
   { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'pixel', icon: '🎯', title: 'Install the Pulse Pixel', desc: 'One snippet on their site/ticket shop — remarketing lists build automatically in Meta / Google / TikTok.', section: 'integrations', auto: (d) => !!d.pixelConfigured },
   { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
 ];
@@ -2571,16 +2846,18 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
+      api.getEntityIntegrations(entity.id).catch(() => null),
       Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
       Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
-    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
+    ]).then(([mt, digests, prog, integ, goalsArr, suiteMtArr, alertsArr]) => {
       if (!alive) return;
       const acc = tmplOf(mt);
       setAux({
         brandingSet: hasBranding(acc) || !!entity.logo,
         emailTemplateSet: hasTemplate(acc),
         digests: (digests || []).length,
+        pixelConfigured: !!integ?.pixel?.configured,
         goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
         brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
         templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
@@ -2596,7 +2873,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
     setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
     api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
   };
-  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0, pixelConfigured: aux?.pixelConfigured };
   const accAuto = (t) => !!(t.auto && t.auto(accData));
   const accManual = (t) => ticks['amchk_' + t.key] === 1;
   const accDone = (t) => accAuto(t) || accManual(t);
@@ -2653,6 +2930,18 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
         </div>
         <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
+      </div>
+
+      {/* The client's own onboarding journey — phases, auto-progress, welcome pack */}
+      <div style={{ marginTop: 14 }}>
+        <button onClick={() => toggle('journey')} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open.journey ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🚀 Client onboarding journey</span>
+            {!open.journey && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The client’s five-phase “Getting started” path — live progress, welcome pack & phase emails.</span>}
+          </span>
+        </button>
+        {open.journey && <div style={{ marginTop: 8 }}><ClientOnboardingJourney entity={entity} /></div>}
       </div>
 
       {/* Reminders — who gets nudged about outstanding setup */}
@@ -5114,8 +5403,12 @@ function ClientIntegrations({ entity }) {
         showTikTok
         showSlack
         showChottu
+        showPixel
+        pixelEntityId={entity.id}
+        onPixelStatus={() => api.getPixelStatus(entity.id)}
+        onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}

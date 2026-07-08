@@ -992,9 +992,14 @@ function JourneyActionCard({ action, suiteId }) {
   const decisions = countDecisions(action.nodes);
   // Broadcast the draft so the Engage → Journeys page (the live canvas) renders
   // the tree full-size in the main body while the chat stays the assistant.
-  // Rendering an older thread re-broadcasts its journey — last card wins.
+  // Rendering an older thread re-broadcasts its journey — last card wins. The
+  // page can also ARRIVE LATE (user navigates to Journeys after the card
+  // rendered) — it asks via howler:journey-request and we re-broadcast.
   useEffect(() => {
-    try { window.dispatchEvent(new CustomEvent('howler:journey-draft', { detail: action })); } catch { /* ignore */ }
+    const send = () => { try { window.dispatchEvent(new CustomEvent('howler:journey-draft', { detail: action })); } catch { /* ignore */ } };
+    send();
+    window.addEventListener('howler:journey-request', send);
+    return () => window.removeEventListener('howler:journey-request', send);
   }, [action]);
   const reach = action.reach || null;
   const reachLine = reach ? `${fmtVal(reach.total)} people${reach.email != null ? ` · ${fmtVal(reach.email)} emailable` : ''}${reach.sms ? ` · ${fmtVal(reach.sms)} SMS` : ''}` : null;
@@ -1002,8 +1007,12 @@ function JourneyActionCard({ action, suiteId }) {
     setState('busy'); setErr('');
     // The server saves a new chat cohort as a reusable segment first, then creates
     // the draft sequence campaign — same auto-save behaviour as draftCampaign.
-    try { const r = await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName, master: action.master || undefined }); setSavedSeg(r?.segment || null); setState('done'); }
-    catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
+    try {
+      const r = await api.owlDraftJourney({ entityId: action.entityId, suiteId: suiteId || undefined, name: action.name, goal: action.goal, summary: action.summary, nodes: action.nodes, audience: action.audience, audienceName: action.audienceName, master: action.master || undefined });
+      setSavedSeg(r?.segment || null); setState('done');
+      // Tell the Journeys page (if open) the draft is real — it refreshes its list.
+      try { window.dispatchEvent(new CustomEvent('howler:journey-created', { detail: { id: r?.journey?.id } })); } catch { /* ignore */ }
+    } catch (e) { setState('error'); setErr((e && e.message) || 'Could not create the draft journey.'); }
   };
   return (
     <div style={{ margin: '2px 0 10px', border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '10px 12px', maxWidth: '95%' }}>
