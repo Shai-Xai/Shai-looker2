@@ -286,6 +286,12 @@ module.exports = function createQueryEngine({ looker, auth }) {
     if (!src?.query) return null;
     const body = await tileQueryBody(src, def, user, suiteId, lockMap);
     if (!body) return null;
+    // Self-deadlock guard (mirror of ViewPage.applyDaysToGo): the days-to-go SOURCE
+    // tile must not be constrained by the very days-before filter this sync SETS —
+    // otherwise a static window that excludes the current event zeroes the source,
+    // n comes back null, and the sync never fires. Strip that field from the body.
+    const dbField = (src.listenTo || {})[sync.filterName] || (auth.filterNameToField ? auth.filterNameToField(sync.filterName) : null);
+    if (dbField && body.filters) delete body.filters[dbField];
     try {
       const data = await runLookerQuery('/queries/run/json_detail', body, undefined, false);
       const n = firstNumberFromDetail(data);

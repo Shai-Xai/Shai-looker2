@@ -929,6 +929,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **Days-to-go dashboards no longer zero out after an event** ✅ (fix):
+  on a "current vs past event" dashboard with the days-to-go sync, the source tile
+  that reads "N days to go" was itself being filtered by the very days-before window
+  it sets. When that static window excluded the current event, the source read
+  nothing, the sync never fired, the window stayed wrong, and the whole Current Event
+  column showed **0** (with the "N days to go" label missing). The source now reads
+  the true days-to-go regardless of the window, so the sync fires and the data shows.
 - **2026-07-08** — **Cleared range filters no longer blank a dashboard** ✅ (fix): a
   range filter (e.g. "Days before event") that a client cleared to empty was being
   sent to Looker as an empty range `[,]`, which Looker reads as "match nothing" —
