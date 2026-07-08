@@ -59,7 +59,12 @@ function mount(app, { sql, now, saveResults, parseUnsubToken, canonicalContact }
     saveResults(a.id, results);
     // Per-link tracking (custom HTML): ?k=<code> names this specific link's
     // destination (stored server-side). Falls back to the campaign's buy link.
+    // Journey campaigns: the message node this step belongs to may carry its own
+    // link — that wins over the campaign-level buy link.
     let dest = a.config.ctaUrl || '/';
+    if (step >= 0 && a.config.journey?.nodes) {
+      try { const n = require('./journeys').nodeByStep(a.config.journey, step); if (n?.ctaUrl) dest = n.ctaUrl; } catch { /* campaign link */ }
+    }
     if (req.query.k) {
       try { const row = sql.prepare('SELECT target FROM action_short_links WHERE code=?').get(String(req.query.k)); if (row?.target) dest = row.target; } catch { /* fall back to ctaUrl */ }
     }

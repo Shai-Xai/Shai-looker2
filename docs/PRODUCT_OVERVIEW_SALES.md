@@ -4,7 +4,11 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
+<<<<<<< HEAD
 > **Last updated:** 2026-07-08 (✨ What's in Pulse: the client-facing feature matrix — in-app grid + explained sales-site index · plus 🚀 Client onboarding journey) · **Maintained:** updated as features ship (see the
+=======
+> **Last updated:** 2026-07-08 (🎖️ Onboarding level 2 on staging: five phases incl. Meet the Owl · badges & Pulse Points · AM cockpit + scorecard) · **Maintained:** updated as features ship (see the
+>>>>>>> staging
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -856,13 +860,27 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 your account team) through it in layers, from first login to full automation,
 and celebrates each milestone on the way."
 
-- **Four phases, one journey.** The "Getting started" card on the client's home
+- **Five phases, one journey.** The "Getting started" card on the client's home
   page is a layered path: **1 · The fundamentals** (dashboards, the installed
-  app, notifications, asking the Owl, the weekly digest, branding, team) →
-  **2 · Goals & first sends** (goals, alerts, a first audience, a first simple
-  email) → **3 · The Owl everywhere** (WhatsApp, Claude & ChatGPT connectors) →
-  **4 · Automate & amplify** (journeys, Meta/TikTok ad accounts, the Pulse
-  Pixel). The current phase is open and actionable; what's next stays visible.
+  app, notifications, the weekly digest, branding, team) → **2 · Meet the Owl**
+  (ask questions, tile insights, Owl-built audiences & Owl-drafted campaigns —
+  drafts only — and filing feedback) → **3 · Goals & first sends** (goals,
+  alerts, a first audience, a first simple email) → **4 · The Owl everywhere**
+  (WhatsApp, Claude & ChatGPT connectors) → **5 · Automate & amplify**
+  (journeys, Meta/TikTok ad accounts, the Pulse Pixel). The current phase is
+  open and actionable; what's next stays visible.
+- **Gamified** 🧪: every step is worth **Pulse Points ⚡** (earned by the whole
+  team, from verified usage — nothing can be farmed), each finished phase awards
+  a collectible **sticker** (Pathfinder 🧭 → Automation Architect ⚙️), and
+  **activity badges** reward real outcomes — 10 Owl questions, a win-back that
+  converted, a goal hit, weekly streaks, a bug report we shipped a fix for. The
+  client's **Your journey** shelf shows it all; a reward catalogue to spend
+  points on is planned (business call pending).
+- **The AM cockpit** 🧪 (Admin → Onboarding): every client's journey on one
+  screen — journey bar, current phase, idle-days **stalled flags**, last
+  milestone, and a one-tap **Nudge** that emails/inboxes exactly the steps still
+  open. Plus an **AM scorecard**: per-AM activation score, medals and a team
+  leaderboard (recognition only — time-in-app deliberately not counted).
 - **Progress ticks itself.** Almost every step auto-detects from real usage —
   a dashboard opened, the app installed, a question asked, a connector used, a
   journey drafted — so the journey reflects reality, not homework.
@@ -915,6 +933,7 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+<<<<<<< HEAD
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
   **Worth a look** suggestion into a campaign no longer forces every idea into the
   abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
@@ -933,6 +952,17 @@ see "The continuous comms loop" above.)*
   with a "ask about this in your demo" link. All fed by the one curated catalogue
   (now with a per-feature description), still governed by the admin Shown/Hidden
   toggles.
+=======
+- **2026-07-08** — **🎖️ Onboarding level 2: gamification + the AM cockpit** 🧪
+  (staging): the journey grows to **five phases** with a dedicated **Meet the
+  Owl** layer (Owl-built audiences/campaign drafts and feedback are auto-detected
+  via provenance + tickets). New **badges & Pulse Points** engine (stickers per
+  phase, outcome-driven activity badges, per-client points; earning only — the
+  reward catalogue is a pending business decision) with a client **Your journey**
+  shelf, points on the Getting-started card and unlock toasts. New **AM cockpit**
+  (journey bars, stalled flags, one-tap nudge) and **AM scorecard/leaderboard**
+  in Admin → Onboarding.
+>>>>>>> staging
 - **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
   checklist became a **four-phase layered journey** (fundamentals → goals & first
   sends → the Owl everywhere → automate & amplify) with almost every step
