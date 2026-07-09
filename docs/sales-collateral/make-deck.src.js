@@ -14,7 +14,7 @@ function gradBar(s, x, y, w, h) {
 }
 
 function footer(s, n) {
-  s.addText([{ text: 'Pulse', options: { bold: true } }, { text: '  ·  The Experience OS by Howler', options: {} }], { x: 0.5, y: 7.05, w: 5, h: 0.3, fontSize: 9, color: '9A97AD', fontFace: F });
+  s.addText([{ text: 'Pulse', options: { bold: true } }, { text: '  ·  flagship of the Howler Experience OS', options: {} }], { x: 0.5, y: 7.05, w: 5, h: 0.3, fontSize: 9, color: '9A97AD', fontFace: F });
   s.addText('howler-pulse-v2.onrender.com', { x: 5.5, y: 7.05, w: 3, h: 0.3, fontSize: 9, color: '9A97AD', align: 'center', fontFace: F });
   s.addText(String(n), { x: 12.3, y: 7.05, w: 0.6, h: 0.3, fontSize: 9, color: '9A97AD', align: 'right', fontFace: F });
 }
@@ -50,7 +50,7 @@ s.addText([
   { text: '.', options: { color: RED } },
 ], { x: 0.82, y: 1.9, w: 11, h: 1.5, fontSize: 80, bold: true, fontFace: F });
 s.addText('Your event’s data, finally working for you.', { x: 0.9, y: 3.45, w: 11.5, h: 0.8, fontSize: 30, bold: true, color: 'D8D4F0', fontFace: F });
-s.addText('The Experience OS for event organisers: live dashboards, an AI analyst, and a full email/SMS campaign engine, all powered by the same governed data. Insight → action → results, in your brand, on your phone.', { x: 0.9, y: 4.5, w: 10.8, h: 1.1, fontSize: 15, color: 'A9A5C6', fontFace: F, lineSpacing: 22 });
+s.addText('Howler is the Experience Operating System for live events; Pulse is our new flagship product: live dashboards, an AI analyst, and a full email/SMS campaign engine, all powered by the same governed data. Insight → action → results, in your brand, on your phone.', { x: 0.9, y: 4.5, w: 10.8, h: 1.1, fontSize: 15, color: 'A9A5C6', fontFace: F, lineSpacing: 22 });
 gradBar(s, 0.9, 5.9, 3.2, 0.07);
 s.addText('Prepared for Milk & Cookies · July 2026', { x: 0.9, y: 6.5, w: 5, h: 0.4, fontSize: 11, color: '6E6A8F', fontFace: F });
 
