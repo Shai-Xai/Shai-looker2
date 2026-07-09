@@ -491,7 +491,10 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const followups = parseFollowups(out);
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
-    logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
+    // Log the Clickatell message id with the reply — 'replied' only means Clickatell
+    // ACCEPTED it; the id is what you trace in their portal / status callbacks when a
+    // message never reaches the handset.
+    logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? `${answer.slice(0, 110)} [id:${sent.id || '?'}]` : (sent && sent.error) || 'send error');
     if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
     // If the Owl drafted an alert/segment, send the Confirm (or event-choice) buttons —
     // that's the call to action this turn, so skip the follow-up suggestions.
