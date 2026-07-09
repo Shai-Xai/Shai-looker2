@@ -202,6 +202,22 @@ export default function ClientLayout() {
     ? (previewMode ? (suiteEntityId || previewEntityId) : (suiteEntityId || profileEntityId))
     : profileEntityId;
   const visibleSuites = activeEntityId ? suites.filter((s) => s.entityId === activeEntityId) : suites;
+  // Drag-to-reorder the nav suites. Order is per-CLIENT (shared) — reuses the
+  // existing suite_order store; the upcoming/past grouping re-partitions on top.
+  const [dragId, setDragId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const reorderSuite = (from, to) => {
+    if (!from || from === to || !activeEntityId) return;
+    const ent = suites.filter((s) => s.entityId === activeEntityId);
+    const ids = ent.map((s) => s.id);
+    if (ids.indexOf(from) < 0 || ids.indexOf(to) < 0) return;
+    ids.splice(ids.indexOf(from), 1);
+    ids.splice(ids.indexOf(to), 0, from);
+    const byId = Object.fromEntries(ent.map((s) => [s.id, s]));
+    let k = 0;
+    setSuites(suites.map((s) => (s.entityId === activeEntityId ? byId[ids[k++]] : s))); // optimistic
+    api.saveSuiteOrder(activeEntityId, ids).catch(() => {});
+  };
   // 🚩 Per-client feature flags drive which workspace sections show (server routes enforce too).
   const myFlags = useMyFlags(activeEntityId);
   const fl = (k) => flagOn(myFlags, k);
@@ -329,12 +345,24 @@ export default function ClientLayout() {
       ) : searching && shownSuites.length === 0 ? (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
       ) : (
-        shownSuites.map((su) => {
+        (() => {
+        // Auto-group by event timing (upcoming/past/undated). Suppressed while
+        // searching (a flat match list reads better). Reorder is drag-to-arrange
+        // within the list; the group headers show only when >1 group has suites.
+        const GROUPS = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
+        const groups = GROUPS.map(([key, label]) => ({ key, label, items: shownSuites.filter((s) => (s.timing || 'undated') === key) })).filter((g) => g.items.length);
+        const grouped = !searching && groups.length > 1;
+        const canReorder = !searching && !!activeEntityId;
+        const renderSuite = (su) => {
           const sets = suiteSets(su);
           const suiteOpen = searching || !!openSuites[su.id];
           return (
-            <div key={su.id} style={{ marginBottom: 2 }}>
+            <div key={su.id} style={{ marginBottom: 2, borderRadius: 8, opacity: dragId === su.id ? 0.4 : 1, boxShadow: (canReorder && dragOverId === su.id && dragId && dragId !== su.id) ? 'inset 0 2px 0 0 var(--brand)' : 'none' }}
+              onDragOver={canReorder ? (e) => { e.preventDefault(); if (dragOverId !== su.id) setDragOverId(su.id); } : undefined}
+              onDrop={canReorder ? (e) => { e.preventDefault(); reorderSuite(dragId, su.id); setDragId(null); setDragOverId(null); } : undefined}
+              onDragEnd={canReorder ? () => { setDragId(null); setDragOverId(null); } : undefined}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {canReorder && <span draggable onDragStart={(e) => { setDragId(su.id); e.dataTransfer.effectAllowed = 'move'; }} title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted)', fontSize: 11, lineHeight: 1, padding: '0 1px', flexShrink: 0, userSelect: 'none' }}>⠿</span>}
                 <button className="nav-row" style={{ ...rowBtn, fontWeight: 600, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
                   <Caret open={suiteOpen} />
                   <Ico v={su.icon} size={22} />
@@ -382,7 +410,15 @@ export default function ClientLayout() {
               </div>
             </div>
           );
-        })
+        };
+        if (!grouped) return shownSuites.map(renderSuite);
+        return groups.map((g) => (
+          <div key={g.key} style={{ marginBottom: 4 }}>
+            <div style={{ padding: '7px 8px 3px 14px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted-2)' }}>{g.label}</div>
+            {g.items.map(renderSuite)}
+          </div>
+        ));
+        })()
       )}
       {/* Settlements — its own section below the suites. Hidden for clients
           with no reports; admins always see it (to preview the feature). */}

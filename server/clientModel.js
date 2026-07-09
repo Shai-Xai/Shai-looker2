@@ -15,6 +15,11 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
   // on sale" — pre_launch hasn't opened, day_after/post_event are over).
   const ON_SALE_PHASES = new Set(['launch', 'artist_drops', 'mid_campaign', 'build_up', 'event_day']);
   const suiteOnSale = (su) => { try { return resolvePhase ? ON_SALE_PHASES.has(resolvePhase(su.briefing || {}).key) : false; } catch { return false; } };
+  // Upcoming vs past, for grouping the nav — derived from the suite's configured
+  // event dates via the shared phase resolver (no Looker read). 'past' once the
+  // event has ended (day_after/post_event), 'undated' when no dates are set.
+  const PAST_PHASES = new Set(['day_after', 'post_event']);
+  const suiteTiming = (su) => { try { const k = resolvePhase ? resolvePhase(su.briefing || {}).key : null; return k == null ? 'undated' : (PAST_PHASES.has(k) ? 'past' : 'upcoming'); } catch { return 'undated'; } };
   // A client's custom sets + the dashboard pool available to build them with
   // (shared dashboards + this client's own bespoke dashboards).
   app.get('/api/admin/entities/:id/sets', auth.requireAdmin, (req, res) => {
@@ -155,7 +160,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
         // One-tap LIVE button target — only surfaced if it's still a dashboard in
         // the suite (a deleted/removed one silently drops the button).
         liveDashboardId: (su.liveDashboardId && db.dashboardsInSuite(su.id).some((d) => (d.id || d) === su.liveDashboardId)) ? su.liveDashboardId : '',
-        onSale: suiteOnSale(su), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
+        onSale: suiteOnSale(su), timing: suiteTiming(su), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
       };
     }));
   });

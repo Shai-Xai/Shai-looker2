@@ -929,6 +929,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **Nav: reorder suites + Upcoming/Past grouping** ✅ (new): the
+  event list in the sidebar now **drag-to-reorder** (a grip handle on each suite;
+  the chosen order is saved for the client), and suites **auto-group into
+  "Upcoming" and "Past"** from their configured event dates — so a client with a
+  long history sees live events first and finished ones tucked below. Admin-side:
+  the grouping is driven by the event dates already set on the suite; the new
+  **⧉ Duplicate suite** action (Admin → client → Suites) stands up a new event
+  just like an existing one.
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
   **Worth a look** suggestion into a campaign no longer forces every idea into the
   abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
