@@ -7,8 +7,6 @@
     --brand:#ff385c; --brand2:#ff6b35;
     --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
   }
-  /* Deliberately single-theme: a live ops-room screen. Dark in both modes. */
-  :root[data-theme="light"]{ --bg:#0b0b0f; }
 
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -281,8 +279,41 @@
     .core-ring{animation:none}
     .toast{animation:none}
   }
+
+  /* ---------- light mode (toggle or artifact theme) ---------- */
+  :root.light, :root[data-theme="light"]{
+    --bg:#f4f4f7; --panel:#ffffff; --panel2:#f0f0f4; --line:#e3e3ea; --line2:#d2d2dc;
+    --ink:#17171c; --mut:#575765; --dim:#8b8b98;
+  }
+  html.on-site .internal{display:none}
+  :where(:root.light, :root[data-theme="light"]) .stage{
+    background:radial-gradient(1100px 500px at 50% 0%, rgba(255,56,92,.06), transparent 60%),
+      radial-gradient(900px 600px at 50% 100%, rgba(96,165,250,.07), transparent 60%), #fbfbfd;
+  }
+  :where(:root.light, :root[data-theme="light"]) .toast{background:rgba(255,255,255,.96)}
+  :where(:root.light, :root[data-theme="light"]) .dock-ic{background:color-mix(in srgb,var(--cc) 12%,#ffffff)}
+  :where(:root.light, :root[data-theme="light"]) .core-badge{background:rgba(255,255,255,.95)}
+  :where(:root.light, :root[data-theme="light"]) .feed .q,
+  :where(:root.light, :root[data-theme="light"]) .core-cap.answering,
+  :where(:root.light, :root[data-theme="light"]) .ask-hint b,
+  :where(:root.light, :root[data-theme="light"]) .con-foot b{color:#0e7c94}
+  :where(:root.light, :root[data-theme="light"]) .map{
+    background:radial-gradient(600px 340px at 50% 42%, rgba(52,211,153,.06), transparent 70%),
+      repeating-linear-gradient(0deg, transparent 0 34px, rgba(0,0,0,.02) 34px 35px),
+      repeating-linear-gradient(90deg, transparent 0 34px, rgba(0,0,0,.02) 34px 35px), #f4f4f8;
+  }
+  :where(:root.light, :root[data-theme="light"]) svg.plan{filter:invert(.93) hue-rotate(180deg)}
+  :where(:root.light, :root[data-theme="light"]) .st{background:rgba(255,255,255,.95)}
+  :where(:root.light, :root[data-theme="light"]) .st .ring .bgc{stroke:#d8d8e2}
+  :where(:root.light, :root[data-theme="light"]) .lm{color:#a2a2b2}
 </style>
 
+<script>
+(function(){
+  try{ if(localStorage.getItem('pulseConceptsMode')==='light') document.documentElement.classList.add('light'); }catch(e){}
+  if (location.pathname.indexOf('/sales/') === 0) document.documentElement.classList.add('on-site');
+})();
+</script>
 <div class="wrap">
   <header>
     <div class="eyebrow">Howler Pulse · Motion concept</div>
@@ -301,6 +332,7 @@
       <button class="tab" role="tab" aria-selected="false" data-sc="morning">Morning after</button>
     </div>
     <button class="ctl" id="pause" aria-pressed="false">Pause motion</button>
+    <button class="ctl" id="mode">☀️ Light</button>
   </div>
 
   <div class="stage" id="stage">
@@ -353,9 +385,9 @@
     </div>
   </div>
 
-  <h2>Where this lives</h2>
-  <p class="lede">Three realistic placements for the same animation system — one build, tuned per surface.</p>
-  <div class="uses">
+  <h2 class="internal">Where this lives</h2>
+  <p class="lede internal">Three realistic placements for the same animation system — one build, tuned per surface.</p>
+  <div class="uses internal">
     <div class="use">
       <h3><small>Placement 01</small>Landing-page hero</h3>
       <p>Runs full-bleed behind the headline on the public Pulse page, pointer-events off, at
@@ -373,7 +405,7 @@
     </div>
   </div>
 
-  <div class="note">
+  <div class="note internal">
     <b>Implementation notes:</b> one &lt;canvas&gt; for the flowing streams + real Pulse screenshots with
     DOM alert cards floating on top — no libraries, self-contained. Insight particles route through the
     action they trigger (alert / digest / campaign / segment / report) before landing on a surface; cyan
@@ -556,6 +588,16 @@
     pauseBtn.textContent = running ? 'Pause motion' : 'Play motion';
     pauseBtn.setAttribute('aria-pressed', String(!running));
   });
+
+  const modeBtn = document.getElementById('mode');
+  const setModeLabel = () => { modeBtn.textContent = document.documentElement.classList.contains('light') ? '\u{1F319} Dark' : '\u2600\uFE0F Light'; };
+  setModeLabel();
+  modeBtn.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    try { localStorage.setItem('pulseConceptsMode', document.documentElement.classList.contains('light') ? 'light' : 'dark'); } catch (e) { /* private mode */ }
+    setModeLabel();
+  });
+
 
   /* ---------------- canvas ---------------- */
   const stage = document.getElementById('stage');
