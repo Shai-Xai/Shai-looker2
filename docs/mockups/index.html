@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pulse — motion concepts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0b0b0f; --panel:#14141b; --line:#26262f; --ink:#f2f2f5; --mut:#9a9aa8; --dim:#6b6b7a;
+    --brand:#ff385c; --brand2:#ff6b35;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--bg);color:var(--ink);display:flex;flex-direction:column;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{
+    display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);
+    background:var(--panel);flex-wrap:wrap;
+  }
+  .brand{font-weight:800;font-size:15px;white-space:nowrap}
+  .brand span{background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase;font-weight:400}
+  nav{display:flex;gap:4px;flex:1;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:2px}
+  nav button{
+    border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:999px;
+    font:600 12.5px/1 inherit;font-family:inherit;padding:9px 14px;cursor:pointer;white-space:nowrap;min-height:38px;
+  }
+  nav button:hover{color:var(--ink)}
+  nav button.on{background:linear-gradient(90deg,var(--brand),var(--brand2));border-color:transparent;color:#fff}
+  nav button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  .open{
+    font-family:var(--mono);font-size:11px;color:var(--dim);text-decoration:none;white-space:nowrap;
+    border:1px solid var(--line);border-radius:999px;padding:9px 14px;min-height:38px;display:flex;align-items:center;
+  }
+  .open:hover{color:var(--ink);border-color:#33333f}
+  .desc{
+    font-family:var(--mono);font-size:10.5px;color:var(--dim);padding:8px 18px;border-bottom:1px solid var(--line);
+    letter-spacing:.03em;
+  }
+  main{flex:1;min-height:0}
+  iframe{display:block;width:100%;height:100%;border:0;background:var(--bg)}
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">howler<span>:pulse</span><small>motion concepts</small></div>
+    <nav id="tabs" role="tablist" aria-label="Concept"></nav>
+    <a class="open" href="/sales">← Pulse</a>
+    <a class="open" id="openLink" href="pulse-data-flow.html" target="_blank" rel="noopener">open full ↗</a>
+  </header>
+  <div class="desc" id="desc"></div>
+  <main><iframe id="frame" title="Concept preview" src="about:blank"></iframe></main>
+
+<script>
+(() => {
+  'use strict';
+  const OPTIONS = [
+    { id:'a',   name:'The flow · side',     file:'pulse-data-flow.html',
+      desc:'every signal in → the Owl acts → insight lands on every surface · sources left, apps right' },
+    { id:'b',   name:'The flow · top-down', file:'pulse-data-flow-topdown.html',
+      desc:'sources rain from the top into the Owl · phone left · web app right · channels fan out below' },
+    { id:'c',   name:'The flow · radial',   file:'pulse-data-flow-radial.html',
+      desc:'sources rain into the Owl · channels fan right · the live dashboard takes the stage below' },
+    { id:'ops', name:'Event Ops · live map',file:'pulse-event-ops-map.html',
+      desc:'event day: station & device health on a site map · incident → triage → dispatch → resolved · radio calls' },
+  ];
+  const tabs = document.getElementById('tabs');
+  const frame = document.getElementById('frame');
+  const desc = document.getElementById('desc');
+  const openLink = document.getElementById('openLink');
+
+  function select(id, push) {
+    const o = OPTIONS.find(x => x.id === id) || OPTIONS[0];
+    [...tabs.children].forEach(b => {
+      const on = b.dataset.id === o.id;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    if (frame.dataset.file !== o.file) { frame.src = o.file; frame.dataset.file = o.file; }
+    desc.textContent = o.desc;
+    openLink.href = o.file;
+    if (push) history.replaceState(null, '', '#' + o.id);
+  }
+  for (const o of OPTIONS) {
+    const b = document.createElement('button');
+    b.role = 'tab'; b.dataset.id = o.id; b.textContent = o.name;
+    b.addEventListener('click', () => select(o.id, true));
+    tabs.appendChild(b);
+  }
+  addEventListener('hashchange', () => select(location.hash.slice(1), false));
+  select(location.hash.slice(1) || 'a', false);
+})();
+</script>
+</body>
+</html>

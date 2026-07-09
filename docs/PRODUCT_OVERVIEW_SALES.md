@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-09 (🎬 Sales site: “See it in motion” — animated Experience OS concept gallery at /sales/experience) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -768,6 +768,12 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-09** — **🎬 “See it in motion”** (sales site): the public sales page
+  gains a nav link + hero button to an animated concept gallery at
+  `/sales/experience` — switchable motion pages telling the Pulse story (data
+  streams → the Owl acts → every surface) plus the Event Ops live site-map
+  concept. Pure marketing surface; figures are illustrative.
 
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
