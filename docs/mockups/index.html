@@ -10,6 +10,9 @@
     --brand:#ff385c; --brand2:#ff6b35;
     --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
   }
+  :root.light, :root[data-theme="light"]{
+    --bg:#f4f4f7; --panel:#ffffff; --line:#e3e3ea; --ink:#17171c; --mut:#575765; --dim:#8b8b98;
+  }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;height:100%}
   body{
@@ -46,10 +49,16 @@
 </style>
 </head>
 <body>
+<script>
+(function(){
+  try{ if(localStorage.getItem('pulseConceptsMode')==='light') document.documentElement.classList.add('light'); }catch(e){}
+})();
+</script>
   <header>
     <div class="brand">howler<span>:pulse</span><small>motion concepts</small></div>
     <nav id="tabs" role="tablist" aria-label="Concept"></nav>
     <a class="open" href="/sales">← Pulse</a>
+    <button class="open" id="mode" type="button" style="background:transparent;cursor:pointer;font:inherit">☀️</button>
     <a class="open" id="openLink" href="pulse-data-flow.html" target="_blank" rel="noopener">open full ↗</a>
   </header>
   <div class="desc" id="desc"></div>
@@ -93,6 +102,17 @@
   }
   addEventListener('hashchange', () => select(location.hash.slice(1), false));
   select(location.hash.slice(1) || 'a', false);
+
+  // light/dark toggle — persists, and reloads the concept so it follows suit
+  const modeBtn = document.getElementById('mode');
+  const setModeLabel = () => { modeBtn.textContent = document.documentElement.classList.contains('light') ? '🌙' : '☀️'; };
+  setModeLabel();
+  modeBtn.addEventListener('click', () => {
+    document.documentElement.classList.toggle('light');
+    try { localStorage.setItem('pulseConceptsMode', document.documentElement.classList.contains('light') ? 'light' : 'dark'); } catch (e) { /* private mode */ }
+    setModeLabel();
+    frame.src = frame.dataset.file; // re-boot the concept in the new mode
+  });
 })();
 </script>
 </body>
