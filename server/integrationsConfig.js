@@ -13,6 +13,7 @@
 // Usage: `require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret })`.
 
 const pixel = require('./pixel'); // stateless applyPatch/view for the Pulse Pixel slice
+const queueit = require('./queueit'); // stateless applyPatch/view for the Queue-it slice
 
 function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
   function applyIntegrationsPatch(body, set) {
@@ -43,6 +44,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
     if (ch.apiKey) set('chottuApiKey', String(ch.apiKey));
     if (ch.clearApiKey) set('chottuApiKey', '');
     if (ch.domain !== undefined) set('chottuDomain', String(ch.domain || '').trim());
+    queueit.applyPatch(body, set); // Queue-it: customer id + api key (server/queueit.js)
   }
 
   function adminIntegrationsView() {
@@ -79,6 +81,13 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
         envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
         configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
       },
+      // Queue-it — platform account (per-client overrides live on the entity).
+      queueit: {
+        customerId: db.getSetting('queueit_customer_id') || '',
+        keySet: !!db.getSetting('queueit_api_key'),
+        keyHint: maskSecret(db.getSetting('queueit_api_key')),
+        configured: !!(db.getSetting('queueit_customer_id') && db.getSetting('queueit_api_key')),
+      },
       locks: getPlatformIntegrationLocks(), // { key: true } — frozen platform integrations
     };
   }
@@ -93,13 +102,14 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
       slack: slack.view(i),
       pixel: pixel.view(i),
       chottu: { keySet: !!i.chottuApiKey, keyHint: maskSecret(i.chottuApiKey), domain: i.chottuDomain || '' },
+      queueit: queueit.view(i, maskSecret),
       locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
     };
   }
 
   // Per-entity integration keys that can be frozen. A frozen section's changes are
   // dropped server-side (defence in depth — the UI also disables it).
-  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel'];
+  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit'];
   function dropFrozenSections(entityId, body) {
     const locks = db.getEntityIntegrationLocks(entityId);
     const b = { ...(body || {}) };
@@ -110,7 +120,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
 
   // Platform-level integration freeze locks — same idea as per-client, but for
   // Howler's own accounts, kept in a single setting.
-  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'chottu'];
+  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit'];
   function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
   function setPlatformIntegrationLock(key, locked) {
     const cur = getPlatformIntegrationLocks();

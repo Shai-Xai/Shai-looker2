@@ -244,6 +244,13 @@ export const api = {
   adminMetaConnectSelect: (entityId, accountId) => fetch(`/api/admin/entities/${entityId}/meta-connect/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) }).then(json),
   myMetaConnectDisconnect: (entityId) => fetch(`/api/my/meta-connect/${entityId}/disconnect`, { method: 'POST' }).then(json),
   adminMetaConnectDisconnect: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-connect/disconnect`, { method: 'POST' }).then(json),
+  // Queue-it waiting-room stats — dual-surface (scope 'my' | 'admin-client')
+  queueitStatus: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit` : `/api/my/queueit/${entityId}`).then(json),
+  queueitRooms: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit/waiting-rooms` : `/api/my/queueit/${entityId}/waiting-rooms`).then(json),
+  queueitSummary: (entityId, scope, roomId) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit` : `/api/my/queueit/${entityId}`}/waiting-rooms/${encodeURIComponent(roomId)}/summary`).then(json),
+  queueitDetails: (entityId, scope, roomId, { type, from, to } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit` : `/api/my/queueit/${entityId}`}/waiting-rooms/${encodeURIComponent(roomId)}/details?type=${encodeURIComponent(type || 'queueinflow')}&from=${encodeURIComponent(from || '')}&to=${encodeURIComponent(to || '')}`).then(json),
+  queueitVerify: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit/verify` : `/api/my/queueit/${entityId}/verify`, { method: 'POST' }).then(json),
+  queueitSetRooms: (entityId, scope, roomIds) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit/rooms` : `/api/my/queueit/${entityId}/rooms`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomIds }) }).then(json),
   owlUploads: (entityId) => fetch(`/api/owl/uploads?entityId=${encodeURIComponent(entityId || '')}`).then(json),
   owlUploadCsv: (entityId, name, csv) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, csv }) }).then(json),
   owlUploadSheet: (entityId, name, sheetUrl) => fetch('/api/owl/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, name, sheetUrl }) }).then(json),
@@ -443,6 +450,9 @@ export const api = {
   // Engage Links — per-client links grouped into typed categories (dual-surface)
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
+  comparisonSortDesc: (scope, apply = false) => fetch('/api/admin/comparison-sort-desc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(typeof scope === 'string' ? { folder: scope } : scope), apply }) }).then(json),
+  folderDaysSyncs: () => fetch('/api/dashboards/folder/days-sync').then(json),
+  setFolderDaysSync: (folder, sync) => fetch('/api/dashboards/folder/days-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, sync }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
     fetch('/api/dashboards/import', {
       method: 'POST',
@@ -503,6 +513,10 @@ export const api = {
   bustCache,
   mySuites: () => cachedGet('/api/my/suites'),
   saveSuiteOrder: (entityId, order) => fetch(`/api/my/suite-order/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) }).then(json),
+  mySuiteCategories: (entityId) => fetch(`/api/my/suite-categories/${entityId}`).then(json),
+  saveMySuiteCategories: (entityId, categories) => fetch(`/api/my/suite-categories/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categories }) }).then(json),
+  adminSuiteCategories: (entityId) => fetch(`/api/admin/entities/${entityId}/suite-categories`).then(json),
+  adminSaveSuiteCategories: (entityId, categories) => fetch(`/api/admin/entities/${entityId}/suite-categories`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categories }) }).then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
   // Social metrics (inbound organic stats). Admins pass the ownership check, so

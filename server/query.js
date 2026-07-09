@@ -14,7 +14,7 @@
 
 const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
 
-module.exports = function createQueryEngine({ looker, auth }) {
+module.exports = function createQueryEngine({ looker, auth, folderDaysSync }) {
   // Cache windows (ms). fresh: serve from cache; stale: serve cached + refresh
   // behind; beyond stale: wait for live Looker data.
   const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;
@@ -268,7 +268,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // matching what the dashboard shows. Returns null when there's no sync to apply
   // (or the number can't be read), leaving the tile queries untouched.
   async function daysBeforeOverlayFor(def, user, suiteId, lockMap) {
-    const sync = def.daysBeforeSync;
+    // A dashboard's own sync wins; otherwise inherit the folder-level cascade
+    // (resolved to a concrete sync for THIS dashboard by tile title).
+    const sync = (def.daysBeforeSync && def.daysBeforeSync.mode && def.daysBeforeSync.mode !== 'off')
+      ? def.daysBeforeSync
+      : (folderDaysSync ? folderDaysSync.effectiveFor(def) : null);
     if (!sync || sync.mode !== 'apply' || !sync.sourceTileId || !sync.filterName) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
     const src = tiles.find((t) => t.id === sync.sourceTileId);

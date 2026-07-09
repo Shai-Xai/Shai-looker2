@@ -28,6 +28,8 @@ export default function HomePage() {
   const [dragFolder, setDragFolder] = useState(null); // folder path being dragged (desktop drag-and-drop)
   const [dropTarget, setDropTarget] = useState(null); // folder path currently hovered as a drop destination
   const [folderSettings, setFolderSettings] = useState({}); // { "<path>": { keepImported } } — persistent, cascading
+  const [folderDaysMap, setFolderDaysMap] = useState({}); // { "<path>": { mode, sourceTileTitle, filterName, expr } }
+  const [showDaysSync, setShowDaysSync] = useState(false);
   const [view, setView] = useState(() => localStorage.getItem('howler_lib_view') || 'list'); // 'tile' | 'list'
   const setViewMode = (v) => { setView(v); localStorage.setItem('howler_lib_view', v); };
 
@@ -36,8 +38,9 @@ export default function HomePage() {
     api.listDashboards().then(setDashboards).catch((e) => setError(e.message)).finally(() => setLoading(false));
   }
   const loadFolderSettings = () => { if (isAdmin) api.getFolderSettings().then(setFolderSettings).catch(() => {}); };
+  const loadDaysSyncs = () => { if (isAdmin) api.folderDaysSyncs().then((r) => setFolderDaysMap(r.syncs || {})).catch(() => {}); };
   useEffect(() => { load(); }, []);
-  useEffect(() => { loadFolderSettings(); }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadFolderSettings(); loadDaysSyncs(); }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nested-folder navigation. Folders are stored as "/"-separated paths on each
   // dashboard (e.g. "Festivals/MTN Bushfire/Cashless").
@@ -63,6 +66,25 @@ export default function HomePage() {
   async function toggleFolderKeepImported() {
     try { await api.setFolderKeepImported(path, !folderKeepOn); loadFolderSettings(); }
     catch (e) { alert('Could not update folder: ' + (e.message || e)); }
+  }
+  // Force comparison-events charts in this folder to sort events descending. Dry-run
+  // first (counts what would change), confirm, then apply.
+  async function comparisonSortDesc() {
+    try {
+      const dry = await api.comparisonSortDesc(path, false);
+      if (!dry.changed) {
+        const s = dry.skip || {};
+        const bits = [];
+        if (s.offsetAuto) bits.push(`${s.offsetAuto} offset comparison tile${s.offsetAuto === 1 ? '' : 's'} already show the current event first automatically (handled at view time)`);
+        if (s.alreadyDesc) bits.push(`${s.alreadyDesc} already sort events descending`);
+        if (s.notComparison) bits.push(`${s.notComparison} aren't event-comparison tiles`);
+        alert(`Nothing to flip in “${path}”.${bits.length ? `\n\n${bits.join('.\n')}.` : ''}`);
+        return;
+      }
+      if (!confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} in “${path}” (and subfolders) to sort events descending?`)) return;
+      await api.comparisonSortDesc(path, true);
+      alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}. Refresh a dashboard to see the new order.`);
+    } catch (e) { alert('Could not update: ' + (e.message || e)); }
   }
 
   async function previewFolder() {
@@ -235,6 +257,13 @@ export default function HomePage() {
               title="When ON, the imported (Looker) default filters are authoritative for EVERY dashboard in this folder (incl. subfolders, and ones added later) — client defaults, saved views & suite locks won't override them.">
               📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
             </button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={comparisonSortDesc} title="Set comparison-events charts in this folder (and subfolders) to sort events descending (most recent first). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Desc</button>
+            <button
+              style={{ ...miniBtnOutline, fontSize: 12, ...(folderDaysMap[path]?.mode && folderDaysMap[path].mode !== 'off' ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff' } : null) }}
+              onClick={() => setShowDaysSync(true)}
+              title="Set one Days-to-go sync for EVERY dashboard in this folder (matched by tile name), instead of configuring each dashboard. A dashboard's own sync still wins.">
+              ⏳ Days-to-go: {folderDaysMap[path]?.mode && folderDaysMap[path].mode !== 'off' ? 'On' : 'Off'}
+            </button>
             <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
           </>
         )}
@@ -346,6 +375,15 @@ export default function HomePage() {
         />
       )}
 
+      {showDaysSync && (
+        <FolderDaysSyncModal
+          folder={path}
+          value={folderDaysMap[path] || null}
+          onClose={() => setShowDaysSync(false)}
+          onSaved={() => { loadDaysSyncs(); setShowDaysSync(false); }}
+        />
+      )}
+
       {moveFolderPath && (
         <FolderMoveModal
           folder={moveFolderPath}
@@ -357,6 +395,56 @@ export default function HomePage() {
     </main>
   );
 }
+
+// One Days-to-go sync for a whole folder — the source tile + filter are matched by
+// NAME in each dashboard (a folder can't reference one dashboard's tile id).
+function FolderDaysSyncModal({ folder, value, onClose, onSaved }) {
+  const [mode, setMode] = useState(value?.mode || 'off');
+  const [sourceTileTitle, setSourceTileTitle] = useState(value?.sourceTileTitle || 'Days To Go');
+  const [filterName, setFilterName] = useState(value?.filterName || 'Days Before Event');
+  const [expr, setExpr] = useState(value?.expr || '>={n}');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await api.setFolderDaysSync(folder, mode === 'off' ? null : { mode, sourceTileTitle: sourceTileTitle.trim(), filterName: filterName.trim(), expr: expr.trim() || '>={n}' }); onSaved(); }
+    catch (e) { alert('Could not save: ' + (e.message || e)); setBusy(false); }
+  };
+  return (
+    <div style={dsOverlay} onClick={busy ? undefined : onClose}>
+      <div style={dsCard} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>⏳ Folder Days-to-go sync</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.45 }}>
+          Applies to <b>every dashboard in “{folder || 'all folders'}”</b> (and subfolders, and ones added later). Each dashboard uses its own tile whose title matches the source-tile name below — so this only works where folder-mates share the same tile/filter names. A dashboard's own Days-to-go sync always wins.
+        </div>
+        <DsL>Mode</DsL>
+        <select style={dsInput} value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="off">Off (no folder sync)</option>
+          <option value="heading">Show “N days to go” only</option>
+          <option value="apply">Auto-apply to the days-before filter (+ show)</option>
+        </select>
+        {mode !== 'off' && (<>
+          <DsL>Source tile — its title (its single value is the days-to-go)</DsL>
+          <input style={dsInput} value={sourceTileTitle} onChange={(e) => setSourceTileTitle(e.target.value)} placeholder="Days To Go" />
+        </>)}
+        {mode === 'apply' && (<>
+          <DsL>Days-before filter to set — its name</DsL>
+          <input style={dsInput} value={filterName} onChange={(e) => setFilterName(e.target.value)} placeholder="Days Before Event" />
+          <DsL>Filter expression — {'{n}'} is replaced with the number</DsL>
+          <input style={dsInput} value={expr} onChange={(e) => setExpr(e.target.value)} placeholder=">={n}" />
+          <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4 }}>e.g. <code>{'>={n}'}</code> includes everything from N+ days out; or <code>{'<={n}'}</code>, or just <code>{'{n}'}</code>.</div>
+        </>)}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button style={miniBtnOutline} onClick={onClose} disabled={busy}>Cancel</button>
+          <button style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function DsL({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)', margin: '10px 0 5px' }}>{children}</div>; }
+const dsOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 600, padding: 20 };
+const dsCard = { width: 'min(520px, 96vw)', maxHeight: '90vh', overflowY: 'auto', background: 'var(--card)', borderRadius: 16, boxShadow: '0 12px 48px rgba(0,0,0,0.25)', padding: 22 };
+const dsInput = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 13.5, outline: 'none', background: 'var(--card)' };
 
 const cardStyle = { flex: '1 1 300px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 22, boxShadow: 'var(--shadow-sm)' };
 const listCardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 18, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' };

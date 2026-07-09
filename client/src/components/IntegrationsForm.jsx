@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -53,6 +53,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [chottuKey, setChottuKey] = useState('');
   const [clearChottuKey, setClearChottuKey] = useState(false);
   const [chottuDomain, setChottuDomain] = useState(value?.chottu?.domain || '');
+  const [qitCustomerId, setQitCustomerId] = useState(value?.queueit?.customerId || '');
+  const [qitKey, setQitKey] = useState('');
+  const [clearQitKey, setClearQitKey] = useState(false);
   const [pxStatus, setPxStatus] = useState(null);   // install check result (GET pixel/status)
   const [pxCopied, setPxCopied] = useState(false);
   const [pxPack, setPxPack] = useState({});         // channel -> result message
@@ -123,6 +126,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (chottuKey) p.chottu.apiKey = chottuKey;
       if (clearChottuKey) p.chottu.clearApiKey = true;
     }
+    if (showQueueit && want('queueit')) {
+      p.queueit = { customerId: qitCustomerId };
+      if (qitKey) p.queueit.apiKey = qitKey;
+      if (clearQitKey) p.queueit.clearApiKey = true;
+    }
     return p;
   }
 
@@ -139,6 +147,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
+      if (!only || only === 'queueit') { setQitKey(''); setClearQitKey(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusyKey(''); }
@@ -183,14 +192,18 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       {showMeta && (
         <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')} guide={<>
           <div style={note}>
-            Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
+            Connect Meta once and Pulse can push <b>segments</b> to Meta <b>Custom Audiences</b> (ad targeting/exclusion) and pull in your <b>paid-ads performance</b>. Emails/phones are hashed before they leave Pulse.
+            {' '}<b>Easiest way:</b> if a <b>📘 Continue with Facebook</b> button appears below this card, use that — one login, nothing to copy. The fields here are the manual (fallback) path.
           </div>
-          <HowTo title="How to get your Meta access details" steps={[
-            <>Open <b>Meta Business Settings</b> → <b>Users → System users</b>. Create (or pick) a system user with <b>Admin</b> access.</>,
-            <>Under <b>Assigned assets</b>, add your <b>Ad account</b> and grant <b>Manage campaigns</b> (full) control.</>,
-            <>Click <b>Generate new token</b>, choose your app, and tick the <code>ads_management</code> scope (add <code>business_management</code> too). Pick a long-lived / non-expiring token and copy it into <b>Access token</b> above.</>,
-            <>Find your <b>Ad account ID</b> in <b>Ads Manager</b> — the <code>act_…</code> number in the account dropdown (top-left). Paste the digits as <code>act_1234567890</code>.</>,
-            <><b>Business ID</b> (optional) lives in <b>Business Settings → Business info</b>.</>,
+          <HowTo title="Manual setup, step by step — no tech skills needed (±10 min)" steps={[
+            <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the Facebook login that manages your ads. You need <b>Admin</b> access to the business portfolio (if you don't have it, ask whoever set up your Facebook ads).</>,
+            <><b>One-time check — your business needs an “app”.</b> In the left menu open <b>Accounts → Apps</b>. If the list is empty, create one (it's just a container Meta requires — you're not building anything): open <ExtLink href="https://developers.facebook.com/apps">developers.facebook.com/apps</ExtLink> → <b>Create app</b> → pick the <b>Business</b> type → name it e.g. “Pulse” → link it to your business portfolio when asked → Create. <i>This is the fix when Meta blocks the token button with “an app must be part of this business portfolio. Please add an app.”</i></>,
+            <>Back in <b>Business settings</b>, go to <b>Users → System users</b> → <b>Add</b> → name it <code>pulse</code>, role <b>Admin</b>. (A system user is a “robot” login the token belongs to — it keeps working even if a staff member leaves.)</>,
+            <>Still on that system user: <b>Add assets → Ad accounts</b> → tick your ad account → switch on <b>Manage campaigns</b> → Save.</>,
+            <>Click <b>Generate new token</b> → choose the app from step 2 → expiration <b>Never</b> → tick <code>ads_read</code> and <code>ads_management</code> (plus <code>business_management</code> if listed) → <b>Generate</b>. <b>Copy the token straight away</b> — Meta shows it only once — and paste it into <b>Access token</b> above.</>,
+            <><b>Ad account ID:</b> open <ExtLink href="https://adsmanager.facebook.com">Ads Manager</ExtLink> and copy the number after <code>act=</code> in the address bar (it's also in the account dropdown, top-left). Paste it as <code>act_1234567890</code> — bare digits work too.</>,
+            <><b>Business ID</b> (optional): Business settings → <b>Business info</b> — the ID shown at the top.</>,
+            <>Press <b>Save</b> below. Once the token and ad account are in, a green <b>✓ Connected</b> appears — you're done.</>,
           ]} />
         </>}>
           <Lbl>Access token</Lbl>
@@ -347,6 +360,35 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <input value={chottuDomain} onChange={(e) => setChottuDomain(e.target.value)} placeholder="howler.chottu.link" style={input} autoComplete="off" />
           {value?.chottu?.keySet && value?.chottu?.domain && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — manage links in Engage → Links.</div>}
           <SaveRow k="chottu" />
+        </Section>
+      )}
+
+      {/* Queue-it — live waiting-room stats (read-only) */}
+      {showQueueit && (
+        <Section title="🚦 Queue-it (waiting rooms)" collapsible={collapsible} {...lockProps('queueit')} guide={<>
+          <div style={note}>
+            Pulls live <b>waiting-room stats</b> (people in queue, redirects per minute, inflow over time) from <b>Queue-it</b> into Pulse — read-only, the queue itself is never touched. Blank fields inherit the platform account; stats then show only the waiting rooms Howler assigns to this client.
+          </div>
+          <HowTo title="How to get your Queue-it access details" steps={[
+            <>Sign in to the <b>GO Queue-it Platform</b> at <code>go.queue-it.net</code> and open <b>Account → API Keys</b>.</>,
+            <>Create (or copy) an API key and paste it into <b>API key</b> above. A read-only/stats key is enough — Pulse only reads statistics.</>,
+            <><b>Customer ID</b> is your short Queue-it account name — the subdomain in your queue URLs (e.g. <code>howler</code> in <code>howler.queue-it.net</code>).</>,
+          ]} />
+        </>}>
+          <Lbl>Customer ID</Lbl>
+          <input value={qitCustomerId} onChange={(e) => setQitCustomerId(e.target.value)} placeholder="e.g. howler" style={input} autoComplete="off" />
+          <Lbl>API key</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={qitKey} onChange={(e) => setQitKey(e.target.value)}
+            placeholder={value?.queueit?.keySet ? `Set (${value.queueit.keyHint || '••••'}) — leave blank to keep` : 'Queue-it API key'}
+            style={input} disabled={clearQitKey}
+          />
+          {value?.queueit?.keySet && (
+            <label style={clearRow}><input type="checkbox" checked={clearQitKey} onChange={(e) => setClearQitKey(e.target.checked)} /> Remove this key</label>
+          )}
+          {value?.queueit?.keySet && value?.queueit?.customerId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — live queue stats appear on the client's Queue-it card (Integrations).</div>}
+          <SaveRow k="queueit" />
         </Section>
       )}
 
@@ -668,10 +710,56 @@ function Section({ title, collapsible, children, guide, lockKey, locked = false,
 
 function Lbl({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '12px 0 5px' }}>{children}</div>; }
 
+// External link for HowTo steps — opens in a new tab so the client keeps their
+// place in the Pulse form while following along on the other site.
+function ExtLink({ href, children }) {
+  return <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', fontWeight: 600 }}>{children}</a>;
+}
+
+// Flatten a HowTo step's JSX down to plain text so the steps can be copied or
+// shared as a message. Links become "label (url)" unless the label already IS
+// the url; everything else keeps just its text.
+function stepText(node) {
+  if (node == null || node === true || node === false) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(stepText).join('');
+  if (node.props) {
+    const inner = stepText(node.props.children);
+    const href = node.props.href;
+    if (href && href !== inner && href.replace(/^https?:\/\//, '') !== inner) return `${inner} (${href})`;
+    return inner;
+  }
+  return '';
+}
+
 // Collapsible "how to get your access details" — closed by default so it never
 // clutters the form, but a step-by-step is one tap away when a client is stuck.
+// Copy/Share turn the steps into a plain-text message, so a non-technical client
+// can hand the requirements to their agency / IT person instead of doing it
+// themselves (Share uses the native sheet on phones → WhatsApp, email, …).
 function HowTo({ title, steps = [] }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const shareText = () =>
+    `Howler Pulse — ${title}\n\n` +
+    steps.map((s, i) => `${i + 1}. ${stepText(s)}`).join('\n\n') +
+    `\n\nOnce you have the details, they get entered in Howler Pulse (${window.location.origin}) under Settings → Integrations.`;
+  const copy = async () => {
+    const text = shareText();
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      // Clipboard API needs a secure context / permission — textarea fallback.
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } finally { ta.remove(); }
+    }
+    setCopied(true); setTimeout(() => setCopied(false), 1800);
+  };
+  const share = async () => {
+    try { await navigator.share({ title: `Howler Pulse — ${title}`, text: shareText() }); }
+    catch { /* user closed the share sheet */ }
+  };
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, margin: '4px 0 6px', overflow: 'hidden' }}>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 11px', background: 'rgba(128,128,128,0.05)', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
@@ -680,9 +768,20 @@ function HowTo({ title, steps = [] }) {
         <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
       </button>
       {open && (
-        <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
-          {steps.map((s, i) => <li key={i}>{s}</li>)}
-        </ol>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 11px 2px' }}>
+            <button type="button" onClick={copy} style={{ ...shareBtn, ...(copied ? { color: 'var(--success, #10b981)', borderColor: 'var(--success, #10b981)' } : null) }}>
+              {copied ? '✓ Copied' : '⧉ Copy steps'}
+            </button>
+            {typeof navigator !== 'undefined' && !!navigator.share && (
+              <button type="button" onClick={share} style={shareBtn}>📤 Share</button>
+            )}
+            <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: '1 1 160px' }}>Not your department? Send these steps to whoever manages this for you.</span>
+          </div>
+          <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
+            {steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        </>
       )}
     </div>
   );
@@ -693,4 +792,5 @@ const secTitle = { fontSize: 14, fontWeight: 700, marginBottom: 4 };
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none' };
 const note = { fontSize: 12, color: 'var(--muted)', background: '#f7f7f8', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', margin: '4px 0 4px' };
 const clearRow = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--error, #ef4444)', marginTop: 6, cursor: 'pointer' };
+const shareBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '8px 14px', minHeight: 40, fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };
 const saveBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };

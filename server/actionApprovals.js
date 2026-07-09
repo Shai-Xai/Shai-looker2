@@ -32,9 +32,10 @@ module.exports = function actionApprovals({ db, sql, mailer, push, os, now, appr
   // — drives a guaranteed "your campaign was approved / sent back" banner.
   function unseenOutcomesFor(user, entityId) {
     if (!user?.email) return [];
-    return sql.prepare("SELECT id, title, config, outcome, outcome_by, outcome_note FROM actions WHERE entity_id=? AND outcome!='' AND outcome_seen=0 AND lower(created_by)=lower(?) ORDER BY outcome_at DESC")
+    return sql.prepare("SELECT id, title, config, status, outcome, outcome_by, outcome_note FROM actions WHERE entity_id=? AND outcome!='' AND outcome_seen=0 AND lower(created_by)=lower(?) ORDER BY outcome_at DESC")
       .all(entityId, user.email)
-      .map((r) => ({ id: r.id, title: r.title || JSON.parse(r.config || '{}').subject || 'Your campaign', outcome: r.outcome, by: r.outcome_by || '', note: r.outcome_note || '' }));
+      // readyToSend: approved but still parked in 'approved' — the sender must send it.
+      .map((r) => ({ id: r.id, title: r.title || JSON.parse(r.config || '{}').subject || 'Your campaign', outcome: r.outcome, by: r.outcome_by || '', note: r.outcome_note || '', readyToSend: r.status === 'approved' }));
   }
   // A short, human summary of a campaign's key settings — for the approval
   // inbox message + email so approvers know what they're signing off. `reach`
@@ -99,7 +100,11 @@ module.exports = function actionApprovals({ db, sql, mailer, push, os, now, appr
     const body = `${noteBlock}“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
     const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
     const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
+    // Inbox thread for a shared record, but explicit empty `channels` so it does
+    // NOT email/push the WHOLE client team — only the named approvers (+ linked
+    // Howler admins) get pinged, via the targeted push + email below. Otherwise
+    // every member is told to approve a campaign they can't actually approve.
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id, channels: [] }); } catch { /* os optional */ }
     if (push?.isEnabled?.()) {
       const pushBody = note ? `${note.slice(0, 90)} — “${name}” needs approval.` : `“${name}” is waiting for your approval.`;
       for (const ap of a.config.approvers || []) {
@@ -130,7 +135,7 @@ module.exports = function actionApprovals({ db, sql, mailer, push, os, now, appr
   // Tell the campaign's creator the outcome — approved (sending) or sent back to
   // draft (with the reviewer's comment). Inbox + push + email, skipping the
   // reviewer if they're also the sender.
-  function notifySender(a, { approved, note = '', by = '' }) {
+  function notifySender(a, { approved, note = '', by = '', readyToSend = false }) {
     const sender = (db.listUsers() || []).find((u) => u.email && a.createdBy && u.email.toLowerCase() === a.createdBy.toLowerCase());
     if (!sender || sender.email.toLowerCase() === (by || '').toLowerCase()) return;
     // Record the unseen outcome on the campaign — this drives a banner that
@@ -141,19 +146,26 @@ module.exports = function actionApprovals({ db, sql, mailer, push, os, now, appr
     const name = a.title || a.config.subject || 'Your campaign';
     const path = `/actions?action=${a.id}`;
     const link = `${mailer.baseUrl()}${path}`;
-    const title = approved ? 'Campaign approved' : 'Campaign sent back to draft';
-    const body = approved
-      ? `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-      : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`;
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
-    if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: approved ? `“${name}” was approved.` : `“${name}” was sent back to draft.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
+    // approved-and-ready (the sender must send it), approved-and-live (a
+    // sequence/automation that activated on approval), or sent back to draft.
+    const title = !approved ? 'Campaign sent back to draft' : readyToSend ? 'Campaign approved — ready to send' : 'Campaign approved';
+    const body = !approved
+      ? `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`
+      : readyToSend
+      ? `“${name}” was approved${by ? ` by ${by}` : ''}. It will NOT send on its own — open it and hit Send when you’re ready:\n${link}`
+      : `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`;
+    const priority = approved && !readyToSend ? 'fyi' : 'needs_reply';
+    try { os?.announce?.({ entityId: a.entityId, title, body, priority, createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
+    if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: !approved ? `“${name}” was sent back to draft.` : readyToSend ? `“${name}” is approved — open Pulse to send it.` : `“${name}” was approved.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
     if (mailer?.isConfigured?.()) {
       const html = mailer.notificationEmail({
         title,
-        body: approved
-          ? `Good news — “${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-          : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `<br><br><b>Comment:</b> ${esc(note)}` : ''}<br><br>Open it to make changes and resubmit.`,
-        ctaText: 'Open campaign', ctaPath: path, preheader: title, entityId: a.entityId,
+        body: !approved
+          ? `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `<br><br><b>Comment:</b> ${esc(note)}` : ''}<br><br>Open it to make changes and resubmit.`
+          : readyToSend
+          ? `Good news — “${name}” was approved${by ? ` by ${by}` : ''}. It won’t send on its own — open it and hit <b>Send</b> when you’re ready.`
+          : `Good news — “${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`,
+        ctaText: readyToSend ? 'Open & send' : 'Open campaign', ctaPath: path, preheader: title, entityId: a.entityId,
       });
       mailer.send({ to: sender.email, subject: `${title}: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
     }

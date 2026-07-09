@@ -710,7 +710,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index (journey nodes may carry their own link)
+    // Real sends route the CTA through the tracked /c/ redirect (/e = email, then step
+    // index; journey nodes may carry their own link). Preview/test link STRAIGHT to
+    // the destination — the token isn't tied to a saved campaign, so /c/ would be dead.
+    const rawCta = step?.ctaUrl || cfg.ctaUrl;
+    const baseClick = !rawCta ? '' : realSend ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : rawCta;
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
     // Function replacers throughout: recipient data may contain `$&`-style
@@ -735,7 +739,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // route each external <a href> through the /c/ click redirect with the original
       // URL stored server-side (?k=code — looked up, never a user-suppliable open
       // redirect; /c/ then appends UTMs). Own links and mailto/tel/# are left alone.
-      if (cfg.clickToken) {
+      // Real sends only — preview/test keep the author's original (working) links.
+      if (realSend && cfg.clickToken) {
         const ownBase = mailer.baseUrl();
         html = html.replace(/(<a\b[^>]*?\shref=)(["'])(https?:\/\/[^"'\s]+)\2/gi, (m, pre, q, url) => {
           if (url.startsWith(ownBase)) return m; // our own links — don't re-track
@@ -1147,49 +1152,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // Email preview (sample recipient) + test-send to self.
-  app.post('/api/actions/:entityId/preview-email', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
-    if (!guard(req, res, req.params.entityId)) return;
-    const cfg = cleanConfig(req.body || {});
-    const fake = { id: 'preview', entityId: req.params.entityId, config: cfg };
-    // Use a real sample recipient (from the audience preview) when the client sends
-    // one, so merge fields ({{Ticket Type}}, {{City}}…) render with actual values.
-    const s = (req.body || {}).sample || {};
-    const recipient = { email: s.email || 'sam@example.com', name: s.name || 'Sam', ticket: s.ticket || 'General Admission', phone: s.phone || '+27820000000', attributes: s.attributes || {} };
-    // The client sends the active step's copy in cfg.body, so render from that
-    // (step=null) — works for once-off and per-step sequence previews alike.
-    // Return whichever channel(s) apply: email html, SMS text, or both.
-    const out = {};
-    if (cfg.channel !== 'sms') out.html = renderFor(fake, recipient).html;
-    if (cfg.channel !== 'email') out.sms = renderSmsFor(fake, recipient, null);
-    res.json(out);
-  });
-  app.post('/api/actions/:entityId/test-send', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
-    if (!guard(req, res, req.params.entityId)) return;
-    const cfg = cleanConfig(req.body || {});
-    const fake = { id: 'test', entityId: req.params.entityId, config: cfg };
-    // SMS test goes to a phone you enter; email test goes to your own address.
-    // For 'both', send whichever the test data supports and report each.
-    const wantsEmail = cfg.channel !== 'sms';
-    const wantsSms = cfg.channel !== 'email';
-    const done = [];
-    if (wantsSms) {
-      const to = String((req.body || {}).testPhone || '').trim();
-      if (!to) return res.status(400).json({ error: 'Enter a mobile number to test the SMS' });
-      const text = renderSmsFor(fake, { email: req.user.email, name: 'Sam', ticket: 'General Admission', phone: to });
-      const r = await messaging.sendSms({ to, text: `[TEST] ${text}` });
-      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'SMS not configured' });
-      done.push(to);
-    }
-    if (wantsEmail) {
-      const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
-      const branding = mailer.resolveBranding(req.params.entityId, fake.config?.eventSuiteId || '');
-      const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
-      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'email not configured' });
-      done.push(req.user.email);
-    }
-    res.json({ ok: true, to: done.join(' & ') });
-  });
+  // Preview + test-send routes live in their own module (keeps this file under budget).
+  require('./actionPreview')(app, { auth, guard, cleanConfig, renderFor, renderSmsFor, audienceFor, mailer, messaging });
 
   // APPROVE & SEND — the human gate. Snapshots the audience at this moment and
   // kicks off the send. Both Howler admins and the client's own users may approve.
@@ -1197,6 +1161,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+
+    // Validate content UP FRONT — before any sign-off is recorded or the sender is
+    // told it's approved. Otherwise the final approval notifies "approved", then
+    // fails this check, stranding the campaign while everyone thinks it sent.
+    const cErr = contentError(a.config);
+    if (cErr) return res.status(400).json({ error: cErr });
 
     // PENDING: record this user's sign-off against their approver slot. Only
     // when ALL required approvers are in does it fall through and actually send.
@@ -1211,11 +1181,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       for (const k of myKeys) ins.run(a.id, k, req.user.email, now());
       const summ = approvalSummary(getAction(a.id));
       if (!summ.complete) return res.json({ ok: true, pending: true, remaining: summ.pending });
-      // All approvals in → tell the sender, then flip to draft and continue
-      // into the send logic below. Conditional on still-pending so a concurrent
-      // final approver can't knock an already-claimed (running) campaign back.
+      // All sign-offs in. A one-off must NOT auto-send on the final approval —
+      // hand it back to the SENDER (status 'approved' + a "ready to send" notice);
+      // they send it themselves. A sequence/automation is approved once then runs
+      // hands-off, so let it fall through to activate below.
+      if (a.config.campaignMode !== 'sequence' && !a.recurring) {
+        const claim = sql.prepare("UPDATE actions SET status='approved', approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='pending'").run(req.user.email, now(), now(), a.id);
+        if (claim.changes !== 1) return res.status(409).json({ error: 'Already handled — another approval got there first' });
+        notifySender(a, { approved: true, by: req.user.email, readyToSend: true });
+        return res.json({ ok: true, approved: true });
+      }
       notifySender(a, { approved: true, by: req.user.email });
       sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=? AND status='pending'").run(now(), a.id);
+    } else if (a.status === 'approved') {
+      // Already cleared approval — only the SENDER (creator) may pull the trigger;
+      // approvers sign off. Falls through to the send logic below.
+      if ((a.createdBy || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+        return res.status(403).json({ error: 'Only the campaign’s sender can send it — it’s approved and waiting for them.' });
+      }
     } else if (a.status !== 'draft') {
       return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
     } else if (requireApprovalFor(a.entityId)) {
@@ -1223,8 +1206,6 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       return res.status(400).json({ error: 'This client requires approval — use “Send for approval”.' });
     }
     const isSequence = a.config.campaignMode === 'sequence';
-    const cErr = contentError(a.config);
-    if (cErr) return res.status(400).json({ error: cErr });
 
     // A sequence (drip) or recurring template ACTIVATES on approval and then runs
     // fully automatically — no per-send approval. The check enrolls new
@@ -1265,7 +1246,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // audience are written in ONE conditional statement and only the winner
       // (changes === 1) may start runCampaign. The loser gets a 409, never a
       // second blast (mirrors runScheduledSend's claim).
-      const claim = sql.prepare("UPDATE actions SET status='running', audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='draft'")
+      const claim = sql.prepare("UPDATE actions SET status='running', audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status IN ('draft','approved')")
         .run(JSON.stringify(list), req.user.email, now(), now(), a.id);
       if (claim.changes !== 1) return res.status(409).json({ error: 'Already sending — another approval got there first' });
       // Remember who this campaign family has reached, for recurring dedupe.
@@ -1378,6 +1359,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft') return res.status(400).json({ error: `Can't submit a ${a.status} campaign` });
+    // Don't route an incomplete campaign for sign-off — the sender fixes it now,
+    // rather than approvers discovering the gap when approval fails.
+    const submitErr = contentError(a.config);
+    if (submitErr) return res.status(400).json({ error: submitErr });
     const approvers = Array.isArray(req.body?.approvers) ? req.body.approvers : (a.config.approvers || []);
     if (!approvers.length) return res.status(400).json({ error: 'Add at least one approver' });
     // Four-eyes means FOUR eyes: a submitter can't be their own only approver —

@@ -21,7 +21,8 @@ const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
 // unchanged. See server/query.js.
-const query = require('./query')({ looker, auth });
+const folderDaysSync = require('./folderDaysSync')(db); // folder-level Days-to-go sync (live cascade) → server/folderDaysSync.js
+const query = require('./query')({ looker, auth, folderDaysSync });
 const {
   runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
@@ -143,6 +144,7 @@ const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND �
 // after the app is up (see startDailySync below).
 const socialMetrics = require('./socialMetrics');
 socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields)
+require('./queueit').mount(app, { db, auth }); // Queue-it INBOUND — live waiting-room stats (read-only; platform creds with per-client override)
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -509,7 +511,8 @@ require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, aut
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
 // filter views + lock overrides. Remove this line + server/clientModel.js.
-require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
+require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, resolveEventDate, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
+require('./suiteCategories').mount(app, { db, auth }); // client-defined nav categories for grouping events (flag: navcategories) → server/suiteCategories.js
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The
@@ -518,7 +521,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache, folderDaysSync,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -1087,8 +1090,9 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
   if (locks.chottu !== false) delete body.chottu;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain' };
-  applyIntegrationsPatch(body, (k, v) => db.setSetting(map[k], v));
+  if (locks.queueit !== false) delete body.queueit;
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key' };
+  applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));

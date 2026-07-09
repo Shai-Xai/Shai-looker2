@@ -23,11 +23,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Channel adapters: record every recipient instead of sending. resolveImpl is
 // swapped per-test to control the resolved audience (the Looker tile resolver).
-const sent = { email: [], sms: [], unsubUrls: [] };
+const sent = { email: [], sms: [], unsubUrls: [], emailHtml: [] };
 let resolveImpl = async () => ({ rows: [], fields: [] });
 
 const mailer = {
-  send: async ({ to, unsubUrl }) => { sent.email.push(to); if (unsubUrl) sent.unsubUrls.push(unsubUrl); return { ok: true }; },
+  send: async ({ to, unsubUrl, html }) => { sent.email.push(to); if (unsubUrl) sent.unsubUrls.push(unsubUrl); sent.emailHtml.push(html || ''); return { ok: true }; },
   baseUrl: () => 'http://test.local',
   resolveBranding: () => ({ senderName: 'Test Sender' }),
   campaignEmail: ({ subject, bodyText }) => ({ html: `<p>${bodyText || ''}</p>`, text: bodyText || '' }),
@@ -54,7 +54,7 @@ before(async () => {
   });
 });
 
-beforeEach(() => { sent.email = []; sent.sms = []; sent.unsubUrls = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
+beforeEach(() => { sent.email = []; sent.sms = []; sent.unsubUrls = []; sent.emailHtml = []; resolveImpl = async () => ({ rows: [], fields: [] }); });
 after(async () => { if (app) await app.close(); });
 
 // Wait for an async campaign send to reach a terminal status (runCampaign runs
@@ -159,12 +159,76 @@ test('when approval is required, a draft cannot be sent directly — only a name
   const wrong = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: outsider });
   assert.equal(wrong.status, 403);
 
-  // The named approver completes the approval → it sends.
+  // The named approver completes the approval → it does NOT auto-send; it moves
+  // to 'approved' and waits for the sender to send it themselves.
   const ok = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: approver });
   assert.equal(ok.status, 200);
+  assert.equal(ok.body.approved, true);
+  const approvedRow = await app.req('GET', `/api/actions/${ent.id}`, { as: author });
+  assert.equal(approvedRow.body.actions.find((a) => a.id === aid).status, 'approved');
+  assert.equal(sent.email.length, 0); // nothing sent yet
+
+  // Only the SENDER (creator) may pull the trigger — the approver cannot send it.
+  const wrongSend = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: approver });
+  assert.equal(wrongSend.status, 403);
+  assert.equal(sent.email.length, 0);
+
+  // The sender now sends the approved campaign → it goes out.
+  const send = await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: author });
+  assert.equal(send.status, 200);
   const done = await waitForStatus(ent.id, aid, 'done', author);
   assert.equal(done.results.sent, 1);
   assert.deepEqual(sent.email, ['appr@x.com']);
+});
+
+test('a custom-HTML test send keeps links clickable and fills merge fields from a real sample recipient', async () => {
+  const ent = h.makeEntity('TestSend Co', 'testsend-org');
+  const owner = h.makeClient('ts@test.local', [ent.id], 'owner');
+  // The audience resolves one real person with a name + a custom column (City).
+  resolveImpl = async () => ({
+    fields: [{ name: 'email', label: 'Email' }, { name: 'name', label: 'Name' }, { name: 'City', label: 'City' }],
+    rows: [{ email: 'real@aud.com', name: 'Thabo Mokoena', City: 'Pretoria' }],
+  });
+  const res = await app.req('POST', `/api/actions/${ent.id}/test-send`, {
+    as: owner,
+    body: {
+      title: 'Custom', channel: 'email', contentMode: 'html',
+      customHtml: '<html><body><p>Hi {{name}} from {{City}}</p><a href="https://tickets.example.com/buy">Buy</a></body></html>',
+      audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email', nameField: 'name' },
+      testEmails: 'me@team.com, mate@team.com',
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(sent.email.sort(), ['mate@team.com', 'me@team.com']); // both typed addresses
+  const html = sent.emailHtml[0];
+  // Bug: the author's external CTA link must NOT be rewritten through /c/ tracking
+  // (a dead link for an unsaved test campaign) — it stays clickable.
+  assert.match(html, /href="https:\/\/tickets\.example\.com\/buy"/);
+  assert.ok(!/\/c\/[^"']+\?k=/.test(html), 'test-send must not route links through /c/ tracking');
+  // Merge fields fill from the sampled real audience recipient.
+  assert.match(html, /Hi Thabo from Pretoria/);
+});
+
+test('{{name}} auto-detects a name column on a real send even when none was mapped', async () => {
+  const ent = h.makeEntity('Autoname Co', 'autoname-org');
+  const owner = h.makeClient('an@test.local', [ent.id], 'owner');
+  // The tile has a "First Name" column but the campaign never maps nameField.
+  resolveImpl = async () => ({
+    fields: [{ name: 'email', label: 'Email' }, { name: 'First Name', label: 'First Name' }],
+    rows: [{ email: 'p@aud.com', 'First Name': 'Lerato Ndlovu' }],
+  });
+  const created = await app.req('POST', `/api/actions/${ent.id}`, {
+    as: owner,
+    body: {
+      title: 'Auto', channel: 'email', subject: 'Hi', body: 'Hello {{name}}!',
+      audience: { mode: 'tile', dashboardId: 'd1', tileId: 't1', emailField: 'email' }, // nameField deliberately omitted
+    },
+  });
+  const aid = created.body.action.id;
+  await app.req('POST', `/api/actions/${ent.id}/${aid}/approve`, { as: owner });
+  await waitForStatus(ent.id, aid, 'done', owner);
+  assert.deepEqual(sent.email, ['p@aud.com']);
+  assert.match(sent.emailHtml[0], /Hello Lerato!/); // friendly first name from the auto-detected column
 });
 
 // ── 4. Per-channel consent enforced at send ──────────────────────────────────
