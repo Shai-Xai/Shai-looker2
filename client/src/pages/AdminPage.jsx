@@ -3411,12 +3411,38 @@ function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields,
   useEffect(() => { api.getEntitySets(entity.id).then((d) => setCustomSets(d.sets || [])).catch(() => setCustomSets([])); }, [entity.id]);
   const sets = [...allSets, ...customSets]; // shared templates + this client's bespoke sets
   const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); onChange(); };
+  // Drag-to-reorder the suites. Saves the SAME per-client order the client nav
+  // uses (saveSuiteOrder), so admin and client agree. Local mirror = optimistic
+  // reorder; the parent refetch (now order-applied) keeps it after onChange.
+  const [list, setList] = useState(suites);
+  useEffect(() => { setList(suites); }, [suites]);
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const reorder = (from, to) => {
+    if (!from || from === to) return;
+    const ids = list.map((s) => s.id);
+    if (ids.indexOf(from) < 0 || ids.indexOf(to) < 0) return;
+    ids.splice(ids.indexOf(from), 1);
+    ids.splice(ids.indexOf(to), 0, from);
+    const byId = Object.fromEntries(list.map((s) => [s.id, s]));
+    setList(ids.map((id) => byId[id]));
+    api.saveSuiteOrder(entity.id, ids).catch(() => {});
+  };
   return (
     <div>
-      {suites.map((su) => (
-        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={sets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
+      {list.map((su) => (
+        <div key={su.id}
+          onDragOver={(e) => { e.preventDefault(); if (overId !== su.id) setOverId(su.id); }}
+          onDrop={(e) => { e.preventDefault(); reorder(dragId, su.id); setDragId(null); setOverId(null); }}
+          onDragEnd={() => { setDragId(null); setOverId(null); }}
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 6, opacity: dragId === su.id ? 0.45 : 1, boxShadow: (overId === su.id && dragId && dragId !== su.id) ? 'inset 0 3px 0 0 var(--brand)' : 'none', borderRadius: 12 }}>
+          <span draggable onDragStart={(e) => { setDragId(su.id); e.dataTransfer.effectAllowed = 'move'; }} title="Drag to reorder" style={{ cursor: 'grab', color: '#c4c4c8', fontSize: 16, lineHeight: 1, paddingTop: 20, userSelect: 'none', flexShrink: 0 }}>⠿</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SuiteCard suite={su} entities={allEntities} sets={sets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
+          </div>
+        </div>
       ))}
-      {suites.length === 0 && <Muted>No suites yet.</Muted>}
+      {list.length === 0 && <Muted>No suites yet.</Muted>}
       <button style={addBtn} onClick={addSuite}>+ Add suite</button>
     </div>
   );
@@ -3998,6 +4024,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
+  const [expanded, setExpanded] = useState(false); // collapsed by default — header is the listing row, click ▶ to open details
   const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, howlerEventId, liveDashboardId }); flash(setSaved); onChange(); };
   // Sets grouped by their library folder (item: show folder → set → dashboards),
   // named folders first then the ungrouped bucket.
@@ -4035,11 +4062,13 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   return (
     <div style={cardStyle}>
       <Row>
-        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
+        <button onClick={() => setExpanded((v) => !v)} title={expanded ? 'Collapse' : 'Open details'} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 12, padding: '0 6px 0 0', flexShrink: 0, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} onFocus={() => setExpanded(true)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
         <button style={previewBtn} onClick={duplicate} title="Clone this suite (sets + dashboards) as a new one">⧉ Duplicate</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
+      {expanded && (<>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
         <div data-tour="suite-icon"><Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field></div>
@@ -4189,6 +4218,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
         <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
       </Section>
+      </>)}
     </div>
   );
 }
