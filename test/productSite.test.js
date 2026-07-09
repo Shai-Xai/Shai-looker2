@@ -13,7 +13,8 @@ const productSite = require('../server/productSite');
 function mountRoutes() {
   const routes = {};
   const reg = (m) => (p, ...hs) => { for (const key of [].concat(p)) routes[m + ' ' + key] = hs[hs.length - 1]; };
-  productSite.mount({ get: reg('GET'), put: reg('PUT') }, { db, auth });
+  // use: the /sales/experience static mount — middleware, not asserted here
+  productSite.mount({ get: reg('GET'), put: reg('PUT'), use: () => {} }, { db, auth });
   return routes;
 }
 const res = () => {

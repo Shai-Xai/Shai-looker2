@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-09 (🎬 Sales site: “See it in motion” — animated Experience OS concept gallery at /sales/experience) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-09 (🌐 Sales site v2 live: new story page at /sales + grouped, benefit-led features page with Coming Soon roadmap at /sales/features) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -769,6 +769,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-09** — **🌐 Sales site v2 is live** — /sales now serves the new
+  story page (interactive light-mode product demo that tours real screens, the
+  Owl with real channel logos, See/Ask/Act rows with a medium carousel and an
+  animated journey tree, marketer pipeline + ad-sync animation, “Finger on the
+  Pulse”, animated Event Ops site plan) and /sales/features serves the new
+  feature index: benefit-led collapsible sections grouped by See it / Ask it /
+  Act on it / Run the event / Yours-and-trusted, plus a Coming Soon roadmap
+  (Fan Owl, Budgeting, Owl Event Builder, Owl Skills). “In motion” is renamed
+  “In flow” across the site. The v1 pages remain in docs/ as instant rollback.
 - **2026-07-09** — **🎬 “See it in motion”** (sales site): the public sales page
   gains a nav link + hero button to an animated concept gallery at
   `/sales/experience` — switchable motion pages telling the Pulse story (data

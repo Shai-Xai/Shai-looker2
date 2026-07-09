@@ -164,8 +164,11 @@ const CATALOGUE = [
 
 const OVERVIEW_MD = path.join(__dirname, '../docs/PRODUCT_OVERVIEW_SALES.md');
 const OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html');
-const SALES_HTML = path.join(__dirname, '../docs/pulse-sales.html');
-const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features.html');
+// v2 (2026-07) is the live site; the v1 pages (pulse-sales.html /
+// pulse-sales-features.html) stay in docs/ as an instant rollback: point
+// these two paths back at them and redeploy.
+const SALES_HTML = path.join(__dirname, '../docs/pulse-sales-v2.html');
+const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features-v2.html');
 const MOCKUPS_DIR = path.join(__dirname, '../docs/mockups'); // "see it in motion" concept pages
 
 // Stable slug for a `##` heading — survives status-emoji / punctuation edits.
