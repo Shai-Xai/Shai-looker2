@@ -76,15 +76,20 @@ app.post('/api/admin/comparison-sort-desc', auth.requireAdmin, (req, res) => {
   const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
   const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event', 'Past Event', 'Event Name']);
   const isEventField = (s) => /core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s));
+  // Narrower: the event DIMENSION itself (e.g. "events", "core_events.start_date",
+  // "event_name") — deliberately excludes generic dates so daily time-series charts
+  // sorting by day aren't flipped.
+  const isEventDim = (s) => /core_events\./i.test(String(s)) || /(^|[._])events?\b/i.test(String(s)) || /(^|[._])event[._]/i.test(String(s));
   const toDesc = (s) => { const str = String(s); if (!isEventField(str) || /\s+desc$/i.test(str)) return str; return `${str.replace(/\s+(asc|desc)$/i, '')} desc`; }; // event sort → desc; already-desc & measure sorts untouched
   const hasOffset = (q) => { try { const dyn = typeof q?.dynamic_fields === 'string' ? JSON.parse(q.dynamic_fields) : q?.dynamic_fields; return Array.isArray(dyn) && dyn.some((d) => /\boffset\s*\(/i.test(String(d?.expression || ''))); } catch { return false; } };
   // A tile is a comparison tile if it listens to a comparison-events filter, OR its
-  // query filters/pivots reference the event/date dimension (broader — catches tiles
-  // that don't wire the filter through listenTo).
+  // query sorts/filters/pivots reference the event dimension (broader — catches tiles
+  // that don't wire the filter through listenTo, incl. ones that merely sort by event).
   const isComparisonTile = (t) => {
     if (Object.keys(t.listenTo || {}).some((k) => COMBO.has(k))) return true;
     const q = t.query || {};
-    return Object.keys(q.filters || {}).some(isEventField) || (Array.isArray(q.pivots) && q.pivots.some(isEventField));
+    if (Array.isArray(q.sorts) && q.sorts.some(isEventDim)) return true;
+    return Object.keys(q.filters || {}).some(isEventDim) || (Array.isArray(q.pivots) && q.pivots.some(isEventDim));
   };
   const defs = dashboardId
     ? [store.get(dashboardId)].filter(Boolean)
