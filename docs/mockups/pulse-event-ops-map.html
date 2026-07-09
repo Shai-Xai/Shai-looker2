@@ -277,7 +277,7 @@
                   fill="none" stroke="#26262f" stroke-width="1.6" stroke-dasharray="7 5"/>
             <!-- main stage -->
             <path d="M180 60 L420 60 L390 130 L210 130 Z" fill="#16161f" stroke="#2e2e3a" stroke-width="1.2"/>
-            <!-- solar stage -->
+            <!-- second stage -->
             <path d="M760 70 L930 70 L910 150 L780 150 Z" fill="#15151d" stroke="#2b2b36" stroke-width="1.2"/>
             <!-- food court block -->
             <rect x="540" y="330" width="180" height="90" rx="10" fill="#14141c" stroke="#26262f"/>
@@ -292,7 +292,7 @@
             <path d="M508 600 L532 600 L520 578 Z" fill="#2a2a36"/>
           </svg>
           <div class="lm" style="left:30%;top:15%">Main stage</div>
-          <div class="lm" style="left:85%;top:18%">Solar stage</div>
+          <div class="lm" style="left:85%;top:18%">Second stage</div>
           <div class="lm" style="left:63%;top:61%">Food court</div>
           <div class="lm" style="left:18%;top:57.5%">Vendor row</div>
         </div>
@@ -312,7 +312,7 @@
         <div class="console">
           <div class="con-head">
             <img id="owlmark" alt="">
-            <div class="con-title">Event Ops · KFF 26<small>OPS HQ · CHANNEL 1 · OWL WATCHING</small></div>
+            <div class="con-title">Event Ops · Summer Fest<small>OPS HQ · CHANNEL 1 · OWL WATCHING</small></div>
             <span class="live">LIVE</span>
           </div>
           <div class="kpis">
@@ -373,9 +373,9 @@
     { id:'gateB',   name:'Gate B',      sub:'8 scanners',    x:.52,  y:.935,icon:'🎟' },
     { id:'vip',     name:'VIP Gate',    sub:'2 scanners',    x:.075, y:.52, icon:'⭐' },
     { id:'box',     name:'Box office',  sub:'3 tills',       x:.33,  y:.87, icon:'🎫' },
-    { id:'solar',   name:'Solar Bar',   sub:'8 POS',         x:.72,  y:.30, icon:'🍺' },
-    { id:'kosmo',   name:'Kosmo Bar',   sub:'6 POS',         x:.44,  y:.26, icon:'🍺' },
-    { id:'futur',   name:'Futur Bar',   sub:'6 POS',         x:.14,  y:.27, icon:'🍺' },
+    { id:'east',   name:'East Bar',   sub:'8 POS',         x:.72,  y:.30, icon:'🍺' },
+    { id:'north',   name:'North Bar',   sub:'6 POS',         x:.44,  y:.26, icon:'🍺' },
+    { id:'west',   name:'West Bar',   sub:'6 POS',         x:.14,  y:.27, icon:'🍺' },
     { id:'food',    name:'Food court',  sub:'12 POS',        x:.63,  y:.67, icon:'🌮' },
     { id:'top1',    name:'Top-up K1',   sub:'4 kiosks',      x:.335, y:.565,icon:'💳' },
     { id:'top2',    name:'Top-up K2',   sub:'4 kiosks',      x:.80,  y:.76, icon:'💳' },
@@ -404,14 +404,14 @@
     peak: {
       rate: ['Sales/min', 486],
       incidents: [
-        { st:'solar', sev:'crit', icon:'🍺', title:'Solar Bar stock critical', det:'Beer 12%, projected dry in 40 min at current pace.', act:'Dispatch restock · 6 kegs', staff:'runner', fix:3000 },
+        { st:'east', sev:'crit', icon:'🍺', title:'East Bar stock critical', det:'Beer 12%, projected dry in 40 min at current pace.', act:'Dispatch restock · 6 kegs', staff:'runner', fix:3000 },
         { st:'food',  sev:'warn', icon:'📟', title:'POS 14 offline · Food court', det:'Card fallback active, 3 declines logged.', act:'Dispatch tech · swap unit', staff:'tech', fix:2400 },
-        { st:'medical',sev:'crit',icon:'✚', title:'Medical assist · Kosmo Bar', det:'Minor incident reported by bar staff, patient walking.', act:'Send medic team', staff:'medic', fix:3200 },
+        { st:'medical',sev:'crit',icon:'✚', title:'Medical assist · North Bar', det:'Minor incident reported by bar staff, patient walking.', act:'Send medic team', staff:'medic', fix:3200 },
         { st:'top2',  sev:'warn', icon:'💳', title:'Top-up K2 queue at changeover', det:'Owl: queues spike every set change. Push mobile top-ups 17:50.', act:'Schedule push · 17:50', staff:'tech', fix:1600 },
-        { st:'kosmo', sev:'warn', icon:'🧊', title:'Kosmo Bar ice low', det:'2 bins left, spirits service degrades within the hour.', act:'Add to next runner loop', staff:'runner', fix:2200 },
+        { st:'north', sev:'warn', icon:'🧊', title:'North Bar ice low', det:'2 bins left, spirits service degrades within the hour.', act:'Add to next runner loop', staff:'runner', fix:2200 },
       ],
       radios: [
-        { st:'solar', who:'Bar lead', msg:'“Solar down to 2 kegs on Lager, confirm restock is moving.”' },
+        { st:'east', who:'Bar lead', msg:'“East down to 2 kegs on Lager, confirm restock is moving.”' },
         { st:'medical',who:'Medic 1', msg:'“Patient stable, returning to post.”' },
         { st:'food',  who:'T2',       msg:'“POS swapped at Food court, back online.”' },
       ],
@@ -421,7 +421,7 @@
       incidents: [
         { st:'gateB', sev:'warn', icon:'🚪', title:'Egress flow · Gate B', det:'Crowd model: 8k exiting in 25 min. Open all lanes outbound.', act:'Flip lanes · all out', staff:'security', fix:2200 },
         { st:'lockers',sev:'warn',icon:'🔒', title:'Locker queue 12 min', det:'3 readers on one bank. Owl suggests staff redirect.', act:'Redirect to bank B', staff:'runner', fix:2000 },
-        { st:'solar', sev:'warn', icon:'💶', title:'Cashout pickup · Solar', det:'Drawer full, collection run due before close.', act:'Send secure run', staff:'security', fix:2800 },
+        { st:'east', sev:'warn', icon:'💶', title:'Cashout pickup · East', det:'Drawer full, collection run due before close.', act:'Send secure run', staff:'security', fix:2800 },
         { st:'food',  sev:'warn', icon:'🧾', title:'Vendor close-out started', det:'Food court reconciling: 4 of 12 POS closed clean.', act:'Track close-out', staff:'runner', fix:1800 },
         { st:'gateA', sev:'crit', icon:'🚑', title:'Lost child report · Gate A', det:'Description circulated to all radios + gate cams.', act:'Security protocol 3', staff:'security', fix:3400 },
       ],
