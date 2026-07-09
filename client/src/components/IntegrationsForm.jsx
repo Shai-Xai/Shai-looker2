@@ -716,10 +716,50 @@ function ExtLink({ href, children }) {
   return <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', fontWeight: 600 }}>{children}</a>;
 }
 
+// Flatten a HowTo step's JSX down to plain text so the steps can be copied or
+// shared as a message. Links become "label (url)" unless the label already IS
+// the url; everything else keeps just its text.
+function stepText(node) {
+  if (node == null || node === true || node === false) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(stepText).join('');
+  if (node.props) {
+    const inner = stepText(node.props.children);
+    const href = node.props.href;
+    if (href && href !== inner && href.replace(/^https?:\/\//, '') !== inner) return `${inner} (${href})`;
+    return inner;
+  }
+  return '';
+}
+
 // Collapsible "how to get your access details" — closed by default so it never
 // clutters the form, but a step-by-step is one tap away when a client is stuck.
+// Copy/Share turn the steps into a plain-text message, so a non-technical client
+// can hand the requirements to their agency / IT person instead of doing it
+// themselves (Share uses the native sheet on phones → WhatsApp, email, …).
 function HowTo({ title, steps = [] }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const shareText = () =>
+    `Howler Pulse — ${title}\n\n` +
+    steps.map((s, i) => `${i + 1}. ${stepText(s)}`).join('\n\n') +
+    `\n\nOnce you have the details, they get entered in Howler Pulse (${window.location.origin}) under Settings → Integrations.`;
+  const copy = async () => {
+    const text = shareText();
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      // Clipboard API needs a secure context / permission — textarea fallback.
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } finally { ta.remove(); }
+    }
+    setCopied(true); setTimeout(() => setCopied(false), 1800);
+  };
+  const share = async () => {
+    try { await navigator.share({ title: `Howler Pulse — ${title}`, text: shareText() }); }
+    catch { /* user closed the share sheet */ }
+  };
   return (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 8, margin: '4px 0 6px', overflow: 'hidden' }}>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 11px', background: 'rgba(128,128,128,0.05)', border: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
@@ -728,9 +768,20 @@ function HowTo({ title, steps = [] }) {
         <span style={{ width: 12, fontSize: 10, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
       </button>
       {open && (
-        <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
-          {steps.map((s, i) => <li key={i}>{s}</li>)}
-        </ol>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 11px 2px' }}>
+            <button type="button" onClick={copy} style={{ ...shareBtn, ...(copied ? { color: 'var(--success, #10b981)', borderColor: 'var(--success, #10b981)' } : null) }}>
+              {copied ? '✓ Copied' : '⧉ Copy steps'}
+            </button>
+            {typeof navigator !== 'undefined' && !!navigator.share && (
+              <button type="button" onClick={share} style={shareBtn}>📤 Share</button>
+            )}
+            <span style={{ fontSize: 11.5, color: 'var(--muted)', flex: '1 1 160px' }}>Not your department? Send these steps to whoever manages this for you.</span>
+          </div>
+          <ol style={{ margin: 0, padding: '10px 12px 10px 28px', display: 'flex', flexDirection: 'column', gap: 7, fontSize: 12.5, color: 'var(--text)', lineHeight: 1.5 }}>
+            {steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        </>
       )}
     </div>
   );
@@ -741,4 +792,5 @@ const secTitle = { fontSize: 14, fontWeight: 700, marginBottom: 4 };
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none' };
 const note = { fontSize: 12, color: 'var(--muted)', background: '#f7f7f8', border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', margin: '4px 0 4px' };
 const clearRow = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--error, #ef4444)', marginTop: 6, cursor: 'pointer' };
+const shareBtn = { border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 980, padding: '8px 14px', minHeight: 40, fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 };
 const saveBtn = { padding: '9px 18px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 980, fontSize: 13, fontWeight: 600, cursor: 'pointer' };
