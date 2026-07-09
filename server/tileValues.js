@@ -318,14 +318,30 @@ module.exports = function tileValues({ db, query }) {
     const seen = new Set();
     const ordered = [...candidates.filter((c) => c.refsEvents), ...candidates.filter((c) => !c.refsEvents)]
       .filter((c) => { const k = `${c.model}|${c.view}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    for (const c of ordered) {
-      const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
-      if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
-      try {
-        const rows = await runLookerQuery('/queries/run/json', q);
-        const v = rows && rows[0] && rows[0][DATE];
-        if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
-      } catch { /* explore may not expose start_date — try the next */ }
+    // Pin to THIS suite's own event(s). Without this, "newest event" is the newest
+    // across the whole organiser — so every edition of a festival (e.g. KFF26 AND
+    // KFF27) resolves to the latest one's date and all show as "upcoming". The suite's
+    // locked core_events dimension(s) restrict the scan to its own editions; sorting by
+    // start_date desc then yields THIS suite's current event (newest within its set).
+    const expanded = expandLockMap(db.lockedFiltersForSuite(suiteId) || {});
+    const eventPin = {};
+    for (const [k, v] of Object.entries(expanded)) {
+      if (/^core_events\./i.test(k) && !/start_date/i.test(k) && v != null && String(v).trim()) eventPin[k] = String(v).trim();
+    }
+    // Try pinned first (correct per-suite date); fall back to unpinned (legacy
+    // newest-in-scope) so a suite whose event isn't lock-pinned still resolves something.
+    const passes = Object.keys(eventPin).length ? [eventPin, null] : [null];
+    for (const pin of passes) {
+      for (const c of ordered) {
+        const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
+        if (pin) q.filters = { ...pin };
+        if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
+        try {
+          const rows = await runLookerQuery('/queries/run/json', q);
+          const v = rows && rows[0] && rows[0][DATE];
+          if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
+        } catch { /* explore may not expose start_date / the pinned field — try the next */ }
+      }
     }
     return null;
   }
