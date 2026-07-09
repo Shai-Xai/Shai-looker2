@@ -39,8 +39,9 @@ export default function EngagePage() {
 
   // Feature-flagged tabs (Admin → Product → Flags): hidden when the client's
   // effective flag is off. Server routes enforce the same flags for real.
+  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links' };
   const myFlags = useMyFlags(entityId);
-  const tabs = TABS.filter((t) => t.key !== 'journeys' || flagOn(myFlags, 'engage.journeys'));
+  const tabs = TABS.filter((t) => !TAB_FLAGS[t.key] || flagOn(myFlags, TAB_FLAGS[t.key]));
 
   const active = tabs.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';
   const go = (key) => { if (key !== active) vtNavigate(navigate, `/engage/${key}`); };
