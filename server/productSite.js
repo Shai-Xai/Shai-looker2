@@ -272,6 +272,7 @@ const OVERVIEW_MD = path.join(__dirname, '../docs/PRODUCT_OVERVIEW_SALES.md');
 const OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html');
 const SALES_HTML = path.join(__dirname, '../docs/pulse-sales.html');
 const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features.html');
+const MOCKUPS_DIR = path.join(__dirname, '../docs/mockups'); // "see it in motion" concept pages
 
 // Stable slug for a `##` heading — survives status-emoji / punctuation edits.
 function slugify(heading) {
@@ -381,6 +382,15 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(SALES_FEATURES_HTML);
   });
+
+  // "See it in motion" — the animated Experience OS concept pages (docs/mockups):
+  // a switchable gallery at /sales/experience, each concept also standalone
+  // (e.g. /sales/experience/pulse-data-flow.html). Public, like the rest of /sales.
+  // The concept pages carry their own inline <script> (the animations), so they
+  // need the same per-page CSP relax as the other static doc pages above.
+  app.use('/sales/experience',
+    (_req, res, next) => { allowInlineScripts(res); next(); },
+    require('express').static(MOCKUPS_DIR, { index: 'index.html' }));
 
   // ── Admin: the full picture + include/exclude toggles ────────────────────────
   app.get('/api/admin/product/matrix', auth.requireAdmin, (_req, res) => {
