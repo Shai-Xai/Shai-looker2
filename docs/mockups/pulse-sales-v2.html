@@ -285,14 +285,29 @@ main{padding-bottom:20px}
 .liveops h6{font-size:11.5px;font-weight:800;display:flex;align-items:center;gap:7px;margin-bottom:10px}
 .liveops h6 .lv{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--ok);font-weight:700}
 .liveops h6 .lv::before{content:'● ';animation:blink 1.6s infinite}
-.heat{display:grid;grid-template-columns:64px repeat(7,1fr);gap:3px;font-family:var(--mono);font-size:8.5px;color:var(--muted)}
-.heat .hl{display:flex;align-items:center;font-size:9px;white-space:nowrap;overflow:hidden}
-.heat .hh{text-align:center;padding-bottom:2px}
-.heat .hc{height:20px;border-radius:5px;background:#f1f1f5;transition:background 1.1s ease, box-shadow 1.1s ease}
-.heat .hc.hot{box-shadow:0 0 12px rgba(255,56,92,.55);animation:hotpulse 1.4s infinite}
-@keyframes hotpulse{50%{box-shadow:0 0 20px rgba(255,56,92,.85)}}
-.heat .hh.now{color:var(--brand);font-weight:800;animation:blink 1.6s infinite}
-.heatleg{display:flex;gap:10px;margin-top:9px;font-family:var(--mono);font-size:9px;color:var(--muted);align-items:center}
+.sp-head{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--muted);margin-bottom:10px;flex-wrap:wrap}
+.sp-head b{color:var(--ink);font-weight:750}
+.sp-head .dark-n{color:var(--brand);font-weight:750}
+.sp-tabs{margin-left:auto;display:flex;gap:4px}
+.sp-tabs span{border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:9px;font-weight:750;color:var(--muted);white-space:nowrap}
+.sp-tabs span.on{border-color:#ffb59e;color:#e05a2b;background:#fff4ef}
+.siteplan{position:relative;height:200px;background:#fdfdfe;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.struct{position:absolute;background:#f3f3f6;border:1px solid #ececf1;border-radius:4px}
+.stagechip{position:absolute;font-family:var(--mono);font-size:7.5px;color:#7C3AED;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.28);padding:1px 6px;border-radius:99px;white-space:nowrap;z-index:2}
+.blob{
+  position:absolute;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;
+  background:radial-gradient(circle, rgba(255,86,56,.42), rgba(255,86,56,0) 68%);
+  transition:width 1.4s ease, height 1.4s ease, opacity 1.4s ease;
+}
+.pin{position:absolute;transform:translate(-50%,-50%);text-align:center;z-index:3}
+.pin .dot{width:13px;height:13px;border-radius:99px;background:#fff;border:3.5px solid #ff5a3c;margin:0 auto 2px;box-shadow:0 1px 4px rgba(0,0,0,.22);transition:border-color .5s, background .5s}
+.pin.green .dot{border-color:#0a8f5b}
+.pin b{display:block;font-size:8px;letter-spacing:.03em;background:#fff;padding:1px 6px;border-radius:99px;border:1px solid var(--line);box-shadow:0 1px 3px rgba(45,43,85,.14);white-space:nowrap;color:var(--ink)}
+.pin small{font-family:var(--mono);font-size:8px;color:#c2410c;font-weight:700}
+.pin.green small{color:#0a8f5b}
+.pin.dark .dot{border-color:#b9b9c4;background:#e8e8ee;animation:blink 1.2s infinite}
+.pin.dark small{color:#8b8b98}
+.heatleg{display:flex;gap:10px;margin-top:9px;font-family:var(--mono);font-size:9px;color:var(--muted);align-items:center;flex-wrap:wrap}
 .heatleg i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .ops-ops .oprow{display:grid;grid-template-columns:58px 1fr 58px;gap:8px;align-items:center;margin-bottom:8px;font-size:11px}
 .ops-ops .opname{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -516,9 +531,18 @@ main{padding-bottom:20px}
     phone-first console. You'll know a scanner died before the queue does.</p>
     <div class="shots">
       <div class="liveops">
-        <h6>🔥 Station activity heat map<span class="lv">LIVE</span></h6>
-        <div class="heat" id="heat"></div>
-        <div class="heatleg"><i style="background:#f1f1f5"></i> quiet <i style="background:#ffd9a8"></i> busy <i style="background:#ff5a3c"></i> hotspot · the crowd moves, the map moves with it</div>
+        <div class="sp-head"><b>Live site plan</b> · tap a pin for its devices &amp; operators · <span class="dark-n" id="darkN">all stations up</span>
+          <span class="sp-tabs"><span>📍 Stations</span><span>👷 Operators</span><span class="on">🔥 Heat</span><span>🚶 Flow</span></span>
+        </div>
+        <div class="siteplan" id="siteplan">
+          <div class="struct" style="left:5%;top:36%;width:9%;height:16%"></div>
+          <div class="struct" style="left:14%;top:74%;width:13%;height:14%"></div>
+          <div class="struct" style="left:63%;top:14%;width:8%;height:18%"></div>
+          <div class="struct" style="left:87%;top:20%;width:9%;height:22%"></div>
+          <div class="stagechip" style="left:34%;top:22%">MAIN STAGE</div>
+          <div class="stagechip" style="left:76%;top:60%">SOLAR STAGE</div>
+        </div>
+        <div class="heatleg">heat = live activity around each station · <span style="color:#e05a2b">glow grows as the crowd does</span> · a grey pin has gone quiet</div>
       </div>
       <div class="liveops ops-ops">
         <h6>🍹 Bar &amp; operator performance<span class="lv">LIVE</span></h6>
@@ -718,40 +742,62 @@ main{padding-bottom:20px}
     skel1.classList.add('go'); skel2.classList.add('go'); dStamp.classList.add('on');
   } else { draftLoop(); }
 
-  /* ops: live heat map */
-  const H_ROWS = ['Gate A', 'Gate B', 'Main Bar', 'VIP Bar', 'Top-up 1'];
-  const H_COLS = ['16:00', '17:00', '18:00', '19:00', '20:00', '21:00', 'now'];
-  const heatEl = document.getElementById('heat');
-  heatEl.innerHTML = '<div></div>' + H_COLS.map(c => '<div class="hh' + (c === 'now' ? ' now' : '') + '">' + c + '</div>').join('') +
-    H_ROWS.map((r, ri) => '<div class="hl">' + r + '</div>' +
-      H_COLS.map((c, ci) => '<div class="hc" id="hc-' + ri + '-' + ci + '"></div>').join('')
-    ).join('');
-  const heatBase = [
-    [.8, .5, .3, .2, .2, .3, .3],   // Gate A: ingress fades
-    [.9, .7, .4, .2, .2, .2, .5],   // Gate B
-    [.2, .4, .6, .8, .9, .8, .9],   // Main Bar: builds to hotspot
-    [.1, .2, .4, .5, .7, .8, .7],   // VIP Bar
-    [.5, .6, .5, .4, .5, .4, .6],   // Top-up 1
+  /* ops: the live site plan heat map */
+  const SP_PINS = [
+    { n: 'VOYAGER BAR',   x: 13, y: 56, c: '8/21',  base: .45 },
+    { n: 'MAIN BAR',      x: 30, y: 50, c: '16/22', base: .95 },
+    { n: 'VIP LOUNGE',    x: 44, y: 30, c: '3/6',   base: .35 },
+    { n: 'NOVA BAR',      x: 52, y: 62, c: '11/16', base: .6 },
+    { n: 'TOP-UP 1',      x: 60, y: 84, c: '3/3',   base: 0, green: true },
+    { n: 'GATE A',        x: 70, y: 38, c: '14/26', base: .75 },
+    { n: 'KOSMO BAR',     x: 83, y: 70, c: '6/11',  base: .5 },
+    { n: 'BACKSTAGE BAR', x: 93, y: 50, c: '1/1',   base: .2 },
   ];
-  function heatColor(v) {
-    if (v < 0.35) return '#f1f1f5';
-    if (v < 0.6) { const t = (v - 0.35) / 0.25; return 'rgb(255,' + Math.round(236 - 40 * t) + ',' + Math.round(200 - 60 * t) + ')'; }
-    const t = Math.min(1, (v - 0.6) / 0.4);
-    return 'rgb(255,' + Math.round(180 - 110 * t) + ',' + Math.round(130 - 70 * t) + ')';
+  const spEl = document.getElementById('siteplan');
+  const darkN = document.getElementById('darkN');
+  SP_PINS.forEach((p, i) => {
+    if (!p.green) {
+      const b = document.createElement('div');
+      b.className = 'blob'; b.id = 'spb-' + i;
+      b.style.left = p.x + '%'; b.style.top = p.y + '%';
+      spEl.appendChild(b);
+    }
+    const d = document.createElement('div');
+    d.className = 'pin' + (p.green ? ' green' : ''); d.id = 'spp-' + i;
+    d.style.left = p.x + '%'; d.style.top = p.y + '%';
+    d.innerHTML = '<span class="dot"></span><b>' + p.n + '</b><small>' + p.c + '</small>';
+    spEl.appendChild(d);
+  });
+  let darkIdx = -1;
+  function spTick() {
+    SP_PINS.forEach((p, i) => {
+      if (p.green) return;
+      const b = document.getElementById('spb-' + i);
+      if (i === darkIdx) { b.style.opacity = 0; return; }
+      const v = Math.max(0.08, Math.min(1.1, p.base + (Math.random() - 0.5) * 0.36));
+      const size = 36 + v * 110;
+      b.style.width = size + 'px'; b.style.height = size + 'px';
+      b.style.opacity = String(0.35 + v * 0.6);
+    });
   }
-  function heatTick() {
-    let max = { v: 0, el: null };
-    heatBase.forEach((row, ri) => row.forEach((base, ci) => {
-      const v = Math.max(0, Math.min(1, base + (Math.random() - 0.5) * 0.22));
-      const el = document.getElementById('hc-' + ri + '-' + ci);
-      el.style.background = heatColor(v);
-      el.classList.remove('hot');
-      if (ci >= 5 && v > max.v) max = { v, el };
-    }));
-    if (max.el && max.v > 0.7) max.el.classList.add('hot');
+  function spDarkCycle() {
+    // a random station goes quiet, the header counts it, then it recovers
+    const candidates = SP_PINS.map((p, i) => (!p.green && p.base < 0.7) ? i : -1).filter(i => i >= 0);
+    darkIdx = candidates[(Math.random() * candidates.length) | 0];
+    document.getElementById('spp-' + darkIdx).classList.add('dark');
+    darkN.textContent = '1 station dark';
+    setTimeout(() => {
+      document.getElementById('spp-' + darkIdx).classList.remove('dark');
+      darkIdx = -1;
+      darkN.textContent = 'all stations up';
+    }, 5200);
   }
-  heatTick();
-  if (!reduced) setInterval(() => { if (!document.hidden) heatTick(); }, 1200);
+  spTick();
+  if (!reduced) {
+    setInterval(() => { if (!document.hidden) spTick(); }, 1500);
+    setTimeout(spDarkCycle, 6000);
+    setInterval(() => { if (!document.hidden) spDarkCycle(); }, 16000);
+  }
 
   /* ops: operator flow */
   const OPS = [
