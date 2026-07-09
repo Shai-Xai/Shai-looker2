@@ -9,24 +9,23 @@
 
   .grad-text { background: linear-gradient(90deg, #FF385C, #FF6B35 45%, #7C3AED); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .rule { height: 4px; border-radius: 2px; background: linear-gradient(90deg, #FF385C, #FF6B35 45%, #7C3AED); }
+  .kicker { font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #FF385C; margin-bottom: 6px; }
+  h2 { font-size: 20px; font-weight: 900; letter-spacing: -0.3px; margin-bottom: 3mm; }
+  h2 .n { color: #FF385C; }
+  .foot { position: absolute; bottom: 10mm; left: 15mm; right: 15mm; display: flex; justify-content: space-between; font-size: 9.5px; color: #9a97ad; border-top: 1px solid #eee9f8; padding-top: 2.5mm; }
 
   /* ---------- Page 1 ---------- */
   .hero { padding-top: 6mm; }
-  .kicker { font-size: 11px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #FF385C; margin-bottom: 6px; }
   h1 { font-size: 46px; font-weight: 900; line-height: 1.05; letter-spacing: -1px; }
   .sub { font-size: 15.5px; line-height: 1.55; color: #44445c; margin-top: 14px; max-width: 168mm; }
   .sub b { color: #1a1a2e; }
-
   .loop { margin-top: 12mm; }
-  h2 { font-size: 20px; font-weight: 900; letter-spacing: -0.3px; margin-bottom: 3mm; }
-  h2 .n { color: #FF385C; }
   .loopsteps { display: flex; gap: 3mm; margin-top: 4mm; }
   .loopstep { flex: 1; border: 1px solid #ece9f5; border-radius: 12px; padding: 4mm 3.5mm; background: #fbfaff; }
   .loopstep .big { font-size: 20px; margin-bottom: 2mm; }
   .loopstep h3 { font-size: 12.5px; font-weight: 800; margin-bottom: 1.5mm; }
   .loopstep p { font-size: 10.5px; line-height: 1.45; color: #55556d; }
   .arrowline { text-align: center; font-size: 12px; color: #a89ddd; font-weight: 700; letter-spacing: 4px; margin-top: 2mm; }
-
   .why { margin-top: 9mm; display: flex; gap: 4mm; }
   .whycard { flex: 1; border-radius: 12px; padding: 4.5mm 5mm; color: #fff; }
   .whycard.a { background: linear-gradient(135deg, #1a1a2e, #2d2b55); }
@@ -34,12 +33,9 @@
   .whycard.c { background: linear-gradient(135deg, #7C3AED, #5b21b6); }
   .whycard h3 { font-size: 12.5px; font-weight: 800; margin-bottom: 2mm; }
   .whycard p { font-size: 10.5px; line-height: 1.5; opacity: .92; }
-
   .quote { margin-top: 9mm; border-left: 4px solid #FF385C; padding: 3mm 0 3mm 5mm; font-size: 14.5px; line-height: 1.55; font-weight: 600; color: #2d2b55; font-style: italic; }
 
-  .foot { position: absolute; bottom: 10mm; left: 15mm; right: 15mm; display: flex; justify-content: space-between; font-size: 9.5px; color: #9a97ad; border-top: 1px solid #eee9f8; padding-top: 2.5mm; }
-
-  /* ---------- Pages 2–3 ---------- */
+  /* ---------- Pillars ---------- */
   .pillars { display: flex; flex-direction: column; gap: 5mm; margin-top: 5mm; }
   .pillar { border: 1px solid #ece9f5; border-radius: 14px; overflow: hidden; }
   .pillar-head { padding: 3.2mm 5mm; display: flex; align-items: baseline; gap: 3mm; color: #fff; }
@@ -53,24 +49,115 @@
   .pillar-body { padding: 3.5mm 5mm 4mm; display: grid; grid-template-columns: 1fr 1fr; gap: 2.6mm 6mm; }
   .feat { font-size: 10.5px; line-height: 1.45; color: #44445c; }
   .feat b { color: #1a1a2e; font-weight: 800; }
-  .badge { display: inline-block; font-size: 8px; font-weight: 800; letter-spacing: .5px; border-radius: 99px; padding: 1px 6px; vertical-align: 1px; margin-left: 3px; }
-  .b-live { background: rgba(16,185,129,.12); color: #059669; }
-  .b-beta { background: rgba(124,58,237,.12); color: #7C3AED; }
-  .b-setup { background: rgba(245,158,11,.15); color: #b45309; }
-
   .pitchline { font-size: 11px; font-weight: 700; color: #7C3AED; padding: 0 5mm 3.5mm; font-style: italic; }
 
-  /* ---------- Page 3 extras ---------- */
+  /* ---------- Mockups ---------- */
+  .phone { width: 47mm; border-radius: 5.5mm; border: 2px solid #24243c; background: #fff; overflow: hidden; box-shadow: 0 3mm 6mm rgba(45,43,85,.16); }
+  .phone .notch { height: 4mm; background: #24243c; border-radius: 0 0 3mm 3mm; width: 18mm; margin: 0 auto; }
+  .p-head { display: flex; align-items: center; gap: 2mm; padding: 2.4mm 3mm 2mm; }
+  .p-logo { width: 5.5mm; height: 5.5mm; border-radius: 50%; background: linear-gradient(135deg, #FF385C, #FF6B35 45%, #7C3AED); color: #fff; font-size: 8px; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+  .p-head b { font-size: 9.5px; }
+  .p-head span { margin-left: auto; font-size: 8px; color: #9a97ad; }
+  .brief { margin: 0 2.5mm 2.5mm; background: #f6f1ff; border: 1px solid #eadfff; border-radius: 3mm; padding: 2.6mm; }
+  .brief h5 { font-size: 8.5px; color: #6d28d9; margin-bottom: 1.4mm; }
+  .brief p { font-size: 7.6px; line-height: 1.5; color: #44445c; }
+  .brief p b { color: #1a1a2e; }
+  .goalcard { margin: 0 2.5mm 2.5mm; border: 1px solid #ece9f5; border-radius: 3mm; padding: 2.4mm 2.6mm; }
+  .goalcard h5 { font-size: 8px; margin-bottom: 1.2mm; }
+  .goalcard .lbl { display: flex; justify-content: space-between; font-size: 7px; color: #55556d; margin-bottom: 1mm; }
+  .gbar { height: 2.4mm; border-radius: 99px; background: #efecf8; overflow: hidden; }
+  .gbar i { display: block; height: 100%; width: 78%; border-radius: 99px; background: linear-gradient(90deg, #FF385C, #FF6B35); }
+  .goalcard .pace { font-size: 7px; color: #059669; font-weight: 800; margin-top: 1.2mm; }
+  .kpis { display: flex; gap: 2mm; margin: 0 2.5mm 3mm; }
+  .kpi { flex: 1; border: 1px solid #ece9f5; border-radius: 2.6mm; padding: 2mm; }
+  .kpi .v { font-size: 10.5px; font-weight: 900; }
+  .kpi .k { font-size: 6.6px; color: #9a97ad; margin-top: .6mm; }
+  .kpi .d { font-size: 6.6px; color: #059669; font-weight: 800; }
+
+  .wa { background: #ece5dd; }
+  .wa-head { background: #075E54; color: #fff; display: flex; align-items: center; gap: 2mm; padding: 2.2mm 3mm; }
+  .wa-ava { width: 5.5mm; height: 5.5mm; border-radius: 50%; background: linear-gradient(135deg, #FF385C, #7C3AED); font-size: 9px; display: flex; align-items: center; justify-content: center; }
+  .wa-head b { font-size: 9px; }
+  .wa-head span { font-size: 6.8px; opacity: .8; display: block; }
+  .wa-body { padding: 2.5mm; display: flex; flex-direction: column; gap: 1.8mm; }
+  .bub { max-width: 84%; border-radius: 2.4mm; padding: 1.8mm 2.4mm; font-size: 7.6px; line-height: 1.45; box-shadow: 0 .3mm .8mm rgba(0,0,0,.08); }
+  .bub.me { align-self: flex-end; background: #dcf8c6; border-bottom-right-radius: .8mm; }
+  .bub.owl { align-self: flex-start; background: #fff; border-bottom-left-radius: .8mm; }
+  .bub b { font-weight: 800; }
+  .mini-chart { display: flex; align-items: flex-end; gap: 1.1mm; height: 11mm; margin: 1.6mm 0 1mm; }
+  .mini-chart i { flex: 1; border-radius: .7mm .7mm 0 0; background: linear-gradient(180deg, #FF6B35, #FF385C); display: block; }
+  .bub .cap { font-size: 6.4px; color: #9a97ad; }
+  .replies { display: flex; flex-wrap: wrap; gap: 1.4mm; }
+  .replies span { background: #fff; border: 1px solid #cfe8e3; color: #075E54; font-size: 6.8px; font-weight: 700; border-radius: 99px; padding: 1mm 2.2mm; }
+
+  /* ---------- Page 3 channels ---------- */
+  .chan-wrap { display: flex; gap: 6mm; margin-top: 5mm; }
+  .chan-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-content: space-between; }
+  .chan { border: 1px solid #ece9f5; border-radius: 10px; padding: 3mm 3.4mm; background: #fbfaff; }
+  .chan h4 { font-size: 11px; font-weight: 800; margin-bottom: 1.2mm; }
+  .chan p { font-size: 9.3px; line-height: 1.45; color: #55556d; }
+  .phones { display: flex; flex-direction: column; gap: 4mm; }
+  .agents { margin-top: 5mm; border-radius: 12px; background: linear-gradient(120deg, #1a1a2e, #2d2b55); color: #fff; padding: 4mm 5mm; display: flex; gap: 6mm; align-items: center; }
+  .agents .txt { flex: 1; }
+  .agents h4 { font-size: 12.5px; font-weight: 800; margin-bottom: 1.6mm; }
+  .agents p { font-size: 10px; line-height: 1.5; opacity: .9; }
+  .chatgpt { width: 62mm; background: #212121; border-radius: 3mm; padding: 3mm; font-size: 8px; }
+  .chatgpt .q { color: #ececec; background: #303030; border-radius: 2mm; padding: 1.8mm 2.4mm; margin-bottom: 1.8mm; }
+  .chatgpt .a { color: #d9d9e3; line-height: 1.5; }
+  .chatgpt .a b { color: #fff; }
+  .chatgpt .src { margin-top: 1.6mm; font-size: 6.6px; color: #8e8ea0; }
+
+  /* ---------- Page 4 marketer ---------- */
+  .flow { display: flex; align-items: center; gap: 2mm; margin-top: 4mm; }
+  .flow .fstep { flex: 1; text-align: center; border-radius: 10px; padding: 3mm 2mm; color: #fff; font-size: 10px; font-weight: 800; }
+  .flow .arr { color: #a89ddd; font-weight: 900; font-size: 13px; }
+  .mkgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 5mm; }
+  .mk { border: 1px solid #ece9f5; border-radius: 12px; padding: 3.5mm 4mm; background: #fbfaff; }
+  .mk h4 { font-size: 11.5px; font-weight: 800; margin-bottom: 1.6mm; }
+  .mk p { font-size: 9.6px; line-height: 1.5; color: #55556d; }
+  .mk p b { color: #1a1a2e; }
+  .journey { border: 1px solid #ece9f5; border-radius: 12px; padding: 3.5mm 4mm; background: #fff; }
+  .journey h4 { font-size: 11.5px; font-weight: 800; margin-bottom: 2.4mm; }
+  .jrow { display: flex; align-items: center; gap: 2.4mm; margin-bottom: 2mm; }
+  .jrow .jl { width: 26mm; font-size: 8.6px; font-weight: 700; color: #2d2b55; }
+  .jbar { flex: 1; height: 4.6mm; border-radius: 2mm; background: #efecf8; overflow: hidden; }
+  .jbar i { display: block; height: 100%; border-radius: 2mm; background: linear-gradient(90deg, #7C3AED, #a78bfa); }
+  .jrow .jv { width: 17mm; font-size: 8.2px; color: #55556d; text-align: right; }
+  .jconv { margin-top: 2.4mm; font-size: 9px; font-weight: 800; color: #059669; }
+
+  /* ---------- Page 5 event ops ---------- */
+  .ops-wrap { display: flex; gap: 6mm; margin-top: 5mm; }
+  .ops-feats { flex: 1.06; display: flex; flex-direction: column; gap: 2.9mm; }
+  .ops-feat { font-size: 10.3px; line-height: 1.5; color: #44445c; }
+  .ops-feat b { color: #1a1a2e; font-weight: 800; }
+  .opsboard { width: 84mm; border: 1px solid #ece9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 3mm 6mm rgba(45,43,85,.12); align-self: flex-start; }
+  .opsboard .ob-head { background: #1a1a2e; color: #fff; padding: 2.6mm 3.5mm; display: flex; justify-content: space-between; align-items: center; }
+  .opsboard .ob-head b { font-size: 10px; }
+  .opsboard .ob-head span { font-size: 7.6px; color: #34d399; font-weight: 800; }
+  .ob-body { padding: 3mm 3.5mm; }
+  .ob-stats { display: flex; gap: 2mm; margin-bottom: 3mm; }
+  .ob-stat { flex: 1; background: #fbfaff; border: 1px solid #ece9f5; border-radius: 2.4mm; padding: 1.8mm 2mm; }
+  .ob-stat .v { font-size: 11px; font-weight: 900; }
+  .ob-stat .k { font-size: 6.4px; color: #9a97ad; margin-top: .4mm; }
+  .ob-stat .v.warn { color: #FF6B35; }
+  .heat h5 { font-size: 8.4px; font-weight: 800; margin-bottom: 1.6mm; }
+  .heat table { border-collapse: separate; border-spacing: .8mm; width: 100%; }
+  .heat td, .heat th { font-size: 6.4px; color: #55556d; }
+  .heat th { text-align: right; padding-right: 1mm; font-weight: 700; white-space: nowrap; }
+  .heat td.c { width: 7.6mm; height: 4.6mm; border-radius: 1mm; }
+  .heat .hx { text-align: center; color: #9a97ad; font-weight: 700; }
+  .h0 { background: #f1eefb; } .h1 { background: #ddd3f6; } .h2 { background: #b79df0; } .h3 { background: #8f66e8; } .h4 { background: #FF6B35; } .h5 { background: #FF385C; }
+  .heat .legend { display: flex; align-items: center; gap: 1.6mm; font-size: 6.4px; color: #9a97ad; margin-top: 1.6mm; }
+  .heat .legend i { width: 4.6mm; height: 2.6mm; border-radius: .8mm; display: inline-block; }
+  .ob-feed { margin-top: 2.6mm; border-top: 1px solid #efecf8; padding-top: 2.2mm; }
+  .ob-feed div { font-size: 7.2px; color: #55556d; line-height: 1.7; }
+  .ob-feed b { color: #1a1a2e; }
+
+  /* ---------- Page 6 ---------- */
   table.compare { width: 100%; border-collapse: collapse; margin-top: 4mm; }
   table.compare th { text-align: left; font-size: 10.5px; font-weight: 800; padding: 2.5mm 3mm; background: #f6f1ff; color: #2d2b55; border-bottom: 2px solid #7C3AED; }
   table.compare td { font-size: 10.5px; line-height: 1.45; color: #44445c; padding: 2.5mm 3mm; border-bottom: 1px solid #efecf8; vertical-align: top; }
   table.compare td:first-child { font-weight: 800; color: #1a1a2e; white-space: nowrap; }
-
-  .trust { display: flex; gap: 4mm; margin-top: 4mm; }
-  .trustcard { flex: 1; background: #fbfaff; border: 1px solid #ece9f5; border-radius: 12px; padding: 3.5mm 4mm; }
-  .trustcard h4 { font-size: 11.5px; font-weight: 800; margin-bottom: 1.5mm; }
-  .trustcard p { font-size: 10px; line-height: 1.5; color: #55556d; }
-
   .cta { margin-top: 4mm; border-radius: 16px; padding: 5mm 8mm 5.5mm; color: #fff; background: linear-gradient(120deg, #1a1a2e 0%, #2d2b55 55%, #4c1d95 100%); }
   .cta h2 { color: #fff; font-size: 19px; margin-bottom: 2mm; }
   .cta p { font-size: 11.5px; line-height: 1.55; opacity: .92; max-width: 165mm; }
@@ -105,7 +192,7 @@
 
   <div class="quote">"It's not dashboards <i>and</i> email <i>and</i> reports — it's one living loop. Your data tells you what to do, you do it in the same place, and the result makes the next call smarter. The longer you use Pulse, the better it gets."</div>
 
-  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 1 of 3</span></div>
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 1 of 6</span></div>
 </div>
 
 <!-- ================= PAGE 2 ================= -->
@@ -118,12 +205,12 @@
     <div class="pillar">
       <div class="pillar-head p1"><h3>👁 SEE — dashboards &amp; AI insight</h3><span>know what's happening, without digging</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Live dashboards</b><span class="badge b-live">LIVE</span> — KPIs, tables and charts on your real ticketing &amp; GA4 data, with drill-through. Mobile-first and installable as an app.</div>
-        <div class="feat"><b>Personalised AI briefing</b><span class="badge b-live">LIVE</span> — land on a plain-English summary of what matters right now, tailored to what you follow.</div>
-        <div class="feat"><b>Per-tile AI insight</b><span class="badge b-live">LIVE</span> — tap any tile and the Owl explains the numbers and answers follow-ups, grounded in that data.</div>
-        <div class="feat"><b>Scheduled digests</b><span class="badge b-live">LIVE</span> — role-specific email briefings (exec / marketing / finance / ops) on your cadence, with charts rendered in the email.</div>
-        <div class="feat"><b>Share any insight</b><span class="badge b-live">LIVE</span> — hand a finding to email, WhatsApp or Slack in one tap, with a link back to the view.</div>
-        <div class="feat"><b>Goals with pace &amp; forecast</b><span class="badge b-beta">BETA</span> — set a North Star target; every screen shows ahead / on-track / behind vs last event's real sell-curve, with a projected landing.</div>
+        <div class="feat"><b>Live dashboards</b> — KPIs, tables and charts on your real ticketing &amp; GA4 data, with drill-through. Mobile-first and installable as an app.</div>
+        <div class="feat"><b>Personalised AI briefing</b> — land on a plain-English summary of what matters right now, tailored to what you follow.</div>
+        <div class="feat"><b>Per-tile AI insight</b> — tap any tile and the Owl explains the numbers and answers follow-ups, grounded in that data.</div>
+        <div class="feat"><b>Scheduled digests</b> — role-specific email briefings (exec / marketing / finance / ops) on your cadence, with charts rendered in the email.</div>
+        <div class="feat"><b>Share any insight</b> — hand a finding to email, WhatsApp or Slack in one tap, with a link back to the view.</div>
+        <div class="feat"><b>Goals with pace &amp; forecast</b> — set a North Star target; every screen shows ahead / on-track / behind vs last event's real sell-curve, with a projected landing.</div>
       </div>
       <div class="pitchline">"Your data, read for you — open the app and you already know what changed and what to do."</div>
     </div>
@@ -131,10 +218,10 @@
     <div class="pillar">
       <div class="pillar-head p2"><h3>🦉 ASK — your AI Data Analyst, everywhere</h3><span>plain-language answers, only from your data</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Ask the Owl in-app</b><span class="badge b-beta">BETA</span> — "what's on sale right now?", "how does this compare to last year?" — conversational answers scoped to your data.</div>
-        <div class="feat"><b>The Owl on WhatsApp</b><span class="badge b-beta">BETA</span> — message the Owl from your own WhatsApp: answers, charts as images, tappable follow-ups, daily updates, even draft a campaign by reply button.</div>
-        <div class="feat"><b>Reads your Google Drive</b><span class="badge b-setup">NEEDS SETUP</span> — share budgets, marketing plans or sponsor decks and the Owl answers from them alongside live sales data.</div>
-        <div class="feat"><b>Fan Owl on your website</b><span class="badge b-beta">BETA</span> — a booking-guide widget on your public event site: answers FAQs from your knowledge base, recommends the right ticket, links to your own checkout, and captures opted-in fans for remarketing.</div>
+        <div class="feat"><b>Ask the Owl in-app</b> — "what's on sale right now?", "how does this compare to last year?" — conversational answers scoped to your data.</div>
+        <div class="feat"><b>The Owl on WhatsApp</b> — message the Owl from your own WhatsApp: answers, charts as images, tappable follow-ups, daily updates, even draft a campaign by reply button.</div>
+        <div class="feat"><b>Reads your Google Drive</b> — share budgets, marketing plans or sponsor decks and the Owl answers from them alongside live sales data.</div>
+        <div class="feat"><b>Fan Owl on your website</b> — a booking-guide widget on your public event site: answers FAQs from your knowledge base, recommends the right ticket, links to your own checkout, and captures opted-in fans for remarketing.</div>
       </div>
       <div class="pitchline">"Ask your data anything, in plain language — your own analyst, in your pocket."</div>
     </div>
@@ -142,48 +229,239 @@
     <div class="pillar">
       <div class="pillar-head p3"><h3>⚡ ACT — Engage, the campaign engine</h3><span>from seeing a cohort to reaching it, in one click</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Live segments</b><span class="badge b-live">LIVE</span> — build audiences from a dashboard tile, a CSV, or a linked Google Sheet; combine with union / intersect / exclude (e.g. abandoned carts <i>minus</i> already-called). Always current at send time.</div>
-        <div class="feat"><b>Email &amp; SMS campaigns</b><span class="badge b-live">LIVE</span> — AI-drafted copy, a drag-and-drop block builder, AI-designed layouts &amp; banners, merge fields, promo codes, full open/click tracking.</div>
-        <div class="feat"><b>Drip automations</b><span class="badge b-live">LIVE</span> — abandoned-cart recovery journeys that catch new abandoners in real time, stop automatically when someone buys, and show a per-step conversion waterfall.</div>
-        <div class="feat"><b>Ad-platform sync</b><span class="badge b-setup">NEEDS CONNECTION</span> — push a segment to Meta or TikTok as a Custom Audience (privacy-safe, hashed), auto-synced daily; see spend, ROAS and paid results next to ticket sales.</div>
-        <div class="feat"><b>Approvals &amp; consent built in</b><span class="badge b-live">LIVE</span> — nothing sends without explicit approval; POPIA-aware consent enforced per channel; send caps stop costly mistakes.</div>
-        <div class="feat"><b>Owl auto-pilot</b><span class="badge b-live">LIVE</span> — one tap turns an AI suggestion into a drafted campaign; it still rides the normal review + approval gates.</div>
+        <div class="feat"><b>Live segments</b> — build audiences from a dashboard tile, a CSV, or a linked Google Sheet; combine with union / intersect / exclude (e.g. abandoned carts <i>minus</i> already-called). Always current at send time.</div>
+        <div class="feat"><b>Email &amp; SMS campaigns</b> — AI-drafted copy, a drag-and-drop block builder, AI-designed layouts &amp; banners, merge fields, promo codes, full open/click tracking.</div>
+        <div class="feat"><b>Drip automations</b> — abandoned-cart recovery journeys that catch new abandoners in real time, stop automatically when someone buys, and show a per-step conversion waterfall.</div>
+        <div class="feat"><b>Ad-platform sync</b> — push a segment to Meta or TikTok as a Custom Audience (privacy-safe, hashed), auto-synced daily; see spend, ROAS and paid results next to ticket sales.</div>
+        <div class="feat"><b>Approvals &amp; consent built in</b> — nothing sends without explicit approval; POPIA-aware consent enforced per channel; send caps stop costly mistakes.</div>
+        <div class="feat"><b>Owl auto-pilot</b> — one tap turns an AI suggestion into a drafted campaign; it still rides the normal review + approval gates.</div>
       </div>
       <div class="pitchline">"Personalised, on-brand email + SMS to a precise audience — with approval gates and real tracking, all from the same data."</div>
     </div>
   </div>
 
-  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 2 of 3</span></div>
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 2 of 6</span></div>
 </div>
 
-<!-- ================= PAGE 3 ================= -->
+<!-- ================= PAGE 3 — CHANNELS ================= -->
+<div class="page">
+  <div class="kicker">Meet your team where they are</div>
+  <h2 style="font-size:24px;">One brain. <span class="grad-text">Every channel.</span></h2>
+  <div class="rule" style="width:40mm; margin-top:2mm;"></div>
+  <p style="font-size:11.5px; color:#55556d; margin-top:3mm; max-width:170mm; line-height:1.5;">The same governed data and the same Owl, reachable wherever your team (and your fans) already live. Nobody has to change how they work — Pulse comes to them.</p>
+
+  <div class="chan-wrap">
+    <div class="chan-grid">
+      <div class="chan"><h4>📱 The Pulse app</h4><p>Mobile-first web app that installs like a native app and sends <b>push notifications even when closed</b> — a nudge lands, you tap, you act.</p></div>
+      <div class="chan"><h4>💬 WhatsApp</h4><p>Chat to the Owl from your own WhatsApp: answers, charts as images, daily updates, event-night mini reports, team broadcast lists.</p></div>
+      <div class="chan"><h4>🤖 ChatGPT &amp; Claude</h4><p>Connect Pulse to the AI tools you already use — ask about your events from ChatGPT or Claude, powered by the Pulse connector (MCP).</p></div>
+      <div class="chan"><h4>✉️ Email</h4><p>Scheduled role-based digests, campaign sends from your own domain — and CC the Owl on a settlement email and it files itself.</p></div>
+      <div class="chan"><h4>📲 SMS</h4><p>Campaigns, urgent alerts and event-night reports by text — for the moments that can't wait for an inbox.</p></div>
+      <div class="chan"><h4>💼 Slack</h4><p>Mirror Pulse notifications into your team's Slack channel, and share any insight or tile straight into a conversation.</p></div>
+      <div class="chan"><h4>🌐 Your website</h4><p>The Fan Owl widget turns your public event site into a guided ticket shop — answering, recommending and selling on every page.</p></div>
+      <div class="chan"><h4>🎫 The Howler portal</h4><p>The Owl embedded inside Howler's organizer portal — ask about ticket sales without leaving the back end you use every day.</p></div>
+    </div>
+
+    <div class="phones">
+      <!-- Phone 1: home briefing -->
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="p-head"><div class="p-logo">K</div><b>Kunye Live</b><span>⚙</span></div>
+        <div class="brief">
+          <h5>🦉 Your morning briefing</h5>
+          <p><b>Strong night:</b> 412 tickets sold (+31% vs same day last event). VIP is pacing to sell out ~11 days early — <b>consider releasing the next tier</b>. Cart abandonment rose to 18%; a recovery journey to 96 abandoners is suggested. <b>Tap to act →</b></p>
+        </div>
+        <div class="goalcard">
+          <h5>🎯 North Star — 15 000 tickets</h5>
+          <div class="lbl"><span>11 640 sold</span><span>78%</span></div>
+          <div class="gbar"><i></i></div>
+          <div class="pace">▲ Ahead of pace · projected 15 400</div>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="v">R4.2m</div><div class="k">Gross revenue</div><div class="d">▲ 12% WoW</div></div>
+          <div class="kpi"><div class="v">2 340</div><div class="k">VIP remaining</div><div class="d">▼ selling fast</div></div>
+        </div>
+      </div>
+      <!-- Phone 2: WhatsApp Owl -->
+      <div class="phone">
+        <div class="notch" style="background:#075E54;"></div>
+        <div class="wa">
+          <div class="wa-head"><div class="wa-ava">🦉</div><div><b>Pulse Owl</b><span>online</span></div></div>
+          <div class="wa-body">
+            <div class="bub me">how are ticket sales looking today?</div>
+            <div class="bub owl"><b>Good morning! 3 187 tickets</b> so far today — 22% ahead of the same day last year. General is your fastest mover.
+              <div class="mini-chart"><i style="height:34%"></i><i style="height:46%"></i><i style="height:42%"></i><i style="height:58%"></i><i style="height:71%"></i><i style="height:64%"></i><i style="height:92%"></i></div>
+              <div class="cap">Daily sales — last 7 days</div>
+            </div>
+            <div class="replies"><span>Break down by ticket type</span><span>Compare to last year</span><span>Alert me at 5 000</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="agents">
+    <div class="txt">
+      <h4>🤝 Works with the AI your team already uses</h4>
+      <p>The Pulse connector plugs your event data into <b>Claude and ChatGPT</b> (including Deep Research). Your marketing lead can ask "which campaign converted best?" from the tool they already have open — same data, same security boundary, read-only, per-client keys you control.</p>
+    </div>
+    <div class="chatgpt">
+      <div class="q">How big is the VIP segment, and how did the launch campaign do?</div>
+      <div class="a">Your <b>VIP Buyers</b> segment currently holds <b>1 842 contactable people</b>. The launch campaign reached 14 210, with a <b>38% open rate</b> and <b>612 tracked purchases</b>.</div>
+      <div class="src">🦉 via Pulse connector · scoped to your events</div>
+    </div>
+  </div>
+
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 3 of 6</span></div>
+</div>
+
+<!-- ================= PAGE 4 — MARKETER'S DREAM ================= -->
+<div class="page">
+  <div class="kicker">For the growth team</div>
+  <h2 style="font-size:24px;">The marketer's dream, <span class="grad-text">on one platform</span></h2>
+  <div class="rule" style="width:40mm; margin-top:2mm;"></div>
+  <p style="font-size:11.5px; color:#55556d; margin-top:3mm; max-width:172mm; line-height:1.5;">Everything a growth marketer normally stitches together across five subscriptions — audiences, journeys, ad platforms, creative, attribution — running on <b style="color:#1a1a2e;">one live, governed dataset</b>. No exports. No stale lists. No copy-paste between tools.</p>
+
+  <div class="flow">
+    <div class="fstep" style="background:linear-gradient(135deg,#1a1a2e,#2d2b55);">📡 LIVE DATA<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">ticketing · cashless · web</span></div>
+    <div class="arr">→</div>
+    <div class="fstep" style="background:linear-gradient(135deg,#FF385C,#d92b4b);">🎯 AUDIENCES<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">always-live segments</span></div>
+    <div class="arr">→</div>
+    <div class="fstep" style="background:linear-gradient(135deg,#FF6B35,#f59e0b);">🗺 JOURNEYS<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">email · SMS · drips</span></div>
+    <div class="arr">→</div>
+    <div class="fstep" style="background:linear-gradient(135deg,#7C3AED,#5b21b6);">📣 AD PLATFORMS<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">Meta · TikTok sync</span></div>
+    <div class="arr">→</div>
+    <div class="fstep" style="background:linear-gradient(135deg,#059669,#047857);">💰 REVENUE<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">tracked per recipient</span></div>
+  </div>
+
+  <div class="mkgrid">
+    <div class="mk"><h4>🎯 Audiences that never go stale</h4><p>Build a segment from a dashboard tile, a sheet or a list — it <b>re-resolves live at send time</b>. Combine sources (union / intersect / exclude), subtract suppression lists, filter on any column: ticket type, city, age, spend.</p></div>
+    <div class="mk"><h4>📣 Live data → your ad accounts</h4><p>Push any segment to <b>Meta or TikTok as a Custom Audience</b> — hashed before it leaves, mirrored daily, leavers removed automatically. Exclude buyers from prospecting. Then see <b>spend, CPC and ROAS next to actual ticket sales</b>.</p></div>
+    <div class="journey">
+      <h4>🗺 Complex journeys, simple setup</h4>
+      <div class="jrow"><div class="jl">1 · Reminder email</div><div class="jbar"><i style="width:100%"></i></div><div class="jv">2 480 sent</div></div>
+      <div class="jrow"><div class="jl">2 · +4h nudge</div><div class="jbar"><i style="width:64%"></i></div><div class="jv">58% opened</div></div>
+      <div class="jrow"><div class="jl">3 · +24h promo SMS</div><div class="jbar"><i style="width:38%"></i></div><div class="jv">31% clicked</div></div>
+      <div class="jconv">✓ 214 recovered purchases · buyers auto-exit the journey</div>
+      <p style="font-size:9.6px; color:#55556d; margin-top:2mm; line-height:1.5;">Timed multi-step drips with per-step copy, promo and delays — true real-time abandoned-cart, or work an existing list forward.</p>
+    </div>
+    <div class="mk"><h4>✨ An AI creative studio inside</h4><p>The Owl drafts the copy, designs the <b>whole themed email layout</b>, and draws <b>on-brand banners</b> from a one-line prompt. Pick a theme, tweak in the drag-and-drop builder, save as a template. Any campaign in any language.</p></div>
+    <div class="mk"><h4>💰 Attribution you can defend</h4><p>Per-recipient <b>opens, clicks and tracked purchases</b>; UTM on every link; unique-per-person promo codes that tie a sale to a send. Campaign results flow back into the same dashboards you plan from.</p></div>
+    <div class="mk"><h4>🛡 Guardrails a CMO will love</h4><p><b>Approval gates</b> before anything sends, POPIA-aware per-channel consent, one-click unsubscribe, audience and SMS <b>send caps</b> so a big blast never becomes an expensive accident.</p></div>
+  </div>
+
+  <div class="quote" style="margin-top:6mm;">"From <i>seeing</i> a cohort on a dashboard to a live journey, an ad audience and tracked revenue — without leaving the platform or exporting a single CSV. That's the whole pitch."</div>
+
+  <div style="margin-top:7mm; border-radius:14px; background:linear-gradient(120deg,#1a1a2e,#2d2b55); color:#fff; padding:5mm 6mm;">
+    <div style="font-size:13px; font-weight:900; margin-bottom:2.5mm;">One platform replaces the pile</div>
+    <div style="display:flex; gap:2.5mm; flex-wrap:wrap;">
+      <span style="font-size:9.5px; font-weight:700; border:1px solid rgba(255,255,255,.25); border-radius:99px; padding:1.6mm 4mm; opacity:.9;">✕ the email tool</span>
+      <span style="font-size:9.5px; font-weight:700; border:1px solid rgba(255,255,255,.25); border-radius:99px; padding:1.6mm 4mm; opacity:.9;">✕ the SMS gateway</span>
+      <span style="font-size:9.5px; font-weight:700; border:1px solid rgba(255,255,255,.25); border-radius:99px; padding:1.6mm 4mm; opacity:.9;">✕ the audience CSV uploads</span>
+      <span style="font-size:9.5px; font-weight:700; border:1px solid rgba(255,255,255,.25); border-radius:99px; padding:1.6mm 4mm; opacity:.9;">✕ the attribution spreadsheet</span>
+      <span style="font-size:9.5px; font-weight:700; border:1px solid rgba(255,255,255,.25); border-radius:99px; padding:1.6mm 4mm; opacity:.9;">✕ the weekly report deck</span>
+      <span style="font-size:9.5px; font-weight:800; border-radius:99px; padding:1.6mm 4mm; background:linear-gradient(90deg,#FF385C,#FF6B35);">✓ one login · one dataset · one loop</span>
+    </div>
+    <div style="font-size:10px; opacity:.85; margin-top:2.5mm; line-height:1.5;">And because every piece runs on the same governed data, each one makes the others smarter — the ad audience knows who already bought, the journey knows who converted, and the briefing knows what worked.</div>
+  </div>
+
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 4 of 6</span></div>
+</div>
+
+<!-- ================= PAGE 5 — EVENT OPS ================= -->
+<div class="page">
+  <div class="kicker">On the ground</div>
+  <h2 style="font-size:24px;">Event Ops — your operations <span class="grad-text">command centre</span></h2>
+  <div class="rule" style="width:40mm; margin-top:2mm;"></div>
+  <p style="font-size:11.5px; color:#55556d; margin-top:3mm; max-width:172mm; line-height:1.5;">A live overview of how the whole event is <b style="color:#1a1a2e;">flowing</b> — the gates, the bars, the devices, the data itself. Replaces the clipboard, the spreadsheet and the frantic WhatsApp group with one phone-first console.</p>
+
+  <div class="ops-wrap">
+    <div class="ops-feats">
+      <div class="ops-feat"><b>🗺 The live overview</b> — one board with the whole operation: device counts by state, per-station deployment, open issues and a live activity feed. The "where is everything right now" view.</div>
+      <div class="ops-feat"><b>📟 Every device tracked</b> — scanners, payment devices, radios, printers: bulk-register a batch, then <b>scan to move</b> between the store and stations. Every move lands in an append-only audit trail — nothing is lost to memory, and every device is accounted for at event close.</div>
+      <div class="ops-feat"><b>🔥 Hotspots &amp; the heat map</b> — every station's activity through the day in time blocks: watch the crowd move from gates to bars, spot the station that's overloaded and the one that's dead — and staff accordingly, tonight and next year.</div>
+      <div class="ops-feat"><b>📶 Connectivity &amp; data health</b> — is data from every station actually arriving? Minutes-since-last-record per station with alerting when a stream goes quiet; a device roster showing exactly <b>which units are offline and for how long</b>. You'll know a scanner died before the queue does.</div>
+      <div class="ops-feat"><b>🩺 AI Diagnose + event report</b> — one tap per station gets an AI verdict with ranked concerns and a suggested fix; after the event, an AI-drafted diagnostics report for the debrief — with a connectivity section clean enough to forward to the network provider.</div>
+      <div class="ops-feat"><b>⚡ Live updates while doors are open</b> — a compact multi-metric report to the team every 15–120 minutes: people through the gates with pace per hour, bar revenue, top-3 vendors, device health, % of last year — to inbox, push, SMS and WhatsApp.</div>
+      <div class="ops-feat"><b>🚨 Alerts on any number</b> — "tell me when VIP drops below 100": Pulse watches it and taps you on the shoulder the moment it crosses. Cooldowns and quiet hours keep it calm.</div>
+    </div>
+
+    <div class="opsboard">
+      <div class="ob-head"><b>🎪 Event Ops — Saturday, live</b><span>● LIVE</span></div>
+      <div class="ob-body">
+        <div class="ob-stats">
+          <div class="ob-stat"><div class="v">142</div><div class="k">devices deployed</div></div>
+          <div class="ob-stat"><div class="v">96%</div><div class="k">online now</div></div>
+          <div class="ob-stat"><div class="v warn">3</div><div class="k">open issues</div></div>
+          <div class="ob-stat"><div class="v">18 460</div><div class="k">through gates</div></div>
+        </div>
+        <div class="heat">
+          <h5>Station activity heat map</h5>
+          <table>
+            <tr><th></th><td class="hx">16:00</td><td class="hx">17:00</td><td class="hx">18:00</td><td class="hx">19:00</td><td class="hx">20:00</td><td class="hx">21:00</td><td class="hx">22:00</td></tr>
+            <tr><th>Gate A</th><td class="c h2"></td><td class="c h4"></td><td class="c h5"></td><td class="c h4"></td><td class="c h2"></td><td class="c h1"></td><td class="c h0"></td></tr>
+            <tr><th>Gate B</th><td class="c h1"></td><td class="c h3"></td><td class="c h4"></td><td class="c h3"></td><td class="c h1"></td><td class="c h1"></td><td class="c h0"></td></tr>
+            <tr><th>Main Bar</th><td class="c h0"></td><td class="c h1"></td><td class="c h2"></td><td class="c h3"></td><td class="c h4"></td><td class="c h5"></td><td class="c h4"></td></tr>
+            <tr><th>VIP Bar</th><td class="c h0"></td><td class="c h1"></td><td class="c h1"></td><td class="c h2"></td><td class="c h3"></td><td class="c h4"></td><td class="c h3"></td></tr>
+            <tr><th>Top-up 1</th><td class="c h1"></td><td class="c h2"></td><td class="c h3"></td><td class="c h2"></td><td class="c h2"></td><td class="c h1"></td><td class="c h0"></td></tr>
+          </table>
+          <div class="legend"><span>quiet</span><i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i><span>hotspot</span></div>
+        </div>
+        <div class="ob-feed">
+          <div>🔴 <b>SL034 (Main Bar)</b> offline 6 min — liaison dispatched</div>
+          <div>⚠️ <b>Gate B</b> pace dropped 40% — 1 scanner idle</div>
+          <div>✅ <b>SL017</b> battery issue resolved · back at VIP Bar</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="quote" style="margin-top:5mm;">"The crowd's flow, every device, every station and the data pipe itself — one live board. You'll know a hotspot is forming, or a scanner has died, before anyone on the ground has to tell you."</div>
+
+  <div style="display:flex; gap:4mm; margin-top:6mm;">
+    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#06B6D4,#0891b2);">
+      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">🧾 At event close</div>
+      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">Every device accounted for — no "missing" unknowns, and a full history of where each one went, who moved it and what went wrong.</div>
+    </div>
+    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#7C3AED,#5b21b6);">
+      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">📱 The whole night, one thread</div>
+      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">Live updates stack into a single inbox thread — scroll the night's story at the debrief, from doors to last call.</div>
+    </div>
+    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#1a1a2e,#2d2b55);">
+      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">📶 Evidence, not arguments</div>
+      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">If connectivity was the culprit, the AI report gives you a neutral, data-backed section you can forward straight to the network provider.</div>
+    </div>
+  </div>
+
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 5 of 6</span></div>
+</div>
+
+<!-- ================= PAGE 6 ================= -->
 <div class="page">
   <div class="kicker">Run it, prove it, own it</div>
-  <h2 style="font-size:24px;">Built for event day — and for <span class="grad-text">your brand</span></h2>
+  <h2 style="font-size:24px;">Your brand. Your data. <span class="grad-text">Your platform.</span></h2>
   <div class="rule" style="width:40mm; margin-top:2mm;"></div>
 
   <div class="pillars">
     <div class="pillar">
-      <div class="pillar-head p4"><h3>🎪 RUN — event day &amp; operations</h3><span>your control room, in your pocket</span></div>
+      <div class="pillar-head p4"><h3>🗂 RUN — the everyday relationship</h3><span>everything with Howler, in one tracked place</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Alerts</b><span class="badge b-beta">BETA</span> — "tell me when VIP drops below 100": Pulse watches the number and pings you via push, email or SMS the moment it crosses. No spam — cooldowns, quiet hours, plain-English rules.</div>
-        <div class="feat"><b>⚡ Live updates</b><span class="badge b-beta">BETA</span> — while the event runs, a compact multi-metric report every 15–120 min: gates pace, bar revenue, top vendors, device health, % of last year — to inbox, push, SMS and WhatsApp.</div>
-        <div class="feat"><b>Messaging inbox</b><span class="badge b-live">LIVE</span> — a two-way client↔Howler inbox with read/acknowledge trails; important notes and approvals stop living in scattered WhatsApps.</div>
-        <div class="feat"><b>Settlements that read themselves</b><span class="badge b-live">LIVE</span> — settlement PDFs become clean interactive statements; CC the Owl on the email and it files &amp; publishes them automatically (human-checked if totals don't reconcile).</div>
-        <div class="feat"><b>Event Ops</b><span class="badge b-beta">BETA</span> — track every scanner, payment device and station live: scan to move, log issues, full audit trail. Every device accounted for at event close.</div>
-        <div class="feat"><b>Data health</b><span class="badge b-beta">BETA</span> — know a scanner has stopped sending data before the queue does, with an AI diagnostics report you can forward to the network provider.</div>
+        <div class="feat"><b>Messaging inbox</b> — a two-way client↔Howler inbox with read/acknowledge trails; important notes and approvals stop living in scattered WhatsApps.</div>
+        <div class="feat"><b>Settlements that read themselves</b> — settlement PDFs become clean interactive statements; CC the Owl on the email and it checks the totals and files them automatically.</div>
+        <div class="feat"><b>Status notices</b> — if anything's ever up with the platform, you see a proper status timeline in-app and hear about it before you have to ask.</div>
+        <div class="feat"><b>Documents in one place</b> — every event's settlements and documents together, searchable, next to the numbers they explain.</div>
       </div>
     </div>
 
     <div class="pillar">
       <div class="pillar-head p5"><h3>🔒 OWN — white-label, security &amp; openness</h3><span>your brand, your accounts, your data</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Fully white-label</b><span class="badge b-live">LIVE</span> — your logo, colours and sender name everywhere; emails from your own domain once verified; even a vanity login page that feels like <i>your</i> product.</div>
-        <div class="feat"><b>Your language &amp; currency</b><span class="badge b-live">LIVE</span> — AI insights, briefings, digests and campaign copy in your reporting currency and your choice of language.</div>
-        <div class="feat"><b>Watertight data scoping</b><span class="badge b-live">LIVE</span> — every query is force-filtered to your events server-side; it can't be bypassed and fails closed. One client can never see another's data.</div>
-        <div class="feat"><b>POPIA-minded by design</b><span class="badge b-live">LIVE</span> — per-channel consent, one-click unsubscribe, hashed identities for ad sync, no cross-client data pooling.</div>
-        <div class="feat"><b>Open by design (API + AI agents)</b><span class="badge b-beta">BETA</span> — read-only, per-client API keys; point Claude or ChatGPT at your data via MCP and ask questions in plain language. Your data is never locked in.</div>
-        <div class="feat"><b>Self-service, with backup</b><span class="badge b-live">LIVE</span> — manage everything yourself in Settings, or your Howler team does it for you. Your named Howler contacts are one tap away.</div>
+        <div class="feat"><b>Fully white-label</b> — your logo, colours and sender name everywhere; emails from your own domain; even a vanity login page that feels like <i>your</i> product.</div>
+        <div class="feat"><b>Your language &amp; currency</b> — AI insights, briefings, digests and campaign copy in your reporting currency and your choice of language.</div>
+        <div class="feat"><b>Watertight data scoping</b> — every query is force-filtered to your events server-side; it can't be bypassed and fails closed. One client can never see another's data.</div>
+        <div class="feat"><b>POPIA-minded by design</b> — per-channel consent, one-click unsubscribe, hashed identities for ad sync, no cross-client data pooling.</div>
+        <div class="feat"><b>Open by design</b> — read-only, per-client API keys; connect Claude or ChatGPT to your data. Never locked in.</div>
+        <div class="feat"><b>Self-service, with backup</b> — manage everything yourself in Settings, or your Howler team does it for you; your named contacts are one tap away.</div>
       </div>
     </div>
   </div>
@@ -193,7 +471,7 @@
     <tr><td>Looker / Tableau</td><td>You see the problem, then export a CSV and switch tools to act on it.</td><td>See it and act on it in the same governed place — campaign, approval, result.</td></tr>
     <tr><td>Mailchimp / Klaviyo</td><td>Audiences go stale the moment you upload them.</td><td>Audiences built from live ticketing data that re-resolve at send time.</td></tr>
     <tr><td>Email + WhatsApp threads</td><td>Approvals, settlements and "did you see this?" get lost.</td><td>One inbox with read/ack trails; settlements that file themselves.</td></tr>
-    <tr><td>Gut feel on event night</td><td>You find out about problems when the queue does.</td><td>Alerts + live mini-reports every 30 minutes, on your phone.</td></tr>
+    <tr><td>Gut feel on event night</td><td>You find out about problems when the queue does.</td><td>A live ops board, alerts, and a mini report every 30 minutes — on your phone.</td></tr>
   </table>
 
   <div class="cta">
@@ -202,5 +480,5 @@
     <span class="tag">Ask your Howler account manager for a live demo →</span>
   </div>
 
-  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 3 of 3</span></div>
+  <div class="foot"><span><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 6 of 6</span></div>
 </div>

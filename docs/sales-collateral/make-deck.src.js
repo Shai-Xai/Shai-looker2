@@ -31,10 +31,9 @@ function contentSlide(title, sub, color, n) {
   return s;
 }
 
-// feature bullet: bold lead + status chip + body
-function feat(s, x, y, w, lead, status, body, statusColor) {
+// feature bullet: bold lead + body (status labels intentionally dropped)
+function feat(s, x, y, w, lead, status, body) {
   const runs = [{ text: lead + '  ', options: { bold: true, color: NAVY } }];
-  if (status) runs.push({ text: '[' + status + ']  ', options: { bold: true, fontSize: 9, color: statusColor || GREEN } });
   runs.push({ text: body, options: { color: GREY } });
   s.addText(runs, { x, y, w, h: 1.0, fontSize: 12, fontFace: F, valign: 'top', lineSpacing: 16 });
 }
@@ -108,8 +107,29 @@ s.addShape('roundRect', { x: 0.5, y: 4.4, w: 12.4, h: 1.6, rectRadius: 0.1, fill
 s.addText('Grounded, always: the Owl quotes your data — it never invents. And it answers only your own events; the scope gate is enforced server-side and cannot be bypassed.', { x: 0.9, y: 4.55, w: 11.6, h: 1.3, fontSize: 14, color: 'D8D4F0', align: 'center', valign: 'middle', fontFace: F, lineSpacing: 20 });
 s.addText('“Ask your data anything, in plain language — your own analyst, in your pocket.”', { x: 0.5, y: 6.25, w: 12.4, h: 0.5, fontSize: 15, bold: true, italic: true, color: ORANGE, align: 'center', fontFace: F });
 
-/* ---------- 6 · ACT ---------- */
-s = contentSlide('⚡  ACT — Engage, the campaign engine', 'from seeing a cohort to reaching it, in one click', PURPLE, 6);
+/* ---------- 6 · CHANNELS ---------- */
+s = contentSlide('One brain. Every channel.', 'the same governed data and the same Owl, wherever your team already lives', ORANGE, 6);
+const chans = [
+  ['📱', 'The Pulse app', 'Installs like a native app; push notifications reach you even when it’s closed.'],
+  ['💬', 'WhatsApp', 'Chat to the Owl: answers, charts as images, daily updates, event-night reports.'],
+  ['🤖', 'ChatGPT & Claude', 'Ask about your events from the AI tools you already use, via the Pulse connector.'],
+  ['✉️', 'Email', 'Role-based digests, branded campaigns from your own domain, CC-the-Owl filing.'],
+  ['📲', 'SMS', 'Campaigns, urgent alerts and event-night reports — for moments that can’t wait.'],
+  ['💼', 'Slack', 'Mirror notifications into your channel; share any insight in one tap.'],
+  ['🌐', 'Your website', 'The Fan Owl widget guides fans to the right ticket on every page of your site.'],
+  ['🎫', 'Howler portal', 'The Owl embedded in the organizer portal you already use every day.'],
+];
+chans.forEach((c, i) => {
+  const x = 0.5 + (i % 4) * 3.15, y = 1.6 + Math.floor(i / 4) * 2.15;
+  s.addShape('roundRect', { x, y, w: 2.95, h: 1.95, rectRadius: 0.1, fill: { color: LIGHT }, line: { color: 'ECE9F5', width: 1 } });
+  s.addText(c[0] + ' ' + c[1], { x: x + 0.15, y: y + 0.1, w: 2.65, h: 0.4, fontSize: 13, bold: true, color: NAVY, fontFace: F });
+  s.addText(c[2], { x: x + 0.15, y: y + 0.52, w: 2.65, h: 1.35, fontSize: 10, color: GREY, fontFace: F, lineSpacing: 13, valign: 'top' });
+});
+s.addShape('roundRect', { x: 0.5, y: 6.0, w: 12.4, h: 0.85, rectRadius: 0.1, fill: { color: NAVY } });
+s.addText('Nobody has to change how they work — Pulse comes to them. Same data, same security boundary, every surface.', { x: 0.8, y: 6.0, w: 11.8, h: 0.85, fontSize: 14, bold: true, color: 'D8D4F0', align: 'center', valign: 'middle', fontFace: F });
+
+/* ---------- 7 · ACT ---------- */
+s = contentSlide('⚡  ACT — Engage, the campaign engine', 'from seeing a cohort to reaching it, in one click', PURPLE, 7);
 feat(s, 0.5, 1.55, 6.0, 'Live segments', 'LIVE', '— audiences from a dashboard tile, CSV or linked Google Sheet; union / intersect / exclude (abandoned carts minus already-called). Always current at send time.');
 feat(s, 0.5, 2.75, 6.0, 'Email & SMS campaigns', 'LIVE', '— AI-drafted copy, drag-and-drop block builder, AI-designed layouts & banners, merge fields, promo codes, full open/click tracking.');
 feat(s, 0.5, 3.95, 6.0, 'Drip automations', 'LIVE', '— abandoned-cart journeys that catch new abandoners in real time, stop when someone buys, and show a per-step conversion waterfall.');
@@ -119,18 +139,36 @@ feat(s, 6.9, 3.95, 6.0, 'Ad-platform sync', 'NEEDS CONNECTION', '— push a segm
 s.addShape('roundRect', { x: 0.5, y: 5.35, w: 12.4, h: 1.0, rectRadius: 0.1, fill: { color: 'F6F1FF' } });
 s.addText('“Personalised, on-brand email + SMS to a precise audience — approval gates and real tracking, all from the same data.”', { x: 0.8, y: 5.45, w: 11.8, h: 0.8, fontSize: 15, bold: true, italic: true, color: PURPLE, align: 'center', valign: 'middle', fontFace: F });
 
-/* ---------- 7 · RUN ---------- */
-s = contentSlide('🎪  RUN — event day & operations', 'your control room, in your pocket', CYAN, 7);
-feat(s, 0.5, 1.55, 6.0, 'Alerts', 'BETA', '— “tell me when VIP drops below 100”: Pulse watches the number and pings you via push, email or SMS the moment it crosses. Cooldowns and quiet hours — no spam.', PURPLE);
-feat(s, 0.5, 2.85, 6.0, 'Live updates', 'BETA', '— while the event runs: a compact multi-metric report every 15–120 min — gates pace, bar revenue, top vendors, device health, % of last year — to inbox, push, SMS and WhatsApp.', PURPLE);
-feat(s, 0.5, 4.15, 6.0, 'Messaging inbox', 'LIVE', '— a two-way client↔Howler inbox with read/acknowledge trails. Approvals stop living in scattered WhatsApps.');
-feat(s, 6.9, 1.55, 6.0, 'Settlements that file themselves', 'LIVE', '— settlement PDFs become clean interactive statements; CC the Owl on the email and it checks the totals and publishes automatically.');
-feat(s, 6.9, 2.85, 6.0, 'Event Ops', 'BETA', '— track every scanner, payment device and station live: scan to move, log issues, full audit trail. Every device accounted for at event close.', PURPLE);
-feat(s, 6.9, 4.15, 6.0, 'Data health', 'BETA', '— know a scanner has stopped sending data before the queue does, with an AI diagnostics report you can forward to the network provider.', PURPLE);
-s.addText('“On event night, Pulse becomes your control room in your pocket — a mini report every half hour.”', { x: 0.5, y: 5.9, w: 12.4, h: 0.5, fontSize: 15, bold: true, italic: true, color: CYAN, align: 'center', fontFace: F });
+/* ---------- 8 · MARKETER'S DREAM ---------- */
+s = contentSlide('The marketer’s dream, on one platform', 'audiences · journeys · ad platforms · creative · attribution — one live, governed dataset', RED, 8);
+const flow = [['📡 LIVE DATA', NAVY], ['🎯 AUDIENCES', RED], ['🗺 JOURNEYS', ORANGE], ['📣 AD PLATFORMS', PURPLE], ['💰 REVENUE', GREEN]];
+flow.forEach((f, i) => {
+  const x = 0.5 + i * 2.62;
+  s.addShape('roundRect', { x, y: 1.55, w: 2.3, h: 0.65, rectRadius: 0.1, fill: { color: f[1] } });
+  s.addText(f[0], { x, y: 1.55, w: 2.3, h: 0.65, fontSize: 11.5, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', fontFace: F });
+  if (i < 4) s.addText('→', { x: x + 2.28, y: 1.55, w: 0.4, h: 0.65, fontSize: 16, bold: true, color: 'A89DDD', align: 'center', valign: 'middle', fontFace: F });
+});
+feat(s, 0.5, 2.55, 6.0, 'Audiences that never go stale', null, '— segments re-resolve live at send time; combine sources, subtract suppression lists, filter on any column.');
+feat(s, 0.5, 3.65, 6.0, 'Complex journeys, simple setup', null, '— timed multi-step email/SMS drips; true real-time abandoned-cart; buyers auto-exit; a per-step conversion waterfall.');
+feat(s, 0.5, 4.75, 6.0, 'Live data → your ad accounts', null, '— push segments to Meta/TikTok as Custom Audiences (hashed, mirrored daily); see spend, CPC and ROAS next to ticket sales.');
+feat(s, 6.9, 2.55, 6.0, 'An AI creative studio inside', null, '— the Owl drafts copy, designs whole themed email layouts and draws on-brand banners; any campaign in any language.');
+feat(s, 6.9, 3.65, 6.0, 'Attribution you can defend', null, '— per-recipient opens, clicks and tracked purchases; UTMs everywhere; unique-per-person promo codes tie a sale to a send.');
+feat(s, 6.9, 4.75, 6.0, 'Guardrails a CMO will love', null, '— approval gates, POPIA-aware consent, one-click unsubscribe, audience & SMS send caps.');
+s.addShape('roundRect', { x: 0.5, y: 5.95, w: 12.4, h: 0.9, rectRadius: 0.1, fill: { color: 'F6F1FF' } });
+s.addText('“From seeing a cohort to a live journey, an ad audience and tracked revenue — without exporting a single CSV.”', { x: 0.8, y: 5.95, w: 11.8, h: 0.9, fontSize: 15, bold: true, italic: true, color: PURPLE, align: 'center', valign: 'middle', fontFace: F });
+
+/* ---------- 9 · RUN / EVENT OPS ---------- */
+s = contentSlide('🎪  RUN — Event Ops, your operations command centre', 'the gates, the bars, the devices, the data itself — one live board', CYAN, 9);
+feat(s, 0.5, 1.55, 6.0, 'The live overview', null, '— device counts by state, per-station deployment, open issues and a live activity feed: the “where is everything right now” board.');
+feat(s, 0.5, 2.75, 6.0, 'Hotspots & the heat map', null, '— every station’s activity through the day in time blocks: watch the crowd move, spot the overloaded station and the dead one, staff accordingly.');
+feat(s, 0.5, 3.95, 6.0, 'Every device tracked', null, '— scan to move between store and stations; append-only audit trail; every device accounted for at event close.');
+feat(s, 6.9, 1.55, 6.0, 'Connectivity & data health', null, '— per-station stream watch and a device roster showing exactly which units are offline and for how long. Know a scanner died before the queue does.');
+feat(s, 6.9, 2.75, 6.0, 'AI Diagnose + event report', null, '— one-tap AI verdicts per station, and a post-event diagnostics report clean enough to forward to the network provider.');
+feat(s, 6.9, 3.95, 6.0, 'Live updates & alerts', null, '— a multi-metric mini report every 15–120 min while doors are open (gates pace, bar revenue, top vendors, device health), plus threshold alerts on any number.');
+s.addText('“You’ll know a hotspot is forming, or a scanner has died, before anyone on the ground has to tell you.”', { x: 0.5, y: 5.9, w: 12.4, h: 0.5, fontSize: 15, bold: true, italic: true, color: CYAN, align: 'center', fontFace: F });
 
 /* ---------- 8 · OWN ---------- */
-s = contentSlide('🔒  OWN — white-label, security & openness', 'your brand, your accounts, your data', NAVY, 8);
+s = contentSlide('🔒  OWN — white-label, security & openness', 'your brand, your accounts, your data', NAVY, 10);
 feat(s, 0.5, 1.55, 6.0, 'Fully white-label', 'LIVE', '— your logo, colours and sender name everywhere; emails from your own domain once verified; even a vanity login page that feels like your product.');
 feat(s, 0.5, 2.75, 6.0, 'Your language & currency', 'LIVE', '— AI insights, briefings, digests and campaign copy in your reporting currency and your choice of language.');
 feat(s, 0.5, 3.95, 6.0, 'Open by design (API + AI agents)', 'BETA', '— read-only, per-client API keys; point Claude or ChatGPT at your data via MCP. Your data is never locked in.', PURPLE);
@@ -141,7 +179,7 @@ s.addShape('roundRect', { x: 0.5, y: 5.35, w: 12.4, h: 1.0, rectRadius: 0.1, fil
 s.addText('“It’s their brand, their accounts, their data — Howler just powers it.”', { x: 0.8, y: 5.45, w: 11.8, h: 0.8, fontSize: 15, bold: true, italic: true, color: NAVY2, align: 'center', valign: 'middle', fontFace: F });
 
 /* ---------- 9 · WHY PULSE (comparison) ---------- */
-s = contentSlide('Why Pulse — and not another tool', 'the honest comparison', RED, 9);
+s = contentSlide('Why Pulse — and not another tool', 'the honest comparison', RED, 11);
 const rows = [
   [{ text: 'If you’re using…', options: { bold: true, color: NAVY2 } }, { text: 'The gap', options: { bold: true, color: NAVY2 } }, { text: 'What Pulse changes', options: { bold: true, color: NAVY2 } }],
   ['Looker / Tableau', 'You see the problem, then export a CSV and switch tools to act on it.', 'See it and act on it in the same governed place — campaign, approval, result.'],
