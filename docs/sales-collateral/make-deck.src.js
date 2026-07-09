@@ -42,6 +42,7 @@ function feat(s, x, y, w, lead, status, body) {
 let s = p.addSlide();
 s.background = { color: NAVY };
 gradBar(s, 0, 0, 13.33, 0.12);
+s.addImage({ path: 'howler-logo.png', x: 0.9, y: 0.55, w: 0.85, h: 0.85, rounding: true });
 s.addText('HOWLER PRESENTS', { x: 0.9, y: 1.5, w: 8, h: 0.4, fontSize: 14, bold: true, charSpacing: 4, color: RED, fontFace: F });
 s.addText([
   { text: 'Pulse', options: { color: 'FFFFFF' } },
@@ -124,10 +125,10 @@ hubCards.forEach(c => {
   s.addText(c[0], { x: c[2] + 0.18, y: c[3] + 0.1, w: 3.45, h: 0.42, fontSize: 14, bold: true, color: NAVY, fontFace: F });
   s.addText(c[1], { x: c[2] + 0.18, y: c[3] + 0.55, w: 3.45, h: 1.25, fontSize: 10.5, color: GREY, fontFace: F, lineSpacing: 14, valign: 'top' });
 });
-// central owl
-s.addShape('ellipse', { x: 5.42, y: 2.7, w: 2.5, h: 2.5, fill: { color: RED } });
-s.addShape('ellipse', { x: 5.52, y: 2.8, w: 2.3, h: 2.3, fill: { color: NAVY } });
-s.addText([{ text: '🦉\n', options: { fontSize: 26 } }, { text: 'THE OWL\n', options: { fontSize: 12, bold: true, color: 'FFFFFF' } }, { text: 'one brain · your data', options: { fontSize: 8, color: 'B8B3D9' } }], { x: 5.42, y: 2.7, w: 2.5, h: 2.5, align: 'center', valign: 'middle', fontFace: F });
+// central owl — the real mark
+s.addImage({ path: 'owl-mark.png', x: 5.42, y: 2.55, w: 2.5, h: 2.5 });
+s.addShape('roundRect', { x: 5.12, y: 5.2, w: 3.1, h: 0.44, rectRadius: 0.22, fill: { color: NAVY } });
+s.addText([{ text: 'THE OWL', options: { bold: true, fontSize: 10, color: 'FFFFFF' } }, { text: ' · one brain · your data', options: { fontSize: 9, color: 'B8B3D9' } }], { x: 5.12, y: 5.2, w: 3.1, h: 0.44, align: 'center', valign: 'middle', fontFace: F });
 s.addShape('roundRect', { x: 0.5, y: 6.5, w: 12.4, h: 0.55, rectRadius: 0.08, fill: { color: NAVY } });
 s.addText('Ask in the app, on WhatsApp, in ChatGPT or Claude — same Owl, same live data, same security boundary.', { x: 0.8, y: 6.5, w: 11.8, h: 0.55, fontSize: 12.5, bold: true, color: 'D8D4F0', align: 'center', valign: 'middle', fontFace: F });
 
@@ -216,10 +217,11 @@ stack.forEach((c, i) => {
   s.addText('↓', { x: x + 1.18, y: 3.5, w: 0.6, h: 0.4, fontSize: 18, bold: true, color: 'A89DDD', align: 'center', fontFace: F });
 });
 s.addShape('roundRect', { x: 0.5, y: 3.95, w: 12.4, h: 1.25, rectRadius: 0.12, fill: { color: NAVY } });
+s.addImage({ path: 'owl-mark.png', x: 0.78, y: 4.15, w: 0.85, h: 0.85 });
 s.addText([
-  { text: '📊 Pulse — the brain of the stack.  ', options: { bold: true, fontSize: 15, color: 'FFFFFF' } },
+  { text: 'Pulse — the brain of the stack.  ', options: { bold: true, fontSize: 15, color: 'FFFFFF' } },
   { text: 'Every ticket scanned, every tap at a bar, every SuperApp session and every VIP booking flows into one governed dataset — where the Owl reads it, your team acts on it, and the results come back measured.', options: { fontSize: 11.5, color: 'D8D4F0' } },
-], { x: 0.85, y: 4.05, w: 11.7, h: 1.05, fontFace: F, valign: 'middle', lineSpacing: 16 });
+], { x: 1.85, y: 4.05, w: 10.8, h: 1.05, fontFace: F, valign: 'middle', lineSpacing: 16 });
 s.addText('ONE STACK  ·  ONE DATASET  ·  ONE BRAND EXPERIENCE  ·  ONE PARTNER', { x: 0.5, y: 5.32, w: 12.4, h: 0.4, fontSize: 12, bold: true, color: NAVY2, align: 'center', charSpacing: 2, fontFace: F });
 const bt = [
   ['The bar', 'Cashless spots the Main Bar spiking; the heat map shows the hotspot; the Owl suggests moving two devices — while the night is young.', RED],
@@ -236,6 +238,7 @@ bt.forEach((c, i) => {
 s = p.addSlide();
 s.background = { color: NAVY };
 gradBar(s, 0, 0, 13.33, 0.12);
+s.addImage({ path: 'howler-logo.png', x: 0.9, y: 0.55, w: 0.85, h: 0.85, rounding: true });
 s.addText('The pitch, in one line', { x: 0.9, y: 1.5, w: 11.5, h: 0.7, fontSize: 34, bold: true, color: 'FFFFFF', fontFace: F });
 s.addText('See what’s happening, act on it, and prove the results — on your phone, in your brand, without exporting to five tools.', { x: 0.9, y: 2.5, w: 11.2, h: 1.0, fontSize: 20, color: 'D8D4F0', fontFace: F, lineSpacing: 28 });
 s.addText('Insight → action → results → improvement, on a loop, in one governed place.', { x: 0.9, y: 3.7, w: 11.2, h: 0.6, fontSize: 20, bold: true, color: ORANGE, fontFace: F });
