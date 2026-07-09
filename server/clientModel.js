@@ -92,7 +92,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
   function enrichSuite(su) {
     return { ...su, entityName: db.getEntity(su.entityId)?.name || '', dashboardCount: db.dashboardsInSuite(su.id).length };
   }
-  app.get('/api/admin/suites', auth.requireAdmin, (_req, res) => res.json(db.listSuites().map(enrichSuite)));
+  app.get('/api/admin/suites', auth.requireAdmin, (_req, res) => res.json(applySuiteOrder(db.listSuites()).map(enrichSuite)));
   app.post('/api/admin/suites', auth.requireAdmin, (req, res) => res.status(201).json(enrichSuite(db.createSuite(req.body || {}))));
   app.put('/api/admin/suites/:id', auth.requireAdmin, (req, res) => {
     const su = db.updateSuite(req.params.id, req.body || {});

@@ -77,7 +77,20 @@ export default function ClientLayout() {
   const [actionsSlot, setActionsSlot] = useState(null);
   const [titleSlot, setTitleSlot] = useState(null); // section pages portal their title into the menu bar
 
-  useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    // Event timing (Upcoming/Past) resolves from Looker in the background, so a
+    // suite's first fetch can come back timing:'unknown' (cold cache) and render
+    // flat. If so, refetch once shortly after to pick up the warmed dates and
+    // group — no manual reload needed.
+    const load = (retry) => api.mySuites().then((list) => {
+      if (cancelled) return;
+      setSuites(list);
+      if (retry && (list || []).some((s) => !s.timing || s.timing === 'unknown')) setTimeout(() => { if (!cancelled) load(false); }, 2500);
+    }).catch(() => {}).finally(() => setLoading(false));
+    load(true);
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
   // Event Ops is a per-client pilot: which of my entities have it switched on (gates the nav).
   const [eopEntities, setEopEntities] = useState([]);
@@ -335,10 +348,13 @@ export default function ClientLayout() {
       )}
       {!opsOnly && (
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '2px 8px 10px 14px' }}>
-        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
-        {!searching && activeEntityId && visibleSuites.length > 1 && (
-          <button onClick={() => setArranging((a) => !a)} title={arranging ? 'Done reordering' : 'Reorder events'} style={{ ...iconBtn, color: arranging ? 'var(--brand)' : undefined, fontWeight: arranging ? 700 : undefined }}>{arranging ? '✓' : '⇅'}</button>
-        )}
+        <span
+          onDoubleClick={() => { if (!searching && activeEntityId && visibleSuites.length > 1) setArranging((a) => !a); }}
+          title="Double-click to reorder events"
+          style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: arranging ? 'var(--brand)' : 'var(--muted)', cursor: 'default', userSelect: 'none' }}>
+          {arranging ? 'Suites · reordering' : 'Suites'}
+        </span>
+        {arranging && <button onClick={() => setArranging(false)} title="Done reordering" style={{ ...iconBtn, color: 'var(--brand)', fontWeight: 700 }}>✓</button>}
         {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
       </div>
       )}
