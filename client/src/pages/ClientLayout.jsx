@@ -83,12 +83,17 @@ export default function ClientLayout() {
     // suite's first fetch can come back timing:'unknown' (cold cache) and render
     // flat. If so, refetch once shortly after to pick up the warmed dates and
     // group — no manual reload needed.
-    const load = (retry) => api.mySuites().then((list) => {
+    // Timing warms on the server in the background; the first few fetches can still
+    // read 'unknown'. Retry a handful of times with a growing delay so a slow Looker
+    // resolve still lands the Upcoming/Past grouping without a manual reload.
+    const load = (tries) => api.mySuites().then((list) => {
       if (cancelled) return;
       setSuites(list);
-      if (retry && (list || []).some((s) => !s.timing || s.timing === 'unknown')) setTimeout(() => { if (!cancelled) load(false); }, 2500);
+      if (tries > 0 && (list || []).some((s) => !s.timing || s.timing === 'unknown')) {
+        setTimeout(() => { if (!cancelled) load(tries - 1); }, 2500 + (4 - tries) * 1500);
+      }
     }).catch(() => {}).finally(() => setLoading(false));
-    load(true);
+    load(4);
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { api.mySettlements().then(setSettlements).catch(() => {}); }, []);
@@ -398,6 +403,12 @@ export default function ClientLayout() {
         const TIMING = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
         const timingGroups = TIMING.map(([key, label]) => ({ label, items: unfiled.filter((s) => s.timing === key) })).filter((g) => g.items.length);
         const anyUnknown = shownSuites.some((s) => !s.timing || s.timing === 'unknown');
+        // Show the Upcoming/Past headers as soon as dates have resolved and at least one
+        // REAL timing bucket exists — even if it's the only one (e.g. every event is in
+        // the past). We only stay flat while searching, while dates are still resolving
+        // (cold), or when everything is undated (a lone "Other" header adds nothing).
+        const hasRealTiming = timingGroups.some((g) => g.label !== 'Other');
+        const showTiming = !searching && !anyUnknown && hasRealTiming;
         const canReorder = arranging && !searching && !!activeEntityId; // grips only in reorder mode
         const renderSuite = (su, catId = null) => {
           const sets = suiteSets(su);
@@ -462,7 +473,7 @@ export default function ClientLayout() {
         const miniIcon = { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 3px', flexShrink: 0 };
         // Flag OFF → legacy: flat while searching / dates resolving / a single group, else timing groups.
         if (!catsOn) {
-          if (searching || anyUnknown || timingGroups.length <= 1) return shownSuites.map((s) => renderSuite(s));
+          if (!showTiming) return shownSuites.map((s) => renderSuite(s));
           return timingGroups.map((g) => (
             <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
           ));
@@ -472,7 +483,7 @@ export default function ClientLayout() {
         // is reachable (with zero categories it's still the way in). Unfiled render
         // flat when there are no categories and the timing groups aren't meaningful
         // yet (dates resolving / a single group).
-        const flatUnfiled = categories.length === 0 && (anyUnknown || timingGroups.length <= 1);
+        const flatUnfiled = categories.length === 0 && !showTiming;
         return (
           <>
             {categories.map((c) => {
