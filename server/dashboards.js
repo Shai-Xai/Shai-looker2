@@ -95,18 +95,24 @@ app.post('/api/admin/comparison-sort-desc', auth.requireAdmin, (req, res) => {
     ? [store.get(dashboardId)].filter(Boolean)
     : store.list().filter((m) => inFolder(m.folder)).map((m) => store.get(m.id)).filter(Boolean);
   const changes = [];
+  // Diagnostic breakdown so a "nothing to change" result can explain WHY: offset
+  // comparison tiles are skipped because their order is already forced to
+  // current-event-first at view time; already-desc & non-comparison tiles are no-ops.
+  const skip = { offsetAuto: 0, alreadyDesc: 0, notComparison: 0 };
   for (const def of defs) {
     let touched = false;
     for (const t of [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]) {
       const q = t.query;
       if (!q || !Array.isArray(q.sorts) || !q.sorts.length) continue;
-      if (!isComparisonTile(t) || hasOffset(q)) continue;
+      if (!isComparisonTile(t)) { skip.notComparison++; continue; }
+      if (hasOffset(q)) { skip.offsetAuto++; continue; } // already current-first at view time
       const next = q.sorts.map(toDesc);
       if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: def.title, tile: t.title || t.id }); }
+      else skip.alreadyDesc++;
     }
     if (touched && apply) store.update(def.id, def);
   }
-  res.json({ folder, dashboardId, apply, changed: changes.length, changes: changes.slice(0, 300) });
+  res.json({ folder, dashboardId, apply, changed: changes.length, skip, changes: changes.slice(0, 300) });
 });
 
 app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {

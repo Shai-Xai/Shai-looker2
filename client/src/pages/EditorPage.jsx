@@ -122,7 +122,15 @@ export default function EditorPage() {
   async function comparisonSortDesc() {
     try {
       const dry = await api.comparisonSortDesc({ dashboardId: id }, false);
-      if (!dry.changed) { alert('Comparison-event charts on this dashboard already sort events descending — nothing to change.'); return; }
+      if (!dry.changed) {
+        const s = dry.skip || {};
+        const bits = [];
+        if (s.offsetAuto) bits.push(`${s.offsetAuto} offset comparison tile${s.offsetAuto === 1 ? '' : 's'} already show the current event first automatically (handled at view time)`);
+        if (s.alreadyDesc) bits.push(`${s.alreadyDesc} already sort events descending`);
+        if (s.notComparison) bits.push(`${s.notComparison} aren't event-comparison tiles`);
+        alert(`Nothing to flip on this dashboard.${bits.length ? `\n\n${bits.join('.\n')}.` : ''}`);
+        return;
+      }
       if (!window.confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} on this dashboard to sort events descending?`)) return;
       await api.comparisonSortDesc({ dashboardId: id }, true);
       const fresh = await api.getDashboard(id);

@@ -72,7 +72,15 @@ export default function HomePage() {
   async function comparisonSortDesc() {
     try {
       const dry = await api.comparisonSortDesc(path, false);
-      if (!dry.changed) { alert('Comparison-event charts in this folder already sort events descending — nothing to change.'); return; }
+      if (!dry.changed) {
+        const s = dry.skip || {};
+        const bits = [];
+        if (s.offsetAuto) bits.push(`${s.offsetAuto} offset comparison tile${s.offsetAuto === 1 ? '' : 's'} already show the current event first automatically (handled at view time)`);
+        if (s.alreadyDesc) bits.push(`${s.alreadyDesc} already sort events descending`);
+        if (s.notComparison) bits.push(`${s.notComparison} aren't event-comparison tiles`);
+        alert(`Nothing to flip in “${path}”.${bits.length ? `\n\n${bits.join('.\n')}.` : ''}`);
+        return;
+      }
       if (!confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} in “${path}” (and subfolders) to sort events descending?`)) return;
       await api.comparisonSortDesc(path, true);
       alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}. Refresh a dashboard to see the new order.`);
