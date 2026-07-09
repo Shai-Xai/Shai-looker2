@@ -206,6 +206,7 @@ export default function ClientLayout() {
   // existing suite_order store; the upcoming/past grouping re-partitions on top.
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
+  const [arranging, setArranging] = useState(false); // reorder mode — grips only show when on
   const reorderSuite = (from, to) => {
     if (!from || from === to || !activeEntityId) return;
     const ent = suites.filter((s) => s.entityId === activeEntityId);
@@ -333,8 +334,11 @@ export default function ClientLayout() {
       </div>
       )}
       {!opsOnly && (
-      <div style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 10px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '2px 8px 10px 14px' }}>
         <span style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>Suites</span>
+        {!searching && activeEntityId && visibleSuites.length > 1 && (
+          <button onClick={() => setArranging((a) => !a)} title={arranging ? 'Done reordering' : 'Reorder events'} style={{ ...iconBtn, color: arranging ? 'var(--brand)' : undefined, fontWeight: arranging ? 700 : undefined }}>{arranging ? '✓' : '⇅'}</button>
+        )}
         {!isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
       </div>
       )}
@@ -356,7 +360,7 @@ export default function ClientLayout() {
         // mis-group a suite); it groups on the next load once the dates are cached.
         const anyUnknown = shownSuites.some((s) => !s.timing || s.timing === 'unknown');
         const grouped = !searching && !anyUnknown && groups.length > 1;
-        const canReorder = !searching && !!activeEntityId;
+        const canReorder = arranging && !searching && !!activeEntityId; // grips only in reorder mode
         const renderSuite = (su) => {
           const sets = suiteSets(su);
           const suiteOpen = searching || !!openSuites[su.id];
