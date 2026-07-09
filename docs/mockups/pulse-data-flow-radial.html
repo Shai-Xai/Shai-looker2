@@ -1,4 +1,4 @@
-<title>Pulse — data flow concept · top-down</title>
+<title>Pulse · data flow concept · top-down</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root{
@@ -70,7 +70,7 @@
   }
   .colhead b{color:var(--mut);font-weight:600}
 
-  /* sources — one rain-row across the full top */
+  /* sources - one rain-row across the full top */
   .srcs{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;width:100%}
   .src{
     background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:8px 11px;
@@ -161,7 +161,7 @@
   .feed .q{color:#7dd8e8;font-style:italic}
   .feed .q::before{content:'you · ';font-family:var(--mono);font-size:9px;font-style:normal;color:var(--dim);letter-spacing:.08em}
 
-  /* devices — hero strip along the bottom */
+  /* devices - hero strip along the bottom */
   .surfs{display:flex;flex-direction:column;gap:12px;grid-column:1 / -1;align-items:center}
   .devices{position:relative;margin-bottom:26px;width:100%;max-width:780px}
   .desk-frame{
@@ -329,10 +329,10 @@
   <header>
     <div class="eyebrow">Howler Pulse · Motion concept · layout C (radial)</div>
     <h1>Every signal flows in.<br><span class="out">Insight flows out.</span></h1>
-    <p class="sub">Seven live streams — ticketing, cashless, payments, web, app, event ops and GA4/BigQuery —
-    pour into the Owl, Pulse's brain. It doesn't just chart them: it <b>acts</b> — alerts, digests, campaigns,
-    segments, reports — landing on the Pulse web app, the phone, WhatsApp, ChatGPT and Claude, with audiences
-    syncing straight to TikTok and Meta. And you can <b>ask the Owl anything</b> — watch the questions flow in
+    <p class="sub">Seven live streams (ticketing, cashless, payments, web, app, event ops and GA4/BigQuery)
+    pour into the Owl, Pulse's brain. It doesn't just chart them: it <b>acts</b>. Alerts, digests, campaigns,
+    segments and reports land on the Pulse web app, the phone, WhatsApp, ChatGPT and Claude, with audiences
+    syncing straight to TikTok and Meta. And you can <b>ask the Owl anything</b>: watch the questions flow in
     and the answers flow back.</p>
   </header>
 
@@ -358,19 +358,19 @@
         <div class="core" id="core">
           <div class="core-ring"></div>
           <div class="core-halo"></div>
-          <div class="core-disc"><img class="core-owl" id="owl" alt="Howler Owl — the Pulse brain"></div>
+          <div class="core-disc"><img class="core-owl" id="owl" alt="Howler Owl - the Pulse brain"></div>
           <div class="core-badge"><b id="count">0</b><small>signals</small></div>
         </div>
         <div class="core-name">howler<span>:pulse</span></div>
         <div class="core-cap" id="cap">correlating streams…</div>
         <div class="acts" id="acts"></div>
-        <div class="feed" id="feed">Insights, digests and Owl answers land on your channels — watch this space…</div>
+        <div class="feed" id="feed">Insights, digests and Owl answers land on your channels. Watch this space…</div>
       </section>
 
       <section class="chanCol">
         <p class="colhead" style="margin:0"><b>Channels</b> · fan out</p>
         <div class="dock" id="dock"></div>
-        <div class="ask-hint" style="text-align:left;max-width:240px">💬 <b>ask the Owl anything</b> — plain language, any channel. cyan = your question flowing in.</div>
+        <div class="ask-hint" style="text-align:left;max-width:240px">💬 <b>ask the Owl anything</b>: plain language, any channel. cyan = your question flowing in.</div>
       </section>
 
       <section class="surfs">
@@ -400,7 +400,7 @@
   </div>
 
   <h2 class="internal">Where this lives</h2>
-  <p class="lede internal">Three realistic placements for the same animation system — one build, tuned per surface.</p>
+  <p class="lede internal">Three realistic placements for the same animation system - one build, tuned per surface.</p>
   <div class="uses internal">
     <div class="use">
       <h3><small>Placement 01</small>Landing-page hero</h3>
@@ -410,18 +410,18 @@
     <div class="use">
       <h3><small>Placement 02</small>In-app loading &amp; empty states</h3>
       <p>A single-stream slice of the same system (one source → Owl → one surface) replaces
-      spinners while dashboards hydrate — the wait itself tells the product story.</p>
+      spinners while dashboards hydrate - the wait itself tells the product story.</p>
     </div>
     <div class="use">
       <h3><small>Placement 03</small>Sales deck &amp; wizard finale</h3>
       <p>Full interactive version with the scenario tabs, used live in pitches and as the
-      closing screen of the client setup wizard — "this is what we just switched on for you."</p>
+      closing screen of the client setup wizard - "this is what we just switched on for you."</p>
     </div>
   </div>
 
   <div class="note internal">
     <b>Implementation notes:</b> one &lt;canvas&gt; for the flowing streams + real Pulse screenshots with
-    DOM alert cards floating on top — no libraries, self-contained. Insight particles route through the
+    DOM alert cards floating on top - no libraries, self-contained. Insight particles route through the
     action they trigger (alert / digest / campaign / segment / report) before landing on a surface; cyan
     particles are questions flowing INTO the Owl. Respects prefers-reduced-motion, throttles when the tab
     is hidden, collapses to a vertical flow on phones. Screenshots are the real Pulse UI; figures are illustrative.
@@ -482,19 +482,19 @@
         gcp:  ['GA4 events 1,2M today','BigQuery sync ✓ 02:00','Attribution refreshed','Funnel model updated'],
       },
       insights: [
-        { to:'mobile',  action:'alert',    tag:'⚠ Alert',  text:'Checkout errors ×3 on Safari — gateway timeouts since 14:10.', tc:'#fbbf24' },
-        { to:'desktop', action:'report',   tag:'Insight',  text:'GA Phase 2 pacing +23% vs last year — release Phase 3 tonight?' },
+        { to:'mobile',  action:'alert',    tag:'⚠ Alert',  text:'Checkout errors ×3 on Safari: gateway timeouts since 14:10.', tc:'#fbbf24' },
+        { to:'desktop', action:'report',   tag:'Insight',  text:'GA Phase 2 pacing +23% vs last year. Release Phase 3 tonight?' },
         { to:'whatsapp',action:'digest',   text:'Sales digest: €38,4k today (+31%) · 812 tickets · top source: IG story.' },
         { to:'meta',    action:'segment',  text:'Segment “Cart abandoners” (2 108) → Meta retargeting, live.' },
-        { to:'mobile',  action:'alert',    tag:'🎯 Goal',  text:'70% sold — Phase 2 hit its target 6 days early.', tc:'#34d399' },
-        { to:'webapp',  action:'campaign', text:'Push campaign “Phase 3 tonight” drafted — review & send in Engage.' },
+        { to:'mobile',  action:'alert',    tag:'🎯 Goal',  text:'70% sold: Phase 2 hit its target 6 days early.', tc:'#34d399' },
+        { to:'webapp',  action:'campaign', text:'Push campaign “Phase 3 tonight” drafted. Review & send in Engage.' },
         { to:'tiktok',  action:'segment',  text:'Lookalike “VIP buyers” (48k) synced to TikTok Ads.' },
-        { to:'desktop', action:'alert',    tag:'⚠ Alert',  text:'Cart abandonment 22% on the payment step — up 6 pts this week.', tc:'#fbbf24' },
+        { to:'desktop', action:'alert',    tag:'⚠ Alert',  text:'Cart abandonment 22% on the payment step, up 6 pts this week.', tc:'#fbbf24' },
       ],
       asks: [
-        { ch:'claude',  q:'Which ticket type is selling fastest?', a:'GA Weekend — 3 184 today, 42% of volume.' },
+        { ch:'claude',  q:'Which ticket type is selling fastest?', a:'GA Weekend: 3 184 today, 42% of volume.' },
         { ch:'chatgpt', q:'Where are our buyers coming from?',     a:'68% mobile; the IG story is today’s top referrer.' },
-        { ch:'whatsapp',q:'How are we pacing vs last year?',       a:'+23% — Phase 3 could release tonight.' },
+        { ch:'whatsapp',q:'How are we pacing vs last year?',       a:'+23%. Phase 3 could release tonight.' },
       ],
     },
     eventday: {
@@ -508,17 +508,17 @@
         gcp:  ['GA4 realtime 4,1k users','Livestream funnel logged','BigQuery streaming ✓'],
       },
       insights: [
-        { to:'mobile',  action:'alert',    tag:'🚨 Alert', text:'Bar 3 beer stock 12% — dry in ~40 min. Dispatch restock?', tc:'#ff385c' },
-        { to:'desktop', action:'alert',    tag:'⚠ Alert',  text:'Gate 4 wait 11 min & rising — open lane 5; Gate 1 staff idle.', tc:'#fbbf24' },
+        { to:'mobile',  action:'alert',    tag:'🚨 Alert', text:'Bar 3 beer stock 12%, dry in ~40 min. Dispatch restock?', tc:'#ff385c' },
+        { to:'desktop', action:'alert',    tag:'⚠ Alert',  text:'Gate 4 wait 11 min & rising. Open lane 5; Gate 1 staff idle.', tc:'#fbbf24' },
         { to:'whatsapp',action:'digest',   text:'16:00 pulse: 8 412 in · spend €14,20/head · bars +9% vs plan.' },
         { to:'meta',    action:'segment',  text:'“At the event now” audience (8 412) live for stories push.' },
         { to:'webapp',  action:'campaign', text:'Rain plan: indoor-stage push drafted, scheduled for 17:30.' },
-        { to:'mobile',  action:'digest',   tag:'Insight',  text:'Kiosk queues peak at changeovers — push mobile top-ups at 17:50.' },
-        { to:'tiktok',  action:'campaign', text:'UGC spike detected — boost suggestion sent to TikTok Ads.' },
+        { to:'mobile',  action:'digest',   tag:'Insight',  text:'Kiosk queues peak at changeovers. Push mobile top-ups at 17:50.' },
+        { to:'tiktok',  action:'campaign', text:'UGC spike detected. Boost suggestion sent to TikTok Ads.' },
         { to:'desktop', action:'report',   tag:'Insight',  text:'Spend/head +€1,10 after the headliner announcement push.' },
       ],
       asks: [
-        { ch:'claude',  q:'Which bar is busiest right now?',  a:'Main Stage East — €31k, 18% of cashless.' },
+        { ch:'claude',  q:'Which bar is busiest right now?',  a:'Main Stage East: €31k, 18% of cashless.' },
         { ch:'whatsapp',q:'How many people are inside?',      a:'8 412 in · gates peaked at 214 scans/min.' },
         { ch:'chatgpt', q:'Any risks I should know about?',   a:'Rain 60% at 18:00 + Gate 4 queue at 11 min.' },
       ],
@@ -534,18 +534,18 @@
         gcp:  ['GA4 recap traffic +180%','BigQuery export complete','Cohorts rebuilt'],
       },
       insights: [
-        { to:'desktop', action:'report',   tag:'Report',   text:'Revenue €486k (+12% YoY) — full settlement report is ready.', tc:'#34d399' },
+        { to:'desktop', action:'report',   tag:'Report',   text:'Revenue €486k (+12% YoY). Full settlement report is ready.', tc:'#34d399' },
         { to:'whatsapp',action:'digest',   text:'Morning digest: 14 213 attended · €34,20/head · NPS 62 · settlement Friday.' },
         { to:'mobile',  action:'alert',    tag:'✓ Done',   text:'Auto-refunds queued: €21k unspent back to 3 108 wristbands.', tc:'#34d399' },
         { to:'tiktok',  action:'segment',  text:'“Next-event intent” audience (12k) synced to TikTok Ads.' },
         { to:'webapp',  action:'campaign', text:'Thank-you + aftermovie campaign drafted for all 14 213 attendees.' },
         { to:'meta',    action:'segment',  text:'Recap retargeting audience (14 213) exported to Meta.' },
-        { to:'desktop', action:'report',   tag:'Insight',  text:'Taco Bros outsold the food plan 2,1× — offer a second stand next time.' },
+        { to:'desktop', action:'report',   tag:'Insight',  text:'Taco Bros outsold the food plan 2,1×. Offer a second stand next time.' },
       ],
       asks: [
         { ch:'claude',  q:'Who spent the most per head?',     a:'18–24s: +22% per head. Segment saved for you.' },
-        { ch:'chatgpt', q:'What should we fix for next time?',a:'Gate 4 queues — the top NPS detractor theme.' },
-        { ch:'whatsapp',q:'When does settlement land?',       a:'€412k initiated — lands Friday.' },
+        { ch:'chatgpt', q:'What should we fix for next time?',a:'Gate 4 queues, the top NPS detractor theme.' },
+        { ch:'whatsapp',q:'When does settlement land?',       a:'€412k initiated, lands Friday.' },
       ],
     },
   };
@@ -561,7 +561,7 @@
     d.className = 'src'; d.id = 'src-' + s.id; d.style.setProperty('--c', s.color);
     const mark = s.icon ? '<span class="src-ic">' + svgIcon(s.icon) + '</span>' : '<span class="src-dot"></span>';
     d.innerHTML = '<div class="src-top">' + mark + s.name + (s.tag ? ' <small>' + s.tag + '</small>' : '') +
-                  '</div><div class="src-tick" id="tick-' + s.id + '">—</div>';
+                  '</div><div class="src-tick" id="tick-' + s.id + '">-</div>';
     srcsEl.appendChild(d);
   }
   const actsEl = document.getElementById('acts');

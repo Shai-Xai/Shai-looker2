@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Pulse — motion concepts</title>
+<title>Pulse · motion concepts</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root{
@@ -103,7 +103,7 @@
   addEventListener('hashchange', () => select(location.hash.slice(1), false));
   select(location.hash.slice(1) || 'a', false);
 
-  // light/dark toggle — persists, and reloads the concept so it follows suit
+  // light/dark toggle: persists, and reloads the concept so it follows suit
   const modeBtn = document.getElementById('mode');
   const setModeLabel = () => { modeBtn.textContent = document.documentElement.classList.contains('light') ? '🌙' : '☀️'; };
   setModeLabel();
