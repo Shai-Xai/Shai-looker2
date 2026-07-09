@@ -11,6 +11,7 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
+import QueueItCard from '../components/QueueItCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
@@ -124,12 +125,13 @@ export default function ClientIntegrationsPage() {
                 showTikTok
                 showSlack
                 showChottu
+                showQueueit
                 showPixel
                 pixelEntityId={activeItem.entityId}
                 onPixelStatus={() => api.myPixelStatus(activeItem.entityId)}
                 onCreatePixelAudiences={(channel) => api.myCreatePixelAudiences(activeItem.entityId, channel)}
                 canManageLock={isAdmin || role === 'owner'}
-                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel']}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
                 locks={activeItem.locks || {}}
                 onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {
@@ -143,6 +145,7 @@ export default function ClientIntegrationsPage() {
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
               <MetaConnectCard entityId={activeItem.entityId} scope="my" />
+              <QueueItCard entityId={activeItem.entityId} scope="my" />
               <DriveSourcesCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}

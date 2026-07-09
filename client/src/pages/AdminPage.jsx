@@ -14,6 +14,7 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
+import QueueItCard from '../components/QueueItCard.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -5176,7 +5177,7 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive showChottu clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5481,12 +5482,13 @@ function ClientIntegrations({ entity }) {
         showTikTok
         showSlack
         showChottu
+        showQueueit
         showPixel
         pixelEntityId={entity.id}
         onPixelStatus={() => api.getPixelStatus(entity.id)}
         onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
@@ -5494,6 +5496,7 @@ function ClientIntegrations({ entity }) {
       />
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
       <MetaConnectCard entityId={entity.id} scope="admin-client" />
+      <QueueItCard entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );

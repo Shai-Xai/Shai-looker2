@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-08 (✨ What's in Pulse feature matrix · 🎖️ Onboarding level 2 on staging) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-09 (🚦 Queue-it live waiting-room stats) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -510,6 +510,29 @@ per event, and ready to drop into posts, bios, emails and QR codes."
 pixel managed from Pulse, and the standard remarketing audiences created in your
 Meta and TikTok accounts in one click. Change pixels any time without a developer."
 
+### 5i. Queue-it — live waiting-room stats  🟡 (needs connection) · 🧪 (new)
+- **The on-sale queue, live in Pulse.** For clients whose big on-sales run behind
+  a **Queue-it** waiting room, Pulse pulls the queue's numbers straight from
+  Queue-it's API: **people waiting right now**, redirects per minute, total
+  queued, passed through, left the queue — refreshed every minute during the sale.
+- **Trend charts** — inflow, passed-through, in-queue and cancellations over the
+  last hour / 24h / 7d / 30d, so the shape of the on-sale (and any stall) is
+  visible at a glance, on a phone.
+- **Read-only and safe** — Pulse only reads statistics; it can never pause,
+  speed up or end a queue.
+- **Scoped like everything else** — on Howler's shared Queue-it account an admin
+  assigns exactly which waiting rooms a client sees (never anyone else's); a
+  client with their **own** Queue-it account can paste their own customer ID +
+  API key and self-serve.
+- Dual-surface: Howler connects it in Admin → the client → Integrations (or
+  platform-wide in Admin → Integrations); clients self-serve in Settings →
+  Integrations, where the live stats card lives. *Not yet exercised against a
+  live Queue-it account — verify with real credentials before pitching hard.*
+
+**Pitch:** "Your on-sale queue, live inside Pulse — how many are waiting, how fast
+they're getting through, and the whole curve of the sale — next to the sales
+numbers they're about to become."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client — sent from Howler's verified domain by
@@ -929,6 +952,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-09** — **Queue-it: live waiting-room stats** 🟡🧪 (new): Pulse pulls a
+  client's Queue-it queue numbers in live — people waiting now, redirects/min,
+  passed through — plus inflow/outflow trend charts (1h→30d). Read-only.
+  Dual-surface: platform account in Admin → Integrations with per-client
+  waiting-room assignment (clients never see another client's rooms), or a
+  client's own customer ID + API key in Settings → Integrations, where the live
+  stats card lives. (§5i)
 - **2026-07-08** — **Nav: your own event categories** 🧪 (new, flag `navcategories`):
   a client can create their own named categories in the sidebar ("Festivals",
   "Club nights", "2025 archive") and **drag events into them** — categories take

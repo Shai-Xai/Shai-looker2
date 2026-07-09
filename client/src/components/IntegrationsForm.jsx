@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -53,6 +53,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [chottuKey, setChottuKey] = useState('');
   const [clearChottuKey, setClearChottuKey] = useState(false);
   const [chottuDomain, setChottuDomain] = useState(value?.chottu?.domain || '');
+  const [qitCustomerId, setQitCustomerId] = useState(value?.queueit?.customerId || '');
+  const [qitKey, setQitKey] = useState('');
+  const [clearQitKey, setClearQitKey] = useState(false);
   const [pxStatus, setPxStatus] = useState(null);   // install check result (GET pixel/status)
   const [pxCopied, setPxCopied] = useState(false);
   const [pxPack, setPxPack] = useState({});         // channel -> result message
@@ -123,6 +126,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (chottuKey) p.chottu.apiKey = chottuKey;
       if (clearChottuKey) p.chottu.clearApiKey = true;
     }
+    if (showQueueit && want('queueit')) {
+      p.queueit = { customerId: qitCustomerId };
+      if (qitKey) p.queueit.apiKey = qitKey;
+      if (clearQitKey) p.queueit.clearApiKey = true;
+    }
     return p;
   }
 
@@ -139,6 +147,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
+      if (!only || only === 'queueit') { setQitKey(''); setClearQitKey(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusyKey(''); }
@@ -351,6 +360,35 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <input value={chottuDomain} onChange={(e) => setChottuDomain(e.target.value)} placeholder="howler.chottu.link" style={input} autoComplete="off" />
           {value?.chottu?.keySet && value?.chottu?.domain && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — manage links in Engage → Links.</div>}
           <SaveRow k="chottu" />
+        </Section>
+      )}
+
+      {/* Queue-it — live waiting-room stats (read-only) */}
+      {showQueueit && (
+        <Section title="🚦 Queue-it (waiting rooms)" collapsible={collapsible} {...lockProps('queueit')} guide={<>
+          <div style={note}>
+            Pulls live <b>waiting-room stats</b> (people in queue, redirects per minute, inflow over time) from <b>Queue-it</b> into Pulse — read-only, the queue itself is never touched. Blank fields inherit the platform account; stats then show only the waiting rooms Howler assigns to this client.
+          </div>
+          <HowTo title="How to get your Queue-it access details" steps={[
+            <>Sign in to the <b>GO Queue-it Platform</b> at <code>go.queue-it.net</code> and open <b>Account → API Keys</b>.</>,
+            <>Create (or copy) an API key and paste it into <b>API key</b> above. A read-only/stats key is enough — Pulse only reads statistics.</>,
+            <><b>Customer ID</b> is your short Queue-it account name — the subdomain in your queue URLs (e.g. <code>howler</code> in <code>howler.queue-it.net</code>).</>,
+          ]} />
+        </>}>
+          <Lbl>Customer ID</Lbl>
+          <input value={qitCustomerId} onChange={(e) => setQitCustomerId(e.target.value)} placeholder="e.g. howler" style={input} autoComplete="off" />
+          <Lbl>API key</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={qitKey} onChange={(e) => setQitKey(e.target.value)}
+            placeholder={value?.queueit?.keySet ? `Set (${value.queueit.keyHint || '••••'}) — leave blank to keep` : 'Queue-it API key'}
+            style={input} disabled={clearQitKey}
+          />
+          {value?.queueit?.keySet && (
+            <label style={clearRow}><input type="checkbox" checked={clearQitKey} onChange={(e) => setClearQitKey(e.target.checked)} /> Remove this key</label>
+          )}
+          {value?.queueit?.keySet && value?.queueit?.customerId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — live queue stats appear on the client's Queue-it card (Integrations).</div>}
+          <SaveRow k="queueit" />
         </Section>
       )}
 
