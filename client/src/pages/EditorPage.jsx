@@ -117,6 +117,20 @@ export default function EditorPage() {
     }
   }
 
+  // Force comparison-events charts on THIS dashboard to sort events descending.
+  // Dry-run first (counts what would change), confirm, then apply, then reload.
+  async function comparisonSortDesc() {
+    try {
+      const dry = await api.comparisonSortDesc({ dashboardId: id }, false);
+      if (!dry.changed) { alert('Comparison-event charts on this dashboard already sort events descending — nothing to change.'); return; }
+      if (!window.confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} on this dashboard to sort events descending?`)) return;
+      await api.comparisonSortDesc({ dashboardId: id }, true);
+      const fresh = await api.getDashboard(id);
+      setDef(fresh);
+      alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}.`);
+    } catch (e) { alert('Could not update: ' + (e.message || e)); }
+  }
+
   // This dashboard is a shared template (no owner) opened inside a client suite:
   // saving offers a choice between updating the template and forking a client copy.
   const isTemplate = !def?.ownerEntityId;
@@ -372,6 +386,7 @@ export default function EditorPage() {
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>
         <button style={btn} onClick={() => setShowDaysSync(true)}>⏳ Days-to-go{def.daysBeforeSync?.mode && def.daysBeforeSync.mode !== 'off' ? ' ●' : ''}</button>
+        <button style={btn} onClick={comparisonSortDesc} title="Set comparison-events charts on this dashboard to sort events descending (most recent first). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Desc</button>
         <button
           style={{ ...btn, ...(def.keepImportedFilters ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
           onClick={() => mutate((d) => ({ ...d, keepImportedFilters: !d.keepImportedFilters }))}

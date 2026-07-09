@@ -71,29 +71,37 @@ app.post('/api/dashboards/folder/days-sync', auth.requireAdmin, (req, res) => {
 // by default.
 app.post('/api/admin/comparison-sort-desc', auth.requireAdmin, (req, res) => {
   const folder = String((req.body || {}).folder || '');
+  const dashboardId = String((req.body || {}).dashboardId || ''); // scope to ONE dashboard (else the folder)
   const apply = !!(req.body || {}).apply;
   const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
-  const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event']);
+  const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event', 'Past Event', 'Event Name']);
   const isEventField = (s) => /core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s));
   const toDesc = (s) => { const str = String(s); if (!isEventField(str) || /\s+desc$/i.test(str)) return str; return `${str.replace(/\s+(asc|desc)$/i, '')} desc`; }; // event sort → desc; already-desc & measure sorts untouched
   const hasOffset = (q) => { try { const dyn = typeof q?.dynamic_fields === 'string' ? JSON.parse(q.dynamic_fields) : q?.dynamic_fields; return Array.isArray(dyn) && dyn.some((d) => /\boffset\s*\(/i.test(String(d?.expression || ''))); } catch { return false; } };
+  // A tile is a comparison tile if it listens to a comparison-events filter, OR its
+  // query filters/pivots reference the event/date dimension (broader — catches tiles
+  // that don't wire the filter through listenTo).
+  const isComparisonTile = (t) => {
+    if (Object.keys(t.listenTo || {}).some((k) => COMBO.has(k))) return true;
+    const q = t.query || {};
+    return Object.keys(q.filters || {}).some(isEventField) || (Array.isArray(q.pivots) && q.pivots.some(isEventField));
+  };
+  const defs = dashboardId
+    ? [store.get(dashboardId)].filter(Boolean)
+    : store.list().filter((m) => inFolder(m.folder)).map((m) => store.get(m.id)).filter(Boolean);
   const changes = [];
-  for (const meta of store.list()) {
-    if (!inFolder(meta.folder)) continue;
-    const def = store.get(meta.id);
-    if (!def) continue;
+  for (const def of defs) {
     let touched = false;
     for (const t of [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]) {
       const q = t.query;
       if (!q || !Array.isArray(q.sorts) || !q.sorts.length) continue;
-      const isComparison = Object.keys(t.listenTo || {}).some((k) => COMBO.has(k));
-      if (!isComparison || hasOffset(q)) continue;
+      if (!isComparisonTile(t) || hasOffset(q)) continue;
       const next = q.sorts.map(toDesc);
-      if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: meta.title, tile: t.title || t.id }); }
+      if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: def.title, tile: t.title || t.id }); }
     }
-    if (touched && apply) store.update(meta.id, def);
+    if (touched && apply) store.update(def.id, def);
   }
-  res.json({ folder, apply, changed: changes.length, changes: changes.slice(0, 300) });
+  res.json({ folder, dashboardId, apply, changed: changes.length, changes: changes.slice(0, 300) });
 });
 
 app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
