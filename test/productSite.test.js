@@ -9,11 +9,13 @@ const { db, auth } = require('./helpers');
 const productSite = require('../server/productSite');
 
 // Mount capturing the final route handlers (no real express; middleware skipped —
-// requireAdmin is exercised by the auth suite).
+// requireAdmin is exercised by the auth suite). `use` is a no-op: the module
+// also mounts a static gallery (/sales/experience) via app.use, which this
+// harness doesn't exercise — without the stub the whole mount throws.
 function mountRoutes() {
   const routes = {};
   const reg = (m) => (p, ...hs) => { for (const key of [].concat(p)) routes[m + ' ' + key] = hs[hs.length - 1]; };
-  productSite.mount({ get: reg('GET'), put: reg('PUT') }, { db, auth });
+  productSite.mount({ get: reg('GET'), put: reg('PUT'), use: () => {} }, { db, auth });
   return routes;
 }
 const res = () => {
