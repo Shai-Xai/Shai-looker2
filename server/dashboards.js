@@ -62,18 +62,20 @@ app.post('/api/dashboards/folder/days-sync', auth.requireAdmin, (req, res) => {
   res.json({ ok: true, folder, sync });
 });
 
-// Bulk: flip comparison-events tiles' EVENT sort from desc → asc across a folder
-// (+ subfolders), so those charts read chronologically. Scoped so it can be rolled
-// out one folder at a time. Only touches tiles that (a) listen to a Comparison
-// Events filter, (b) are NOT offset() "change" tiles (their order is forced to
-// current-first at query time anyway), and (c) sort by the event/date dimension
-// — never a measure sort (a top-N-by-value chart is left alone). dryRun by default.
-app.post('/api/admin/comparison-sort-asc', auth.requireAdmin, (req, res) => {
+// Bulk: force comparison-events tiles' EVENT sort to DESCENDING across a folder
+// (+ subfolders), so those charts lead with the most recent event. Scoped so it can
+// be rolled out one folder at a time. Only touches tiles that (a) listen to a
+// Comparison Events filter, (b) are NOT offset() "change" tiles (their order is
+// forced current-first at query time anyway), and (c) sort by the event/date
+// dimension — never a measure sort (a top-N-by-value chart is left alone). dryRun
+// by default.
+app.post('/api/admin/comparison-sort-desc', auth.requireAdmin, (req, res) => {
   const folder = String((req.body || {}).folder || '');
   const apply = !!(req.body || {}).apply;
   const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
   const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event']);
-  const isEventSort = (s) => / desc$/i.test(String(s)) && (/core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s)));
+  const isEventField = (s) => /core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s));
+  const toDesc = (s) => { const str = String(s); if (!isEventField(str) || /\s+desc$/i.test(str)) return str; return `${str.replace(/\s+(asc|desc)$/i, '')} desc`; }; // event sort → desc; already-desc & measure sorts untouched
   const hasOffset = (q) => { try { const dyn = typeof q?.dynamic_fields === 'string' ? JSON.parse(q.dynamic_fields) : q?.dynamic_fields; return Array.isArray(dyn) && dyn.some((d) => /\boffset\s*\(/i.test(String(d?.expression || ''))); } catch { return false; } };
   const changes = [];
   for (const meta of store.list()) {
@@ -86,7 +88,7 @@ app.post('/api/admin/comparison-sort-asc', auth.requireAdmin, (req, res) => {
       if (!q || !Array.isArray(q.sorts) || !q.sorts.length) continue;
       const isComparison = Object.keys(t.listenTo || {}).some((k) => COMBO.has(k));
       if (!isComparison || hasOffset(q)) continue;
-      const next = q.sorts.map((s) => (isEventSort(s) ? String(s).replace(/\s+desc$/i, ' asc') : s));
+      const next = q.sorts.map(toDesc);
       if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: meta.title, tile: t.title || t.id }); }
     }
     if (touched && apply) store.update(meta.id, def);

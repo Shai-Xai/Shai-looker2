@@ -67,14 +67,14 @@ export default function HomePage() {
     try { await api.setFolderKeepImported(path, !folderKeepOn); loadFolderSettings(); }
     catch (e) { alert('Could not update folder: ' + (e.message || e)); }
   }
-  // Flip comparison-events charts in this folder to sort events ascending. Dry-run
+  // Force comparison-events charts in this folder to sort events descending. Dry-run
   // first (counts what would change), confirm, then apply.
-  async function comparisonSortAsc() {
+  async function comparisonSortDesc() {
     try {
-      const dry = await api.comparisonSortAsc(path, false);
-      if (!dry.changed) { alert('No comparison-event charts in this folder sort events descending — nothing to change.'); return; }
-      if (!confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} in “${path}” (and subfolders) to sort events ascending?`)) return;
-      await api.comparisonSortAsc(path, true);
+      const dry = await api.comparisonSortDesc(path, false);
+      if (!dry.changed) { alert('Comparison-event charts in this folder already sort events descending — nothing to change.'); return; }
+      if (!confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} in “${path}” (and subfolders) to sort events descending?`)) return;
+      await api.comparisonSortDesc(path, true);
       alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}. Refresh a dashboard to see the new order.`);
     } catch (e) { alert('Could not update: ' + (e.message || e)); }
   }
@@ -249,7 +249,7 @@ export default function HomePage() {
               title="When ON, the imported (Looker) default filters are authoritative for EVERY dashboard in this folder (incl. subfolders, and ones added later) — client defaults, saved views & suite locks won't override them.">
               📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
             </button>
-            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={comparisonSortAsc} title="Set comparison-events charts in this folder (and subfolders) to sort events ascending (chronological). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Asc</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={comparisonSortDesc} title="Set comparison-events charts in this folder (and subfolders) to sort events descending (most recent first). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Desc</button>
             <button
               style={{ ...miniBtnOutline, fontSize: 12, ...(folderDaysMap[path]?.mode && folderDaysMap[path].mode !== 'off' ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff' } : null) }}
               onClick={() => setShowDaysSync(true)}
