@@ -89,14 +89,16 @@ s.addText('“It’s not dashboards and email and reports — it’s one living 
 
 /* ---------- 4 · SEE ---------- */
 s = contentSlide('👁  SEE — dashboards & AI insight', 'know what’s happening, without digging', RED, 4);
-feat(s, 0.5, 1.55, 6.0, 'Live dashboards', 'LIVE', '— KPIs, tables and charts on your real ticketing & GA4 data, with drill-through. Mobile-first, installable as an app.');
-feat(s, 0.5, 2.65, 6.0, 'Per-tile AI insight', 'LIVE', '— tap any tile and the Owl explains the numbers in plain English, grounded in that data.');
-feat(s, 0.5, 3.75, 6.0, 'Personalised AI briefing', 'LIVE', '— land on a summary of what matters right now, tailored to what you follow and view.');
-feat(s, 6.9, 1.55, 6.0, 'Scheduled digests', 'LIVE', '— role-specific email briefings (exec / marketing / finance / ops) on your cadence, with charts rendered in the email.');
-feat(s, 6.9, 2.65, 6.0, 'Share any insight', 'LIVE', '— hand a finding to email, WhatsApp or Slack in one tap, with a link back to the view.');
-feat(s, 6.9, 3.75, 6.0, 'Goals with pace & forecast', 'BETA', '— a North Star target on every screen: ahead / on-track / behind vs last event’s real sell-curve, with a projected landing.', PURPLE);
-s.addShape('roundRect', { x: 0.5, y: 5.35, w: 12.4, h: 1.0, rectRadius: 0.1, fill: { color: 'F6F1FF' } });
-s.addText('“Your data, read for you — open the app and you already know what changed and what to do.”', { x: 0.8, y: 5.45, w: 11.8, h: 0.8, fontSize: 15, bold: true, italic: true, color: PURPLE, align: 'center', valign: 'middle', fontFace: F });
+feat(s, 0.5, 1.5, 5.9, 'Live dashboards', null, '— KPIs, tables and charts on your real ticketing & GA4 data, with drill-through. Mobile-first, installable as an app.');
+feat(s, 0.5, 2.6, 5.9, 'Per-tile AI insight', null, '— tap any tile and the Owl explains the numbers in plain English, grounded in that data.');
+feat(s, 0.5, 3.7, 5.9, 'Personalised AI briefing', null, '— land on a summary of what matters right now, tailored to what you follow and view.');
+feat(s, 0.5, 4.8, 5.9, 'Goals with pace & forecast', null, '— a North Star target on every screen: ahead / on-track / behind vs last event’s real sell-curve, with a projected landing.');
+s.addImage({ path: 'dash.png', x: 6.75, y: 1.55, w: 6.1, h: 1.72 });
+s.addText('The dashboard with the Owl one tap away — every number explained.', { x: 6.75, y: 3.3, w: 6.1, h: 0.35, fontSize: 9.5, italic: true, color: GREY, fontFace: F });
+feat(s, 6.75, 3.8, 6.1, 'Scheduled digests', null, '— role-specific email briefings (exec / marketing / finance / ops) on your cadence, with charts rendered in the email.');
+feat(s, 6.75, 4.8, 6.1, 'Share any insight', null, '— hand a finding to email, WhatsApp or Slack in one tap, with a link back to the view.');
+s.addShape('roundRect', { x: 0.5, y: 5.9, w: 12.4, h: 0.85, rectRadius: 0.1, fill: { color: 'F6F1FF' } });
+s.addText('“Your data, read for you — open the app and you already know what changed and what to do.”', { x: 0.8, y: 5.9, w: 11.8, h: 0.85, fontSize: 14.5, bold: true, italic: true, color: PURPLE, align: 'center', valign: 'middle', fontFace: F });
 
 /* ---------- 5 · ASK ---------- */
 s = contentSlide('🦉  ASK — your AI Data Analyst, everywhere', 'plain-language answers, only ever from your own data', ORANGE, 5);
