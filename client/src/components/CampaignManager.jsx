@@ -747,6 +747,50 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
   const convDash = tiles?.dashboards?.find((d) => d.dashboardId === f.convDashboardId);
 
+  // ── Journey editor block — shared by the full-width strip (default) and the
+  // full-screen overlay (⛶ Expand). Same tree, same edit handler; the tree just
+  // gets more room. Layout-only; no data/engine impact.
+  const isJourneyCampaign = isSequence && f.journey?.nodes?.length > 0;
+  const [journeyFull, setJourneyFull] = useState(false);
+  useEffect(() => {
+    if (!journeyFull) return;
+    const onKey = (e) => { if (e.key === 'Escape') setJourneyFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [journeyFull]);
+  const onJourneyEdit = (id, patch) => setF((s) => {
+    const nodes = journeyPatch(s.journey.nodes, id, patch);
+    // Mirror the opening (pre-decision) trunk into `steps` so the email preview
+    // + the linear fallback stay coherent with tree edits.
+    const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText, heroImage: n.heroImage || '' }));
+    return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
+  });
+  const journeyWatchedSummary = () => {
+    if (!isJourneyCampaign) return null;
+    const watched = journeyWatched(f.journey.nodes);
+    return (
+      <div style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 9, padding: '7px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <div><strong>Who enters:</strong> the audience configured{f.audienceMode === 'segment' ? ' (a saved segment)' : ''} — everyone enrolled starts at the top of the tree.</div>
+        {watched.length > 0
+          ? watched.map((w, i) => (
+            <div key={i}><strong>Watched list:</strong> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>👥 “{w.segmentName}”</a>{w.segmentId ? '' : <span style={{ color: '#dc2626', fontWeight: 700 }}> ⚠ not linked to a saved segment — this branch will never fire</span>} — decides “{w.branch}” at “{w.question}”</div>
+          ))
+          : <div style={{ color: 'var(--muted)' }}><strong>Watched lists:</strong> none — decisions here use opens, clicks and the campaign’s conversion source.</div>}
+      </div>
+    );
+  };
+  const journeyStrip = () => (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--elevated, var(--card))', padding: '14px 16px 8px', marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>🧭 Journey <span style={{ color: 'var(--muted)', fontWeight: 600 }}>(every message is editable — branches included{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)}` : ''})</span></span>
+        <button type="button" onClick={() => setJourneyFull(true)} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, padding: '5px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>⛶ Expand</button>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Edit any message right here — subject, copy, artwork, button and its link, or apply a template. To change the flow (branches, timing), ask the Owl on the Journeys tab.</div>
+      {journeyWatchedSummary()}
+      <JourneyTree nodes={f.journey.nodes} templates={templates} onEdit={onJourneyEdit} />
+    </div>
+  );
+
   return (
     <div>
       <button style={{ ...mini, marginBottom: 12 }} onClick={onClose}>← Back to campaigns</button>
@@ -773,6 +817,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
         </div>
       )}
+      {/* Journey campaigns: the tree spans the FULL editor width (Option A) — the
+          narrow form column can't show a branching tree. ⛶ Expand goes full-screen. */}
+      {isJourneyCampaign && journeyStrip()}
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1037,39 +1084,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
             </Field>
           )}
 
-          {isSequence && f.journey?.nodes?.length > 0 && (
-            <Field label="🧭 Journey (every message is fully editable — branches included)">
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-                Built with the Owl{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)} decision point${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'}` : ''}. Edit any message right here — subject, copy, artwork, button and its link (blank link = the campaign buy link below), or apply a saved template — then Save. To restructure the flow (add branches, change timing), ask the Owl on the Journeys tab.
-              </div>
-              {(() => {
-                const watched = journeyWatched(f.journey.nodes);
-                return (
-                  <div style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 9, padding: '7px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <div><strong>Who enters:</strong> the audience configured above{f.audienceMode === 'segment' ? ' (a saved segment)' : ''} — everyone enrolled starts at the top of the tree.</div>
-                    {watched.length > 0
-                      ? watched.map((w, i) => (
-                        <div key={i}><strong>Watched list:</strong> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>👥 “{w.segmentName}”</a>{w.segmentId ? '' : <span style={{ color: '#dc2626', fontWeight: 700 }}> ⚠ not linked to a saved segment — this branch will never fire</span>} — decides “{w.branch}” at “{w.question}”</div>
-                      ))
-                      : <div style={{ color: 'var(--muted)' }}><strong>Watched lists:</strong> none — decisions here use opens, clicks and the campaign’s conversion source.</div>}
-                  </div>
-                );
-              })()}
-              <JourneyTree
-                nodes={f.journey.nodes}
-                templates={templates}
-                onEdit={(id, patch) => setF((s) => {
-                  const nodes = journeyPatch(s.journey.nodes, id, patch);
-                  // Mirror the opening (pre-decision) trunk into `steps` so the email
-                  // preview + the linear fallback stay coherent with tree edits.
-                  const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText, heroImage: n.heroImage || '' }));
-                  return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
-                })}
-              />
-            </Field>
-          )}
+          {/* Journey tree lives in the full-width strip above (Option A) + the
+              ⛶ full-screen overlay — not in this narrow column. */}
 
-          {isSequence && !(f.journey?.nodes?.length > 0) && (
+          {isSequence && !isJourneyCampaign && (
             <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
@@ -1306,6 +1324,29 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
         </div>
       </div>
+
+      {/* ⛶ Full-screen journey editor (Option B) — the whole tree, room to work.
+          Same editable JourneyTree + shared form state; Esc / ✕ / Save closes. */}
+      {journeyFull && isJourneyCampaign && (
+        <div role="dialog" aria-modal="true" aria-label="Journey full-screen editor"
+          style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(20,20,24,0.5)', display: 'flex', padding: isMobile ? 8 : 18, boxSizing: 'border-box' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setJourneyFull(false); }}>
+          <div style={{ flex: 1, maxWidth: 1400, margin: '0 auto', background: 'var(--bg)', borderRadius: 16, boxShadow: '0 8px 30px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: '1px solid var(--hairline)', background: 'var(--card)', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>🧭 {f.title || 'Journey'}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{journeyDecisions(f.journey.nodes) > 0 ? `◆ ${journeyDecisions(f.journey.nodes)} decision${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'} · ` : ''}every message editable</span>
+              <button type="button" onClick={() => setJourneyFull(false)} style={{ marginLeft: 'auto', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Done · Esc</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '18px 12px' : '28px 24px', display: 'flex', justifyContent: 'safe center', alignItems: 'flex-start' }}>
+              <div>
+                {journeyWatchedSummary()}
+                <JourneyTree nodes={f.journey.nodes} templates={templates} onEdit={onJourneyEdit} />
+              </div>
+            </div>
+            <div style={{ padding: '9px 18px', borderTop: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 12, color: 'var(--muted)' }}>Edits save with the campaign — close and hit Save. On a live journey the funnel (👁 opened · 🖱 clicked · ⏳ waiting) shows here too.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
