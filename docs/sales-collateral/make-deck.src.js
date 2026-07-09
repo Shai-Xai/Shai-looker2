@@ -52,7 +52,7 @@ s.addText([
 s.addText('Your event’s data, finally working for you.', { x: 0.9, y: 3.45, w: 11.5, h: 0.8, fontSize: 30, bold: true, color: 'D8D4F0', fontFace: F });
 s.addText('The Experience OS for event organisers: live dashboards, an AI analyst, and a full email/SMS campaign engine, all powered by the same governed data. Insight → action → results, in your brand, on your phone.', { x: 0.9, y: 4.5, w: 10.8, h: 1.1, fontSize: 15, color: 'A9A5C6', fontFace: F, lineSpacing: 22 });
 gradBar(s, 0.9, 5.9, 3.2, 0.07);
-s.addText('Sales deck · 2026', { x: 0.9, y: 6.5, w: 5, h: 0.4, fontSize: 11, color: '6E6A8F', fontFace: F });
+s.addText('Prepared for Milk & Cookies · July 2026', { x: 0.9, y: 6.5, w: 5, h: 0.4, fontSize: 11, color: '6E6A8F', fontFace: F });
 
 /* ---------- 2 · THE PROBLEM ---------- */
 s = contentSlide('The problem: five tools, zero loop', 'how event teams work today', NAVY, 2);
