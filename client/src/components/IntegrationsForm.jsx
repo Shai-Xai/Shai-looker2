@@ -183,14 +183,18 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       {showMeta && (
         <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')} guide={<>
           <div style={note}>
-            Push a <b>segment</b> to a Meta <b>Custom Audience</b> for ad targeting or exclusion. Emails/phones are hashed before they leave Pulse. Use a system-user / long-lived token with <code>ads_management</code>.
+            Connect Meta once and Pulse can push <b>segments</b> to Meta <b>Custom Audiences</b> (ad targeting/exclusion) and pull in your <b>paid-ads performance</b>. Emails/phones are hashed before they leave Pulse.
+            {' '}<b>Easiest way:</b> if a <b>📘 Continue with Facebook</b> button appears below this card, use that — one login, nothing to copy. The fields here are the manual (fallback) path.
           </div>
-          <HowTo title="How to get your Meta access details" steps={[
-            <>Open <b>Meta Business Settings</b> → <b>Users → System users</b>. Create (or pick) a system user with <b>Admin</b> access.</>,
-            <>Under <b>Assigned assets</b>, add your <b>Ad account</b> and grant <b>Manage campaigns</b> (full) control.</>,
-            <>Click <b>Generate new token</b>, choose your app, and tick the <code>ads_management</code> scope (add <code>business_management</code> too). Pick a long-lived / non-expiring token and copy it into <b>Access token</b> above.</>,
-            <>Find your <b>Ad account ID</b> in <b>Ads Manager</b> — the <code>act_…</code> number in the account dropdown (top-left). Paste the digits as <code>act_1234567890</code>.</>,
-            <><b>Business ID</b> (optional) lives in <b>Business Settings → Business info</b>.</>,
+          <HowTo title="Manual setup, step by step — no tech skills needed (±10 min)" steps={[
+            <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the Facebook login that manages your ads. You need <b>Admin</b> access to the business portfolio (if you don't have it, ask whoever set up your Facebook ads).</>,
+            <><b>One-time check — your business needs an “app”.</b> In the left menu open <b>Accounts → Apps</b>. If the list is empty, create one (it's just a container Meta requires — you're not building anything): open <ExtLink href="https://developers.facebook.com/apps">developers.facebook.com/apps</ExtLink> → <b>Create app</b> → pick the <b>Business</b> type → name it e.g. “Pulse” → link it to your business portfolio when asked → Create. <i>This is the fix when Meta blocks the token button with “an app must be part of this business portfolio. Please add an app.”</i></>,
+            <>Back in <b>Business settings</b>, go to <b>Users → System users</b> → <b>Add</b> → name it <code>pulse</code>, role <b>Admin</b>. (A system user is a “robot” login the token belongs to — it keeps working even if a staff member leaves.)</>,
+            <>Still on that system user: <b>Add assets → Ad accounts</b> → tick your ad account → switch on <b>Manage campaigns</b> → Save.</>,
+            <>Click <b>Generate new token</b> → choose the app from step 2 → expiration <b>Never</b> → tick <code>ads_read</code> and <code>ads_management</code> (plus <code>business_management</code> if listed) → <b>Generate</b>. <b>Copy the token straight away</b> — Meta shows it only once — and paste it into <b>Access token</b> above.</>,
+            <><b>Ad account ID:</b> open <ExtLink href="https://adsmanager.facebook.com">Ads Manager</ExtLink> and copy the number after <code>act=</code> in the address bar (it's also in the account dropdown, top-left). Paste it as <code>act_1234567890</code> — bare digits work too.</>,
+            <><b>Business ID</b> (optional): Business settings → <b>Business info</b> — the ID shown at the top.</>,
+            <>Press <b>Save</b> below. Once the token and ad account are in, a green <b>✓ Connected</b> appears — you're done.</>,
           ]} />
         </>}>
           <Lbl>Access token</Lbl>
@@ -667,6 +671,12 @@ function Section({ title, collapsible, children, guide, lockKey, locked = false,
 }
 
 function Lbl({ children }) { return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '12px 0 5px' }}>{children}</div>; }
+
+// External link for HowTo steps — opens in a new tab so the client keeps their
+// place in the Pulse form while following along on the other site.
+function ExtLink({ href, children }) {
+  return <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', fontWeight: 600 }}>{children}</a>;
+}
 
 // Collapsible "how to get your access details" — closed by default so it never
 // clutters the form, but a step-by-step is one tap away when a client is stuck.
