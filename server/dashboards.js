@@ -52,6 +52,38 @@ app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) =
   res.json({ ok: true, folder, on });
 });
 
+// Bulk: flip comparison-events tiles' EVENT sort from desc → asc across a folder
+// (+ subfolders), so those charts read chronologically. Scoped so it can be rolled
+// out one folder at a time. Only touches tiles that (a) listen to a Comparison
+// Events filter, (b) are NOT offset() "change" tiles (their order is forced to
+// current-first at query time anyway), and (c) sort by the event/date dimension
+// — never a measure sort (a top-N-by-value chart is left alone). dryRun by default.
+app.post('/api/admin/comparison-sort-asc', auth.requireAdmin, (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const apply = !!(req.body || {}).apply;
+  const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
+  const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event']);
+  const isEventSort = (s) => / desc$/i.test(String(s)) && (/core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s)));
+  const hasOffset = (q) => { try { const dyn = typeof q?.dynamic_fields === 'string' ? JSON.parse(q.dynamic_fields) : q?.dynamic_fields; return Array.isArray(dyn) && dyn.some((d) => /\boffset\s*\(/i.test(String(d?.expression || ''))); } catch { return false; } };
+  const changes = [];
+  for (const meta of store.list()) {
+    if (!inFolder(meta.folder)) continue;
+    const def = store.get(meta.id);
+    if (!def) continue;
+    let touched = false;
+    for (const t of [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]) {
+      const q = t.query;
+      if (!q || !Array.isArray(q.sorts) || !q.sorts.length) continue;
+      const isComparison = Object.keys(t.listenTo || {}).some((k) => COMBO.has(k));
+      if (!isComparison || hasOffset(q)) continue;
+      const next = q.sorts.map((s) => (isEventSort(s) ? String(s).replace(/\s+desc$/i, ' asc') : s));
+      if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: meta.title, tile: t.title || t.id }); }
+    }
+    if (touched && apply) store.update(meta.id, def);
+  }
+  res.json({ folder, apply, changed: changes.length, changes: changes.slice(0, 300) });
+});
+
 app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
   const d = store.get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Dashboard not found' });

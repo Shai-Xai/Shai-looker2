@@ -64,6 +64,17 @@ export default function HomePage() {
     try { await api.setFolderKeepImported(path, !folderKeepOn); loadFolderSettings(); }
     catch (e) { alert('Could not update folder: ' + (e.message || e)); }
   }
+  // Flip comparison-events charts in this folder to sort events ascending. Dry-run
+  // first (counts what would change), confirm, then apply.
+  async function comparisonSortAsc() {
+    try {
+      const dry = await api.comparisonSortAsc(path, false);
+      if (!dry.changed) { alert('No comparison-event charts in this folder sort events descending — nothing to change.'); return; }
+      if (!confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} in “${path}” (and subfolders) to sort events ascending?`)) return;
+      await api.comparisonSortAsc(path, true);
+      alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}. Refresh a dashboard to see the new order.`);
+    } catch (e) { alert('Could not update: ' + (e.message || e)); }
+  }
 
   async function previewFolder() {
     if (!lookerFolderId.trim()) return;
@@ -235,6 +246,7 @@ export default function HomePage() {
               title="When ON, the imported (Looker) default filters are authoritative for EVERY dashboard in this folder (incl. subfolders, and ones added later) — client defaults, saved views & suite locks won't override them.">
               📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
             </button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={comparisonSortAsc} title="Set comparison-events charts in this folder (and subfolders) to sort events ascending (chronological). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Asc</button>
             <button style={{ ...miniBtnOutline, fontSize: 12, color: 'var(--error)' }} onClick={(e) => deleteFolderAction(path, e)} title="Delete this folder">🗑 Delete</button>
           </>
         )}
