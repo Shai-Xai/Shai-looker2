@@ -503,6 +503,10 @@ export const api = {
   bustCache,
   mySuites: () => cachedGet('/api/my/suites'),
   saveSuiteOrder: (entityId, order) => fetch(`/api/my/suite-order/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) }).then(json),
+  mySuiteCategories: (entityId) => fetch(`/api/my/suite-categories/${entityId}`).then(json),
+  saveMySuiteCategories: (entityId, categories) => fetch(`/api/my/suite-categories/${entityId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categories }) }).then(json),
+  adminSuiteCategories: (entityId) => fetch(`/api/admin/entities/${entityId}/suite-categories`).then(json),
+  adminSaveSuiteCategories: (entityId, categories) => fetch(`/api/admin/entities/${entityId}/suite-categories`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categories }) }).then(json),
   mySuite: (id) => fetch(`/api/my/suites/${id}`).then(json),
 
   // Social metrics (inbound organic stats). Admins pass the ownership check, so

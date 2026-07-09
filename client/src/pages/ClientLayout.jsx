@@ -235,6 +235,26 @@ export default function ClientLayout() {
   // 🚩 Per-client feature flags drive which workspace sections show (server routes enforce too).
   const myFlags = useMyFlags(activeEntityId);
   const fl = (k) => flagOn(myFlags, k);
+  // Client-defined categories for the nav (flag: navcategories). A category is
+  // { id, name, suiteIds:[…] }; filed events show under it (takes precedence over
+  // the auto Upcoming/Past), a suite lives in at most one. All edits happen in
+  // "arrange" mode and save the whole array.
+  const catsEnabled = fl('navcategories');
+  const [categories, setCategories] = useState([]);
+  useEffect(() => {
+    if (!activeEntityId || !catsEnabled) { setCategories([]); return; }
+    api.mySuiteCategories(activeEntityId).then((r) => setCategories(r.categories || [])).catch(() => {});
+  }, [activeEntityId, catsEnabled]);
+  const saveCats = (next) => { setCategories(next); if (activeEntityId) api.saveMySuiteCategories(activeEntityId, next).catch(() => {}); };
+  const fileSuite = (suiteId, catId, beforeId) => {
+    if (!suiteId) return;
+    const next = categories.map((c) => ({ ...c, suiteIds: (c.suiteIds || []).filter((id) => id !== suiteId) }));
+    if (catId) { const c = next.find((x) => x.id === catId); if (c) { const i = beforeId ? c.suiteIds.indexOf(beforeId) : -1; if (i >= 0) c.suiteIds.splice(i, 0, suiteId); else c.suiteIds.push(suiteId); } }
+    saveCats(next);
+  };
+  const addCategory = () => { const name = (prompt('New category name (e.g. Festivals):') || '').trim(); if (name) saveCats([...categories, { id: 'c' + Math.random().toString(36).slice(2, 9), name, suiteIds: [] }]); };
+  const renameCategory = (id) => { const c = categories.find((x) => x.id === id); const name = prompt('Rename category:', c?.name || ''); if (name != null) saveCats(categories.map((x) => (x.id === id ? { ...x, name: name.trim() } : x))); };
+  const deleteCategory = (id) => { if (confirm('Delete this category? Its events move back to Upcoming/Past.')) saveCats(categories.filter((x) => x.id !== id)); };
   const visibleSettlements = activeEntityId ? settlements.filter((s) => s.entityId === activeEntityId) : settlements;
   // Show the Event Ops nav only when the active client has the pilot switched on AND the
   // user may operate it (admins always pass `can`). Server enforces the real boundary.
@@ -349,8 +369,8 @@ export default function ClientLayout() {
       {!opsOnly && (
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '2px 8px 10px 14px' }}>
         <span
-          onDoubleClick={() => { if (!searching && activeEntityId && visibleSuites.length > 1) setArranging((a) => !a); }}
-          title="Double-click to reorder events"
+          onDoubleClick={() => { if (!searching && activeEntityId && (visibleSuites.length > 1 || catsEnabled)) setArranging((a) => !a); }}
+          title={catsEnabled ? 'Double-click to arrange events & categories' : 'Double-click to reorder events'}
           style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: arranging ? 'var(--brand)' : 'var(--muted)', cursor: 'default', userSelect: 'none' }}>
           {arranging ? 'Suites · reordering' : 'Suites'}
         </span>
@@ -366,32 +386,36 @@ export default function ClientLayout() {
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 13 }}>No matches for “{q.trim()}”.</div>
       ) : (
         (() => {
-        // Auto-group by event timing (upcoming/past/undated). Suppressed while
-        // searching (a flat match list reads better). Reorder is drag-to-arrange
-        // within the list; the group headers show only when >1 group has suites.
-        const GROUPS = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
-        const groups = GROUPS.map(([key, label]) => ({ key, label, items: shownSuites.filter((s) => s.timing === key) })).filter((g) => g.items.length);
-        // Event dates resolve from Looker in the background; the first load a suite is
-        // seen its timing is 'unknown'. Show a flat list that round (never drop or
-        // mis-group a suite); it groups on the next load once the dates are cached.
+        // Grouping: client CATEGORIES take precedence (filed events under their
+        // category), then the automatic Upcoming/Past/Other for anything unfiled.
+        // Timing resolves from Looker in the background — a suite's first load is
+        // 'unknown', so with no categories we render a flat list that round.
+        const catsOn = catsEnabled && !searching && !!activeEntityId;
+        const byId = Object.fromEntries(shownSuites.map((s) => [s.id, s]));
+        const filed = new Set();
+        if (catsOn) for (const c of categories) for (const id of c.suiteIds || []) if (byId[id]) filed.add(id);
+        const unfiled = shownSuites.filter((s) => !filed.has(s.id));
+        const TIMING = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
+        const timingGroups = TIMING.map(([key, label]) => ({ label, items: unfiled.filter((s) => s.timing === key) })).filter((g) => g.items.length);
         const anyUnknown = shownSuites.some((s) => !s.timing || s.timing === 'unknown');
-        const grouped = !searching && !anyUnknown && groups.length > 1;
+        const hasCats = catsOn && categories.length > 0;
         const canReorder = arranging && !searching && !!activeEntityId; // grips only in reorder mode
-        const renderSuite = (su) => {
+        const renderSuite = (su, catId = null) => {
           const sets = suiteSets(su);
           const suiteOpen = searching || !!openSuites[su.id];
           return (
             <div key={su.id} style={{ marginBottom: 2, borderRadius: 8, opacity: dragId === su.id ? 0.4 : 1, boxShadow: (canReorder && dragOverId === su.id && dragId && dragId !== su.id) ? 'inset 0 2px 0 0 var(--brand)' : 'none' }}
               onDragOver={canReorder ? (e) => { e.preventDefault(); if (dragOverId !== su.id) setDragOverId(su.id); } : undefined}
-              onDrop={canReorder ? (e) => { e.preventDefault(); reorderSuite(dragId, su.id); setDragId(null); setDragOverId(null); } : undefined}
+              onDrop={canReorder ? (e) => { e.preventDefault(); if (catId) { fileSuite(dragId, catId, su.id); } else { if (categories.some((c) => (c.suiteIds || []).includes(dragId))) fileSuite(dragId, null); reorderSuite(dragId, su.id); } setDragId(null); setDragOverId(null); } : undefined}
               onDragEnd={canReorder ? () => { setDragId(null); setDragOverId(null); } : undefined}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {canReorder && <span draggable onDragStart={(e) => { setDragId(su.id); e.dataTransfer.effectAllowed = 'move'; }} title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted)', fontSize: 11, lineHeight: 1, padding: '0 1px', flexShrink: 0, userSelect: 'none' }}>⠿</span>}
+                {canReorder && <span draggable onDragStart={(e) => { setDragId(su.id); e.dataTransfer.effectAllowed = 'move'; }} title="Drag to reorder / into a category" style={{ cursor: 'grab', color: 'var(--muted)', fontSize: 11, lineHeight: 1, padding: '0 1px', flexShrink: 0, userSelect: 'none' }}>⠿</span>}
                 <button className="nav-row" style={{ ...rowBtn, fontWeight: 600, flex: 1, minWidth: 0 }} onClick={() => toggleSuite(su.id)}>
                   <Caret open={suiteOpen} />
                   <Ico v={su.icon} size={22} />
                   <span style={ellip}>{su.name}</span>
                 </button>
+                {arranging && catId && <button onClick={(e) => { e.stopPropagation(); fileSuite(su.id, null); }} title="Remove from category" style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 13, padding: '0 4px', flexShrink: 0 }}>✕</button>}
                 {su.liveDashboardId && <LiveBtn onClick={() => go(su.id, su.liveDashboardId)} title={`Live ticket sales — ${su.name}`} />}
               </div>
               <div className={`collapsey${suiteOpen ? ' open' : ''}`}>
@@ -435,13 +459,41 @@ export default function ClientLayout() {
             </div>
           );
         };
-        if (!grouped) return shownSuites.map(renderSuite);
-        return groups.map((g) => (
-          <div key={g.key} style={{ marginBottom: 4 }}>
-            <div style={{ padding: '7px 8px 3px 14px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted-2)' }}>{g.label}</div>
-            {g.items.map(renderSuite)}
-          </div>
-        ));
+        const headStyle = { padding: '7px 8px 3px 14px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted-2)' };
+        const miniIcon = { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 3px', flexShrink: 0 };
+        // No categories: flat while searching / dates resolving / a single group, else the timing groups.
+        if (!hasCats) {
+          if (searching || anyUnknown || timingGroups.length <= 1) return shownSuites.map((s) => renderSuite(s));
+          return timingGroups.map((g) => (
+            <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
+          ));
+        }
+        // With categories: each category (a drop target while arranging), then the
+        // unfiled events under their automatic Upcoming/Past/Other groups.
+        return (
+          <>
+            {categories.map((c) => {
+              const items = (c.suiteIds || []).map((id) => byId[id]).filter(Boolean);
+              if (!items.length && !arranging) return null; // hide empties unless arranging
+              return (
+                <div key={c.id} style={{ marginBottom: 4, borderRadius: 8, boxShadow: (canReorder && dragOverId === `cat:${c.id}` && dragId) ? 'inset 0 0 0 1.5px var(--brand)' : 'none' }}
+                  onDragOver={canReorder ? (e) => { e.preventDefault(); if (dragOverId !== `cat:${c.id}`) setDragOverId(`cat:${c.id}`); } : undefined}
+                  onDrop={canReorder ? (e) => { e.preventDefault(); fileSuite(dragId, c.id); setDragId(null); setDragOverId(null); } : undefined}>
+                  <div style={{ ...headStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ flex: 1, ...ellip }}>🗂 {c.name}</span>
+                    {arranging && <button onClick={() => renameCategory(c.id)} title="Rename category" style={miniIcon}>✎</button>}
+                    {arranging && <button onClick={() => deleteCategory(c.id)} title="Delete category" style={miniIcon}>✕</button>}
+                  </div>
+                  {items.length ? items.map((s) => renderSuite(s, c.id)) : <div style={{ ...subRow, color: 'var(--muted)', fontStyle: 'italic' }}>Drop events here</div>}
+                </div>
+              );
+            })}
+            {timingGroups.map((g) => (
+              <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
+            ))}
+            {arranging && <button onClick={addCategory} style={{ ...subRow, color: 'var(--brand)', fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left', padding: '6px 14px' }}>+ New category</button>}
+          </>
+        );
         })()
       )}
       {/* Settlements — its own section below the suites. Hidden for clients

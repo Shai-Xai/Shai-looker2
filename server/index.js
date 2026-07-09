@@ -510,6 +510,7 @@ require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, aut
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
 // filter views + lock overrides. Remove this line + server/clientModel.js.
 require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, resolveEventDate, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
+require('./suiteCategories').mount(app, { db, auth }); // client-defined nav categories for grouping events (flag: navcategories) → server/suiteCategories.js
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The

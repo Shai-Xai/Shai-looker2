@@ -929,6 +929,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-08** — **Nav: your own event categories** 🧪 (new, flag `navcategories`):
+  a client can create their own named categories in the sidebar ("Festivals",
+  "Club nights", "2025 archive") and **drag events into them** — categories take
+  precedence, and anything unfiled still falls under the automatic Upcoming/Past.
+  All editing happens in the nav's "arrange" mode (double-click **Suites**);
+  dual-surface (client self-service + an admin API per client). Beta, off by
+  default — flip it on per client from Admin → Product → Flags.
 - **2026-07-08** — **Nav: reorder suites + Upcoming/Past grouping** ✅ (new): the
   event list in the sidebar now **drag-to-reorder** (a grip handle on each suite;
   the chosen order is saved for the client), and suites **auto-group into

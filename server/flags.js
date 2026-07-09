@@ -87,6 +87,7 @@ const REGISTRY = [
     { key: 'selfservice.team', name: 'Team', def: true, desc: 'Invite/manage their own users.' },
   ] },
   { key: 'yourjourney', emoji: '⚡', name: 'Your journey', def: true, beta: true, desc: 'Client onboarding journey — stickers, badges & Pulse Points (nav entry + points ledger).' },
+  { key: 'navcategories', emoji: '🗂', name: 'Nav categories', def: false, beta: true, desc: 'Clients group their events into their own named categories in the sidebar (drag events in). OFF hides the category controls; the nav falls back to the automatic Upcoming/Past grouping.' },
   { key: 'report', emoji: '💬', name: 'Report an issue', def: true, desc: 'In-app bug/idea reporting.' },
 ];
 
@@ -122,6 +123,7 @@ const GATES = [
   ['/api/owl/act/create-chottu-link', 'engage.links'],
   ['/api/owl/act/apply-chottu-template', 'engage.links'],
   ['/api/my/onboarding', 'yourjourney'],
+  ['/api/my/suite-categories', 'navcategories'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────
