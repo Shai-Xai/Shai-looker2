@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
@@ -138,6 +139,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
             : a.status === 'draft'
             ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
+            : a.status === 'approved'
+            ? `Approved by ${a.approvedBy} · ready for you to send`
             : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
         </div>
         {a.config?.campaignMode === 'sequence' && a.status === 'auto' ? (
@@ -147,7 +150,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>
             {a.promoCodes && <span style={{ color: 'var(--muted)' }}>🎟 {a.promoCodes.available}/{a.promoCodes.total} codes left</span>}
           </div>
-        ) : a.status !== 'draft' && (
+        ) : !['draft', 'approved'].includes(a.status) && (
           <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
             <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
             {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
@@ -162,6 +165,9 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             {a.approval.approvers.filter((x) => x.approved).length}/{a.approval.approvers.length} approved · waiting on {a.approval.approvers.filter((x) => !x.approved).map((x) => x.label).join(', ') || '—'}
           </div>
         )}
+        {a.status === 'approved' && (
+          <div style={{ fontSize: 12, color: '#15803d', marginTop: 4 }}>✅ Approved — it won’t send on its own. Open it to send when you’re ready.</div>
+        )}
         {a.status === 'scheduled' && a.config?.scheduledAt && (
           <div style={{ fontSize: 12, color: '#0a66c2', marginTop: 4 }}>🕒 Sends {new Date(a.config.scheduledAt).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
         )}
@@ -170,11 +176,11 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
       {(() => {
         // One primary action + a ⋯ overflow menu, to keep rows tidy.
         const sent = ['done', 'running', 'failed'].includes(a.status);
-        const editable = ['draft', 'auto', 'pending', 'scheduled'].includes(a.status);
+        const editable = ['draft', 'auto', 'pending', 'scheduled', 'approved'].includes(a.status);
         const primary = sent
           ? { label: '📊 Report', onClick: () => setReporting(a) }
           : editable
-            ? { label: a.createdBy === 'automation' || a.status === 'pending' ? 'Review' : a.status === 'scheduled' ? 'Reschedule' : 'Edit', onClick: () => setEditing(a) }
+            ? { label: a.status === 'approved' ? 'Review & send' : a.createdBy === 'automation' || a.status === 'pending' ? 'Review' : a.status === 'scheduled' ? 'Reschedule' : 'Edit', onClick: () => setEditing(a) }
             : null;
         const items = [];
         if (a.config?.campaignMode === 'sequence' && a.status === 'auto') items.push({ label: '🪜 Journey', onClick: () => setJourney(a) });
@@ -219,6 +225,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     { value: 'all', label: 'All' },
     { value: 'draft', label: 'Drafts', n: countBy((a) => stateBucket(a) === 'draft') },
     { value: 'pending', label: 'Pending', n: countBy((a) => stateBucket(a) === 'pending') },
+    { value: 'approved', label: 'Approved', n: countBy((a) => stateBucket(a) === 'approved') },
     { value: 'scheduled', label: 'Scheduled', n: countBy((a) => stateBucket(a) === 'scheduled') },
     { value: 'sent', label: 'Sent', n: countBy((a) => stateBucket(a) === 'sent') },
     { value: 'automated', label: 'Automated', n: countBy((a) => stateBucket(a) === 'automated') },
@@ -518,7 +525,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   // Editor sections behave as an exclusive accordion — opening one collapses the rest.
   const [openSection, setOpenSection] = useState(null);
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
+  const { user } = useAuth();
   const isPending = action?.status === 'pending';
+  const isApproved = action?.status === 'approved';
+  // Only the campaign's creator (the sender) may actually send an approved
+  // campaign — approvers sign off, the sender pulls the trigger.
+  const isSender = !!action?.createdBy && (user?.email || '').toLowerCase() === action.createdBy.toLowerCase();
   const isScheduled = action?.status === 'scheduled';
   // For Email+SMS campaigns, the two content sub-sections are collapsible — but
   // default OPEN so the separate SMS editor is obviously available (it was easy
@@ -732,12 +744,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
       ? `\n\nRecipients:\n• ${who.join('\n• ')}${aud.count > who.length ? `\n• …and ${aud.count - who.length} more` : ''}`
       : '';
     const src = f.audienceMode === 'tile' ? `the “${dash?.tiles?.find((t) => t.tileId === f.tileId)?.title || 'selected'}” tile` : 'your pasted list';
-    if (!confirm(`Send this campaign to ${aud.count} recipient${aud.count === 1 ? '' : 's'} from ${src}?${recipientList}\n\nThis sends real emails now and cannot be undone.`)) return;
+    const verb = isApproved ? 'Send this approved campaign' : 'Send this campaign';
+    if (!confirm(`${verb} to ${aud.count} recipient${aud.count === 1 ? '' : 's'} from ${src}?${recipientList}\n\nThis sends real emails now and cannot be undone.`)) return;
     setApproveState('working');
     try {
       let id = action?.id;
-      if (id) await api.updateAction(entityId, id, payload());
-      else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+      // An already-approved campaign is locked — send its approved content as-is
+      // (re-saving is blocked server-side and would bypass the sign-off anyway).
+      if (id && !isApproved) await api.updateAction(entityId, id, payload());
+      else if (!id) { const r = await api.createAction(entityId, payload()); id = r.action.id; }
       const r = await api.approveAction(entityId, id);
       setApproveState(`✓ Sending to ${r.sendingTo}`);
       setTimeout(onSaved, 900);
@@ -769,6 +784,23 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <textarea style={{ ...input, resize: 'vertical', fontFamily: 'inherit' }} rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} placeholder="Comment for the sender — what needs to change before this can be approved…" />
               <div><button className="liquid-btn" style={{ ...primary, background: '#dc2626' }} onClick={rejectPending} disabled={approveState === 'working'}>Send back to draft</button></div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Approved banner — sign-off is complete; only the sender may now send it. */}
+      {isApproved && (
+        <div style={{ border: '1px solid rgba(21,128,61,0.4)', background: 'rgba(52,199,89,0.10)', borderRadius: 12, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#15803d' }}>✅ Approved — ready to send</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+            {action.approvedBy ? `Approved by ${action.approvedBy}. ` : ''}This campaign won’t send on its own — {isSender ? 'review it below, then send when you’re ready.' : `only the sender (${action.createdBy}) can send it.`}
+          </div>
+          {isSender && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
+                {approveState === 'working' ? 'Sending…' : `Send now${aud?.count ? ` to ${aud.count}` : ''}`}
+              </button>
+              {(approveState && approveState !== 'working') && <span style={{ fontSize: 12.5, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
             </div>
           )}
         </div>
@@ -873,7 +905,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                       <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
-                        <option value="">Name column (optional)</option>
+                        <option value="">Name column (auto-detected — enables {'{{name}}'})</option>
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                     </div>
@@ -1251,25 +1283,32 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-            <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
+            {!isApproved && <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>}
             <button
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => {
                 let testPhone = '';
                 if (hasSms) { testPhone = window.prompt('Send the test SMS to which number?', ''); if (!testPhone) return; }
+                let testEmails = '';
+                if (hasEmail) {
+                  testEmails = window.prompt('Send the test email to which address(es)?\nSeparate multiple with commas — they don’t have to be Pulse users.\nLeave blank to send to yourself.', '');
+                  if (testEmails === null) return; // cancelled
+                }
                 setTestState('sending');
-                try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
+                try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone, testEmails }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
               }}
-            >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
-            {!requireApproval && (
+            >{testState === 'sending' ? 'Sending…' : 'Send test…'}</button>
+            {!requireApproval && !isApproved && (
               <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
                 {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
               </button>
             )}
-            <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
-              📩 Send for approval
-            </button>
-            {!requireApproval && !isSequence && !f.recurring && (
+            {!isApproved && (
+              <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
+                📩 Send for approval
+              </button>
+            )}
+            {!requireApproval && !isSequence && !f.recurring && !isApproved && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} style={{ ...input, width: 'auto', padding: '7px 10px' }} />
                 <button style={mini} onClick={scheduleSend} disabled={approveState === 'working' || !aud?.count}>🕒 {isScheduled ? 'Reschedule' : 'Schedule'}</button>
@@ -1688,7 +1727,62 @@ export function ImageField({ label, value, onChange }) {
   );
 }
 
-// Custom HTML: upload an .html file or paste/edit markup directly.
+// Syntax-highlight colours for the HTML editor — chosen to read on BOTH the light
+// and dark card background. Merge tokens ({{name}}…) get the brand colour so
+// they're easy to spot amongst the markup.
+const HL = { tag: '#2f81f7', attr: '#0d9488', val: '#c2601a', com: '#8a94a6', doc: '#8b5cf6', tok: 'var(--brand, #ff385c)' };
+const escH = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const hlTokens = (escaped) => escaped.replace(/\{\{[^}]+\}\}/g, (x) => `<span style="color:${HL.tok};font-weight:700">${x}</span>`);
+function hlTag(tag) {
+  const mm = /^(<\/?)([a-zA-Z][\w:-]*)([\s\S]*?)(\/?>)$/.exec(tag);
+  if (!mm) return `<span style="color:${HL.tag}">${escH(tag)}</span>`;
+  const [, open, name, attrs, close] = mm;
+  let a = ''; let m2;
+  // Walk the attribute string ONCE, emitting escaped+coloured pieces (never re-scan output).
+  const ar = /(\s+)|([a-zA-Z_:][\w:.-]*)(\s*=\s*)?("[^"]*"|'[^']*'|[^\s"'>]+)?|([\s\S])/g;
+  while ((m2 = ar.exec(attrs))) {
+    if (m2[0] === '') break;
+    if (m2[1]) a += m2[1];
+    else if (m2[2]) { a += `<span style="color:${HL.attr}">${escH(m2[2])}</span>`; if (m2[3]) a += escH(m2[3]); if (m2[4]) a += `<span style="color:${HL.val}">${hlTokens(escH(m2[4]))}</span>`; }
+    else if (m2[4]) a += `<span style="color:${HL.val}">${hlTokens(escH(m2[4]))}</span>`;
+    else if (m2[5]) a += escH(m2[5]);
+  }
+  return `<span style="color:${HL.tag}">${escH(open + name)}</span>${a}<span style="color:${HL.tag}">${escH(close)}</span>`;
+}
+// Turn an HTML source string into coloured, fully-escaped markup for the overlay.
+// The value is ESCAPED throughout — only our own <span> wrappers are live HTML —
+// so there's no way for the edited content to inject DOM.
+function highlightHtmlSource(code) {
+  const out = [];
+  const re = /(<!--[\s\S]*?-->)|(<!DOCTYPE[^>]*>)|(<\/?[a-zA-Z][\w:-]*(?:"[^"]*"|'[^']*'|[^>])*>)/gi;
+  let last = 0; let m;
+  while ((m = re.exec(code))) {
+    if (m.index > last) out.push(hlTokens(escH(code.slice(last, m.index))));
+    if (m[1]) out.push(`<span style="color:${HL.com}">${escH(m[1])}</span>`);
+    else if (m[2]) out.push(`<span style="color:${HL.doc}">${escH(m[2])}</span>`);
+    else out.push(hlTag(m[3]));
+    last = re.lastIndex;
+  }
+  if (last < code.length) out.push(hlTokens(escH(code.slice(last))));
+  return out.join('');
+}
+// Lightweight syntax-highlighted editor: a coloured <pre> behind a transparent-text
+// <textarea> (same metrics), so the caret + selection stay native. No dependency.
+function HtmlCodeEditor({ value, onChange }) {
+  const taRef = useRef(null);
+  const preRef = useRef(null);
+  const sync = () => { const ta = taRef.current; const pre = preRef.current; if (ta && pre) { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; } };
+  const shared = { margin: 0, border: 0, padding: '10px 12px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', tabSize: 2, boxSizing: 'border-box', letterSpacing: 0 };
+  const overlay = value ? highlightHtmlSource(value) + '\n' : `<span style="color:var(--muted)">&lt;html&gt;…&lt;/html&gt; — paste your HTML, or upload a file above</span>`;
+  return (
+    <div style={{ position: 'relative', border: '1.5px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', overflow: 'hidden' }}>
+      <pre ref={preRef} aria-hidden="true" style={{ ...shared, position: 'absolute', inset: 0, overflow: 'auto', color: 'var(--text)', pointerEvents: 'none' }} dangerouslySetInnerHTML={{ __html: overlay }} />
+      <textarea ref={taRef} value={value} spellCheck={false} onChange={(e) => onChange(e.target.value)} onScroll={sync}
+        style={{ ...shared, position: 'relative', display: 'block', width: '100%', minHeight: 200, resize: 'vertical', background: 'transparent', color: 'transparent', caretColor: 'var(--text)', outline: 'none', overflow: 'auto' }} />
+    </div>
+  );
+}
+// Custom HTML: upload an .html file or paste/edit markup directly (syntax-highlighted).
 export function HtmlField({ value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
@@ -1698,6 +1792,7 @@ export function HtmlField({ value, onChange }) {
     reader.readAsText(file);
     e.target.value = '';
   };
+  const Swatch = ({ c, children }) => <span style={{ color: c, fontWeight: 600 }}>{children}</span>;
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -1705,7 +1800,10 @@ export function HtmlField({ value, onChange }) {
         {value && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => onChange('')}>Clear</button>}
         <input ref={ref} type="file" accept=".html,text/html" style={{ display: 'none' }} onChange={onFile} />
       </div>
-      <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }} rows={8} value={value} onChange={(e) => onChange(e.target.value)} placeholder="<html>…</html> — or upload a file above" />
+      <HtmlCodeEditor value={value} onChange={onChange} />
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Swatch c={HL.tag}>tags</Swatch><Swatch c={HL.attr}>attributes</Swatch><Swatch c={HL.val}>values</Swatch><Swatch c={HL.com}>comments</Swatch><Swatch c={HL.tok}>{'{{merge fields}}'}</Swatch>
+      </div>
     </div>
   );
 }
@@ -1829,6 +1927,7 @@ function StatusChip({ status }) {
     done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
     scheduled: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: '🕒 Scheduled' },
     pending: { bg: 'rgba(245,158,11,0.16)', c: '#b45309', t: '⏳ Awaiting approval' },
+    approved: { bg: 'rgba(52,199,89,0.15)', c: '#15803d', t: '✅ Approved — ready to send' },
     failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },
   }[status] || { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: status };
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: map.bg, color: map.c }}>{map.t}</span>;

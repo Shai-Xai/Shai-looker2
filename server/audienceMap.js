@@ -19,6 +19,15 @@ const clampSmsCap = (raw) => { if (raw === '' || raw == null) return MAX_SMS_DEF
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
+// Best-effort name column when a campaign didn't explicitly map one, so {{name}}
+// still personalises on real sends. Prefers first/full/customer-name columns;
+// ignores user/company/event/file-name lookalikes and bare last-name/surname.
+const NAME_RE = /(first|full|customer|attendee|given)[\s._-]?name|(^|[\s._-])name([\s._-]|$)/i;
+const NAME_ANTI_RE = /user|compan|organi|event|file|venue|display|screen|nick|last[\s._-]?name|surname/i;
+const detectNameField = (fields = []) => {
+  const f = fields.find((fl) => { const s = `${fl.name} ${fl.label || ''}`; return NAME_RE.test(s) && !NAME_ANTI_RE.test(s); });
+  return f ? f.name : '';
+};
 
 // rows → shaped recipients (with per-channel consent tagged). Mirrors the tile branch
 // of audienceFor verbatim. `opts`: { emailField, nameField, phoneField, ticketField,
@@ -33,6 +42,9 @@ function buildRows(rows, opts = {}) {
   const raw = [];
   let filteredOut = 0;
   if (!emailField) return { raw, filteredOut };
+  // Fall back to an auto-detected name column so {{name}} personalises even when
+  // the campaign never mapped one (the name field is optional in the editor).
+  const nf = nameField || detectNameField([...fields, ...attrFields]);
   for (const row of rows || []) {
     const email = cellVal(row[emailField]).toLowerCase();
     if (!EMAIL_RE.test(email)) continue;
@@ -48,7 +60,7 @@ function buildRows(rows, opts = {}) {
     // Every column as a merge-field attribute (by field label AND name).
     const attributes = {};
     for (const fl of [...fields, ...attrFields]) { const v = cellVal(merged[fl.name]); attributes[fl.name] = v; if (fl.label) attributes[fl.label] = v; }
-    raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
+    raw.push({ email, name: nf ? cellVal(merged[nf]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
   }
   return { raw, filteredOut };
 }

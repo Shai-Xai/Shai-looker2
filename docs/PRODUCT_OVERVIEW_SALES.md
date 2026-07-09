@@ -952,6 +952,16 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-09** — **Campaign approval + custom-HTML fixes**: (1) approving now
+  validates content **first** (a missing subject can't slip through and wrongly say
+  "approved & sending"); (2) only the **named approvers** are pinged to approve, not
+  the whole team; (3) a fully-approved one-off **no longer auto-sends** — it becomes
+  **Approved — ready to send** and only the **sender** sends it, with a deliberate
+  click; (4) **test sends** go to teammates or any external address (not just
+  yourself); (5) `{{name}}` and other merge fields **personalise reliably** — the
+  name column auto-detects, and custom-HTML test links stay clickable; (6) the
+  **custom-HTML editor is syntax-highlighted** (tags/attributes/values/comments +
+  `{{merge fields}}` each in colour).
 - **2026-07-09** — **Queue-it: live waiting-room stats** 🟡🧪 (new): Pulse pulls a
   client's Queue-it queue numbers in live — people waiting now, redirects/min,
   passed through — plus inflow/outflow trend charts (1h→30d). Read-only.

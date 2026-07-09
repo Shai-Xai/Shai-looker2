@@ -923,7 +923,7 @@ export default function ClientLayout() {
             <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 16px', color: '#fff', fontSize: 13, background: approved ? 'linear-gradient(90deg, #16a34a, #15803d)' : 'linear-gradient(90deg, #f59e0b, #dc2626)' }}>
               <span style={{ fontSize: 15 }}>{approved ? '✅' : '↩️'}</span>
               <button onClick={() => { ack(); vtNavigate(navigate, `/actions?action=${o.id}`); }} style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 0, fontSize: 13 }}>
-                <span style={{ fontWeight: 700 }}>“{o.title}” was {approved ? 'approved' : 'sent back to draft'}{o.by ? ` by ${o.by}` : ''}{approved ? ' — now sending' : ''}.</span>
+                <span style={{ fontWeight: 700 }}>“{o.title}” was {approved ? 'approved' : 'sent back to draft'}{o.by ? ` by ${o.by}` : ''}{approved ? (o.readyToSend ? ' — ready for you to send' : ' — now sending') : ''}.</span>
                 {!approved && o.note ? <span style={{ opacity: 0.9 }}> {o.note}</span> : null}
               </button>
               <span onClick={() => { ack(); vtNavigate(navigate, `/actions?action=${o.id}`); }} style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 980, padding: '5px 14px', fontWeight: 700, flexShrink: 0, cursor: 'pointer' }}>Open →</span>
