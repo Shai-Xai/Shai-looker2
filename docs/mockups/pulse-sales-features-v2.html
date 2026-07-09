@@ -1,0 +1,284 @@
+<title>Pulse features: every feature, led by value</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{
+  --brand:#FF385C;
+  --g:linear-gradient(120deg,#FF385C 0%,#FF6B35 45%,#7C3AED 100%);
+  --ink:#1d1d1f; --muted:#6e6e73; --line:#ececef; --bg:#fff; --soft:#f7f7f9;
+  --violet:#7C3AED; --ok:#0a8f5b;
+  --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:0 22px}
+img{max-width:100%}
+
+/* header */
+header.bar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.86);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line)}
+.bar .in{display:flex;align-items:center;gap:12px;max-width:1060px;margin:0 auto;padding:12px 22px}
+.bar .mark{width:34px;height:34px;border-radius:10px;flex:none}
+.bar b{font-size:16px;font-weight:800;letter-spacing:-.02em}
+.bar .sub{font-size:12px;color:var(--muted);font-weight:600}
+.bar nav{margin-left:auto;display:flex;align-items:center;gap:8px}
+.bar nav a{font-size:13px;font-weight:700;text-decoration:none;color:var(--ink);padding:9px 14px;border-radius:980px;min-height:40px;display:inline-flex;align-items:center}
+.bar nav a.solid{background:var(--ink);color:#fff}
+.bar nav a.plain{display:none}
+@media(min-width:560px){.bar nav a.plain{display:inline-flex}}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:12px 24px;border-radius:980px;font-size:15px;font-weight:750;text-decoration:none}
+.btn.primary{background:var(--g);color:#fff;box-shadow:0 12px 26px -12px rgba(255,56,92,.6)}
+.btn.ghost{border:1.5px solid var(--line);color:var(--ink);background:#fff}
+
+section.value{padding:64px 0 0}
+.eyebrow{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--brand)}
+section.value h1{font-size:clamp(30px,5.6vw,46px);letter-spacing:-.03em;font-weight:850;line-height:1.08;margin-top:8px}
+section.value h2{font-size:clamp(26px,4.6vw,40px);letter-spacing:-.028em;font-weight:840;line-height:1.12;margin-top:8px}
+section.value p.big{max-width:660px;font-size:clamp(15px,2.3vw,17.5px);color:#3a3a3e;margin-top:14px}
+
+/* features accordion */
+.feats{margin-top:26px}
+details.feat{background:#fff;border:1px solid var(--line);border-radius:16px;margin-top:10px;overflow:hidden}
+details.feat summary{display:flex;align-items:center;gap:12px;padding:15px 18px;cursor:pointer;list-style:none}
+details.feat summary::-webkit-details-marker{display:none}
+details.feat summary .fe{font-size:20px;flex:none}
+details.feat summary .ft b{display:block;font-size:14.5px;letter-spacing:-.01em}
+details.feat summary .ft p{font-size:12px;color:var(--muted);margin-top:1px}
+details.feat summary .chev{margin-left:auto;flex:none;color:var(--muted);transition:transform .25s;font-size:12px}
+details.feat[open] summary .chev{transform:rotate(180deg)}
+details.feat[open] summary{border-bottom:1px solid var(--line)}
+.frow{padding:11px 18px;border-bottom:1px dashed var(--line)}
+.frow:last-child{border-bottom:0}
+.frow p{font-size:13px;color:#2c2c30;line-height:1.5}
+.frow small{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px}
+.frow .st{display:inline-block;border-radius:99px;padding:0 7px;font-size:9px;font-weight:800;margin-right:6px;vertical-align:1px}
+.frow .st.live{background:rgba(10,143,91,.1);color:var(--ok)}
+.frow .st.beta{background:rgba(124,58,237,.1);color:var(--violet)}
+.frow .st.setup{background:rgba(245,158,11,.12);color:#b45309}
+.frow .st.soon{background:var(--soft);color:var(--muted)}
+
+/* coming soon */
+.soon{display:grid;grid-template-columns:1fr;gap:14px;margin-top:26px}
+@media(min-width:720px){.soon{grid-template-columns:1fr 1fr}}
+.soon .card{position:relative;background:var(--soft);border:1px solid var(--line);border-radius:20px;padding:24px 22px}
+.soon .card .pill{position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--violet);background:rgba(124,58,237,.1);border-radius:99px;padding:3px 9px}
+.soon .card .em{font-size:30px;line-height:1;display:block}
+.soon .card b{display:block;font-size:17px;letter-spacing:-.015em;margin-top:12px}
+.soon .card small.wn{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px}
+.soon .card p{font-size:13.5px;color:#3a3a3e;margin-top:8px;line-height:1.55}
+
+.closing{margin:74px 0 0;background:#1d1d1f;border-radius:26px;color:#fff;text-align:center;padding:52px 26px}
+.closing h2{font-size:clamp(24px,4.4vw,36px);letter-spacing:-.028em;font-weight:840;line-height:1.12}
+.closing p{color:rgba(255,255,255,.75);font-size:15px;max-width:560px;margin:12px auto 22px}
+.closing .btn.inverse{background:#fff;color:var(--ink)}
+footer{padding:28px 22px 64px;color:var(--muted);font-size:12.5px;text-align:center}
+footer a{color:var(--muted)}
+</style>
+
+<header class="bar">
+  <div class="in">
+    <img class="mark" src="data:image/png;base64,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" alt="Howler">
+    <div><b>Pulse</b><div class="sub">every feature, honestly labelled</div></div>
+    <nav>
+      <a class="plain" href="/sales">The story</a>
+      <a class="plain" href="/sales/experience">In flow</a>
+      <a class="solid" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a demo</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="value">
+    <span class="eyebrow">Everything inside</span>
+    <h1>Every feature, led by what it does for you.</h1>
+    <p class="big">Open a section and scan the value lines: each one says what you get, then names the
+    feature behind it. Statuses are honest: <b>live</b> today, <b>beta</b> with early clients,
+    <b>needs setup</b> once, or <b>soon</b>.</p>
+    <div class="feats">
+    <details class="feat"><summary><span class="fe">📊</span><span class="ft"><b>Dashboards &amp; insight</b><p>Your data, read for you - open the app and you already know what changed and what to do.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Live dashboards - KPIs, tables &amp; charts on real ticketing/GA4 data"><p>Your ticket sales, revenue and web traffic in one place, updating live - no more waiting for a weekly report.</p><small><span class="st live">live</span>Live dashboards - KPIs, tables &amp; charts on real ticketing/GA4 data</small></div>
+      <div class="frow" title="Per-tile AI insight + follow-up questions"><p>Tap any chart and Pulse explains what it means in plain language - then ask follow-up questions right there.</p><small><span class="st live">live</span>Per-tile AI insight + follow-up questions</small></div>
+      <div class="frow" title="Share an insight or tile to email / WhatsApp / Slack"><p>Send any chart or insight to your team on email, WhatsApp or Slack in two taps.</p><small><span class="st live">live</span>Share an insight or tile to email / WhatsApp / Slack</small></div>
+      <div class="frow" title="Personalised home briefing"><p>The first thing you see when you open Pulse: a short briefing on what moved overnight and what deserves attention.</p><small><span class="st live">live</span>Personalised home briefing</small></div>
+      <div class="frow" title="Mobile-first, installable PWA with push notifications"><p>Install Pulse on your phone like an app and get push notifications - it’s built for the phone first.</p><small><span class="st live">live</span>Mobile-first, installable PWA with push notifications</small></div>
+      <div class="frow" title="Shared dashboard templates + per-client bespoke versions"><p>Proven dashboard layouts shared across events, plus bespoke versions built for the way you work.</p><small><span class="st live">live</span>Shared dashboard templates + per-client bespoke versions</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🦉</span><span class="ft"><b>The Owl - your AI analyst, everywhere</b><p>Two analysts, many doors: Pulse’s own native Owl - in the app, on WhatsApp, in the organizer portal, in Claude &amp; ChatGPT - plus the embedded Inventive “Ask” analyst.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Native Pulse Owl - in-app chat analyst: charts, follow-up chips, “/” actions, prompt starters"><p>Ask anything about your event in plain language - “how did VIP sell this weekend?” - and get an answer with a chart.</p><small><span class="st beta">beta</span>Native Pulse Owl - in-app chat analyst: charts, follow-up chips, “/” actions, prompt starters</small></div>
+      <div class="frow" title="Native Owl actions - set an alert, save a segment, draft a campaign from chat"><p>The Owl doesn’t just answer - from the same chat it can set an alert, save an audience or draft a campaign for you.</p><small><span class="st beta">beta</span>Native Owl actions - set an alert, save a segment, draft a campaign from chat</small></div>
+      <div class="frow" title="Native Owl memory - client / event / personal layers, client self-service"><p>The Owl remembers your event context and preferences, so answers get sharper over time - and you control what it remembers.</p><small><span class="st beta">beta</span>Native Owl memory - client / event / personal layers, client self-service</small></div>
+      <div class="frow" title="Owl data catalogue - admin-curated fields + extra Looker explores (e.g. Cashless)"><p>We curate exactly which data the Owl can see, so its answers stay accurate and on-topic - and can add extra sources like cashless.</p><small><span class="st beta">beta</span>Owl data catalogue - admin-curated fields + extra Looker explores (e.g. Cashless)</small></div>
+      <div class="frow" title="Native Owl on WhatsApp - charts as images, reply buttons, scheduled updates"><p>The same analyst in WhatsApp - ask questions, get charts back as images, and schedule regular updates.</p><small><span class="st beta">beta</span>Native Owl on WhatsApp - charts as images, reply buttons, scheduled updates</small></div>
+      <div class="frow" title="Native Owl inside the Howler organizer portal (one-iframe embed)"><p>Ask the Owl without leaving the Howler organizer portal - it lives right inside it.</p><small><span class="st beta">beta</span>Native Owl inside the Howler organizer portal (one-iframe embed)</small></div>
+      <div class="frow" title="Fan Owl - a booking guide on the event’s own website"><p>A friendly booking guide on your event’s own website that helps fans pick and buy the right ticket.</p><small><span class="st beta">beta</span>Fan Owl - a booking guide on the event’s own website</small></div>
+      <div class="frow" title="Agentic Owl auto-pilot - one-tap insight → campaign"><p>The Owl spots an opportunity in your numbers and turns it into a ready-to-review campaign in one tap.</p><small><span class="st live">live</span>Agentic Owl auto-pilot - one-tap insight → campaign</small></div>
+      <div class="frow" title="The Owl in Claude - one-click MCP connect; answers + drafts, never sends"><p>Connect Pulse to Claude with one click and ask about your data there - it answers and drafts, but never sends anything.</p><small><span class="st beta">beta</span>The Owl in Claude - one-click MCP connect; answers + drafts, never sends</small></div>
+      <div class="frow" title="The Owl in ChatGPT / OpenAI - custom connector, works with Deep Research"><p>The same connection for ChatGPT - ask about your event data in the assistant you already use, Deep Research included.</p><small><span class="st beta">beta</span>The Owl in ChatGPT / OpenAI - custom connector, works with Deep Research</small></div>
+      <div class="frow" title="Inventive Owl (“Ask”) - separate embedded third-party analyst (needs Inventive key + per-client workspace)"><p>An additional embedded analyst (“Ask”) for deep ad-hoc analysis, available on request.</p><small><span class="st beta">beta</span>Inventive Owl (“Ask”) - separate embedded third-party analyst (needs Inventive key + per-client workspace)</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">✉️</span><span class="ft"><b>Scheduled digests</b><p>A sharp, role-specific briefing in their inbox on schedule - they stay on top of the event without logging in.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Role-written email digests (exec / marketing / finance / ops)"><p>A short email briefing written for your role - exec, marketing, finance or ops - so everyone gets their version of the story.</p><small><span class="st live">live</span>Role-written email digests (exec / marketing / finance / ops)</small></div>
+      <div class="frow" title="Configurable cadence &amp; focus - AI-led or curated"><p>You choose how often it lands and what it focuses on - AI-led or hand-curated.</p><small><span class="st live">live</span>Configurable cadence &amp; focus - AI-led or curated</small></div>
+      <div class="frow" title="Pinned/followed tiles rendered in the email (chart images &amp; metric chips)"><p>The charts and numbers you follow, rendered right inside the email - stay on top of the event without logging in.</p><small><span class="st live">live</span>Pinned/followed tiles rendered in the email (chart images &amp; metric chips)</small></div>
+      <div class="frow" title="Admin-managed + client self-service"><p>We can set your digests up for you, or you manage them yourself in Settings - your choice.</p><small><span class="st live">live</span>Admin-managed + client self-service</small></div>
+      <div class="frow" title="Daily WhatsApp update (digest / goals / alerts) + team broadcast lists"><p>Your key numbers in WhatsApp every morning, with team broadcast lists so everyone stays in the loop.</p><small><span class="st beta">beta</span>Daily WhatsApp update (digest / goals / alerts) + team broadcast lists</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">💬</span><span class="ft"><b>Messaging inbox</b><p>Important notes, approvals and receipts in one place with a clear read/ack trail - no more chasing over WhatsApp and email.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Two-way client ↔ Howler threads (read/unread, attachments)"><p>A direct line between your team and Howler - threads with attachments and a clear read trail, instead of scattered emails.</p><small><span class="st live">live</span>Two-way client ↔ Howler threads (read/unread, attachments)</small></div>
+      <div class="frow" title="Must-acknowledge messages"><p>For the messages that really matter, ask for an acknowledgement - and see exactly who has confirmed.</p><small><span class="st live">live</span>Must-acknowledge messages</small></div>
+      <div class="frow" title="In-app, web-push &amp; email notifications"><p>New messages reach you in the app, as a push notification and by email - nothing slips past.</p><small><span class="st live">live</span>In-app, web-push &amp; email notifications</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">📄</span><span class="ft"><b>Settlements &amp; documents</b><p>Settlements clients can actually read - and now they file themselves: just CC the Owl.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Settlement PDF → interactive statement"><p>Your settlement PDF becomes an interactive statement you can actually read and drill into.</p><small><span class="st live">live</span>Settlement PDF → interactive statement</small></div>
+      <div class="frow" title="Event documents area"><p>All your event documents in one tidy place, filed per event.</p><small><span class="st live">live</span>Event documents area</small></div>
+      <div class="frow" title="Owl auto-ingest - CC the Owl on the settlement email and it files itself"><p>CC the Owl on the settlement email and it files itself into Pulse - no uploading, no chasing.</p><small><span class="st beta">beta</span>Owl auto-ingest - CC the Owl on the settlement email and it files itself</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🎯</span><span class="ft"><b>Goals - track the results that matter</b><p>Tell Pulse what success looks like and every screen shows how you’re tracking, how it compares to last time, and where you’ll land.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="North Star + secondary goals with progress bars and a pace read"><p>Tell Pulse what success looks like - one North Star plus supporting goals - and every screen shows how you’re tracking.</p><small><span class="st beta">beta</span>North Star + secondary goals with progress bars and a pace read</small></div>
+      <div class="frow" title="Sell-curve pace, vs-last-time and a forecast landing on every card"><p>Every goal card shows your sales pace, how it compares to last time, and where you’ll land at this rate.</p><small><span class="st beta">beta</span>Sell-curve pace, vs-last-time and a forecast landing on every card</small></div>
+      <div class="frow" title="Goal types: hit a target / stay under a cap / healthy range / mix &amp; split"><p>Goals that fit how you actually work: hit a target, stay under a cap, keep a healthy range, or manage a mix.</p><small><span class="st beta">beta</span>Goal types: hit a target / stay under a cap / healthy range / mix &amp; split</small></div>
+      <div class="frow" title="Reusable goal templates (+ global templates published to every client)"><p>Set goals up once and reuse them for every event - including proven templates we publish for everyone.</p><small><span class="st beta">beta</span>Reusable goal templates (+ global templates published to every client)</small></div>
+      <div class="frow" title="Weekly “your goals this week” push"><p>A short “your goals this week” nudge so targets stay top of mind.</p><small><span class="st beta">beta</span>Weekly “your goals this week” push</small></div>
+      <div class="frow" title="Tag &amp; group goals by operational area"><p>Group goals by area - marketing, bar, gate - so each owner sees theirs.</p><small><span class="st beta">beta</span>Tag &amp; group goals by operational area</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🔔</span><span class="ft"><b>Alerts - told the moment a number matters</b><p>Stop watching dashboards - Pulse taps you on the shoulder the second a sell-out, milestone or low-stock moment happens.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Watch any KPI tile live - sold out / low stock / crosses a number"><p>Watch any number live - sold out, low stock, crossing a milestone - and get pinged the second it happens.</p><small><span class="st beta">beta</span>Watch any KPI tile live - sold out / low stock / crosses a number</small></div>
+      <div class="frow" title="Build a metric with filters (e.g. VIP tickets) - no tile needed"><p>Alert on exactly what you care about - e.g. just VIP tickets - even if no dashboard tile shows it.</p><small><span class="st beta">beta</span>Build a metric with filters (e.g. VIP tickets) - no tile needed</small></div>
+      <div class="frow" title="Inbox + push / email / SMS, with cooldowns &amp; quiet hours"><p>Alerts arrive where you want them - inbox, push, email or SMS - with quiet hours and cooldowns so they never spam.</p><small><span class="st beta">beta</span>Inbox + push / email / SMS, with cooldowns &amp; quiet hours</small></div>
+      <div class="frow" title="Live Pulse strip - alert fires + live momentum in the header"><p>A live strip in the app header showing fresh alerts and sales momentum at a glance.</p><small><span class="st beta">beta</span>Live Pulse strip - alert fires + live momentum in the header</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🚨</span><span class="ft"><b>Status notices</b><p>If anything ever goes wrong, clients know before they have to ask - and see exactly when it’s fixed.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Status-page-style incidents - all clients or specific ones"><p>If anything goes wrong, you hear it from us first - status updates posted straight into Pulse.</p><small><span class="st live">live</span>Status-page-style incidents - all clients or specific ones</small></div>
+      <div class="frow" title="A living timeline: updates + resolution"><p>Every incident keeps a living timeline from first update to resolution - you always know where things stand.</p><small><span class="st live">live</span>A living timeline: updates + resolution</small></div>
+      <div class="frow" title="Severity-driven notify (email / push / SMS + in-app banner)"><p>Serious issues notify you immediately by email, push or SMS, plus a banner in the app.</p><small><span class="st live">live</span>Severity-driven notify (email / push / SMS + in-app banner)</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🎪</span><span class="ft"><b>Event Ops - live device logistics</b><p>Every device accounted for at event close - no spreadsheet, no “missing” unknowns, a full history of where each one went.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Device &amp; station inventory (bulk auto-numbering, scannable codes)"><p>Every scanner and card machine in a live inventory - bulk-numbered and scannable.</p><small><span class="st beta">beta</span>Device &amp; station inventory (bulk auto-numbering, scannable codes)</small></div>
+      <div class="frow" title="Scan to move - Hive ↔ stations, append-only audit trail"><p>Move devices between the Hive and stations with a scan - every move logged, so nothing goes missing quietly.</p><small><span class="st beta">beta</span>Scan to move - Hive ↔ stations, append-only audit trail</small></div>
+      <div class="frow" title="Liaison checks &amp; issue log with resolutions"><p>Liaison checks and issues logged with resolutions, so problems get closed, not forgotten.</p><small><span class="st beta">beta</span>Liaison checks &amp; issue log with resolutions</small></div>
+      <div class="frow" title="Live overview - counts by state, open issues, recent activity"><p>A live overview during the event: where every device is, open issues and recent activity.</p><small><span class="st beta">beta</span>Live overview - counts by state, open issues, recent activity</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">👥</span><span class="ft"><b>Engage · Segments</b><p>Build the exact audience from your own data or a spreadsheet - combine lists, subtract a suppression list, and it stays live.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Always-live audiences (tile / CSV / paste / Google Sheet)"><p>Build audiences from your own data, a CSV, a paste or a Google Sheet - and they stay live as new people qualify.</p><small><span class="st live">live</span>Always-live audiences (tile / CSV / paste / Google Sheet)</small></div>
+      <div class="frow" title="Column matching (email / name / mobile)"><p>Pulse matches your columns (email, name, mobile) automatically - messy spreadsheets welcome.</p><small><span class="st live">live</span>Column matching (email / name / mobile)</small></div>
+      <div class="frow" title="Target on any column"><p>Target on any column - ticket type, spend, city, anything in your data.</p><small><span class="st live">live</span>Target on any column</small></div>
+      <div class="frow" title="Multi-source combine (Union / Intersect / Exclude)"><p>Combine audiences like sets: union, intersect or exclude - perfect for suppression lists.</p><small><span class="st live">live</span>Multi-source combine (Union / Intersect / Exclude)</small></div>
+      <div class="frow" title="Organise - link to an event, file in folders"><p>Keep audiences tidy - link each to its event and file them in folders.</p><small><span class="st live">live</span>Organise - link to an event, file in folders</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">📣</span><span class="ft"><b>Engage · Campaigns</b><p>Personalised, on-brand email + SMS to a precise audience - with approval gates and real tracking, all from the same data.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Email, SMS or both to a segment / tile / list"><p>Send email, SMS or both to exactly the audience you built - no exports, no list uploads to a third-party tool.</p><small><span class="st live">live</span>Email, SMS or both to a segment / tile / list</small></div>
+      <div class="frow" title="AI-drafted copy, branded templates, hero image"><p>AI drafts the copy in your voice, on your branded template, hero image included.</p><small><span class="st live">live</span>AI-drafted copy, branded templates, hero image</small></div>
+      <div class="frow" title="Email block builder - drag-to-order blocks, multi-column, saved templates"><p>Build emails from drag-to-order blocks - multi-column layouts you can save as reusable templates.</p><small><span class="st live">live</span>Email block builder - drag-to-order blocks, multi-column, saved templates</small></div>
+      <div class="frow" title="AI email design - full themed layouts, one-tap themes, AI banners"><p>One tap re-themes the whole email - and AI can design full layouts and banners for you.</p><small><span class="st live">live</span>AI email design - full themed layouts, one-tap themes, AI banners</small></div>
+      <div class="frow" title="Merge fields from any column"><p>Personalise with any column from your data - names, ticket types, order details.</p><small><span class="st live">live</span>Merge fields from any column</small></div>
+      <div class="frow" title="Promo / discount codes"><p>Drop promo or discount codes into any send.</p><small><span class="st live">live</span>Promo / discount codes</small></div>
+      <div class="frow" title="UTM + per-recipient open &amp; click tracking"><p>See exactly who opened and clicked, per recipient, with UTM tracking through to your analytics.</p><small><span class="st live">live</span>UTM + per-recipient open &amp; click tracking</small></div>
+      <div class="frow" title="Consent-aware (POPIA), one-click unsubscribe"><p>Consent-aware sending (POPIA) with one-click unsubscribe handled for you.</p><small><span class="st live">live</span>Consent-aware (POPIA), one-click unsubscribe</small></div>
+      <div class="frow" title="Approval workflow"><p>Nothing sends without a sign-off - a clear approval step before every campaign goes out.</p><small><span class="st live">live</span>Approval workflow</small></div>
+      <div class="frow" title="Send caps - per-client audience cap + a tighter SMS sub-cap"><p>Guard rails on volume: a per-audience cap and a tighter SMS cap, so a mistake can’t become a mass send.</p><small><span class="st live">live</span>Send caps - per-client audience cap + a tighter SMS sub-cap</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🔁</span><span class="ft"><b>Engage · Drip sequences</b><p>Set up an automated recovery sequence once - it catches new abandoners in real time, stops when they buy, and shows where people convert.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Multi-step journeys with delays"><p>Set up a sequence once - e.g. cart recovery - and it runs itself, step by step, on delays you choose.</p><small><span class="st live">live</span>Multi-step journeys with delays</small></div>
+      <div class="frow" title="Timing modes (fresh-abandonment / forward-from-send)"><p>Choose how timing works: react to fresh abandonment in real time, or run forward from a send.</p><small><span class="st live">live</span>Timing modes (fresh-abandonment / forward-from-send)</small></div>
+      <div class="frow" title="Auto-stop on purchase or unsubscribe"><p>The moment someone buys or unsubscribes, the sequence stops for them automatically.</p><small><span class="st live">live</span>Auto-stop on purchase or unsubscribe</small></div>
+      <div class="frow" title="Journey waterfall (open / click / convert + drop-off)"><p>See the journey as a waterfall - opens, clicks, conversions and where people drop off.</p><small><span class="st live">live</span>Journey waterfall (open / click / convert + drop-off)</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">📢</span><span class="ft"><b>Engage · Ad audience sync</b><p>Turn a Pulse audience into a Meta/TikTok ad audience in a click - auto-synced, privacy-safe, visible without leaving Pulse.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Push a segment to Meta / TikTok Custom Audiences"><p>Turn any Pulse audience into a Meta or TikTok ad audience in a click. Connect your ad accounts once and it’s on.</p><small><span class="st setup">needs setup</span>Push a segment to Meta / TikTok Custom Audiences</small></div>
+      <div class="frow" title="Mirror membership + daily auto-sync"><p>Audiences stay mirrored automatically - new buyers drop out of your “abandoned cart” ads on their own.</p><small><span class="st setup">needs setup</span>Mirror membership + daily auto-sync</small></div>
+      <div class="frow" title="Hashed identities before they leave Pulse"><p>Identities are hashed before they leave Pulse - privacy-safe by design.</p><small><span class="st setup">needs setup</span>Hashed identities before they leave Pulse</small></div>
+      <div class="frow" title="Ad audiences hub - connection health + live match sizes"><p>One place to see connection health and live match sizes for every synced audience.</p><small><span class="st live">live</span>Ad audiences hub - connection health + live match sizes</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">📱</span><span class="ft"><b>Social metrics</b><p>See how a client’s Facebook, Instagram and TikTok are really doing - next to their ticketing numbers, updating itself daily.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Facebook / Instagram / TikTok organic stats in Pulse"><p>Your Facebook, Instagram and TikTok numbers next to your ticket sales - one story, one place.</p><small><span class="st setup">needs setup</span>Facebook / Instagram / TikTok organic stats in Pulse</small></div>
+      <div class="frow" title="Account-level daily trends + per-post performance"><p>Daily account trends plus per-post performance, so you can see what content actually sells tickets.</p><small><span class="st setup">needs setup</span>Account-level daily trends + per-post performance</small></div>
+      <div class="frow" title="Self-service Social page - 30-day trend, top posts, daily sync"><p>A Social page of your own: 30-day trend, top posts, refreshed daily.</p><small><span class="st setup">needs setup</span>Self-service Social page - 30-day trend, top posts, daily sync</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🔌</span><span class="ft"><b>Pulse API &amp; AI-agent access (MCP)</b><p>Your Pulse data isn’t locked in - read it from your own tools, or point an AI agent like Claude at it and ask in plain language.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Per-client, read-only API keys - named, revocable, self-service"><p>Create read-only API keys yourself - named, revocable, and scoped to your data only.</p><small><span class="st beta">beta</span>Per-client, read-only API keys - named, revocable, self-service</small></div>
+      <div class="frow" title="REST API /api/v1 - dashboards, live metrics, segments, campaigns, goals"><p>Read your dashboards, live metrics, audiences, campaigns and goals from your own tools.</p><small><span class="st beta">beta</span>REST API /api/v1 - dashboards, live metrics, segments, campaigns, goals</small></div>
+      <div class="frow" title="Direct data queries - any curated measure × dimension, with filters"><p>Query your data directly - any curated measure by any dimension, with filters.</p><small><span class="st beta">beta</span>Direct data queries - any curated measure × dimension, with filters</small></div>
+      <div class="frow" title="MCP server - works with Claude AND ChatGPT / OpenAI"><p>Point Claude or ChatGPT at your Pulse data and ask questions in plain language.</p><small><span class="st beta">beta</span>MCP server - works with Claude AND ChatGPT / OpenAI</small></div>
+      <div class="frow" title="One-click Connect (OAuth 2.1 + PKCE) - no key copying"><p>Connect your AI assistant with one click - no copying keys around.</p><small><span class="st beta">beta</span>One-click Connect (OAuth 2.1 + PKCE) - no key copying</small></div>
+      <div class="frow" title="Row-level tile data - explicit per-key opt-in, fully audited"><p>Row-level data access is opt-in per key and fully audited - you stay in control.</p><small><span class="st beta">beta</span>Row-level tile data - explicit per-key opt-in, fully audited</small></div>
+      <div class="frow" title="Connected Owl can draft segments &amp; campaigns (drafts only - never sends)"><p>A connected assistant can draft audiences and campaigns for you - drafts only; a person always approves and sends.</p><small><span class="st beta">beta</span>Connected Owl can draft segments &amp; campaigns (drafts only - never sends)</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🎨</span><span class="ft"><b>White-label branding &amp; integrations</b><p>It’s their brand, their accounts, their data - Howler just powers it.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Per-client branding - logo / colours / sender (+ dark-mode logo)"><p>Pulse wears your brand - logo (light and dark), colours and sender name on everything your team and fans see.</p><small><span class="st live">live</span>Per-client branding - logo / colours / sender (+ dark-mode logo)</small></div>
+      <div class="frow" title="Vanity login page - the client’s own white-labelled sign-in URL"><p>Your own white-labelled sign-in page on your own URL.</p><small><span class="st live">live</span>Vanity login page - the client’s own white-labelled sign-in URL</small></div>
+      <div class="frow" title="Reporting currency per client (flows to every AI touch point)"><p>Report in your currency - it flows through every screen, email and AI answer.</p><small><span class="st live">live</span>Reporting currency per client (flows to every AI touch point)</small></div>
+      <div class="frow" title="AI copy language per client + per-campaign override"><p>AI-written copy in your language, with a per-campaign override when you need it.</p><small><span class="st live">live</span>AI copy language per client + per-campaign override</small></div>
+      <div class="frow" title="Looker / Anthropic keys · Email (Resend) · SMS (Clickatell)"><p>Your accounts under the hood - analytics, email and SMS - connected once and managed in Settings.</p><small><span class="st live">live</span>Looker / Anthropic keys · Email (Resend) · SMS (Clickatell)</small></div>
+      <div class="frow" title="Meta / TikTok ad accounts"><p>Connect your Meta and TikTok ad accounts to unlock ad audience sync.</p><small><span class="st setup">needs setup</span>Meta / TikTok ad accounts</small></div>
+      <div class="frow" title="Slack - mirror inbox notifications into a client channel"><p>Mirror your Pulse inbox notifications into your team’s Slack channel.</p><small><span class="st setup">needs setup</span>Slack - mirror inbox notifications into a client channel</small></div>
+      <div class="frow" title="Integration lock guard 🔒 + one-tap connect"><p>Integrations lock once verified, with one-tap connect - no accidental breakage.</p><small><span class="st live">live</span>Integration lock guard 🔒 + one-tap connect</small></div>
+      <div class="frow" title="Your Howler Support - assigned contacts under Settings → Team"><p>Your assigned Howler contacts, right in Settings - you always know who to call.</p><small><span class="st live">live</span>Your Howler Support - assigned contacts under Settings → Team</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🔐</span><span class="ft"><b>Trust, security &amp; scope</b><p>Every query is force-scoped to the client on the server - it can’t be bypassed and fails closed.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Server-side multi-tenant scoping (fails closed)"><p>You only ever see your own data - enforced on the server, on every query, with no way around it.</p><small><span class="st live">live</span>Server-side multi-tenant scoping (fails closed)</small></div>
+      <div class="frow" title="POPIA-minded consent + hashed ad sync"><p>Consent-aware messaging and hashed ad sync keep you on the right side of POPIA.</p><small><span class="st live">live</span>POPIA-minded consent + hashed ad sync</small></div>
+      <div class="frow" title="Roles &amp; permissions"><p>Fine-grained roles decide who on your team can see and do what.</p><small><span class="st live">live</span>Roles &amp; permissions</small></div>
+      <div class="frow" title="Write-only secrets - Pulse never shows a stored value"><p>Keys and passwords are write-only - once saved, Pulse never displays them again.</p><small><span class="st live">live</span>Write-only secrets - Pulse never shows a stored value</small></div>
+    </details>
+    <details class="feat"><summary><span class="fe">🔭</span><span class="ft"><b>On the horizon</b><p>Where Pulse goes next - for roadmap conversations, not promises.</p></span><span class="chev">▼</span></summary>
+      <div class="frow" title="Campaigns - conditional sequencing (branch a journey on open / click / purchase)"><p>Branch a journey on behaviour - different follow-ups for openers, clickers and buyers.</p><small><span class="st soon">soon</span>Campaigns - conditional sequencing (branch a journey on open / click / purchase)</small></div>
+      <div class="frow" title="Portfolio / “all events” view"><p>One view across every event you run - compare, spot patterns, plan the season.</p><small><span class="st soon">soon</span>Portfolio / “all events” view</small></div>
+      <div class="frow" title="Event tasks + AM cockpit"><p>Event to-dos and an account-manager cockpit, so the work around the data lives here too.</p><small><span class="st soon">soon</span>Event tasks + AM cockpit</small></div>
+      <div class="frow" title="WhatsApp &amp; Howler app-push message channels"><p>Send campaigns by WhatsApp and app push, not just email and SMS.</p><small><span class="st soon">soon</span>WhatsApp &amp; Howler app-push message channels</small></div>
+      <div class="frow" title="Packages / tiers with feature gating"><p>Clear packages so you can see what’s in your plan and what an upgrade unlocks.</p><small><span class="st soon">soon</span>Packages / tiers with feature gating</small></div>
+    </details>
+    </div>
+  </section>
+
+  <section class="value" id="coming-soon">
+    <span class="eyebrow">On the roadmap</span>
+    <h2>Coming soon.</h2>
+    <p class="big">Where the Owl goes next: from analysing your event to helping run it, and from
+    talking to your team to talking to your fans.</p>
+    <div class="soon">
+      <div class="card">
+        <span class="pill">coming soon</span>
+        <span class="em">🦉</span>
+        <b>Fan Owl</b>
+        <p>Your fans get an Owl too. Set times, "where do I top up?", "where's my ticket?" answered
+        instantly in your brand, on WhatsApp and in the app. Every conversation becomes audience
+        insight you keep.</p>
+      </div>
+      <div class="card">
+        <span class="pill">coming soon</span>
+        <span class="em">💰</span>
+        <b>Budgeting</b>
+        <p>Plan the budget where the actuals live. Committed vs spent vs forecast per department,
+        tracked against live revenue, so an overrun shows up as an alert before the event, not in
+        the post-mortem.</p>
+      </div>
+      <div class="card">
+        <span class="pill">coming soon</span>
+        <span class="em">🪄</span>
+        <b>Owl Event Builder</b>
+        <small class="wn">the event setup copilot</small>
+        <p>Stand up and change events by talking to the Owl: "add an early-bird tier at R450, capped
+        at 2 000". It drafts the change, shows you exactly what will change, and applies it only
+        once you approve.</p>
+      </div>
+      <div class="card">
+        <span class="pill">coming soon</span>
+        <span class="em">🧩</span>
+        <b>Owl Skills</b>
+        <p>Teach the Owl your playbooks. Reusable skills like "build the settlement pack" or
+        "day-after debrief" that anyone on the team runs on demand or on a schedule. Event setup,
+        sponsor reports, whatever you do every event becomes a skill you run, not a week you lose.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <h2>Want to see it live?</h2>
+    <p>Twenty minutes with your kind of event data: see it, ask it, act on it.</p>
+    <a class="btn inverse" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a live demo</a>
+  </section>
+
+</main>
+
+<footer>Pulse · flagship of the Howler Experience OS · <a href="/sales">the story</a> · <a href="/sales/experience">in flow</a> · <a href="/">log in</a></footer>

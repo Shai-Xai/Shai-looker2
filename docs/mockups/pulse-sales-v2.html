@@ -279,19 +279,43 @@ main{padding-bottom:20px}
 .medDots button{width:auto;min-width:8px;height:8px;border-radius:99px;border:0;background:#d9d9e0;cursor:pointer;padding:0;transition:all .3s;font-size:0}
 .medDots button.on{background:var(--brand);min-width:22px}
 
-/* act: owl drafting */
-.drafting{margin-bottom:10px}
-.drafting .dsub{font-family:var(--mono);font-size:11px;color:var(--ink);min-height:17px;font-weight:600}
-.drafting .dsub .caret{display:inline-block;width:1.5px;height:11px;background:var(--brand);vertical-align:-1.5px;margin-left:1px;animation:caret 1s steps(1) infinite}
-@keyframes caret{50%{opacity:0}}
-.drafting .skel{height:7px;border-radius:99px;background:linear-gradient(90deg,#ececf1,#f6f6f8);margin-top:7px;width:0;transition:width .8s ease}
-.drafting .skel.go{width:100%}
-.drafting .skel.s2.go{width:72%}
-.drafting .stamp{display:inline-flex;align-items:center;gap:5px;margin-top:9px;font-size:10.5px;font-weight:750;color:var(--ok);opacity:0;transform:translateY(3px);transition:all .35s}
-.drafting .stamp.on{opacity:1;transform:none}
-.journey .j{transition:background .3s}
-.journey .j.lit{background:linear-gradient(90deg,rgba(255,56,92,.07),transparent)}
-.journey .j.lit .n{box-shadow:0 0 10px rgba(255,56,92,.5)}
+/* act: the Owl builds a journey tree */
+.jtree{display:flex;flex-direction:column;align-items:center;padding:4px 0 2px}
+.jnode{
+  display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);
+  border-radius:10px;padding:6px 11px;font-size:11px;font-weight:700;color:var(--ink);
+  box-shadow:0 8px 18px -10px rgba(45,43,85,.35);
+  opacity:0;transform:translateY(6px) scale(.94);transition:opacity .35s,transform .35s;
+}
+.jnode small{font-family:var(--mono);font-size:9px;color:var(--muted);font-weight:600}
+.jnode.trig{border-color:rgba(255,56,92,.45);border-left:3px solid var(--brand)}
+.jnode.exit{border-color:rgba(10,143,91,.45);border-left:3px solid var(--ok);color:var(--ok)}
+.jnode.on{opacity:1;transform:none}
+.jconn{width:2px;height:14px;background:#d6d6e0;transform:scaleY(0);transform-origin:top;transition:transform .3s}
+.jconn.on{transform:none}
+.jsplit{position:relative;width:72%;height:14px;opacity:0;transition:opacity .35s}
+.jsplit::before{content:'';position:absolute;left:0;right:0;top:0;border-top:2px solid #d6d6e0}
+.jsplit::after{content:'';position:absolute;left:50%;top:-14px;height:14px;border-left:2px solid #d6d6e0}
+.jsplit i{position:absolute;top:0;height:12px;border-left:2px solid #d6d6e0}
+.jsplit i:first-of-type{left:0}
+.jsplit i:last-of-type{right:0}
+.jsplit.on{opacity:1}
+.jbranches{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;align-items:start}
+.jbr{display:flex;flex-direction:column;align-items:center;gap:5px}
+.jtag{
+  font-family:var(--mono);font-size:8.5px;border-radius:99px;padding:1px 8px;font-weight:700;
+  opacity:0;transition:opacity .35s;
+}
+.jtag.ok{background:rgba(10,143,91,.1);color:var(--ok)}
+.jtag.mut{background:var(--soft);color:var(--muted)}
+.jtag.on{opacity:1}
+.jmerge{position:relative;width:72%;height:14px;opacity:0;transition:opacity .35s}
+.jmerge::before{content:'';position:absolute;left:0;right:0;bottom:0;border-bottom:2px solid #d6d6e0}
+.jmerge i{position:absolute;bottom:0;height:12px;border-left:2px solid #d6d6e0}
+.jmerge i:first-of-type{left:0}
+.jmerge i:last-of-type{right:0}
+.jmerge::after{content:'';position:absolute;left:50%;bottom:-13px;height:13px;border-left:2px solid #d6d6e0}
+.jmerge.on{opacity:1}
 
 /* ops: live heat map + operator flow */
 .liveops{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 15px;box-shadow:0 20px 44px -26px rgba(45,43,85,.35)}
@@ -372,6 +396,13 @@ main{padding-bottom:20px}
 .mailwrap.up .mailpaper{transform:translateY(-14px)}
 .mailbadge{position:absolute;top:-8px;right:-10px;background:var(--brand);color:#fff;font-size:9.5px;font-weight:800;border-radius:99px;padding:2px 7px;z-index:3;opacity:0;transition:opacity .3s}
 .mailwrap.up .mailbadge{opacity:1}
+.fop .viz{gap:13px}
+.briefdoc{width:46px;height:58px;background:#fff;border:1.5px solid var(--line);border-radius:7px;padding:7px;display:flex;flex-direction:column;gap:4px;transform:rotate(5deg);transition:transform .8s cubic-bezier(.3,.8,.3,1);box-shadow:0 8px 18px -10px rgba(45,43,85,.35)}
+.briefdoc .bt{height:5px;border-radius:99px;background:var(--g);width:72%;display:block}
+.briefdoc i{height:3px;border-radius:99px;background:#e3e3ea;display:block}
+.briefdoc i.hl{background:rgba(124,58,237,.35);width:85%}
+.briefdoc i.hl2{background:rgba(255,56,92,.3);width:60%}
+.mailwrap.up + .briefdoc{transform:rotate(-2deg) translateY(-7px)}
 .appwrap{position:relative}
 .appicon{width:58px;height:58px;border-radius:14px;box-shadow:0 10px 24px -10px rgba(45,43,85,.5)}
 .appbadge{
@@ -387,26 +418,7 @@ main{padding-bottom:20px}
 }
 .pushmini.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* features accordion */
-.feats{margin-top:26px}
-details.feat{background:#fff;border:1px solid var(--line);border-radius:16px;margin-top:10px;overflow:hidden}
-details.feat summary{display:flex;align-items:center;gap:12px;padding:15px 18px;cursor:pointer;list-style:none}
-details.feat summary::-webkit-details-marker{display:none}
-details.feat summary .fe{font-size:20px;flex:none}
-details.feat summary .ft b{display:block;font-size:14.5px;letter-spacing:-.01em}
-details.feat summary .ft p{font-size:12px;color:var(--muted);margin-top:1px}
-details.feat summary .chev{margin-left:auto;flex:none;color:var(--muted);transition:transform .25s;font-size:12px}
-details.feat[open] summary .chev{transform:rotate(180deg)}
-details.feat[open] summary{border-bottom:1px solid var(--line)}
-.frow{padding:11px 18px;border-bottom:1px dashed var(--line)}
-.frow:last-child{border-bottom:0}
-.frow p{font-size:13px;color:#2c2c30;line-height:1.5}
-.frow small{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px}
-.frow .st{display:inline-block;border-radius:99px;padding:0 7px;font-size:9px;font-weight:800;margin-right:6px;vertical-align:1px}
-.frow .st.live{background:rgba(10,143,91,.1);color:var(--ok)}
-.frow .st.beta{background:rgba(124,58,237,.1);color:var(--violet)}
-.frow .st.setup{background:rgba(245,158,11,.12);color:#b45309}
-.frow .st.soon{background:var(--soft);color:var(--muted)}
+
 </style>
 
 <header class="bar">
@@ -415,7 +427,7 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
     <div><b>Pulse</b><div class="sub">flagship of the Howler Experience OS</div></div>
     <nav>
       <a class="plain" href="#owl">The Owl</a>
-      <a class="plain" href="/sales/experience">In motion</a>
+      <a class="plain" href="/sales/experience">In flow</a>
       <a class="plain" href="/sales/features">All features</a>
       <a class="solid" href="/">Log in</a>
     </nav>
@@ -433,7 +445,7 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
     data, all in your brand. Your event intelligence, with you, on every platform.</p>
     <div class="ctas">
       <a class="btn primary" href="#loop">See how it works</a>
-      <a class="btn ghost" href="/sales/experience">▶ See it in motion</a>
+      <a class="btn ghost" href="/sales/experience">▶ See it in flow</a>
       <a class="btn ghost" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a demo</a>
     </div>
 
@@ -455,7 +467,7 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
         2 877. The 3 396 abandoned carts are your fastest path to sell-out: 188 recoveries closes the goal.
         <b>Draft the recovery drip?</b></p>
       </div>
-      <div class="cap">live interactive preview · alerts land, the nav opens, the Owl suggests · <a href="/sales/experience" style="color:var(--brand)">see the full story in motion →</a></div>
+      <div class="cap">live interactive preview · alerts land, the nav opens, the Owl suggests · <a href="/sales/experience" style="color:var(--brand)">see the full story in flow →</a></div>
     </div>
   </section>
 
@@ -550,19 +562,27 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
           <li><b>AI-drafted email and SMS</b> with approvals, consent and send caps built in.</li>
           <li><b>Drip journeys</b> that catch new abandoners in real time and stop when someone buys.</li>
         </ul></div>
-        <div class="mini drafting" id="drafting">
-          <h6>✨ Owl drafting · journey step 1 email<small id="draftState">writing…</small></h6>
-          <div class="dsub"><span id="draftSubj"></span><span class="caret" id="draftCaret"></span></div>
-          <div class="skel s1" id="skel1"></div>
-          <div class="skel s2" id="skel2"></div>
-          <span class="stamp" id="draftStamp">✓ Draft ready · added to journey · awaiting your approval</span>
-        </div>
-        <div class="mini journey" id="journey">
-          <h6>🗺 Abandoned-cart recovery<small>3 396 enrolled</small></h6>
-          <div class="j"><span class="n">1</span>Reminder email<em>sent</em></div>
-          <div class="j"><span class="n">2</span>+4h nudge<em>58% opened</em></div>
-          <div class="j"><span class="n">3</span>+24h promo SMS<em>31% clicked</em></div>
-          <div class="done">✓ 188 recoveries closes the 18 000 goal · buyers auto-exit</div>
+        <div class="mini" id="jtreeCard">
+          <h6>✨ The Owl builds the journey<small id="jtreeState">building…</small></h6>
+          <div class="jtree" id="jtree">
+            <div class="jnode trig" data-s="0">🛒 Cart abandoned <small>3 396 enrolled</small></div>
+            <div class="jconn" data-s="1"></div>
+            <div class="jnode" data-s="2">✉️ Reminder email <small>step 1</small></div>
+            <div class="jconn" data-s="3"></div>
+            <div class="jsplit" data-s="4"><i></i><i></i></div>
+            <div class="jbranches">
+              <div class="jbr">
+                <span class="jtag ok" data-s="5">opened · 58%</span>
+                <div class="jnode" data-s="6">📲 +4h · SMS promo code</div>
+              </div>
+              <div class="jbr">
+                <span class="jtag mut" data-s="7">no open · 42%</span>
+                <div class="jnode" data-s="8">✉️ +24h · nudge email</div>
+              </div>
+            </div>
+            <div class="jmerge" data-s="9"><i></i><i></i></div>
+            <div class="jnode exit" data-s="10">✓ Purchase → auto-exit <small>188 closes the goal</small></div>
+          </div>
         </div>
       </div>
     </div>
@@ -584,7 +604,7 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
       </div>
       <div class="onebrain">Ask on the couch, at the gate, or at your desk. Same Owl, same answer. Your event intelligence, wherever you are.</div>
       <div class="guard">🔒 Every door goes through the same server-side scope gate: the Owl answers only your events. It quotes, it never invents.</div>
-      <div class="cta"><a class="btn inverse" href="/sales/experience">▶ Watch the story in motion</a></div>
+      <div class="cta"><a class="btn inverse" href="/sales/experience">▶ Watch the story in flow</a></div>
     </div>
   </section>
 
@@ -644,9 +664,9 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
           <span class="mailbadge">Friday · 07:00</span>
           <div class="mailpaper"><i></i><i></i><i></i></div>
           <div class="mailenv"></div>
-        </div></div>
-        <b>✉️ Digests</b>
-        <p>The right briefing in the right inbox, on schedule: one version for the exec, another for marketing, finance and ops.</p>
+        </div><div class="briefdoc"><span class="bt"></span><i class="hl"></i><i></i><i></i><i class="hl2"></i><i></i></div></div>
+        <b>✉️📰 Digests / Briefings</b>
+        <p>Scheduled digests and the Owl's written briefing, in the right inbox: the numbers plus the story behind them, one version for the exec, another for marketing, finance and ops.</p>
       </div>
       <div class="f">
         <div class="viz"><div class="appwrap">
@@ -719,142 +739,9 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
   <section class="value">
     <span class="eyebrow">Everything inside</span>
     <h2>Every feature, led by what it does for you.</h2>
-    <p class="big">Open a section and scan the value lines: each one says what you get, then names the
-    feature behind it. The <a href="/sales/features" style="color:var(--brand);font-weight:700;text-decoration:none">full living feature index</a> has the complete matrix.</p>
-    <div class="feats">
-    <details class="feat"><summary><span class="fe">📊</span><span class="ft"><b>Dashboards &amp; insight</b><p>Your data, read for you - open the app and you already know what changed and what to do.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Live dashboards - KPIs, tables &amp; charts on real ticketing/GA4 data"><p>Your ticket sales, revenue and web traffic in one place, updating live - no more waiting for a weekly report.</p><small><span class="st live">live</span>Live dashboards - KPIs, tables &amp; charts on real ticketing/GA4 data</small></div>
-      <div class="frow" title="Per-tile AI insight + follow-up questions"><p>Tap any chart and Pulse explains what it means in plain language - then ask follow-up questions right there.</p><small><span class="st live">live</span>Per-tile AI insight + follow-up questions</small></div>
-      <div class="frow" title="Share an insight or tile to email / WhatsApp / Slack"><p>Send any chart or insight to your team on email, WhatsApp or Slack in two taps.</p><small><span class="st live">live</span>Share an insight or tile to email / WhatsApp / Slack</small></div>
-      <div class="frow" title="Personalised home briefing"><p>The first thing you see when you open Pulse: a short briefing on what moved overnight and what deserves attention.</p><small><span class="st live">live</span>Personalised home briefing</small></div>
-      <div class="frow" title="Mobile-first, installable PWA with push notifications"><p>Install Pulse on your phone like an app and get push notifications - it’s built for the phone first.</p><small><span class="st live">live</span>Mobile-first, installable PWA with push notifications</small></div>
-      <div class="frow" title="Shared dashboard templates + per-client bespoke versions"><p>Proven dashboard layouts shared across events, plus bespoke versions built for the way you work.</p><small><span class="st live">live</span>Shared dashboard templates + per-client bespoke versions</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🦉</span><span class="ft"><b>The Owl - your AI analyst, everywhere</b><p>Two analysts, many doors: Pulse’s own native Owl - in the app, on WhatsApp, in the organizer portal, in Claude &amp; ChatGPT - plus the embedded Inventive “Ask” analyst.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Native Pulse Owl - in-app chat analyst: charts, follow-up chips, “/” actions, prompt starters"><p>Ask anything about your event in plain language - “how did VIP sell this weekend?” - and get an answer with a chart.</p><small><span class="st beta">beta</span>Native Pulse Owl - in-app chat analyst: charts, follow-up chips, “/” actions, prompt starters</small></div>
-      <div class="frow" title="Native Owl actions - set an alert, save a segment, draft a campaign from chat"><p>The Owl doesn’t just answer - from the same chat it can set an alert, save an audience or draft a campaign for you.</p><small><span class="st beta">beta</span>Native Owl actions - set an alert, save a segment, draft a campaign from chat</small></div>
-      <div class="frow" title="Native Owl memory - client / event / personal layers, client self-service"><p>The Owl remembers your event context and preferences, so answers get sharper over time - and you control what it remembers.</p><small><span class="st beta">beta</span>Native Owl memory - client / event / personal layers, client self-service</small></div>
-      <div class="frow" title="Owl data catalogue - admin-curated fields + extra Looker explores (e.g. Cashless)"><p>We curate exactly which data the Owl can see, so its answers stay accurate and on-topic - and can add extra sources like cashless.</p><small><span class="st beta">beta</span>Owl data catalogue - admin-curated fields + extra Looker explores (e.g. Cashless)</small></div>
-      <div class="frow" title="Native Owl on WhatsApp - charts as images, reply buttons, scheduled updates"><p>The same analyst in WhatsApp - ask questions, get charts back as images, and schedule regular updates.</p><small><span class="st beta">beta</span>Native Owl on WhatsApp - charts as images, reply buttons, scheduled updates</small></div>
-      <div class="frow" title="Native Owl inside the Howler organizer portal (one-iframe embed)"><p>Ask the Owl without leaving the Howler organizer portal - it lives right inside it.</p><small><span class="st beta">beta</span>Native Owl inside the Howler organizer portal (one-iframe embed)</small></div>
-      <div class="frow" title="Fan Owl - a booking guide on the event’s own website"><p>A friendly booking guide on your event’s own website that helps fans pick and buy the right ticket.</p><small><span class="st beta">beta</span>Fan Owl - a booking guide on the event’s own website</small></div>
-      <div class="frow" title="Agentic Owl auto-pilot - one-tap insight → campaign"><p>The Owl spots an opportunity in your numbers and turns it into a ready-to-review campaign in one tap.</p><small><span class="st live">live</span>Agentic Owl auto-pilot - one-tap insight → campaign</small></div>
-      <div class="frow" title="The Owl in Claude - one-click MCP connect; answers + drafts, never sends"><p>Connect Pulse to Claude with one click and ask about your data there - it answers and drafts, but never sends anything.</p><small><span class="st beta">beta</span>The Owl in Claude - one-click MCP connect; answers + drafts, never sends</small></div>
-      <div class="frow" title="The Owl in ChatGPT / OpenAI - custom connector, works with Deep Research"><p>The same connection for ChatGPT - ask about your event data in the assistant you already use, Deep Research included.</p><small><span class="st beta">beta</span>The Owl in ChatGPT / OpenAI - custom connector, works with Deep Research</small></div>
-      <div class="frow" title="Inventive Owl (“Ask”) - separate embedded third-party analyst (needs Inventive key + per-client workspace)"><p>An additional embedded analyst (“Ask”) for deep ad-hoc analysis, available on request.</p><small><span class="st beta">beta</span>Inventive Owl (“Ask”) - separate embedded third-party analyst (needs Inventive key + per-client workspace)</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">✉️</span><span class="ft"><b>Scheduled digests</b><p>A sharp, role-specific briefing in their inbox on schedule - they stay on top of the event without logging in.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Role-written email digests (exec / marketing / finance / ops)"><p>A short email briefing written for your role - exec, marketing, finance or ops - so everyone gets their version of the story.</p><small><span class="st live">live</span>Role-written email digests (exec / marketing / finance / ops)</small></div>
-      <div class="frow" title="Configurable cadence &amp; focus - AI-led or curated"><p>You choose how often it lands and what it focuses on - AI-led or hand-curated.</p><small><span class="st live">live</span>Configurable cadence &amp; focus - AI-led or curated</small></div>
-      <div class="frow" title="Pinned/followed tiles rendered in the email (chart images &amp; metric chips)"><p>The charts and numbers you follow, rendered right inside the email - stay on top of the event without logging in.</p><small><span class="st live">live</span>Pinned/followed tiles rendered in the email (chart images &amp; metric chips)</small></div>
-      <div class="frow" title="Admin-managed + client self-service"><p>We can set your digests up for you, or you manage them yourself in Settings - your choice.</p><small><span class="st live">live</span>Admin-managed + client self-service</small></div>
-      <div class="frow" title="Daily WhatsApp update (digest / goals / alerts) + team broadcast lists"><p>Your key numbers in WhatsApp every morning, with team broadcast lists so everyone stays in the loop.</p><small><span class="st beta">beta</span>Daily WhatsApp update (digest / goals / alerts) + team broadcast lists</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">💬</span><span class="ft"><b>Messaging inbox</b><p>Important notes, approvals and receipts in one place with a clear read/ack trail - no more chasing over WhatsApp and email.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Two-way client ↔ Howler threads (read/unread, attachments)"><p>A direct line between your team and Howler - threads with attachments and a clear read trail, instead of scattered emails.</p><small><span class="st live">live</span>Two-way client ↔ Howler threads (read/unread, attachments)</small></div>
-      <div class="frow" title="Must-acknowledge messages"><p>For the messages that really matter, ask for an acknowledgement - and see exactly who has confirmed.</p><small><span class="st live">live</span>Must-acknowledge messages</small></div>
-      <div class="frow" title="In-app, web-push &amp; email notifications"><p>New messages reach you in the app, as a push notification and by email - nothing slips past.</p><small><span class="st live">live</span>In-app, web-push &amp; email notifications</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">📄</span><span class="ft"><b>Settlements &amp; documents</b><p>Settlements clients can actually read - and now they file themselves: just CC the Owl.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Settlement PDF → interactive statement"><p>Your settlement PDF becomes an interactive statement you can actually read and drill into.</p><small><span class="st live">live</span>Settlement PDF → interactive statement</small></div>
-      <div class="frow" title="Event documents area"><p>All your event documents in one tidy place, filed per event.</p><small><span class="st live">live</span>Event documents area</small></div>
-      <div class="frow" title="Owl auto-ingest - CC the Owl on the settlement email and it files itself"><p>CC the Owl on the settlement email and it files itself into Pulse - no uploading, no chasing.</p><small><span class="st beta">beta</span>Owl auto-ingest - CC the Owl on the settlement email and it files itself</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🎯</span><span class="ft"><b>Goals - track the results that matter</b><p>Tell Pulse what success looks like and every screen shows how you’re tracking, how it compares to last time, and where you’ll land.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="North Star + secondary goals with progress bars and a pace read"><p>Tell Pulse what success looks like - one North Star plus supporting goals - and every screen shows how you’re tracking.</p><small><span class="st beta">beta</span>North Star + secondary goals with progress bars and a pace read</small></div>
-      <div class="frow" title="Sell-curve pace, vs-last-time and a forecast landing on every card"><p>Every goal card shows your sales pace, how it compares to last time, and where you’ll land at this rate.</p><small><span class="st beta">beta</span>Sell-curve pace, vs-last-time and a forecast landing on every card</small></div>
-      <div class="frow" title="Goal types: hit a target / stay under a cap / healthy range / mix &amp; split"><p>Goals that fit how you actually work: hit a target, stay under a cap, keep a healthy range, or manage a mix.</p><small><span class="st beta">beta</span>Goal types: hit a target / stay under a cap / healthy range / mix &amp; split</small></div>
-      <div class="frow" title="Reusable goal templates (+ global templates published to every client)"><p>Set goals up once and reuse them for every event - including proven templates we publish for everyone.</p><small><span class="st beta">beta</span>Reusable goal templates (+ global templates published to every client)</small></div>
-      <div class="frow" title="Weekly “your goals this week” push"><p>A short “your goals this week” nudge so targets stay top of mind.</p><small><span class="st beta">beta</span>Weekly “your goals this week” push</small></div>
-      <div class="frow" title="Tag &amp; group goals by operational area"><p>Group goals by area - marketing, bar, gate - so each owner sees theirs.</p><small><span class="st beta">beta</span>Tag &amp; group goals by operational area</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🔔</span><span class="ft"><b>Alerts - told the moment a number matters</b><p>Stop watching dashboards - Pulse taps you on the shoulder the second a sell-out, milestone or low-stock moment happens.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Watch any KPI tile live - sold out / low stock / crosses a number"><p>Watch any number live - sold out, low stock, crossing a milestone - and get pinged the second it happens.</p><small><span class="st beta">beta</span>Watch any KPI tile live - sold out / low stock / crosses a number</small></div>
-      <div class="frow" title="Build a metric with filters (e.g. VIP tickets) - no tile needed"><p>Alert on exactly what you care about - e.g. just VIP tickets - even if no dashboard tile shows it.</p><small><span class="st beta">beta</span>Build a metric with filters (e.g. VIP tickets) - no tile needed</small></div>
-      <div class="frow" title="Inbox + push / email / SMS, with cooldowns &amp; quiet hours"><p>Alerts arrive where you want them - inbox, push, email or SMS - with quiet hours and cooldowns so they never spam.</p><small><span class="st beta">beta</span>Inbox + push / email / SMS, with cooldowns &amp; quiet hours</small></div>
-      <div class="frow" title="Live Pulse strip - alert fires + live momentum in the header"><p>A live strip in the app header showing fresh alerts and sales momentum at a glance.</p><small><span class="st beta">beta</span>Live Pulse strip - alert fires + live momentum in the header</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🚨</span><span class="ft"><b>Status notices</b><p>If anything ever goes wrong, clients know before they have to ask - and see exactly when it’s fixed.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Status-page-style incidents - all clients or specific ones"><p>If anything goes wrong, you hear it from us first - status updates posted straight into Pulse.</p><small><span class="st live">live</span>Status-page-style incidents - all clients or specific ones</small></div>
-      <div class="frow" title="A living timeline: updates + resolution"><p>Every incident keeps a living timeline from first update to resolution - you always know where things stand.</p><small><span class="st live">live</span>A living timeline: updates + resolution</small></div>
-      <div class="frow" title="Severity-driven notify (email / push / SMS + in-app banner)"><p>Serious issues notify you immediately by email, push or SMS, plus a banner in the app.</p><small><span class="st live">live</span>Severity-driven notify (email / push / SMS + in-app banner)</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🎪</span><span class="ft"><b>Event Ops - live device logistics</b><p>Every device accounted for at event close - no spreadsheet, no “missing” unknowns, a full history of where each one went.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Device &amp; station inventory (bulk auto-numbering, scannable codes)"><p>Every scanner and card machine in a live inventory - bulk-numbered and scannable.</p><small><span class="st beta">beta</span>Device &amp; station inventory (bulk auto-numbering, scannable codes)</small></div>
-      <div class="frow" title="Scan to move - Hive ↔ stations, append-only audit trail"><p>Move devices between the Hive and stations with a scan - every move logged, so nothing goes missing quietly.</p><small><span class="st beta">beta</span>Scan to move - Hive ↔ stations, append-only audit trail</small></div>
-      <div class="frow" title="Liaison checks &amp; issue log with resolutions"><p>Liaison checks and issues logged with resolutions, so problems get closed, not forgotten.</p><small><span class="st beta">beta</span>Liaison checks &amp; issue log with resolutions</small></div>
-      <div class="frow" title="Live overview - counts by state, open issues, recent activity"><p>A live overview during the event: where every device is, open issues and recent activity.</p><small><span class="st beta">beta</span>Live overview - counts by state, open issues, recent activity</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">👥</span><span class="ft"><b>Engage · Segments</b><p>Build the exact audience from your own data or a spreadsheet - combine lists, subtract a suppression list, and it stays live.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Always-live audiences (tile / CSV / paste / Google Sheet)"><p>Build audiences from your own data, a CSV, a paste or a Google Sheet - and they stay live as new people qualify.</p><small><span class="st live">live</span>Always-live audiences (tile / CSV / paste / Google Sheet)</small></div>
-      <div class="frow" title="Column matching (email / name / mobile)"><p>Pulse matches your columns (email, name, mobile) automatically - messy spreadsheets welcome.</p><small><span class="st live">live</span>Column matching (email / name / mobile)</small></div>
-      <div class="frow" title="Target on any column"><p>Target on any column - ticket type, spend, city, anything in your data.</p><small><span class="st live">live</span>Target on any column</small></div>
-      <div class="frow" title="Multi-source combine (Union / Intersect / Exclude)"><p>Combine audiences like sets: union, intersect or exclude - perfect for suppression lists.</p><small><span class="st live">live</span>Multi-source combine (Union / Intersect / Exclude)</small></div>
-      <div class="frow" title="Organise - link to an event, file in folders"><p>Keep audiences tidy - link each to its event and file them in folders.</p><small><span class="st live">live</span>Organise - link to an event, file in folders</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">📣</span><span class="ft"><b>Engage · Campaigns</b><p>Personalised, on-brand email + SMS to a precise audience - with approval gates and real tracking, all from the same data.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Email, SMS or both to a segment / tile / list"><p>Send email, SMS or both to exactly the audience you built - no exports, no list uploads to a third-party tool.</p><small><span class="st live">live</span>Email, SMS or both to a segment / tile / list</small></div>
-      <div class="frow" title="AI-drafted copy, branded templates, hero image"><p>AI drafts the copy in your voice, on your branded template, hero image included.</p><small><span class="st live">live</span>AI-drafted copy, branded templates, hero image</small></div>
-      <div class="frow" title="Email block builder - drag-to-order blocks, multi-column, saved templates"><p>Build emails from drag-to-order blocks - multi-column layouts you can save as reusable templates.</p><small><span class="st live">live</span>Email block builder - drag-to-order blocks, multi-column, saved templates</small></div>
-      <div class="frow" title="AI email design - full themed layouts, one-tap themes, AI banners"><p>One tap re-themes the whole email - and AI can design full layouts and banners for you.</p><small><span class="st live">live</span>AI email design - full themed layouts, one-tap themes, AI banners</small></div>
-      <div class="frow" title="Merge fields from any column"><p>Personalise with any column from your data - names, ticket types, order details.</p><small><span class="st live">live</span>Merge fields from any column</small></div>
-      <div class="frow" title="Promo / discount codes"><p>Drop promo or discount codes into any send.</p><small><span class="st live">live</span>Promo / discount codes</small></div>
-      <div class="frow" title="UTM + per-recipient open &amp; click tracking"><p>See exactly who opened and clicked, per recipient, with UTM tracking through to your analytics.</p><small><span class="st live">live</span>UTM + per-recipient open &amp; click tracking</small></div>
-      <div class="frow" title="Consent-aware (POPIA), one-click unsubscribe"><p>Consent-aware sending (POPIA) with one-click unsubscribe handled for you.</p><small><span class="st live">live</span>Consent-aware (POPIA), one-click unsubscribe</small></div>
-      <div class="frow" title="Approval workflow"><p>Nothing sends without a sign-off - a clear approval step before every campaign goes out.</p><small><span class="st live">live</span>Approval workflow</small></div>
-      <div class="frow" title="Send caps - per-client audience cap + a tighter SMS sub-cap"><p>Guard rails on volume: a per-audience cap and a tighter SMS cap, so a mistake can’t become a mass send.</p><small><span class="st live">live</span>Send caps - per-client audience cap + a tighter SMS sub-cap</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🔁</span><span class="ft"><b>Engage · Drip sequences</b><p>Set up an automated recovery sequence once - it catches new abandoners in real time, stops when they buy, and shows where people convert.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Multi-step journeys with delays"><p>Set up a sequence once - e.g. cart recovery - and it runs itself, step by step, on delays you choose.</p><small><span class="st live">live</span>Multi-step journeys with delays</small></div>
-      <div class="frow" title="Timing modes (fresh-abandonment / forward-from-send)"><p>Choose how timing works: react to fresh abandonment in real time, or run forward from a send.</p><small><span class="st live">live</span>Timing modes (fresh-abandonment / forward-from-send)</small></div>
-      <div class="frow" title="Auto-stop on purchase or unsubscribe"><p>The moment someone buys or unsubscribes, the sequence stops for them automatically.</p><small><span class="st live">live</span>Auto-stop on purchase or unsubscribe</small></div>
-      <div class="frow" title="Journey waterfall (open / click / convert + drop-off)"><p>See the journey as a waterfall - opens, clicks, conversions and where people drop off.</p><small><span class="st live">live</span>Journey waterfall (open / click / convert + drop-off)</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">📢</span><span class="ft"><b>Engage · Ad audience sync</b><p>Turn a Pulse audience into a Meta/TikTok ad audience in a click - auto-synced, privacy-safe, visible without leaving Pulse.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Push a segment to Meta / TikTok Custom Audiences"><p>Turn any Pulse audience into a Meta or TikTok ad audience in a click. Connect your ad accounts once and it’s on.</p><small><span class="st setup">needs setup</span>Push a segment to Meta / TikTok Custom Audiences</small></div>
-      <div class="frow" title="Mirror membership + daily auto-sync"><p>Audiences stay mirrored automatically - new buyers drop out of your “abandoned cart” ads on their own.</p><small><span class="st setup">needs setup</span>Mirror membership + daily auto-sync</small></div>
-      <div class="frow" title="Hashed identities before they leave Pulse"><p>Identities are hashed before they leave Pulse - privacy-safe by design.</p><small><span class="st setup">needs setup</span>Hashed identities before they leave Pulse</small></div>
-      <div class="frow" title="Ad audiences hub - connection health + live match sizes"><p>One place to see connection health and live match sizes for every synced audience.</p><small><span class="st live">live</span>Ad audiences hub - connection health + live match sizes</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">📱</span><span class="ft"><b>Social metrics</b><p>See how a client’s Facebook, Instagram and TikTok are really doing - next to their ticketing numbers, updating itself daily.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Facebook / Instagram / TikTok organic stats in Pulse"><p>Your Facebook, Instagram and TikTok numbers next to your ticket sales - one story, one place.</p><small><span class="st setup">needs setup</span>Facebook / Instagram / TikTok organic stats in Pulse</small></div>
-      <div class="frow" title="Account-level daily trends + per-post performance"><p>Daily account trends plus per-post performance, so you can see what content actually sells tickets.</p><small><span class="st setup">needs setup</span>Account-level daily trends + per-post performance</small></div>
-      <div class="frow" title="Self-service Social page - 30-day trend, top posts, daily sync"><p>A Social page of your own: 30-day trend, top posts, refreshed daily.</p><small><span class="st setup">needs setup</span>Self-service Social page - 30-day trend, top posts, daily sync</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🔌</span><span class="ft"><b>Pulse API &amp; AI-agent access (MCP)</b><p>Your Pulse data isn’t locked in - read it from your own tools, or point an AI agent like Claude at it and ask in plain language.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Per-client, read-only API keys - named, revocable, self-service"><p>Create read-only API keys yourself - named, revocable, and scoped to your data only.</p><small><span class="st beta">beta</span>Per-client, read-only API keys - named, revocable, self-service</small></div>
-      <div class="frow" title="REST API /api/v1 - dashboards, live metrics, segments, campaigns, goals"><p>Read your dashboards, live metrics, audiences, campaigns and goals from your own tools.</p><small><span class="st beta">beta</span>REST API /api/v1 - dashboards, live metrics, segments, campaigns, goals</small></div>
-      <div class="frow" title="Direct data queries - any curated measure × dimension, with filters"><p>Query your data directly - any curated measure by any dimension, with filters.</p><small><span class="st beta">beta</span>Direct data queries - any curated measure × dimension, with filters</small></div>
-      <div class="frow" title="MCP server - works with Claude AND ChatGPT / OpenAI"><p>Point Claude or ChatGPT at your Pulse data and ask questions in plain language.</p><small><span class="st beta">beta</span>MCP server - works with Claude AND ChatGPT / OpenAI</small></div>
-      <div class="frow" title="One-click Connect (OAuth 2.1 + PKCE) - no key copying"><p>Connect your AI assistant with one click - no copying keys around.</p><small><span class="st beta">beta</span>One-click Connect (OAuth 2.1 + PKCE) - no key copying</small></div>
-      <div class="frow" title="Row-level tile data - explicit per-key opt-in, fully audited"><p>Row-level data access is opt-in per key and fully audited - you stay in control.</p><small><span class="st beta">beta</span>Row-level tile data - explicit per-key opt-in, fully audited</small></div>
-      <div class="frow" title="Connected Owl can draft segments &amp; campaigns (drafts only - never sends)"><p>A connected assistant can draft audiences and campaigns for you - drafts only; a person always approves and sends.</p><small><span class="st beta">beta</span>Connected Owl can draft segments &amp; campaigns (drafts only - never sends)</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🎨</span><span class="ft"><b>White-label branding &amp; integrations</b><p>It’s their brand, their accounts, their data - Howler just powers it.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Per-client branding - logo / colours / sender (+ dark-mode logo)"><p>Pulse wears your brand - logo (light and dark), colours and sender name on everything your team and fans see.</p><small><span class="st live">live</span>Per-client branding - logo / colours / sender (+ dark-mode logo)</small></div>
-      <div class="frow" title="Vanity login page - the client’s own white-labelled sign-in URL"><p>Your own white-labelled sign-in page on your own URL.</p><small><span class="st live">live</span>Vanity login page - the client’s own white-labelled sign-in URL</small></div>
-      <div class="frow" title="Reporting currency per client (flows to every AI touch point)"><p>Report in your currency - it flows through every screen, email and AI answer.</p><small><span class="st live">live</span>Reporting currency per client (flows to every AI touch point)</small></div>
-      <div class="frow" title="AI copy language per client + per-campaign override"><p>AI-written copy in your language, with a per-campaign override when you need it.</p><small><span class="st live">live</span>AI copy language per client + per-campaign override</small></div>
-      <div class="frow" title="Looker / Anthropic keys · Email (Resend) · SMS (Clickatell)"><p>Your accounts under the hood - analytics, email and SMS - connected once and managed in Settings.</p><small><span class="st live">live</span>Looker / Anthropic keys · Email (Resend) · SMS (Clickatell)</small></div>
-      <div class="frow" title="Meta / TikTok ad accounts"><p>Connect your Meta and TikTok ad accounts to unlock ad audience sync.</p><small><span class="st setup">needs setup</span>Meta / TikTok ad accounts</small></div>
-      <div class="frow" title="Slack - mirror inbox notifications into a client channel"><p>Mirror your Pulse inbox notifications into your team’s Slack channel.</p><small><span class="st setup">needs setup</span>Slack - mirror inbox notifications into a client channel</small></div>
-      <div class="frow" title="Integration lock guard 🔒 + one-tap connect"><p>Integrations lock once verified, with one-tap connect - no accidental breakage.</p><small><span class="st live">live</span>Integration lock guard 🔒 + one-tap connect</small></div>
-      <div class="frow" title="Your Howler Support - assigned contacts under Settings → Team"><p>Your assigned Howler contacts, right in Settings - you always know who to call.</p><small><span class="st live">live</span>Your Howler Support - assigned contacts under Settings → Team</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🔐</span><span class="ft"><b>Trust, security &amp; scope</b><p>Every query is force-scoped to the client on the server - it can’t be bypassed and fails closed.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Server-side multi-tenant scoping (fails closed)"><p>You only ever see your own data - enforced on the server, on every query, with no way around it.</p><small><span class="st live">live</span>Server-side multi-tenant scoping (fails closed)</small></div>
-      <div class="frow" title="POPIA-minded consent + hashed ad sync"><p>Consent-aware messaging and hashed ad sync keep you on the right side of POPIA.</p><small><span class="st live">live</span>POPIA-minded consent + hashed ad sync</small></div>
-      <div class="frow" title="Roles &amp; permissions"><p>Fine-grained roles decide who on your team can see and do what.</p><small><span class="st live">live</span>Roles &amp; permissions</small></div>
-      <div class="frow" title="Write-only secrets - Pulse never shows a stored value"><p>Keys and passwords are write-only - once saved, Pulse never displays them again.</p><small><span class="st live">live</span>Write-only secrets - Pulse never shows a stored value</small></div>
-    </details>
-    <details class="feat"><summary><span class="fe">🔭</span><span class="ft"><b>On the horizon</b><p>Where Pulse goes next - for roadmap conversations, not promises.</p></span><span class="chev">▼</span></summary>
-      <div class="frow" title="Campaigns - conditional sequencing (branch a journey on open / click / purchase)"><p>Branch a journey on behaviour - different follow-ups for openers, clickers and buyers.</p><small><span class="st soon">soon</span>Campaigns - conditional sequencing (branch a journey on open / click / purchase)</small></div>
-      <div class="frow" title="Portfolio / “all events” view"><p>One view across every event you run - compare, spot patterns, plan the season.</p><small><span class="st soon">soon</span>Portfolio / “all events” view</small></div>
-      <div class="frow" title="Event tasks + AM cockpit"><p>Event to-dos and an account-manager cockpit, so the work around the data lives here too.</p><small><span class="st soon">soon</span>Event tasks + AM cockpit</small></div>
-      <div class="frow" title="WhatsApp &amp; Howler app-push message channels"><p>Send campaigns by WhatsApp and app push, not just email and SMS.</p><small><span class="st soon">soon</span>WhatsApp &amp; Howler app-push message channels</small></div>
-      <div class="frow" title="Packages / tiers with feature gating"><p>Clear packages so you can see what’s in your plan and what an upgrade unlocks.</p><small><span class="st soon">soon</span>Packages / tiers with feature gating</small></div>
-    </details>
-    </div>
+    <p class="big">The full index has its own page: open a section, scan the value lines (each one says
+    what you get, then names the feature behind it), and see what the Owl learns next.</p>
+    <div style="margin-top:22px"><a class="btn primary" href="/sales/features">Explore every feature →</a></div>
   </section>
 
   <section class="value">
@@ -876,7 +763,7 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
     Your event intelligence: insight → action → results → improvement, on repeat.</p>
     <div class="ctas">
       <a class="btn inverse" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a live demo</a>
-      <a class="btn inverse" href="/sales/experience" style="background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5)">▶ See it in motion</a>
+      <a class="btn inverse" href="/sales/experience" style="background:rgba(255,255,255,.18);color:#fff;border:1.5px solid rgba(255,255,255,.5)">▶ See it in flow</a>
     </div>
   </section>
 
@@ -1010,38 +897,27 @@ details.feat[open] summary{border-bottom:1px solid var(--line)}
   }
   goMed(0); armMed();
 
-  /* act: the Owl drafts the journey email */
-  const SUBJ = 'Last crumbs. Everyone\u2019s going. Are you, {{name}}?';
-  const dSubj = document.getElementById('draftSubj');
-  const dCaret = document.getElementById('draftCaret');
-  const dState = document.getElementById('draftState');
-  const skel1 = document.getElementById('skel1'), skel2 = document.getElementById('skel2');
-  const dStamp = document.getElementById('draftStamp');
-  const jSteps = [...document.querySelectorAll('#journey .j')];
-  async function draftLoop() {
+  /* act: the Owl builds the journey, node by node */
+  const jSteps2 = [...document.querySelectorAll('#jtree [data-s]')].sort((a, b) => +a.dataset.s - +b.dataset.s);
+  const jState = document.getElementById('jtreeState');
+  async function treeLoop() {
     for (;;) {
       if (document.hidden) { await sleep(1500); continue; }
-      dSubj.textContent = ''; dState.textContent = 'writing\u2026';
-      dCaret.style.display = 'inline-block';
-      skel1.classList.remove('go'); skel2.classList.remove('go');
-      dStamp.classList.remove('on');
-      jSteps.forEach(j => j.classList.remove('lit'));
-      await sleep(900);
-      for (let i = 1; i <= SUBJ.length; i++) { dSubj.textContent = SUBJ.slice(0, i); await sleep(38); }
-      await sleep(250);
-      skel1.classList.add('go'); await sleep(500);
-      skel2.classList.add('go'); await sleep(700);
-      dCaret.style.display = 'none';
-      dState.textContent = 'done';
-      dStamp.classList.add('on');
-      for (const j of jSteps) { j.classList.add('lit'); await sleep(520); }
-      await sleep(3600);
+      jSteps2.forEach(el => el.classList.remove('on'));
+      jState.textContent = 'building…';
+      await sleep(800);
+      for (const el of jSteps2) {
+        el.classList.add('on');
+        await sleep(el.classList.contains('jnode') ? 480 : 240);
+      }
+      jState.textContent = 'journey live · awaiting your approval';
+      await sleep(4200);
     }
   }
   if (reduced) {
-    dSubj.textContent = SUBJ; dCaret.style.display = 'none'; dState.textContent = 'done';
-    skel1.classList.add('go'); skel2.classList.add('go'); dStamp.classList.add('on');
-  } else { draftLoop(); }
+    jSteps2.forEach(el => el.classList.add('on'));
+    jState.textContent = 'journey live · awaiting your approval';
+  } else { treeLoop(); }
 
   /* ops: the live site plan heat map */
   const SP_PINS = [
