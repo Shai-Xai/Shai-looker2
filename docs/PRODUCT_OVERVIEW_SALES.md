@@ -932,9 +932,9 @@ see "The continuous comms loop" above.)*
 - **2026-07-08** — **Nav: reorder suites + Upcoming/Past grouping** ✅ (new): the
   event list in the sidebar now **drag-to-reorder** (a grip handle on each suite;
   the chosen order is saved for the client), and suites **auto-group into
-  "Upcoming" and "Past"** from their configured event dates — so a client with a
-  long history sees live events first and finished ones tucked below. Admin-side:
-  the grouping is driven by the event dates already set on the suite; the new
+  "Upcoming" and "Past"** using the **live event date from Looker**
+  (`core_events.start_date`, cached) — so a client with a long history sees live
+  events first and finished ones tucked below, with no manual date upkeep. The new
   **⧉ Duplicate suite** action (Admin → client → Suites) stands up a new event
   just like an existing one.
 - **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a

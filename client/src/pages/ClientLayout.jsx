@@ -350,8 +350,12 @@ export default function ClientLayout() {
         // searching (a flat match list reads better). Reorder is drag-to-arrange
         // within the list; the group headers show only when >1 group has suites.
         const GROUPS = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
-        const groups = GROUPS.map(([key, label]) => ({ key, label, items: shownSuites.filter((s) => (s.timing || 'undated') === key) })).filter((g) => g.items.length);
-        const grouped = !searching && groups.length > 1;
+        const groups = GROUPS.map(([key, label]) => ({ key, label, items: shownSuites.filter((s) => s.timing === key) })).filter((g) => g.items.length);
+        // Event dates resolve from Looker in the background; the first load a suite is
+        // seen its timing is 'unknown'. Show a flat list that round (never drop or
+        // mis-group a suite); it groups on the next load once the dates are cached.
+        const anyUnknown = shownSuites.some((s) => !s.timing || s.timing === 'unknown');
+        const grouped = !searching && !anyUnknown && groups.length > 1;
         const canReorder = !searching && !!activeEntityId;
         const renderSuite = (su) => {
           const sets = suiteSets(su);
