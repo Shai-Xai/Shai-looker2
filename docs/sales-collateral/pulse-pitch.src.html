@@ -128,13 +128,13 @@
   .jconv { margin-top: 2.4mm; font-size: 9px; font-weight: 800; color: #059669; }
 
   /* ---------- Site map mockup ---------- */
-  .sitemap { margin-top: 5mm; border: 1px solid #ece9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 2mm 5mm rgba(45,43,85,.10); }
+  .sitemap { margin-top: 4mm; border: 1px solid #ece9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 2mm 5mm rgba(45,43,85,.10); }
   .sm-bar { display: flex; align-items: center; gap: 2mm; padding: 2.4mm 4mm; background: #fff; border-bottom: 1px solid #efecf8; }
   .sm-bar .cap { font-size: 9px; color: #55556d; margin-right: auto; }
   .sm-bar .cap b.dark { color: #e11d48; }
   .sm-tab { font-size: 8.5px; font-weight: 800; border: 1px solid #e4e0f2; border-radius: 99px; padding: 1.2mm 3.4mm; color: #55556d; }
   .sm-tab.on { background: #fff1ec; border-color: #FF6B35; color: #c2410c; }
-  .sm-map { position: relative; height: 54mm; background: #eef0ec;
+  .sm-map { position: relative; height: 40mm; background: #eef0ec;
     background-image: repeating-linear-gradient(0deg, rgba(45,43,85,.06) 0, rgba(45,43,85,.06) .25mm, transparent .25mm, transparent 6mm),
                       repeating-linear-gradient(90deg, rgba(45,43,85,.06) 0, rgba(45,43,85,.06) .25mm, transparent .25mm, transparent 6mm); }
   .blk { position: absolute; border: .4mm solid rgba(45,43,85,.18); background: rgba(255,255,255,.35); border-radius: .8mm; }
@@ -239,10 +239,27 @@
   .adchip { font-size: 6.8px; font-weight: 800; border-radius: 99px; padding: 1mm 2.4mm; background: rgba(16,185,129,.12); color: #047857; }
   .ad-note { font-size: 7.2px; color: #9a97ad; padding: 0 3mm 2.6mm; }
 
+  /* ---------- River (operators) mockup ---------- */
+  .river { margin-top: 3.5mm; border: 1px solid #ece9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 2mm 5mm rgba(45,43,85,.10); }
+  .rv-bar { display: flex; align-items: center; gap: 2mm; padding: 2.2mm 4mm; background: #fff; border-bottom: 1px solid #efecf8; }
+  .rv-bar .cap { font-size: 9px; color: #55556d; margin-right: auto; }
+  .rv-body { background: #fdfdfb; padding: 2mm 4mm 1.2mm; }
+  .rv-row { display: flex; align-items: center; gap: 3mm; margin-bottom: .9mm; }
+  .rv-who { width: 26mm; flex-shrink: 0; }
+  .rv-who b { font-size: 8.4px; display: block; }
+  .rv-who span { font-size: 6.8px; color: #9a97ad; }
+  .rv-lane { flex: 1; height: 5.8mm; }
+  .rv-lane svg { width: 100%; height: 100%; display: block; }
+  .rv-num { width: 25mm; flex-shrink: 0; text-align: right; }
+  .rv-num b { font-size: 8.8px; display: block; }
+  .rv-num span { font-size: 6.8px; color: #9a97ad; }
+  .rv-num .warn { color: #e11d48; font-weight: 800; }
+  .rv-axis { display: flex; justify-content: space-between; font-size: 6.6px; color: #9a97ad; padding: 1mm 4mm 0 33mm; margin-right: 25mm; }
+
   /* ---------- Page 5 event ops ---------- */
   .ops-wrap { display: flex; gap: 6mm; margin-top: 5mm; }
-  .ops-feats { flex: 1.06; display: flex; flex-direction: column; gap: 2.9mm; }
-  .ops-feat { font-size: 10.3px; line-height: 1.5; color: #44445c; }
+  .ops-feats { flex: 1.06; display: flex; flex-direction: column; gap: 2.4mm; }
+  .ops-feat { font-size: 9.7px; line-height: 1.42; color: #44445c; }
   .ops-feat b { color: #1a1a2e; font-weight: 800; }
   .opsboard { width: 84mm; border: 1px solid #ece9f5; border-radius: 12px; overflow: hidden; box-shadow: 0 3mm 6mm rgba(45,43,85,.12); align-self: flex-start; }
   .opsboard .ob-head { background: #1a1a2e; color: #fff; padding: 2.6mm 3.5mm; display: flex; justify-content: space-between; align-items: center; }
@@ -583,11 +600,11 @@
     <div class="ops-feats">
       <div class="ops-feat"><b>🗺 The live overview</b>: one board with the whole operation: device counts by state, per-station deployment, open issues and a live activity feed. The "where is everything right now" view.</div>
       <div class="ops-feat"><b>📟 Every device tracked</b>: scanners, payment devices, radios, printers: bulk-register a batch, then <b>scan to move</b> between the store and stations. Every move lands in an append-only audit trail, nothing is lost to memory, and every device is accounted for at event close.</div>
-      <div class="ops-feat"><b>🔥 Hotspots &amp; the heat map</b>: every station's activity through the day in time blocks: watch the crowd move from gates to bars, spot the station that's overloaded and the one that's dead, and staff accordingly, tonight and next year.</div>
+      <div class="ops-feat"><b>🔥 Hotspots &amp; the heat map</b>: every station's activity in time blocks: watch the crowd move from gates to bars, spot the overloaded station and the dead one, staff accordingly.</div>
+      <div class="ops-feat"><b>🍹 Bar &amp; operator performance</b>: every bar and every bartender, live: sales and rands-per-hour per operator, who's flying and which till has gone quiet. Praise the stars at the debrief; fix the slow lane before the queue grows.</div>
       <div class="ops-feat"><b>📶 Connectivity &amp; data health</b>: is data from every station actually arriving? Minutes-since-last-record per station with alerting when a stream goes quiet; a device roster showing exactly <b>which units are offline and for how long</b>. You'll know a scanner died before the queue does.</div>
-      <div class="ops-feat"><b>🩺 AI Diagnose + event report</b>: one tap per station gets an AI verdict with ranked concerns and a suggested fix; after the event, an AI-drafted diagnostics report for the debrief, with a connectivity section clean enough to forward to the network provider.</div>
-      <div class="ops-feat"><b>⚡ Live updates while doors are open</b>: a compact multi-metric report to the team every 15–120 minutes: people through the gates with pace per hour, bar revenue, top-3 vendors, device health, % of last year, to inbox, push, SMS and WhatsApp.</div>
-      <div class="ops-feat"><b>🚨 Alerts on any number</b>: "tell me when VIP drops below 100": Pulse watches it and taps you on the shoulder the moment it crosses. Cooldowns and quiet hours keep it calm.</div>
+      <div class="ops-feat"><b>🩺 AI Diagnose + event report</b>: one-tap AI verdicts per station, and a post-event diagnostics report clean enough to forward to the network provider.</div>
+      <div class="ops-feat"><b>⚡ Live updates &amp; alerts</b>: a compact multi-metric report every 15–120 minutes while doors are open (gates pace, bar revenue, top vendors, device health) to inbox, push, SMS and WhatsApp, plus threshold alerts on any number, with cooldowns and quiet hours.</div>
     </div>
 
     <div class="opsboard">
@@ -655,20 +672,41 @@
   </div>
   <div style="font-size:9px; color:#9a97ad; margin-top:1.6mm; font-style:italic;">Your venue's own site plan, live: every station pinned, heat showing where the crowd is spending right now, and a dark station flagged the moment its data stops flowing.</div>
 
-  <div style="display:flex; gap:4mm; margin-top:4mm;">
-    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#06B6D4,#0891b2);">
-      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">🧾 At event close</div>
-      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">Every device accounted for, no "missing" unknowns, and a full history of where each one went, who moved it and what went wrong.</div>
+    <div class="river">
+    <div class="rv-bar">
+      <div class="cap">🌊 The River · every operator's night as a flowing lane · <b>👤 Operators · all bars</b></div>
+      <span class="sm-tab">🐝 Board</span><span class="sm-tab">📈 Rhythm</span><span class="sm-tab on">🌊 River</span><span class="sm-tab">🕸 Network</span>
     </div>
-    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#7C3AED,#5b21b6);">
-      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">📱 The whole night, one thread</div>
-      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">Live updates stack into a single inbox thread, scroll the night's story at the debrief, from doors to last call.</div>
-    </div>
-    <div style="flex:1; border-radius:12px; padding:4mm 4.5mm; color:#fff; background:linear-gradient(135deg,#1a1a2e,#2d2b55);">
-      <div style="font-size:11.5px; font-weight:900; margin-bottom:1.6mm;">📶 Evidence, not arguments</div>
-      <div style="font-size:9.8px; line-height:1.5; opacity:.94;">If connectivity was the culprit, the AI report gives you a neutral, data-backed section you can forward straight to the network provider.</div>
+    <div class="rv-body">
+      <div class="rv-row">
+        <div class="rv-who"><b>Thabo M.</b><span>Main Bar · till 4</span></div>
+        <div class="rv-lane"><svg viewBox="0 0 300 26" preserveAspectRatio="none"><polygon points="0.0,10 42.9,7 85.7,4 128.6,2 171.4,4 214.3,1 257.1,3 300.0,6 300.0,20 257.1,23 214.3,25 171.4,22 128.6,24 85.7,22 42.9,19 0.0,16" fill="#FF385C" opacity="0.8"/></svg></div>
+        <div class="rv-num"><b>R48 250</b><span>412 sales · R8.0k/hr ⭐</span></div>
+      </div>
+      <div class="rv-row">
+        <div class="rv-who"><b>Lerato K.</b><span>Main Bar · till 2</span></div>
+        <div class="rv-lane"><svg viewBox="0 0 300 26" preserveAspectRatio="none"><polygon points="0.0,11 42.9,8 85.7,5 128.6,4 171.4,3 214.3,4 257.1,5 300.0,7 300.0,19 257.1,21 214.3,22 171.4,23 128.6,22 85.7,21 42.9,18 0.0,15" fill="#FF6B35" opacity="0.8"/></svg></div>
+        <div class="rv-num"><b>R41 900</b><span>388 sales · R7.0k/hr</span></div>
+      </div>
+      <div class="rv-row">
+        <div class="rv-who"><b>Sipho D.</b><span>Solar Bar · till 1</span></div>
+        <div class="rv-lane"><svg viewBox="0 0 300 26" preserveAspectRatio="none"><polygon points="0.0,11 42.9,9 85.7,7 128.6,5 171.4,6 214.3,5 257.1,7 300.0,8 300.0,18 257.1,19 214.3,21 171.4,20 128.6,21 85.7,19 42.9,17 0.0,15" fill="#FFB020" opacity="0.8"/></svg></div>
+        <div class="rv-num"><b>R33 400</b><span>301 sales · R5.6k/hr</span></div>
+      </div>
+      <div class="rv-row">
+        <div class="rv-who"><b>Naledi P.</b><span>VIP Bar · till 1</span></div>
+        <div class="rv-lane"><svg viewBox="0 0 300 26" preserveAspectRatio="none"><polygon points="0.0,12 42.9,10 85.7,8 128.6,7 171.4,6 214.3,7 257.1,6 300.0,8 300.0,18 257.1,20 214.3,19 171.4,20 128.6,19 85.7,18 42.9,16 0.0,14" fill="#7C3AED" opacity="0.8"/></svg></div>
+        <div class="rv-num"><b>R28 750</b><span>246 sales · R4.8k/hr</span></div>
+      </div>
+      <div class="rv-row">
+        <div class="rv-who"><b>Kea R.</b><span>Kosmo Bar · till 3</span></div>
+        <div class="rv-lane"><svg viewBox="0 0 300 26" preserveAspectRatio="none"><polygon points="0.0,11 42.9,9 85.7,10 128.6,11 171.4,12 214.3,12.4 257.1,12.6 300.0,12.7 300.0,13.3 257.1,13.4 214.3,13.6 171.4,14 128.6,15 85.7,16 42.9,17 0.0,15" fill="#94a3b8" opacity="0.8"/></svg></div>
+        <div class="rv-num"><b>R9 120</b><span class="warn">⚠ idle 25 min</span></div>
+      </div>
+      <div class="rv-axis"><span>18:00</span><span>19:00</span><span>20:00</span><span>21:00</span><span>22:00</span><span>23:00</span></div>
     </div>
   </div>
+  <div class="mockcap">Bar &amp; operator performance, live: the lane's width is money flowing through that operator's till. Thabo is carrying Main Bar; Kea's lane has run dry, someone should check till 3. Names illustrative; the view is real.</div>
 
   <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · The Experience OS by Howler</span><span>howler-pulse-v2.onrender.com</span><span>Page 5 of 7</span></div>
 </div>

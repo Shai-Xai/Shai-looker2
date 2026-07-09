@@ -167,14 +167,14 @@ s.addText('“From seeing a cohort to a live journey, an ad audience and tracked
 /* ---------- 9 · RUN / EVENT OPS ---------- */
 s = contentSlide('🎪  RUN · Event Ops, your operations command centre', 'the gates, the bars, the devices, the data itself, one live board', CYAN, 9);
 feat(s, 0.5, 1.5, 5.9, 'The live site map', null, 'your venue’s own plan with every station pinned: heat shows where the crowd is spending right now; a dark station is flagged the moment its data stops.');
-feat(s, 0.5, 2.62, 5.9, 'Hotspots & the heat map', null, 'station activity through the day in time blocks: watch the crowd move, spot the overloaded station and the dead one, staff accordingly.');
+feat(s, 0.5, 2.62, 5.9, 'Bar & operator performance', null, 'every bar and every bartender, live: sales and rands-per-hour per operator, who is flying and which till has gone quiet. The River view turns the night into flowing lanes.');
 feat(s, 0.5, 3.74, 5.9, 'Every device tracked', null, 'scan to move between store and stations; append-only audit trail; every device accounted for at event close.');
 feat(s, 0.5, 4.72, 5.9, 'Connectivity & data health', null, 'stream watch per station and a roster of exactly which units are offline and for how long. Know a scanner died before the queue does.');
 feat(s, 0.5, 5.84, 5.9, 'AI Diagnose · live updates · alerts', null, 'one-tap AI verdicts per station, a multi-metric mini report every 15–120 min while doors are open, and threshold alerts on any number.');
-s.addImage({ path: 'sitemap.png', x: 6.75, y: 1.6, w: 6.1, h: 2.23 });
-s.addText('The Flow board’s live site map, stations, heat and a dark station, on your own venue plan.', { x: 6.75, y: 3.9, w: 6.1, h: 0.5, fontSize: 10, italic: true, color: GREY, fontFace: F });
-s.addShape('roundRect', { x: 6.75, y: 4.55, w: 6.1, h: 2.0, rectRadius: 0.1, fill: { color: 'F0FBFD' }, line: { color: CYAN, width: 1 } });
-s.addText([{ text: '“You’ll know a hotspot is forming, or a scanner has died, before anyone on the ground has to tell you.”', options: { italic: true, bold: true, color: '0E7490' } }], { x: 7.0, y: 4.7, w: 5.6, h: 1.7, fontSize: 14, align: 'center', valign: 'middle', fontFace: F, lineSpacing: 20 });
+s.addImage({ path: 'sitemap.png', x: 6.75, y: 1.55, w: 6.1, h: 2.06 });
+s.addText('The live site map: stations, heat and a dark station, on your own venue plan.', { x: 6.75, y: 3.63, w: 6.1, h: 0.32, fontSize: 9.5, italic: true, color: GREY, fontFace: F });
+s.addImage({ path: 'river.png', x: 6.75, y: 4.1, w: 6.1, h: 2.15 });
+s.addText('The River, operators only: each lane is money flowing through one bartender’s till.', { x: 6.75, y: 6.28, w: 6.1, h: 0.32, fontSize: 9.5, italic: true, color: GREY, fontFace: F });
 
 /* ---------- 8 · OWN ---------- */
 s = contentSlide('🔒  OWN · white-label, security & openness', 'your brand, your accounts, your data', NAVY, 10);
