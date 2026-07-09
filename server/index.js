@@ -21,7 +21,8 @@ const rateLimit = require('./ratelimit');
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
 // unchanged. See server/query.js.
-const query = require('./query')({ looker, auth });
+const folderDaysSync = require('./folderDaysSync')(db); // folder-level Days-to-go sync (live cascade) → server/folderDaysSync.js
+const query = require('./query')({ looker, auth, folderDaysSync });
 const {
   runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
@@ -519,7 +520,7 @@ require('./suiteCategories').mount(app, { db, auth }); // client-defined nav cat
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache, folderDaysSync,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────

@@ -15,7 +15,7 @@ const fx = require('./filterExpression'); // combined-field OR → Looker filter
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache, folderDaysSync,
 }) {
 // Admin: hard-wipe the server's query cache (all dashboards). The client's
 // "Clear cache" refresh calls this first, then re-fetches its tiles live.
@@ -50,6 +50,16 @@ app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) =
   const on = !!(req.body || {}).on;
   db.setFolderKeepImported(folder, on);
   res.json({ ok: true, folder, on });
+});
+
+// Folder-level Days-to-go sync (cascades to every dashboard in the folder by tile
+// title). GET returns the whole map; POST sets/clears one folder's sync.
+app.get('/api/dashboards/folder/days-sync', auth.requireAdmin, (_req, res) => res.json({ syncs: folderDaysSync ? folderDaysSync.read() : {} }));
+app.post('/api/dashboards/folder/days-sync', auth.requireAdmin, (req, res) => {
+  if (!folderDaysSync) return res.status(501).json({ error: 'Not available' });
+  const folder = String((req.body || {}).folder || '');
+  const sync = folderDaysSync.save(folder, (req.body || {}).sync);
+  res.json({ ok: true, folder, sync });
 });
 
 // Bulk: flip comparison-events tiles' EVENT sort from desc → asc across a folder
@@ -91,7 +101,10 @@ app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
   // View-time cascade: a persistent folder setting can pin imported filters for the
   // whole folder. Surfaced as a separate hint so the editor still shows the
   // dashboard's OWN flag; it's never persisted onto the dashboard.
-  res.json({ ...d, folderKeepImported: db.folderKeepImportedFor(d.folder) });
+  // Also apply the folder-level Days-to-go sync (resolved to this dashboard by tile
+  // title) when the dashboard has none of its own — same view-time inheritance.
+  const withSync = folderDaysSync ? folderDaysSync.withFolderSync(d) : d;
+  res.json({ ...withSync, folderKeepImported: db.folderKeepImportedFor(d.folder) });
 });
 
 // Create / edit / delete / import — admin only (Howler builds; clients view).
