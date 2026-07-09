@@ -398,7 +398,6 @@ export default function ClientLayout() {
         const TIMING = [['upcoming', 'Upcoming'], ['past', 'Past'], ['undated', 'Other']];
         const timingGroups = TIMING.map(([key, label]) => ({ label, items: unfiled.filter((s) => s.timing === key) })).filter((g) => g.items.length);
         const anyUnknown = shownSuites.some((s) => !s.timing || s.timing === 'unknown');
-        const hasCats = catsOn && categories.length > 0;
         const canReorder = arranging && !searching && !!activeEntityId; // grips only in reorder mode
         const renderSuite = (su, catId = null) => {
           const sets = suiteSets(su);
@@ -461,15 +460,19 @@ export default function ClientLayout() {
         };
         const headStyle = { padding: '7px 8px 3px 14px', fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted-2)' };
         const miniIcon = { border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 3px', flexShrink: 0 };
-        // No categories: flat while searching / dates resolving / a single group, else the timing groups.
-        if (!hasCats) {
+        // Flag OFF → legacy: flat while searching / dates resolving / a single group, else timing groups.
+        if (!catsOn) {
           if (searching || anyUnknown || timingGroups.length <= 1) return shownSuites.map((s) => renderSuite(s));
           return timingGroups.map((g) => (
             <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
           ));
         }
-        // With categories: each category (a drop target while arranging), then the
-        // unfiled events under their automatic Upcoming/Past/Other groups.
+        // Flag ON: category groups (a drop target while arranging), then the unfiled
+        // events. "+ New category" always shows in arrange mode so the FIRST category
+        // is reachable (with zero categories it's still the way in). Unfiled render
+        // flat when there are no categories and the timing groups aren't meaningful
+        // yet (dates resolving / a single group).
+        const flatUnfiled = categories.length === 0 && (anyUnknown || timingGroups.length <= 1);
         return (
           <>
             {categories.map((c) => {
@@ -488,9 +491,11 @@ export default function ClientLayout() {
                 </div>
               );
             })}
-            {timingGroups.map((g) => (
-              <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
-            ))}
+            {flatUnfiled
+              ? unfiled.map((s) => renderSuite(s))
+              : timingGroups.map((g) => (
+                <div key={g.label} style={{ marginBottom: 4 }}><div style={headStyle}>{g.label}</div>{g.items.map((s) => renderSuite(s))}</div>
+              ))}
             {arranging && <button onClick={addCategory} style={{ ...subRow, color: 'var(--brand)', fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', width: '100%', textAlign: 'left', padding: '6px 14px' }}>+ New category</button>}
           </>
         );
