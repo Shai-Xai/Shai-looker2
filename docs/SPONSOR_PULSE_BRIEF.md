@@ -131,9 +131,38 @@ footfall is 18% ahead of your last event; your Sunday campaign is still
 awaiting organiser approval." Owl-narrated, on the portal home and as a digest
 email, with a "needs you" block (pending approvals, creative sign-offs).
 
-**A sponsor-scoped Owl.** "How many leads did we capture at Riverfields vs
-last year?" answered conversationally, grounded only in that sponsor's deals.
-The Owl/MCP plumbing exists; this is scoping work, not new AI work.
+**A sponsor-scoped Owl** — see the dedicated section below.
+
+## The Owl & bring-your-own-AI (MCP)
+Two ways sponsors get *answers* instead of dashboards:
+
+1. **In the portal — the sponsor Owl.** A chat page: "How did our stand do vs
+   City Sundowner?" answered conversationally, grounded only in that sponsor's
+   deals, every figure cited to its source (vendor IDs, scan points), strictly
+   read-only. The Owl/MCP plumbing exists; this is scoping work plus a sponsor
+   prompt lens in `promptRegistry()` — not new AI work.
+2. **In their own AI tools — Claude & ChatGPT connectors.** Pulse already runs
+   an MCP server (`server/mcp.js`, endpoint
+   `https://howler-pulse-v2.onrender.com/mcp`) that organisers connect to
+   Claude and ChatGPT today. Issue **sponsor API keys scoped to their deals**
+   (same `apiKeys.js` model, revocable) and a sponsor adds their Pulse data as
+   a connector in [Claude](https://claude.ai/settings/connectors) or
+   [ChatGPT](https://chatgpt.com/#settings/Connectors) — live event data inside
+   the assistant their marketing team already uses every day:
+   - "Pull my Riverfields numbers into this quarterly deck."
+   - "Draft our post-event sponsorship report with the actuals."
+   - "Compare lead cost at our three events against our Meta CPL."
+   - Weekly agency reporting without CSV-export round-trips.
+
+   The scope boundary rides the same rails as the portal: deal-scoped,
+   read-only, aggregates only, no organiser PII reachable — a sponsor's key
+   can never see more through MCP than they can see in the portal. Flag-gated
+   by tier (Gold+ suggested), enforced at the route/tool layer
+   (`OWL_TOOL_FLAGS`), and every key is revocable from the deal editor.
+
+   This is a genuine differentiator to sell with: *"your sponsorship comes
+   with an AI analyst — and it plugs into the Claude/ChatGPT your team
+   already has."*
 
 ## Tiers, entitlements & the package page
 What a sponsor can *do* is set by their **tier on the deal** — the module
@@ -144,7 +173,7 @@ overrides always possible):
 |---|---|
 | **Bronze** | Results only — dashboards + wrap report |
 | **Silver** | + briefing, lead capture & export, live event-day view |
-| **Gold** | + campaigns (own leads + organiser-approved sends), audience sync to own ad accounts, sponsor Owl |
+| **Gold** | + campaigns (own leads + organiser-approved sends), audience sync to own ad accounts, sponsor Owl + Claude/ChatGPT connector (MCP) |
 | **Platinum** | + portfolio benchmarks across events/organisers, API access |
 
 The **package page** is the sponsor-facing mirror of those toggles: what their
