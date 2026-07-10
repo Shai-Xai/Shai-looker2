@@ -122,6 +122,7 @@ export function AppAnalyticsAdmin() {
     ? [
         ['Viewers today', data.live?.actives, true],
         ['Unique viewers', data.totals?.uniques],
+        ['Interactions', data.totals?.interactions],
         ['Views', data.totals?.views],
         ['CTA taps', data.totals?.ctaTaps],
         ['Purchases', data.totals?.purchases],
@@ -167,11 +168,13 @@ export function AppAnalyticsAdmin() {
       <SeriesCard
         series={data.series || []}
         metrics={perClient
-          ? [['views', 'Views'], ['uniques', 'Unique viewers'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]
+          ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'], ['views', 'Views'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]
           : [['dau', 'Active users'], ['views', 'Views'], ['interactions', 'Interactions'], ['new_users', 'New users'], ['sessions', 'Sessions']]}
         isMobile={isMobile}
       />
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
+      <BreakdownsCard key={`bd-${entityId || 'all'}-${days}`} keys={data.breakdowns || []} days={days}
+        loader={(key) => api.adminAppBreakdown({ key, days, entityId })} />
       <PeopleSection key={entityId || 'all'} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
@@ -216,14 +219,17 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       <StatRow isMobile={isMobile} stats={[
         ['Viewers today', data.live?.actives, true],
-        ['Unique viewers', data.totals?.uniques],
+        ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
+        ['Interactions', data.totals?.interactions],
         ['Views', data.totals?.views],
         ['CTA taps', data.totals?.ctaTaps],
         ['Purchases', data.totals?.purchases],
       ]} />
       <SeriesCard series={data.series || []} isMobile={isMobile}
-        metrics={[['views', 'Views'], ['uniques', 'Unique viewers'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]} />
+        metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'], ['views', 'Views'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]} />
       <EventsTable rows={data.events} title="By event" days={data.days} />
+      <BreakdownsCard key={`bd-${entityId}-${days}`} keys={data.breakdowns || []} days={days}
+        loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))} />
       <PeopleSection key={entityId} days={days}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
     </div>
@@ -296,6 +302,57 @@ function EventsTable({ rows, title: heading, days }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// What's driving the numbers — top values of the configured breakdown properties
+// (interaction_type / CTA_Label / surface), live-queried per chip with a short
+// server-side cache. Scoped exactly like the rest of the surface.
+function BreakdownsCard({ keys, loader }) {
+  const [key, setKey] = useState(keys[0] || '');
+  const [out, setOut] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!key) return;
+    let dead = false;
+    setBusy(true); setError('');
+    loader(key)
+      .then((r) => { if (!dead) setOut(r); })
+      .catch((e) => { if (!dead) { setError(e.message); setOut(null); } })
+      .finally(() => { if (!dead) setBusy(false); });
+    return () => { dead = true; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope)
+  if (!keys.length) return null;
+  const max = Math.max(1, ...(out?.values || []).map((v) => v.count));
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🧩 What's driving it</div>
+      <p style={sub}>The busiest values behind the interactions — pick a property.</p>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {keys.map((k) => <Chip key={k} on={key === k} onClick={() => setKey(k)}>{k}</Chip>)}
+      </div>
+      {error && <div style={errBox}>{error}</div>}
+      {busy && <p style={mutedTxt}>Loading…</p>}
+      {!busy && out && out.values.length === 0 && <p style={sub}>Nothing recorded for "{out.key}" in this window.</p>}
+      {!busy && out && out.values.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 420 }}>
+            <thead><tr>{[out.key, '', 'Count', 'Uniques'].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {out.values.map((v) => (
+                <tr key={v.value}>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'normal' }}>{v.value}</td>
+                  <td style={{ ...td, width: '30%', minWidth: 90 }}><span style={{ display: 'inline-block', height: 8, borderRadius: 4, background: 'var(--brand)', opacity: 0.75, width: `${Math.max(3, Math.round((v.count / max) * 100))}%` }} /></td>
+                  <td style={td}>{fmt(v.count)}</td>
+                  <td style={td}>{fmt(v.uniques)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -385,7 +442,7 @@ function MappingEditor() {
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🧭 Event mapping</div>
-      <p style={sub}>Tell Pulse which PostHog events mean what — one entry per line. Either a plain event name, or <code>event : property=value</code> when one generic event carries several meanings (e.g. <code>interaction : action=event_view</code>). The catalog shows what the app actually sends, busiest first; 🔬 Diagnose shows the property keys.</p>
+      <p style={sub}>Tell Pulse which PostHog events mean what — one entry per line. Either a plain event name, or <code>event : property=value</code> when one generic event carries several meanings (e.g. <code>interaction : interaction_type=event_view</code>). <code>property=*</code> means "the property is present with any value" (e.g. <code>interaction : CTA_Label=*</code> counts every labelled CTA tap). The catalog shows what the app actually sends, busiest first; 🔬 Diagnose shows the property keys and values.</p>
       <div style={grid2}>
         {[['screenEvents', 'Screen / page views'], ['ctaEvents', 'CTA taps'], ['purchaseEvents', 'Purchases'], ['notificationEvents', 'Notifications']].map(([k, label]) => (
           <label key={k} style={lbl}>{label}
@@ -396,6 +453,9 @@ function MappingEditor() {
       <div style={grid2}>
         <label style={lbl}>Purchase value property
           <input style={input} value={m.purchaseValueProp || ''} onChange={(e) => setM({ ...m, purchaseValueProp: e.target.value })} placeholder="e.g. value" autoComplete="off" />
+        </label>
+        <label style={lbl}>Breakdown properties (the "What's driving it" chips)
+          <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\nCTA_Label\nsurface'} />
         </label>
       </div>
       <div style={{ ...title, fontSize: 12.5, marginTop: 10 }}>Person profile properties</div>
@@ -482,8 +542,51 @@ function DiagnoseCard() {
           <div style={{ ...title, fontSize: 12.5 }}>Person profile property keys (for the App-users mapping)</div>
           <KeyChips items={d.personPropertyKeys} hint={(k) => /mail|name|phone|mobile|surname/i.test(k)} />
           <p style={{ ...mutedTxt, fontSize: 11.5 }}>Local rollup: {fmt(d.rollup?.eventRows)} event-day rows total · {fmt(d.rollup?.eventRowsLast7d)} in the last 7 days · {fmt(d.rollup?.appDays)} app days.</p>
+          <ValueExplorer />
           <button type="button" style={ghostBtn} disabled={busy} onClick={run}>{busy ? 'Checking…' : 'Re-run'}</button>
         </>
+      )}
+    </div>
+  );
+}
+
+// What does a property CONTAIN? Type an event + property key (from the chips
+// above) and see its top values — copy-paste material for the mapping's
+// `event : property=value` lines.
+function ValueExplorer() {
+  const [event, setEvent] = useState('interaction');
+  const [key, setKey] = useState('');
+  const [out, setOut] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const go = async (e) => {
+    e?.preventDefault();
+    if (!event.trim() || !key.trim()) return;
+    setBusy(true); setError('');
+    try { setOut(await api.posthogPropertyValues(event.trim(), key.trim())); } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, margin: '4px 0 12px' }}>
+      <div style={{ ...title, fontSize: 12.5 }}>Explore a property's values</div>
+      <form style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} onSubmit={go}>
+        <input style={{ ...input, flex: 1, minWidth: 140, marginTop: 0 }} value={event} onChange={(e) => setEvent(e.target.value)} placeholder="event, e.g. interaction" />
+        <input style={{ ...input, flex: 1, minWidth: 140, marginTop: 0 }} value={key} onChange={(e) => setKey(e.target.value)} placeholder="property key, e.g. action" />
+        <button type="submit" style={ghostBtn} disabled={busy || !event.trim() || !key.trim()}>{busy ? '…' : 'Show values'}</button>
+      </form>
+      {error && <div style={{ ...errBox, marginTop: 8 }}>{error}</div>}
+      {out && (
+        out.values.length === 0
+          ? <p style={{ ...sub, marginTop: 8 }}>No values for "{out.key}" on "{out.event}" in the last 30 days — try another key from the chips above.</p>
+          : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {out.values.map((v) => (
+                <span key={v.value} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
+                  {out.event} : {out.key}={v.value} <span style={{ color: 'var(--muted)' }}>· {fmt(v.count)}</span>
+                </span>
+              ))}
+            </div>
+          )
       )}
     </div>
   );

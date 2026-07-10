@@ -252,6 +252,49 @@ test('diagnose reports tagged-event counts, sample ids and rollup state (admin o
   assert.equal(denied.status, 403);
 });
 
+test('property-values explorer scopes to one event, escapes config, admin only', async () => {
+  let captured = '';
+  const h = makeHarness({ responder: (q) => { captured = q; return HOGQL(['v', 'n'], [['event_view', 9000], ['cta_tap', 800]]); } });
+  const out = await h.invoke('GET /api/admin/posthog/property-values', { query: { event: "inter'action", key: 'action' }, user: { role: 'admin' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.values[0].value, 'event_view');
+  assert.ok(captured.includes("event = 'inter\\'action'"), 'event name escaped');
+  const bad = await h.invoke('GET /api/admin/posthog/property-values', { query: {}, user: { role: 'admin' } });
+  assert.equal(bad.status, 400);
+  const denied = await h.invoke('GET /api/admin/posthog/property-values', { query: { event: 'x', key: 'y' }, user: { role: 'member' } });
+  assert.equal(denied.status, 403);
+});
+
+test('the =* wildcard maps property-presence (any labelled CTA counts)', () => {
+  assert.equal(
+    posthog.mapCond(['interaction : CTA_Label=*']),
+    "(event = 'interaction' AND notEmpty(toString(properties['CTA_Label'])))",
+  );
+});
+
+test('breakdowns are scoped, and clients can only use the configured keys', async () => {
+  let captured = '';
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => { captured = q; return HOGQL(['v', 'n', 'u'], [['event_view', 9000, 1500], ['share', 400, 300]]); },
+  });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/breakdown', { params: { entityId: 'e1' }, query: { key: 'interaction_type' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.values[0].value, 'event_view');
+  assert.ok(captured.includes("IN ('101')"), 'client breakdown is forced to their event ids');
+  const probe = await h.invoke('GET /api/my/app-analytics/:entityId/breakdown', { params: { entityId: 'e1' }, query: { key: '$geoip_city_name' } });
+  assert.equal(probe.status, 400, 'unconfigured keys are rejected — no property probing');
+});
+
+test('reports carry the configured breakdown keys and live window uniques', async () => {
+  const h = makeHarness({ responder: syncResponder });
+  await h.api.syncDaily(7);
+  assert.deepEqual(h.api.appReport(7).breakdowns, ['interaction_type', 'CTA_Label', 'surface']);
+  const u = await h.api.windowUniques(['101'], 28);
+  assert.equal(typeof u, 'number');
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();

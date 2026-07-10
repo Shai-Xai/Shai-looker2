@@ -55,9 +55,14 @@ function parseMapEntry(s) {
   if (m && m[1].trim() && m[2].trim()) return { event: m[1].trim(), prop: m[2].trim(), value: m[3].trim() };
   return { event: String(s).trim() };
 }
-const entryCond = (e) => (e.prop
-  ? `(event = ${hqlStr(e.event)} AND toString(${prop(e.prop)}) = ${hqlStr(e.value)})`
-  : `event = ${hqlStr(e.event)}`);
+const entryCond = (e) => {
+  if (!e.prop) return `event = ${hqlStr(e.event)}`;
+  // `event : key=*` = the property is PRESENT with any value (e.g. every
+  // `interaction` carrying a CTA_Label counts as a CTA tap).
+  return e.value === '*'
+    ? `(event = ${hqlStr(e.event)} AND notEmpty(toString(${prop(e.prop)})))`
+    : `(event = ${hqlStr(e.event)} AND toString(${prop(e.prop)}) = ${hqlStr(e.value)})`;
+};
 // countIf over a configured mapping list; an unmapped (empty) list is a constant
 // 0 so the column always exists and an empty OR never reaches PostHog.
 const mapCond = (list) => list.map(parseMapEntry).map(entryCond).join(' OR ');
@@ -84,6 +89,8 @@ const DEFAULT_MAP = {
   purchaseEvents: [],
   purchaseValueProp: '',
   notificationEvents: [],
+  // Property keys the breakdown panels group by (Howler app taxonomy).
+  breakdownProps: ['interaction_type', 'CTA_Label', 'surface'],
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
 };
 
@@ -144,6 +151,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       purchaseEvents: nameList(stored.purchaseEvents ?? DEFAULT_MAP.purchaseEvents),
       purchaseValueProp: String(stored.purchaseValueProp ?? DEFAULT_MAP.purchaseValueProp).trim(),
       notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
+      breakdownProps: nameList(stored.breakdownProps ?? DEFAULT_MAP.breakdownProps),
       personProps: { ...DEFAULT_MAP.personProps, ...(stored.personProps && typeof stored.personProps === 'object' ? stored.personProps : {}) },
     };
   }
@@ -341,7 +349,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
              SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
       FROM posthog_daily_event WHERE date>=? GROUP BY event_ref ORDER BY uniques DESC LIMIT 25`).all(sinceDate(N));
-    return { ...status(), days: N, totals, series, topEvents };
+    return { ...status(), days: N, totals, series, topEvents, breakdowns: metricMap().breakdownProps };
   }
   function entityReport(entityId, days, ids) {
     const N = clampDays(days);
@@ -357,7 +365,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       FROM posthog_daily_event WHERE date>=? AND event_ref IN (${ph}) GROUP BY event_ref ORDER BY uniques DESC`).all(sinceDate(N), ...ids);
     const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0, purchaseValue: 0 };
     for (const r of events) { totals.uniques += r.uniques; totals.interactions += r.interactions; totals.views += r.views; totals.ctaTaps += r.ctaTaps; totals.purchases += r.purchases; totals.purchaseValue += r.purchaseValue; }
-    return { ...status(), days: N, scoped: true, eventIds: ids, totals, series, events };
+    return { ...status(), days: N, scoped: true, eventIds: ids, totals, series, events, breakdowns: metricMap().breakdownProps };
   }
 
   // ── live tier (short-TTL HogQL; callers treat a failure as "live unavailable") ──
@@ -371,10 +379,36 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       FROM events WHERE timestamp >= toStartOfDay(now())${scope}`, { ttl: LIVE_TTL });
     return { actives: Number(row?.actives) || 0, sessions: Number(row?.sessions) || 0, interactions: Number(row?.interactions) || 0, views: Number(row?.views) || 0, asOf: now() };
   }
+  // True uniques over the whole window (summing per-day uniques over-counts —
+  // the same fan on three days is three daily-uniques but ONE person).
+  async function windowUniques(ids, days) {
+    const N = clampDays(days);
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const [row] = await hogql(`SELECT uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY${scope}`, { ttl: LIVE_TTL });
+    return Number(row?.u) || 0;
+  }
   const withLive = async (report, ids) => {
-    try { return { ...report, live: await liveToday(ids) }; }
+    try { return { ...report, live: { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, report.days) } }; }
     catch (e) { return { ...report, live: null, liveError: e instanceof HttpError ? e.message : 'Live numbers are unavailable right now.' }; }
   };
+
+  // Top values of one breakdown property (interaction_type / CTA_Label / surface
+  // …), counted + uniqued over the window, optionally scoped to event ids. Which
+  // keys are offered comes from the mapping (metricMap().breakdownProps).
+  async function breakdown({ ids = null, days = DAYS_DEFAULT, key }) {
+    const N = clampDays(days);
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY AND notEmpty(toString(${prop(key)}))${scope} GROUP BY v ORDER BY n DESC LIMIT 25`, { ttl: LIVE_TTL });
+    return { key, days: N, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
+  }
+  // Clients may only group by the admin-configured keys (no property probing).
+  function breakdownKeyOrThrow(req) {
+    const key = String(req.query.key || '').trim();
+    if (!metricMap().breakdownProps.includes(key)) throw new HttpError(400, 'Unknown breakdown — pick one of the configured properties.');
+    return key;
+  }
 
   // App-user profiles (PostHog person properties: email / name / surname / mobile).
   // `ids` null = whole app (admin); an array = scoped to those Howler events.
@@ -437,6 +471,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
         purchaseEvents: nameList(b.metricMap.purchaseEvents ?? cur.purchaseEvents),
         purchaseValueProp: String(b.metricMap.purchaseValueProp ?? cur.purchaseValueProp).trim().slice(0, 80),
         notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
+        breakdownProps: nameList(b.metricMap.breakdownProps ?? cur.breakdownProps),
         personProps: { ...cur.personProps },
       };
       for (const k of ['email', 'firstName', 'lastName', 'phone']) {
@@ -456,6 +491,16 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   app.get('/api/admin/posthog/events-catalog', auth.requireAdmin, asyncHandler(async (_req, res) => {
     const rows = await hogql('SELECT event, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY event ORDER BY n DESC LIMIT 200', { ttl: CATALOG_TTL });
     res.json({ events: rows.map((r) => ({ event: String(r.event), count: Number(r.n) || 0 })) });
+  }));
+  // Top values of one property on one event — the tool for writing
+  // `event : property=value` mapping entries (e.g. what does `interaction`'s
+  // `action` property contain?). Everything escaped via hqlStr.
+  app.get('/api/admin/posthog/property-values', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const event = String(req.query.event || '').trim().slice(0, 200);
+    const key = String(req.query.key || '').trim().slice(0, 200);
+    if (!event || !key) throw new HttpError(400, 'Pass ?event= and ?key=.');
+    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n FROM events WHERE event = ${hqlStr(event)} AND timestamp >= now() - INTERVAL 30 DAY AND notEmpty(toString(${prop(key)})) GROUP BY v ORDER BY n DESC LIMIT 50`, { ttl: CATALOG_TTL });
+    res.json({ event, key, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0 })) });
   }));
   // Does the configured event-id property actually exist, and what do its values
   // look like? Answers "whole app has data but a client's view is empty" without
@@ -503,6 +548,13 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (eid && !ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
     res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
   }));
+  app.get('/api/admin/app-analytics/breakdown', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const key = breakdownKeyOrThrow(req);
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
+    res.json(await breakdown({ ids, days: req.query.days, key }));
+  }));
   app.post('/api/admin/app-analytics/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
     const r = await syncDaily(Number(req.body?.days) || undefined);
     if (!r.ok) throw new HttpError(400, r.error || 'Sync failed.');
@@ -520,9 +572,15 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (!ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
     res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
   }));
+  app.get('/api/my/app-analytics/:entityId/breakdown', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const key = breakdownKeyOrThrow(req);
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
+    res.json(await breakdown({ ids, days: req.query.days, key }));
+  }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, people, isConfigured, hogql };
 }
 
 module.exports = { mount, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };
