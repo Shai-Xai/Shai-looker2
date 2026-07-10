@@ -341,37 +341,54 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   // ── report views (rollup tables — no PostHog traffic) ──────────────────────────
   const clampDays = (d) => Math.min(Math.max(Number(d) || DAYS_DEFAULT, 1), DAYS_MAX);
   const sinceDate = (days) => new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  // Normalize a reporting window. Explicit {from,to} dates (YYYY-MM-DD, inclusive)
+  // win; otherwise `days` back from today. Accepts a bare number for the older
+  // days-only callers. Dates are read in the PostHog project's timezone —
+  // consistent with the rollup, whose `date` column came from toDate(timestamp).
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function win(o) {
+    const q = o && typeof o === 'object' ? o : { days: o };
+    const from = DATE_RE.test(String(q.from || '')) ? String(q.from) : '';
+    const to = DATE_RE.test(String(q.to || '')) ? String(q.to) : '';
+    if (from && to && from <= to) {
+      return { from, to, days: Math.min(Math.round((Date.parse(to) - Date.parse(from)) / 86400_000) + 1, 366) };
+    }
+    const days = clampDays(q.days);
+    return { from: sinceDate(days - 1), to: new Date().toISOString().slice(0, 10), days };
+  }
+  const tsWin = (w) => `timestamp >= toDateTime(${hqlStr(w.from)}) AND timestamp < toDateTime(${hqlStr(w.to)}) + INTERVAL 1 DAY`;
+  const winQ = (req) => ({ days: req.query.days, from: req.query.from, to: req.query.to });
   function status() {
     let headline = {};
     try { headline = JSON.parse(db.getSetting('posthog_headline', '') || '{}'); } catch { /* fine */ }
     return { configured: isConfigured(), lastSync: db.getSetting('posthog_last_sync', ''), lastError: db.getSetting('posthog_last_error', ''), headline };
   }
-  function appReport(days) {
-    const N = clampDays(days);
-    const series = sql.prepare('SELECT * FROM posthog_daily_app WHERE date>=? ORDER BY date ASC').all(sinceDate(N));
+  function appReport(o) {
+    const w = win(o);
+    const series = sql.prepare('SELECT * FROM posthog_daily_app WHERE date>=? AND date<=? ORDER BY date ASC').all(w.from, w.to);
     const totals = { newUsers: 0, sessions: 0, interactions: 0, views: 0, notifEvents: 0 };
     for (const r of series) { totals.newUsers += r.new_users; totals.sessions += r.sessions; totals.interactions += r.interactions; totals.views += r.views; totals.notifEvents += r.notif_events; }
     const topEvents = sql.prepare(`
       SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
              SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
-      FROM posthog_daily_event WHERE date>=? GROUP BY event_ref ORDER BY uniques DESC LIMIT 25`).all(sinceDate(N));
-    return { ...status(), days: N, totals, series, topEvents, breakdowns: metricMap().breakdownProps };
+      FROM posthog_daily_event WHERE date>=? AND date<=? GROUP BY event_ref ORDER BY uniques DESC LIMIT 25`).all(w.from, w.to);
+    return { ...status(), days: w.days, from: w.from, to: w.to, totals, series, topEvents, breakdowns: metricMap().breakdownProps };
   }
-  function entityReport(entityId, days, ids) {
-    const N = clampDays(days);
-    if (!ids.length) return { ...status(), days: N, scoped: false, eventIds: [], totals: null, series: [], events: [] };
+  function entityReport(entityId, o, ids) {
+    const w = win(o);
+    if (!ids.length) return { ...status(), days: w.days, from: w.from, to: w.to, scoped: false, eventIds: [], totals: null, series: [], events: [] };
     const ph = ids.map(() => '?').join(',');
     const series = sql.prepare(`
       SELECT date, SUM(uniques) AS uniques, SUM(interactions) AS interactions, SUM(views) AS views,
              SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
-      FROM posthog_daily_event WHERE date>=? AND event_ref IN (${ph}) GROUP BY date ORDER BY date ASC`).all(sinceDate(N), ...ids);
+      FROM posthog_daily_event WHERE date>=? AND date<=? AND event_ref IN (${ph}) GROUP BY date ORDER BY date ASC`).all(w.from, w.to, ...ids);
     const events = sql.prepare(`
       SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
              SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
-      FROM posthog_daily_event WHERE date>=? AND event_ref IN (${ph}) GROUP BY event_ref ORDER BY uniques DESC`).all(sinceDate(N), ...ids);
+      FROM posthog_daily_event WHERE date>=? AND date<=? AND event_ref IN (${ph}) GROUP BY event_ref ORDER BY uniques DESC`).all(w.from, w.to, ...ids);
     const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0, purchaseValue: 0 };
     for (const r of events) { totals.uniques += r.uniques; totals.interactions += r.interactions; totals.views += r.views; totals.ctaTaps += r.ctaTaps; totals.purchases += r.purchases; totals.purchaseValue += r.purchaseValue; }
-    return { ...status(), days: N, scoped: true, eventIds: ids, totals, series, events, breakdowns: metricMap().breakdownProps };
+    return { ...status(), days: w.days, from: w.from, to: w.to, scoped: true, eventIds: ids, totals, series, events, breakdowns: metricMap().breakdownProps };
   }
 
   // ── live tier (short-TTL HogQL; callers treat a failure as "live unavailable") ──
@@ -387,30 +404,33 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   }
   // True uniques over the whole window (summing per-day uniques over-counts —
   // the same fan on three days is three daily-uniques but ONE person).
-  async function windowUniques(ids, days) {
-    const N = clampDays(days);
+  async function windowUniques(ids, o) {
+    const w = win(o);
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
-    const [row] = await hogql(`SELECT uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY${scope}`, { ttl: LIVE_TTL });
+    const [row] = await hogql(`SELECT uniq(person_id) AS u FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
     return Number(row?.u) || 0;
   }
   const withLive = async (report, ids) => {
-    try { return { ...report, live: { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, report.days) } }; }
+    try { return { ...report, live: { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, { from: report.from, to: report.to }) } }; }
     catch (e) { return { ...report, live: null, liveError: e instanceof HttpError ? e.message : 'Live numbers are unavailable right now.' }; }
   };
 
-  // Today, hour by hour — straight from PostHog (the rollup is daily), same
-  // short cache and scoping as the other live queries. Powers the "Today" chip.
-  async function todayHourly(ids) {
+  // Hour-by-hour — straight from PostHog (the rollup is daily), same short cache
+  // and scoping as the other live queries. Defaults to today; an explicit range
+  // is capped at 14 days (hour-points beyond that are noise and cost).
+  async function todayHourly(ids, o = {}) {
+    const w = o.from || o.to ? win(o) : win({ from: new Date().toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
+    if (w.days > 14) throw new HttpError(400, 'Hourly view covers at most 14 days — narrow the date range.');
     const m = metricMap();
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     const rows = await hogql(`
       SELECT toString(toStartOfHour(timestamp)) AS hour, uniq(person_id) AS uniques, count() AS interactions,
              ${countIn(m.screenEvents, 'views')}, ${countIn(m.ctaEvents, 'cta_taps')}, ${countIn(m.purchaseEvents, 'purchases')}
-      FROM events WHERE timestamp >= toStartOfDay(now())${scope} GROUP BY hour ORDER BY hour`, { ttl: LIVE_TTL });
+      FROM events WHERE ${tsWin(w)}${scope} GROUP BY hour ORDER BY hour LIMIT 1000`, { ttl: LIVE_TTL });
     return {
-      asOf: now(),
+      asOf: now(), from: w.from, to: w.to, days: w.days,
       hours: rows.map((r) => ({ hour: String(r.hour), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, ctaTaps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0 })),
     };
   }
@@ -418,25 +438,25 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   // Top values of one breakdown property (interaction_type / CTA_Label / surface
   // …), counted + uniqued over the window, optionally scoped to event ids. Which
   // keys are offered comes from the mapping (metricMap().breakdownProps).
-  async function breakdown({ ids = null, days = DAYS_DEFAULT, key }) {
-    const N = clampDays(days);
+  async function breakdown({ ids = null, days, from, to, key }) {
+    const w = win({ days, from, to });
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
-    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY AND notEmpty(toString(${prop(key)}))${scope} GROUP BY v ORDER BY n DESC LIMIT 25`, { ttl: LIVE_TTL });
-    return { key, days: N, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
+    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE ${tsWin(w)} AND notEmpty(toString(${prop(key)}))${scope} GROUP BY v ORDER BY n DESC LIMIT 25`, { ttl: LIVE_TTL });
+    return { key, days: w.days, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
   }
   // Daily time-series per breakdown VALUE (the "show it in the line graph" view):
   // one row per (day, value) for the given values — or the window's top 6 when
   // none are named. Same scoping and key rules as breakdown().
-  async function breakdownSeries({ ids = null, days = DAYS_DEFAULT, key, values = [] }) {
-    const N = clampDays(days);
+  async function breakdownSeries({ ids = null, days, from, to, key, values = [] }) {
+    const w = win({ days, from, to });
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     let vals = nameList(values).slice(0, 8);
-    if (!vals.length) vals = (await breakdown({ ids, days: N, key })).values.slice(0, 6).map((v) => v.value);
-    if (!vals.length) return { key, days: N, values: [], series: [] };
-    const rows = await hogql(`SELECT toString(toDate(timestamp)) AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
-    return { key, days: N, values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
+    if (!vals.length) vals = (await breakdown({ ids, from: w.from, to: w.to, key })).values.slice(0, 6).map((v) => v.value);
+    if (!vals.length) return { key, days: w.days, values: [], series: [] };
+    const rows = await hogql(`SELECT toString(toDate(timestamp)) AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE ${tsWin(w)} AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
+    return { key, days: w.days, values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
   }
   // Clients may only group by the admin-configured keys (no property probing).
   function breakdownKeyOrThrow(req) {
@@ -449,10 +469,10 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   // `ids` null = whole app (admin); an array = scoped to those Howler events.
   // Paged (offset + hasMore) and orderable: 'recent' (last seen) or 'active'
   // (most interactions — the "top users" view).
-  async function people({ ids = null, days = DAYS_DEFAULT, q = '', limit = 200, offset = 0, orderBy = 'recent' } = {}) {
-    const N = clampDays(days);
+  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent' } = {}) {
+    const w = win({ days, from, to });
     const L = Math.min(Math.max(Number(limit) || 200, 1), 500);
-    const off = Math.max(Number(offset) || 0, 0);
+    const off = Math.min(Math.max(Number(offset) || 0, 0), 1800);
     const order = orderBy === 'active' ? 'interactions DESC' : 'lastSeen DESC';
     const m = metricMap();
     const c = conn();
@@ -462,16 +482,19 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const search = term
       ? ` AND (${[p.email, p.firstName, p.lastName, p.phone].map((f) => `toString(${personProp(f)}) ILIKE ${hqlStr(`%${term}%`)}`).join(' OR ')})`
       : '';
+    // Personal API keys forbid OFFSET (PostHog HTTP 400) — fetch up to the end of
+    // the requested page in one bounded query and slice the page out locally.
+    const fetchN = Math.min(off + L + 1, 2000);
     const rows = await hogql(`
       SELECT any(toString(${personProp(p.email)})) AS email, any(toString(${personProp(p.firstName)})) AS firstName,
              any(toString(${personProp(p.lastName)})) AS lastName, any(toString(${personProp(p.phone)})) AS phone,
              max(timestamp) AS lastSeen, count() AS interactions,
              groupUniqArray(5)(toString(${prop(c.eventNameProp)})) AS eventNames
-      FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY${scope}${search}
-      GROUP BY person_id ORDER BY ${order} LIMIT ${L + 1} OFFSET ${off}`, { ttl: PEOPLE_TTL });
+      FROM events WHERE ${tsWin(w)}${scope}${search}
+      GROUP BY person_id ORDER BY ${order} LIMIT ${fetchN}`, { ttl: PEOPLE_TTL });
     return {
-      days: N, offset: off, orderBy: orderBy === 'active' ? 'active' : 'recent', hasMore: rows.length > L,
-      people: rows.slice(0, L).map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })),
+      days: w.days, offset: off, orderBy: orderBy === 'active' ? 'active' : 'recent', hasMore: rows.length > off + L,
+      people: rows.slice(off, off + L).map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })),
     };
   }
 
@@ -580,35 +603,35 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const eid = String(req.query.entityId || '');
     if (eid) {
       const ids = await eventIdsForEntity(eid);
-      return res.json(await withLive(entityReport(eid, req.query.days, ids), ids.length ? ids : null));
+      return res.json(await withLive(entityReport(eid, winQ(req), ids), ids.length ? ids : null));
     }
-    res.json(await withLive(appReport(req.query.days), null));
+    res.json(await withLive(appReport(winQ(req)), null));
   }));
   app.get('/api/admin/app-analytics/people', auth.requireAdmin, asyncHandler(async (req, res) => {
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
-    if (eid && !ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
-    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
+    if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
   }));
   app.get('/api/admin/app-analytics/breakdown', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
-    if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
-    res.json(await breakdown({ ids, days: req.query.days, key }));
+    if (eid && !ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
+    res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
   app.get('/api/admin/app-analytics/today', auth.requireAdmin, asyncHandler(async (req, res) => {
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ asOf: now(), hours: [] });
-    res.json(await todayHourly(ids));
+    res.json(await todayHourly(ids, winQ(req)));
   }));
   app.get('/api/admin/app-analytics/breakdown-series', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
-    if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [], series: [] });
-    res.json(await breakdownSeries({ ids, days: req.query.days, key, values: req.query.values }));
+    if (eid && !ids.length) return res.json({ key, days: win(winQ(req)).days, values: [], series: [] });
+    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values }));
   }));
   app.post('/api/admin/app-analytics/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
     const r = await syncDaily(Number(req.body?.days) || undefined);
@@ -619,30 +642,30 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   // Client self-service — scoped to their events, fail closed.
   app.get('/api/my/app-analytics/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
-    const report = entityReport(req.params.entityId, req.query.days, ids);
+    const report = entityReport(req.params.entityId, winQ(req), ids);
     res.json(ids.length ? await withLive(report, ids) : { ...report, live: null });
   }));
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
-    if (!ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
-    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
+    if (!ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
   }));
   app.get('/api/my/app-analytics/:entityId/breakdown', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const ids = await eventIdsForEntity(req.params.entityId);
-    if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
-    res.json(await breakdown({ ids, days: req.query.days, key }));
+    if (!ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
+    res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
   app.get('/api/my/app-analytics/:entityId/today', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ asOf: now(), hours: [] });
-    res.json(await todayHourly(ids));
+    res.json(await todayHourly(ids, winQ(req)));
   }));
   app.get('/api/my/app-analytics/:entityId/breakdown-series', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const ids = await eventIdsForEntity(req.params.entityId);
-    if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [], series: [] });
-    res.json(await breakdownSeries({ ids, days: req.query.days, key, values: req.query.values }));
+    if (!ids.length) return res.json({ key, days: win(winQ(req)).days, values: [], series: [] });
+    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values }));
   }));
 
   console.log('[posthog] app-analytics connector mounted');

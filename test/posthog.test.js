@@ -346,16 +346,19 @@ test('breakdown-series charts per-value daily lines, scoped, top-N when unnamed'
   assert.ok(seriesQ.includes("IN ('event_detail', 'home_feed')"), 'restricted to the chosen values');
 });
 
-test('people supports order-by-activity and paging with hasMore', async () => {
+test('people supports order-by-activity and OFFSET-free paging (personal keys forbid OFFSET)', async () => {
   let captured = '';
   const mk = (n) => Array.from({ length: n }, (_, i) => [`u${i}@x.com`, '', '', '', '2026-07-10 12:00:00', 100 - i, []]);
-  const h = makeHarness({ responder: (q) => { captured = q; return HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'], mk(201)); } });
+  const h = makeHarness({ responder: (q) => { captured = q; const m = q.match(/LIMIT (\d+)/); return HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'], mk(Math.min(401, Number(m[1])))); } });
   const r = await h.api.people({ ids: ['101'], days: 28, orderBy: 'active', limit: 200 });
   assert.ok(captured.includes('ORDER BY interactions DESC'), 'most-active ordering');
   assert.equal(r.people.length, 200, 'page trimmed to the limit');
-  assert.equal(r.hasMore, true, 'the +1 row signals another page');
-  await h.api.people({ ids: ['101'], days: 28, offset: 200 });
-  assert.ok(captured.includes('OFFSET 200'), 'paging passes through');
+  assert.equal(r.hasMore, true, 'rows beyond the page signal another page');
+  const page2 = await h.api.people({ ids: ['101'], days: 28, offset: 200 });
+  assert.ok(!captured.includes('OFFSET'), 'OFFSET never reaches PostHog — personal API keys reject it');
+  assert.ok(captured.includes('LIMIT 401'), 'page 2 fetches to the end of the page and slices locally');
+  assert.equal(page2.people.length, 200);
+  assert.equal(page2.people[0].email, 'u200@x.com', 'slice starts where page 1 ended');
   assert.ok(captured.includes('ORDER BY lastSeen DESC'), 'default ordering is most recent');
 });
 

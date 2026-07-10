@@ -16,6 +16,39 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
 const DAY_CHOICES = [7, 28, 90];
+const HOURLY_MAX_DAYS = 14; // matches the server cap
+
+// ── window state: an inclusive {from,to} date range + a day/hour granularity ────
+const isoDay = (offset = 0) => new Date(Date.now() + offset * 86400_000).toISOString().slice(0, 10);
+const presetRange = (days) => ({ from: isoDay(-(days - 1)), to: isoDay(0) });
+const rangeDays = (r) => Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400_000) + 1;
+const clampHourly = (r) => (rangeDays(r) > HOURLY_MAX_DAYS
+  ? { from: new Date(Date.parse(r.to) - (HOURLY_MAX_DAYS - 1) * 86400_000).toISOString().slice(0, 10), to: r.to }
+  : r);
+
+// Daily/Hourly toggle + from/to date pickers + quick presets. Hourly ranges are
+// clamped to the server's 14-day cap (hour-points beyond that are noise).
+function WindowControls({ gran, setGran, range, setRange }) {
+  const apply = (next, g = gran) => {
+    if (next.from > next.to) next = { from: next.to, to: next.from };
+    setRange(g === 'hour' ? clampHourly(next) : next);
+  };
+  const pick = (g) => { setGran(g); if (g === 'hour') setRange(clampHourly(range)); };
+  return (
+    <>
+      <Chip on={gran === 'day'} onClick={() => pick('day')}>Daily</Chip>
+      <Chip on={gran === 'hour'} onClick={() => pick('hour')}>Hourly</Chip>
+      <input type="date" style={dateInput} value={range.from} max={isoDay(0)} onChange={(e) => e.target.value && apply({ ...range, from: e.target.value })} aria-label="From date" />
+      <span style={{ color: 'var(--muted)', fontSize: 12 }}>→</span>
+      <input type="date" style={dateInput} value={range.to} max={isoDay(0)} onChange={(e) => e.target.value && apply({ ...range, to: e.target.value })} aria-label="To date" />
+      <Chip on={range.from === isoDay(0) && range.to === isoDay(0)} onClick={() => { setGran('hour'); apply({ from: isoDay(0), to: isoDay(0) }, 'hour'); }}>Today</Chip>
+      {DAY_CHOICES.map((d) => (
+        <Chip key={d} on={range.from === presetRange(d).from && range.to === isoDay(0)}
+          onClick={() => { if (d > HOURLY_MAX_DAYS && gran === 'hour') setGran('day'); apply(presetRange(d), d > HOURLY_MAX_DAYS ? 'day' : gran); }}>{d}d</Chip>
+      ))}
+    </>
+  );
+}
 
 // ── Connection card (platform-level; key is write-only) ─────────────────────────
 export function PosthogSettingsCard() {
@@ -91,19 +124,20 @@ export function PosthogSettingsCard() {
 // ── Management tab (Admin → 📱 App analytics) ───────────────────────────────────
 export function AppAnalyticsAdmin() {
   const isMobile = useIsMobile();
-  const [days, setDays] = useState(28);
-  const [today, setToday] = useState(false);
+  const [gran, setGran] = useState('day');
+  const [range, setRange] = useState(() => presetRange(28));
   const [entityId, setEntityId] = useState('');
   const [clients, setClients] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const winKey = `${entityId || 'all'}-${range.from}-${range.to}`;
   useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
   const load = useCallback(() => {
     setError('');
-    api.adminAppAnalytics({ days, entityId }).then(setData).catch((e) => { setError(e.message); setData(null); });
-  }, [days, entityId]);
+    api.adminAppAnalytics({ from: range.from, to: range.to, entityId }).then(setData).catch((e) => { setError(e.message); setData(null); });
+  }, [range.from, range.to, entityId]);
   useEffect(() => { load(); }, [load]);
 
   if (error && !data) return <div style={errBox}>{error}</div>;
@@ -146,8 +180,7 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
-        <Chip on={today} onClick={() => setToday(true)}>Today</Chip>
-        {DAY_CHOICES.map((d) => <Chip key={d} on={!today && days === d} onClick={() => { setToday(false); setDays(d); }}>{d}d</Chip>)}
+        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
           try {
@@ -168,8 +201,8 @@ export function AppAnalyticsAdmin() {
       )}
 
       <StatRow stats={stats} isMobile={isMobile} />
-      {today ? (
-        <TodayChart key={`today-${entityId || 'all'}`} loader={() => api.adminAppToday({ entityId })} />
+      {gran === 'hour' ? (
+        <TodayChart key={`hourly-${winKey}`} loader={() => api.adminAppToday({ entityId, from: range.from, to: range.to })} />
       ) : (
       <SeriesCard
         series={data.series || []}
@@ -181,11 +214,11 @@ export function AppAnalyticsAdmin() {
       />
       )}
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
-      <BreakdownsCard key={`bd-${entityId || 'all'}-${days}`} keys={data.breakdowns || []} days={days}
-        loader={(key) => api.adminAppBreakdown({ key, days, entityId })}
-        seriesLoader={(key) => api.adminAppBreakdownSeries({ key, days, entityId })} />
-      <TopUsersCard key={`top-${entityId || 'all'}`} days={days} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} />
-      <PeopleSection key={entityId || 'all'} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
+      <BreakdownsCard key={`bd-${winKey}`} keys={data.breakdowns || []}
+        loader={(key) => api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId })}
+        seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId })} />
+      <TopUsersCard key={`top-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
+      <PeopleSection key={`ppl-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
       {data.lastSync && <p style={{ ...mutedTxt, fontSize: 11.5, marginTop: 10 }}>Rollup last synced {new Date(data.lastSync).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · live numbers refresh on load (≤5 min cache)</p>}
@@ -196,16 +229,18 @@ export function AppAnalyticsAdmin() {
 // ── Client-scoped panel (their events only; also the admin per-client lens) ─────
 export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
-  const [days, setDays] = useState(28);
-  const [today, setToday] = useState(false);
+  const [gran, setGran] = useState('day');
+  const [range, setRange] = useState(() => presetRange(28));
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const winKey = `${entityId}-${range.from}-${range.to}`;
   useEffect(() => {
     if (!entityId) return;
     setError('');
-    const req = scope === 'admin-client' ? api.adminAppAnalytics({ days, entityId }) : api.myAppAnalytics(entityId, days);
+    const w = { from: range.from, to: range.to };
+    const req = scope === 'admin-client' ? api.adminAppAnalytics({ ...w, entityId }) : api.myAppAnalytics(entityId, w);
     req.then(setData).catch((e) => { setError(e.message); setData(null); });
-  }, [entityId, scope, days]);
+  }, [entityId, scope, range.from, range.to]);
 
   if (error) return <div style={errBox}>{error}</div>;
   if (!data) return <div style={mutedTxt}>Loading…</div>;
@@ -225,8 +260,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>How your events perform inside the Howler app.</span>
-        <Chip on={today} onClick={() => setToday(true)}>Today</Chip>
-        {DAY_CHOICES.map((d) => <Chip key={d} on={!today && days === d} onClick={() => { setToday(false); setDays(d); }}>{d}d</Chip>)}
+        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
       </div>
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       <StatRow isMobile={isMobile} stats={[
@@ -236,21 +270,21 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
       ]} />
-      {today ? (
-        <TodayChart key={`today-${entityId}`} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId }) : api.myAppToday(entityId))} />
+      {gran === 'hour' ? (
+        <TodayChart key={`hourly-${winKey}`} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
       ) : (
       <SeriesCard series={data.series || []} isMobile={isMobile}
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
           ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       )}
       <EventsTable rows={data.events} title="By event" days={data.days} />
-      <BreakdownsCard key={`bd-${entityId}-${days}`} keys={data.breakdowns || []} days={days}
-        loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))}
-        seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, days, entityId }) : api.myAppBreakdownSeries(entityId, { key, days }))} />
-      <TopUsersCard key={`top-${entityId}`} days={days}
-        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
-      <PeopleSection key={entityId} days={days}
-        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
+      <BreakdownsCard key={`bd-${winKey}`} keys={data.breakdowns || []}
+        loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdown(entityId, { key, from: range.from, to: range.to }))}
+        seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to }))} />
+      <TopUsersCard key={`top-${winKey}`}
+        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
+      <PeopleSection key={`ppl-${winKey}`}
+        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
     </div>
   );
 }
@@ -480,17 +514,17 @@ function BreakdownSeriesChart({ data }) {
 // 🏆 Top users — the 10 most active people in the window, its own card (moved
 // out of the App-users list per Shai). Auto-loads: it's a headline metric, and
 // the server caches the query.
-function TopUsersCard({ loader, days }) {
+function TopUsersCard({ loader }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   useEffect(() => {
     let dead = false;
     setRows(null); setError('');
-    loader({ days, orderBy: 'active', limit: 10 })
+    loader({ orderBy: 'active', limit: 10 })
       .then((r) => { if (!dead) setRows(r.people || []); })
       .catch((e) => { if (!dead) setError(e.message); });
     return () => { dead = true; };
-  }, [days]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope)
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
   if (rows && rows.length === 0) return null; // no signal, no card
   const max = Math.max(1, ...(rows || []).map((p) => p.interactions || 0));
   return (
@@ -524,7 +558,7 @@ function TopUsersCard({ loader, days }) {
 
 // App-user profiles (PostHog person properties). Loaded on demand — live PostHog
 // queries are scarce, so nothing fires until someone asks for the list.
-function PeopleSection({ loader, days }) {
+function PeopleSection({ loader }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
@@ -536,7 +570,7 @@ function PeopleSection({ loader, days }) {
   const load = async (term, { append = false } = {}) => {
     setBusy(true); setError('');
     try {
-      const r = await loader({ days, q: term, offset: append ? (rows?.length || 0) : 0 });
+      const r = await loader({ q: term, offset: append ? (rows?.length || 0) : 0 });
       setRows(append ? [...(rows || []), ...(r.people || [])] : (r.people || []));
       setHasMore(!!r.hasMore);
     } catch (e) { setError(e.message); }
@@ -791,4 +825,5 @@ const input = { display: 'block', width: '100%', marginTop: 4, padding: '9px 11p
 const lbl = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted-2, var(--muted))', marginBottom: 8 };
 const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 };
 const th = { textAlign: 'left', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700, padding: '6px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
+const dateInput = { minHeight: 32, padding: '4px 8px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit' };
 const td = { padding: '8px', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
