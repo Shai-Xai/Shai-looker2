@@ -72,8 +72,11 @@ Sponsor Pulse has **three** surfaces, not two:
    becomes a line item organisers charge for. `/api/my/sponsors/...`,
    entity-ownership enforced.
 3. **Sponsor portal** — the sponsor's own login (mobile-first, PWA — event-day
-   usage is standing at a stand with a phone). Their dashboards, their leads,
-   their wrap reports, their branding.
+   usage is standing at a stand with a phone). Its pages: **briefing** (the
+   Owl's daily read), **pre-event** (pacing + audience), **live** (event day),
+   **engage** (campaigns + audience sync), **leads**, **reports** (wrap +
+   portfolio), and the **package page** (their tier, value delivered, and
+   what's unlocked vs locked). All branded for the sponsor.
 
 ## The dashboard, by event lifecycle
 **Pre-event (anticipation + confidence)**
@@ -100,16 +103,85 @@ Sponsor Pulse has **three** surfaces, not two:
 - Delivered automatically as a **branded wrap digest** (scheduler/digest
   engine) — the forwardable artefact that sells the whole product.
 
-## The two differentiators
-1. **Sponsor campaigns with organiser approval.** The approval workflow in
-   `actions.js` already exists. A sponsor drafts a campaign ("20% off at the
-   Heineken bar, to attendees"); the *organiser* approves; Pulse sends to the
-   organiser's audience. The sponsor never touches the PII — which neatly
-   solves the POPIA problem that kills most sponsor-data conversations, and
-   it's a feature neither side can get anywhere else.
-2. **A sponsor-scoped Owl.** "How many leads did we capture at Bushfire vs
-   last year?" answered conversationally, grounded only in that sponsor's
-   deals. The Owl/MCP plumbing exists; this is scoping work, not new AI work.
+## The engage layer — campaigns, audiences, ad accounts
+Sponsors don't just watch; higher tiers can **act**, on a ladder that is safe
+by construction:
+
+1. **See results** (every tier) — dashboards, reports, briefing.
+2. **Campaigns to their own leads** — self-serve email/SMS through the
+   existing actions engine (`actions.js`); the audience is their opted-in
+   `sponsor_leads` and nothing else. Runs the same approval workflow as every
+   Pulse send (approver = Howler or a named sponsor-side approver).
+3. **Campaigns to the organiser's audience** — the sponsor drafts ("20% off at
+   the Karoo bar, to attendees"); the **organiser approves**; Pulse sends.
+   The list never leaves Pulse and the sponsor never touches the PII — which
+   neatly solves the POPIA problem that kills most sponsor-data
+   conversations, and it's a feature neither side can get anywhere else.
+
+**Audience sync to the sponsor's own ad accounts.** The existing audience-sync
+rails (Meta / Google / TikTok custom audiences via `segments.js`, `metaAds.js`,
+`tiktok.js`) get a sponsor scope: a sponsor connects **their own** ad accounts
+and syncs the audiences **they own — their opted-in leads, and only those**.
+Nightly refresh, match-rate reporting, disconnect anytime. Organiser audiences
+can never sync to a sponsor's ad account; sponsors reach those via rung 3.
+
+**The sponsor briefing.** The same briefing engine organisers get
+(`briefing.js`), through a sponsor lens: "gates opened 11:00; your first-hour
+footfall is 18% ahead of your last event; your Sunday campaign is still
+awaiting organiser approval." Owl-narrated, on the portal home and as a digest
+email, with a "needs you" block (pending approvals, creative sign-offs).
+
+**A sponsor-scoped Owl** — see the dedicated section below.
+
+## The Owl & bring-your-own-AI (MCP)
+Two ways sponsors get *answers* instead of dashboards:
+
+1. **In the portal — the sponsor Owl.** A chat page: "How did our stand do vs
+   City Sundowner?" answered conversationally, grounded only in that sponsor's
+   deals, every figure cited to its source (vendor IDs, scan points), strictly
+   read-only. The Owl/MCP plumbing exists; this is scoping work plus a sponsor
+   prompt lens in `promptRegistry()` — not new AI work.
+2. **In their own AI tools — Claude & ChatGPT connectors.** Pulse already runs
+   an MCP server (`server/mcp.js`, endpoint
+   `https://howler-pulse-v2.onrender.com/mcp`) that organisers connect to
+   Claude and ChatGPT today. Issue **sponsor API keys scoped to their deals**
+   (same `apiKeys.js` model, revocable) and a sponsor adds their Pulse data as
+   a connector in [Claude](https://claude.ai/settings/connectors) or
+   [ChatGPT](https://chatgpt.com/#settings/Connectors) — live event data inside
+   the assistant their marketing team already uses every day:
+   - "Pull my Riverfields numbers into this quarterly deck."
+   - "Draft our post-event sponsorship report with the actuals."
+   - "Compare lead cost at our three events against our Meta CPL."
+   - Weekly agency reporting without CSV-export round-trips.
+
+   The scope boundary rides the same rails as the portal: deal-scoped,
+   read-only, aggregates only, no organiser PII reachable — a sponsor's key
+   can never see more through MCP than they can see in the portal. Flag-gated
+   by tier (Gold+ suggested), enforced at the route/tool layer
+   (`OWL_TOOL_FLAGS`), and every key is revocable from the deal editor.
+
+   This is a genuine differentiator to sell with: *"your sponsorship comes
+   with an AI analyst — and it plugs into the Claude/ChatGPT your team
+   already has."*
+
+## Tiers, entitlements & the package page
+What a sponsor can *do* is set by their **tier on the deal** — the module
+toggles admins/organisers control. An illustrative default ladder (per-deal
+overrides always possible):
+
+| Tier | Adds |
+|---|---|
+| **Bronze** | Results only — dashboards + wrap report |
+| **Silver** | + briefing, lead capture & export, live event-day view |
+| **Gold** | + campaigns (own leads + organiser-approved sends), audience sync to own ad accounts, sponsor Owl + Claude/ChatGPT connector (MCP) |
+| **Platinum** | + portfolio benchmarks across events/organisers, API access |
+
+The **package page** is the sponsor-facing mirror of those toggles: what their
+sponsorship includes, what each module has delivered so far (a value summary —
+footfall, leads, attributed revenue), and what's locked — shown, not hidden,
+with "included in Platinum" as the built-in upsell. Every module registers a
+flag + route gate in `server/flags.js` per the house rule, so entitlement is
+enforced server-side, not cosmetically.
 
 ## Lead capture (the small net-new module)
 A disposable module in the house style (`server/sponsorLeads.js` or folded
@@ -128,6 +200,10 @@ into a `server/sponsors.js`):
 - PII crosses to a sponsor only via (a) leads they captured with explicit
   consent, or (b) never — campaigns to the organiser's audience are sent *by
   Pulse* under organiser approval.
+- **Ad-account sync is leads-only and one-way** — a sponsor's connected ad
+  accounts can only ever receive audiences built from their own opted-in
+  leads; organiser audiences and event buyer lists are not syncable objects
+  in sponsor scope, at any tier.
 - Sponsor scope fails closed: a deal with no attributions shows nothing, not
   everything.
 - Secrets/branding follow the existing write-only-secrets rules.
@@ -151,9 +227,13 @@ Practical implications:
 3. **Lead capture microsite + QR** — small new module, biggest sponsor
    delight.
 4. **Event-day live view** — footfall (RFID/QR feed) + live spend + leads.
-5. **Sponsor Owl** (scoped read-only) → **sponsor campaigns with organiser
-   approval**.
-6. **Portfolio view** across events/organisers; benchmarks.
+5. **Engage layer** — sponsor campaigns (own leads first, then
+   organiser-approved audience sends) + **audience sync** to the sponsor's own
+   ad accounts on the existing sync rails.
+6. **Briefing + package page** — sponsor lens on `briefing.js`; the
+   entitlement/value page mirroring the deal's module toggles.
+7. **Sponsor Owl** (scoped read-only) → **portfolio view** across
+   events/organisers; benchmarks.
 
 ## Data model sketch (for engineering review)
 ```
@@ -166,7 +246,14 @@ sponsor_logins      id, sponsor_id, email, password_hash, role, last_seen   -- o
 sponsor_leads       id, deal_id, form_id, name, email, phone?, answers{json},
                     consent_text, consented_at, source(qr|manual), created_at
 lead_forms          id, deal_id, title, fields{json}, consent_wording, qr_slug, active
+sponsor_ad_accounts id, sponsor_id, platform(meta|google|tiktok), account_ref,
+                    status(connected|error), connected_by/at   -- secrets write-only, as everywhere
+sponsor_audience_syncs id, sponsor_ad_account_id, deal_id, source(leads), audience_ref,
+                    last_synced_at, matched_count, status
 ```
+Sponsor campaigns reuse the existing campaign tables in `actions.js` with a
+sponsor owner + an audience resolver locked to `sponsor_leads` (rung 2) or an
+organiser-approved segment reference that resolves at send time (rung 3).
 Everything keys off `suite_id` (the event) on one side and `sponsor_id` on the
 other; `deal_attributions` is the bridge that makes server-side force-filtering
 possible whatever the data source (Looker today, BigQuery direct tomorrow —
@@ -196,9 +283,16 @@ keep the resolver source-agnostic per `docs/ENGAGEMENT_ENGINE.md`).
 - **Campaigns + approvals** — `actions.js` already has audiences, promo codes,
   conversion tracking and a full approval workflow; sponsor-drafted /
   organiser-approved is a permission arrangement, not a new engine.
+- **Audience sync** — the Meta / Google / TikTok custom-audience rails
+  (`segments.js`, `metaAds.js`, `tiktok.js`) already exist for organisers;
+  sponsor sync is those rails with the audience source locked to
+  `sponsor_leads` and the sponsor's own ad-account connections.
+- **Briefing** — `briefing.js` already narrates for organisers; the sponsor
+  briefing is a lens over the same engine, registered in `promptRegistry()`.
 - **Owl** — read-only MCP + chat exists; sponsor Owl is a scope, plus a small
   system-prompt lens registered in `promptRegistry()`.
 - **Branding** — per-entity branding (logo / colour / sender display) extends
   naturally to sponsors.
 - **Net-new** — sponsor tenancy tables above, the lead-capture module, the
-  RFID/QR footfall ingestion path, and the wrap-report template.
+  RFID/QR footfall ingestion path, the wrap-report template, and the
+  sponsor ad-account connection tables.
