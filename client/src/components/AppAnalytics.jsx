@@ -174,7 +174,8 @@ export function AppAnalyticsAdmin() {
       />
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
       <BreakdownsCard key={`bd-${entityId || 'all'}-${days}`} keys={data.breakdowns || []} days={days}
-        loader={(key) => api.adminAppBreakdown({ key, days, entityId })} />
+        loader={(key) => api.adminAppBreakdown({ key, days, entityId })}
+        seriesLoader={(key) => api.adminAppBreakdownSeries({ key, days, entityId })} />
       <PeopleSection key={entityId || 'all'} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
@@ -229,7 +230,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'], ['views', 'Views'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]} />
       <EventsTable rows={data.events} title="By event" days={data.days} />
       <BreakdownsCard key={`bd-${entityId}-${days}`} keys={data.breakdowns || []} days={days}
-        loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))} />
+        loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))}
+        seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, days, entityId }) : api.myAppBreakdownSeries(entityId, { key, days }))} />
       <PeopleSection key={entityId} days={days}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
     </div>
@@ -306,34 +308,44 @@ function EventsTable({ rows, title: heading, days }) {
   );
 }
 
+// Fixed per-value line colors — validated for CVD + contrast on BOTH light and
+// dark surfaces (dataviz six-checks). Color follows the value's slot in the
+// server's top-N order for this view, never re-painted by legend toggles.
+const SERIES_COLORS = ['#ff385c', '#3b82f6', '#d97706', '#0d9488', '#8b5cf6', '#0891b2'];
+
 // What's driving the numbers — top values of the configured breakdown properties
 // (interaction_type / CTA_Label / surface), live-queried per chip with a short
-// server-side cache. Scoped exactly like the rest of the surface.
-function BreakdownsCard({ keys, loader }) {
+// server-side cache, PLUS a per-value daily line chart (the legend is the
+// filter — click a value to hide/show its line). Scoped exactly like the rest
+// of the surface.
+function BreakdownsCard({ keys, loader, seriesLoader }) {
   const [key, setKey] = useState(keys[0] || '');
   const [out, setOut] = useState(null);
+  const [seriesOut, setSeriesOut] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     if (!key) return;
     let dead = false;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setSeriesOut(null);
     loader(key)
       .then((r) => { if (!dead) setOut(r); })
       .catch((e) => { if (!dead) { setError(e.message); setOut(null); } })
       .finally(() => { if (!dead) setBusy(false); });
+    if (seriesLoader) seriesLoader(key).then((r) => { if (!dead) setSeriesOut(r); }).catch(() => { if (!dead) setSeriesOut(null); });
     return () => { dead = true; };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope)
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps -- loaders are stable per mount (card is keyed by scope)
   if (!keys.length) return null;
   const max = Math.max(1, ...(out?.values || []).map((v) => v.count));
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🧩 What's driving it</div>
-      <p style={sub}>The busiest values behind the interactions — pick a property.</p>
+      <p style={sub}>The busiest values behind the interactions — pick a property. In the chart, click a value in the legend to hide or show its line.</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {keys.map((k) => <Chip key={k} on={key === k} onClick={() => setKey(k)}>{k}</Chip>)}
       </div>
       {error && <div style={errBox}>{error}</div>}
+      {seriesOut && seriesOut.series?.length > 0 && <BreakdownSeriesChart data={seriesOut} />}
       {busy && <p style={mutedTxt}>Loading…</p>}
       {!busy && out && out.values.length === 0 && <p style={sub}>Nothing recorded for "{out.key}" in this window.</p>}
       {!busy && out && out.values.length > 0 && (
@@ -357,6 +369,36 @@ function BreakdownsCard({ keys, loader }) {
   );
 }
 
+// One line per breakdown value over the window. ECharts' legend does the value
+// filtering natively; colors are the validated fixed order (SERIES_COLORS).
+function BreakdownSeriesChart({ data }) {
+  const isMobile = useIsMobile();
+  const option = useMemo(() => {
+    const days = [...new Set(data.series.map((r) => r.day))].sort();
+    const byValue = new Map(data.values.map((v) => [v, new Map()]));
+    for (const r of data.series) byValue.get(r.value)?.set(r.day, r.count);
+    return {
+      animationDuration: 300,
+      grid: { left: 8, right: 12, top: 34, bottom: 8, containLabel: true },
+      legend: { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
+      xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (d) => String(d).slice(5) }, splitLine: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
+      series: data.values.map((v, i) => ({
+        name: v, type: 'line', showSymbol: false, smooth: 0.15,
+        lineStyle: { width: 2, color: SERIES_COLORS[i % SERIES_COLORS.length] },
+        itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+        data: days.map((d) => byValue.get(v)?.get(d) ?? 0),
+      })),
+    };
+  }, [data]);
+  return (
+    <div style={{ width: '100%', overflow: 'hidden', marginBottom: 12 }}>
+      <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 220 : 280, width: '100%' }} opts={{ renderer: 'canvas' }} />
+    </div>
+  );
+}
+
 // App-user profiles (PostHog person properties). Loaded on demand — live PostHog
 // queries are scarce, so nothing fires until someone asks for the list.
 function PeopleSection({ loader, days }) {
@@ -365,10 +407,16 @@ function PeopleSection({ loader, days }) {
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const load = async (term) => {
+  const [orderBy, setOrderBy] = useState('recent');
+  const [hasMore, setHasMore] = useState(false);
+  // Fresh list (new search / order switch) or append the next page.
+  const load = async (term, { append = false, order = orderBy } = {}) => {
     setBusy(true); setError('');
-    try { setRows((await loader({ days, q: term })).people || []); }
-    catch (e) { setError(e.message); }
+    try {
+      const r = await loader({ days, q: term, orderBy: order, offset: append ? (rows?.length || 0) : 0 });
+      setRows(append ? [...(rows || []), ...(r.people || [])] : (r.people || []));
+      setHasMore(!!r.hasMore);
+    } catch (e) { setError(e.message); }
     setBusy(false);
   };
   const exportCsv = () => {
@@ -392,29 +440,38 @@ function PeopleSection({ loader, days }) {
         <button type="button" style={btn} onClick={() => { setOpen(true); load(''); }}>Load app users</button>
       ) : (
         <>
-          <form style={{ display: 'flex', gap: 8, marginBottom: 10 }} onSubmit={(e) => { e.preventDefault(); load(q); }}>
-            <input style={{ ...input, flex: 1 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email or mobile…" />
+          <form style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); load(q); }}>
+            <input style={{ ...input, flex: 1, minWidth: 180 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email or mobile…" />
             <button type="submit" style={ghostBtn} disabled={busy}>{busy ? '…' : 'Search'}</button>
+            <Chip on={orderBy === 'recent'} onClick={() => { setOrderBy('recent'); load(q, { order: 'recent' }); }}>Most recent</Chip>
+            <Chip on={orderBy === 'active'} onClick={() => { setOrderBy('active'); load(q, { order: 'active' }); }}>Most active</Chip>
           </form>
           {error && <div style={errBox}>{error}</div>}
           {busy && !rows && <p style={mutedTxt}>Loading…</p>}
           {rows && rows.length === 0 && <p style={sub}>No app users found in this window.</p>}
           {rows && rows.length > 0 && (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 560 }}>
-                <thead><tr>{['Name', 'Email', 'Mobile', 'Last seen', 'Events'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
+                <thead><tr>{['Name', 'Email', 'Mobile', 'Interactions', 'Last seen', 'Events'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {rows.map((p, i) => (
                     <tr key={i}>
                       <td style={{ ...td, fontWeight: 600 }}>{[p.firstName, p.lastName].filter(Boolean).join(' ') || '—'}</td>
                       <td style={td}>{p.email || '—'}</td>
                       <td style={td}>{p.phone || '—'}</td>
+                      <td style={td}>{fmt(p.interactions)}</td>
                       <td style={td}>{p.lastSeen ? new Date(p.lastSeen).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                       <td style={{ ...td, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{(p.eventNames || []).join(', ') || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {rows && rows.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <span style={{ ...mutedTxt, fontSize: 12 }}>Showing {rows.length}{hasMore ? ' — more available' : ' (all in this window)'}</span>
+              {hasMore && <button type="button" style={ghostBtn} disabled={busy} onClick={() => load(q, { append: true })}>{busy ? '…' : 'Load more'}</button>}
             </div>
           )}
         </>

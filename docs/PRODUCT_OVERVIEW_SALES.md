@@ -570,8 +570,15 @@ numbers they're about to become."
   connection is in, every client's 📲 App page lights up automatically (behind
   the `App analytics` feature flag, default off while in beta).
 - **App users, by name** — the actual people in the app (email, first name,
-  surname, mobile from PostHog profiles), searchable and exportable to CSV —
-  per client (only people who touched THEIR events) or app-wide for Howler.
+  surname, mobile from PostHog profiles), searchable, pageable, orderable by
+  most-recent or most-active (top users), and exportable to CSV — per client
+  (only people who touched THEIR events) or app-wide for Howler.
+- **"What's driving it" breakdowns** — the busiest values behind the numbers
+  (interaction type, CTA label, surface — configurable), as a ranked table AND
+  per-value daily trend lines with a click-to-filter legend.
+- **Ask the Owl** — "how is my event doing in the Howler app?" is a native Owl
+  question (`getAppAnalytics`): live + windowed engagement, per event, with
+  breakdowns — scoped exactly like the client's App page.
 - **Management view** (Admin → 📲 App analytics): the whole app across every
   client — active users today (live), weekly/monthly actives, new users,
   sessions, top events by in-app attention, with a per-client lens — plus the

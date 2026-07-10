@@ -403,6 +403,19 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY AND notEmpty(toString(${prop(key)}))${scope} GROUP BY v ORDER BY n DESC LIMIT 25`, { ttl: LIVE_TTL });
     return { key, days: N, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
   }
+  // Daily time-series per breakdown VALUE (the "show it in the line graph" view):
+  // one row per (day, value) for the given values — or the window's top 6 when
+  // none are named. Same scoping and key rules as breakdown().
+  async function breakdownSeries({ ids = null, days = DAYS_DEFAULT, key, values = [] }) {
+    const N = clampDays(days);
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    let vals = nameList(values).slice(0, 8);
+    if (!vals.length) vals = (await breakdown({ ids, days: N, key })).values.slice(0, 6).map((v) => v.value);
+    if (!vals.length) return { key, days: N, values: [], series: [] };
+    const rows = await hogql(`SELECT toString(toDate(timestamp)) AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
+    return { key, days: N, values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
+  }
   // Clients may only group by the admin-configured keys (no property probing).
   function breakdownKeyOrThrow(req) {
     const key = String(req.query.key || '').trim();
@@ -412,9 +425,13 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
 
   // App-user profiles (PostHog person properties: email / name / surname / mobile).
   // `ids` null = whole app (admin); an array = scoped to those Howler events.
-  async function people({ ids = null, days = DAYS_DEFAULT, q = '', limit = 100 } = {}) {
+  // Paged (offset + hasMore) and orderable: 'recent' (last seen) or 'active'
+  // (most interactions — the "top users" view).
+  async function people({ ids = null, days = DAYS_DEFAULT, q = '', limit = 200, offset = 0, orderBy = 'recent' } = {}) {
     const N = clampDays(days);
-    const L = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const L = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const off = Math.max(Number(offset) || 0, 0);
+    const order = orderBy === 'active' ? 'interactions DESC' : 'lastSeen DESC';
     const m = metricMap();
     const c = conn();
     const p = m.personProps;
@@ -429,8 +446,11 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
              max(timestamp) AS lastSeen, count() AS interactions,
              groupUniqArray(5)(toString(${prop(c.eventNameProp)})) AS eventNames
       FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY${scope}${search}
-      GROUP BY person_id ORDER BY lastSeen DESC LIMIT ${L}`, { ttl: PEOPLE_TTL });
-    return { days: N, people: rows.map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })) };
+      GROUP BY person_id ORDER BY ${order} LIMIT ${L + 1} OFFSET ${off}`, { ttl: PEOPLE_TTL });
+    return {
+      days: N, offset: off, orderBy: orderBy === 'active' ? 'active' : 'recent', hasMore: rows.length > L,
+      people: rows.slice(0, L).map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })),
+    };
   }
 
   // ── routes ──────────────────────────────────────────────────────────────────────
@@ -546,7 +566,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
-    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
+    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
   }));
   app.get('/api/admin/app-analytics/breakdown', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
@@ -554,6 +574,13 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
     res.json(await breakdown({ ids, days: req.query.days, key }));
+  }));
+  app.get('/api/admin/app-analytics/breakdown-series', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const key = breakdownKeyOrThrow(req);
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [], series: [] });
+    res.json(await breakdownSeries({ ids, days: req.query.days, key, values: req.query.values }));
   }));
   app.post('/api/admin/app-analytics/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
     const r = await syncDaily(Number(req.body?.days) || undefined);
@@ -570,7 +597,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
-    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
+    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
   }));
   app.get('/api/my/app-analytics/:entityId/breakdown', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
@@ -578,9 +605,59 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
     res.json(await breakdown({ ids, days: req.query.days, key }));
   }));
+  app.get('/api/my/app-analytics/:entityId/breakdown-series', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const key = breakdownKeyOrThrow(req);
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [], series: [] });
+    res.json(await breakdownSeries({ ids, days: req.query.days, key, values: req.query.values }));
+  }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, people, isConfigured, hogql };
 }
 
-module.exports = { mount, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };
+// ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },
+// registered in owlTools.js like journeys.owlTool). Forced to the client's own
+// event ids exactly like their App page (fail closed); numbers come straight
+// from the rollup + live tier — never invented. Flag-gated via OWL_TOOL_FLAGS
+// ('appanalytics'): flag off = the tool is never offered to the model.
+function owlTool({ db, getApi }) {
+  const refuse = (reason, message) => ({ ok: false, reason, message });
+  async function run(args = {}, ctx = {}) {
+    const { user, suiteId, entityId } = ctx;
+    if (!user) return refuse('no_user', 'No authenticated user.');
+    const eid = entityId || (suiteId && db && db.getSuite ? (db.getSuite(suiteId) || {}).entityId : null);
+    if (!eid) return refuse('no_client', 'Open or pick a client first.');
+    const api = typeof getApi === 'function' ? getApi() : null;
+    if (!api || !api.entityReport) return refuse('unavailable', 'App analytics isn\'t available right now.');
+    if (!api.isConfigured()) return refuse('not_configured', 'The PostHog connection isn\'t set up yet (Admin → Integrations → PostHog).');
+    const days = Number(args.days) || DAYS_DEFAULT;
+    const ids = await api.eventIdsForEntity(eid);
+    const rep = api.entityReport(eid, days, ids);
+    if (!rep.scoped) return refuse('no_scope', 'No Howler event ids resolve for this client yet — their suites need an event lock before app data can be scoped to them.');
+    let live = null; // a briefly unreachable PostHog degrades to the rollup, never an error
+    try { live = { ...(await api.liveToday(ids)), windowUniques: await api.windowUniques(ids, days) }; } catch { live = null; }
+    let breakdown = null;
+    if (args.breakdown) {
+      if (!(rep.breakdowns || []).includes(args.breakdown)) return refuse('unknown_breakdown', `Pick a configured breakdown: ${(rep.breakdowns || []).join(', ') || '(none configured)'}.`);
+      try { breakdown = await api.breakdown({ ids, days, key: args.breakdown }); } catch { breakdown = null; }
+    }
+    return {
+      ok: true, days: rep.days, lastSync: rep.lastSync,
+      totals: rep.totals, live, events: (rep.events || []).slice(0, 15),
+      breakdownsAvailable: rep.breakdowns || [], breakdown,
+      note: 'In-app engagement from the Howler consumer app (PostHog), scoped to this client\'s events. live.actives = unique people today so far; live.windowUniques = unique people across the whole window (use this for "how many people", not the summed daily uniques). "purchases" are in-app purchase EVENTS — ticket-sales revenue truth lives in the dashboards, say so if asked about revenue.',
+    };
+  }
+  const schema = {
+    name: 'getAppAnalytics',
+    description: 'Howler CONSUMER APP engagement for this client\'s events, from PostHog: unique viewers (live + window), views, interactions, CTA taps and in-app purchase signals — per event, with optional breakdowns (e.g. interaction_type, CTA_Label, surface — the reply lists breakdownsAvailable). Use for "how is my event doing in the app", "what are people tapping", "app views this week". Read-only.',
+    input_schema: { type: 'object', properties: {
+      days: { type: 'number', description: 'Window in days (default 28, max 90).' },
+      breakdown: { type: 'string', description: 'Optional property to break down by — call without it first; the reply lists breakdownsAvailable.' },
+    } },
+  };
+  return { schema, run };
+}
+
+module.exports = { mount, owlTool, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };

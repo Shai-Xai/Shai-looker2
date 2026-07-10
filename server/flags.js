@@ -108,6 +108,7 @@ const OWL_TOOL_FLAGS = {
   draftReport: 'owl.save_reports',
   createLink: 'engage.links',
   applyLinkTemplate: 'engage.links',
+  getAppAnalytics: 'appanalytics', // flag off = the tool is never offered to the model
 };
 
 // Client-route prefixes → the flag that must be ON (admins always pass).

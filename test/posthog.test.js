@@ -295,6 +295,70 @@ test('reports carry the configured breakdown keys and live window uniques', asyn
   assert.equal(typeof u, 'number');
 });
 
+test('getAppAnalytics Owl tool: scoped report + live, honest refusals, breakdown validation', async () => {
+  const createOwlTools = require('../server/owlTools');
+  const h = makeHarness({
+    responder: syncResponder,
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+  });
+  await h.api.syncDaily(7);
+  const t = createOwlTools({ query: { applyScope: () => false, runLookerQuery: async () => [] }, auth: {}, db: {}, getPosthogApi: () => h.api });
+  const noClient = await t.getAppAnalytics.run({}, { user: { id: 'u1' } });
+  assert.equal(noClient.reason, 'no_client');
+  const res = await t.getAppAnalytics.run({ days: 28 }, { user: { id: 'u1' }, entityId: 'e1' });
+  assert.equal(res.ok, true);
+  assert.equal(res.totals.uniques, 500, 'only their own event rows');
+  assert.equal(res.events[0].eventRef, '101');
+  assert.ok(res.live && typeof res.live.windowUniques === 'number', 'live tier rides along');
+  assert.match(res.note, /revenue truth lives in the dashboards/);
+  const badBd = await t.getAppAnalytics.run({ breakdown: '$geoip_city_name' }, { user: { id: 'u1' }, entityId: 'e1' });
+  assert.equal(badBd.reason, 'unknown_breakdown', 'only configured breakdown keys');
+  // no event locks → fail closed, with a message the Owl can relay
+  const h2 = makeHarness({ responder: syncResponder, suites: [{ id: 's2', entityId: 'e2' }], locks: {} });
+  const t2 = createOwlTools({ query: { applyScope: () => false, runLookerQuery: async () => [] }, auth: {}, db: {}, getPosthogApi: () => h2.api });
+  const noScope = await t2.getAppAnalytics.run({}, { user: { id: 'u1' }, entityId: 'e2' });
+  assert.equal(noScope.reason, 'no_scope');
+  // unconfigured platform
+  const h3 = makeHarness({ configured: false });
+  const t3 = createOwlTools({ query: { applyScope: () => false, runLookerQuery: async () => [] }, auth: {}, db: {}, getPosthogApi: () => h3.api });
+  const nc = await t3.getAppAnalytics.run({}, { user: { id: 'u1' }, entityId: 'e1' });
+  assert.equal(nc.reason, 'not_configured');
+});
+
+test('breakdown-series charts per-value daily lines, scoped, top-N when unnamed', async () => {
+  const queries = [];
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => {
+      queries.push(q);
+      if (q.includes('GROUP BY day, v')) return HOGQL(['day', 'v', 'n', 'u'], [[today, 'event_detail', 5655, 1985], [today, 'home_feed', 900, 700]]);
+      return HOGQL(['v', 'n', 'u'], [['event_detail', 5655, 1985], ['home_feed', 900, 700]]);
+    },
+  });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/breakdown-series', { params: { entityId: 'e1' }, query: { key: 'surface' } });
+  assert.equal(out.status, 200);
+  assert.deepEqual(out.body.values, ['event_detail', 'home_feed'], 'unnamed values default to the window top-N');
+  assert.equal(out.body.series[0].count, 5655);
+  const seriesQ = queries.find((q) => q.includes('GROUP BY day, v'));
+  assert.ok(seriesQ.includes("IN ('101')"), 'scoped to the client\'s events');
+  assert.ok(seriesQ.includes("IN ('event_detail', 'home_feed')"), 'restricted to the chosen values');
+});
+
+test('people supports order-by-activity and paging with hasMore', async () => {
+  let captured = '';
+  const mk = (n) => Array.from({ length: n }, (_, i) => [`u${i}@x.com`, '', '', '', '2026-07-10 12:00:00', 100 - i, []]);
+  const h = makeHarness({ responder: (q) => { captured = q; return HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'], mk(201)); } });
+  const r = await h.api.people({ ids: ['101'], days: 28, orderBy: 'active', limit: 200 });
+  assert.ok(captured.includes('ORDER BY interactions DESC'), 'most-active ordering');
+  assert.equal(r.people.length, 200, 'page trimmed to the limit');
+  assert.equal(r.hasMore, true, 'the +1 row signals another page');
+  await h.api.people({ ids: ['101'], days: 28, offset: 200 });
+  assert.ok(captured.includes('OFFSET 200'), 'paging passes through');
+  assert.ok(captured.includes('ORDER BY lastSeen DESC'), 'default ordering is most recent');
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();

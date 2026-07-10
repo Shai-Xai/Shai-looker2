@@ -1,7 +1,10 @@
 # Spec — Direct PostHog integration: app analytics in Pulse (v1)
 
-> Status: **v1 SHIPPED 2026-07-10** (steps 1–3 + app-user profiles; funnels/
-> retention + the Owl tool remain — see §7) · Implementation: `server/posthog.js`,
+> Status: **v1 SHIPPED 2026-07-10** (steps 1–3 + 5: app-user profiles with
+> paging/top-users, property-qualified mapping incl. `=*`, breakdowns with
+> per-value trend lines, diagnostics + property-value explorer, and the
+> `getAppAnalytics` Owl tool. Funnels/retention — step 4 — remain) ·
+> Implementation: `server/posthog.js`,
 > `client/src/components/AppAnalytics.jsx`, `client/src/pages/AppAnalyticsPage.jsx`,
 > flag `appanalytics` (default off, beta) · Owner: Shai · North Star:
 > `docs/EXPERIENCE_OS_BRIEF.md`. Decided direction (Shai, 2026-07-10): the
