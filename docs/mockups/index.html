@@ -51,7 +51,7 @@
 <body>
 <script>
 (function(){
-  try{ if(localStorage.getItem('pulseConceptsMode')==='light') document.documentElement.classList.add('light'); }catch(e){}
+  try{ if(localStorage.getItem('pulseConceptsMode')!=='dark') document.documentElement.classList.add('light'); }catch(e){}
 })();
 </script>
   <header>

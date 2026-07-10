@@ -315,13 +315,13 @@
 
 <script>
 (function(){
-  try{ if(localStorage.getItem('pulseConceptsMode')==='light') document.documentElement.classList.add('light'); }catch(e){}
+  try{ if(localStorage.getItem('pulseConceptsMode')!=='dark') document.documentElement.classList.add('light'); }catch(e){}
   if (location.pathname.indexOf('/sales/') === 0) document.documentElement.classList.add('on-site');
 })();
 </script>
 <div class="wrap">
   <header>
-    <div class="eyebrow">Howler Pulse · Motion concept · layout B (top-down)</div>
+    <div class="eyebrow">Howler Pulse · flow concept · layout B (top-down)</div>
     <h1>Every signal flows in.<br><span class="out">Insight flows out.</span></h1>
     <p class="sub">Seven live streams (ticketing, cashless, payments, web, app, event ops and GA4/BigQuery)
     pour into the Owl, Pulse's brain. It doesn't just chart them: it <b>acts</b>. Alerts, digests, campaigns,
