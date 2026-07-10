@@ -359,6 +359,28 @@ test('people supports order-by-activity and paging with hasMore', async () => {
   assert.ok(captured.includes('ORDER BY lastSeen DESC'), 'default ordering is most recent');
 });
 
+test('today view returns hourly rows, scoped and fail-closed', async () => {
+  let captured = '';
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => {
+      captured = q;
+      return HOGQL(['hour', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases'],
+        [['2026-07-11 09:00:00', 120, 800, 300, 40, 5], ['2026-07-11 10:00:00', 180, 1100, 420, 60, 9]]);
+    },
+  });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/today', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.hours.length, 2);
+  assert.equal(out.body.hours[1].ctaTaps, 60);
+  assert.ok(captured.includes('toStartOfHour'), 'hourly grain');
+  assert.ok(captured.includes("IN ('101')"), 'scoped to the client\'s events');
+  const h2 = makeHarness({ suites: [{ id: 's2', entityId: 'e2' }], locks: {} });
+  const closed = await h2.invoke('GET /api/my/app-analytics/:entityId/today', { params: { entityId: 'e2' }, user: { id: 'u1', role: 'member', entityIds: ['e2'] } });
+  assert.deepEqual(closed.body.hours, [], 'no event scope → empty, never whole-app');
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();

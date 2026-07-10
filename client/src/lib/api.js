@@ -234,6 +234,8 @@ export const api = {
   myAppBreakdown: (entityId, { key, days } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}`).then(json),
   adminAppBreakdownSeries: ({ key, days, entityId } = {}) => fetch(`/api/admin/app-analytics/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   myAppBreakdownSeries: (entityId, { key, days } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}`).then(json),
+  adminAppToday: ({ entityId } = {}) => fetch(`/api/admin/app-analytics/today?entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  myAppToday: (entityId) => fetch(`/api/my/app-analytics/${entityId}/today`).then(json),
   // Google Drive sources (the Owl reads the client's shared files) — dual-surface
   myDriveView: (entityId) => fetch(`/api/my/drive/${entityId}`).then(json),
   myDriveSetKey: (entityId, body) => fetch(`/api/my/drive/${entityId}/key`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

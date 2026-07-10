@@ -399,6 +399,22 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     catch (e) { return { ...report, live: null, liveError: e instanceof HttpError ? e.message : 'Live numbers are unavailable right now.' }; }
   };
 
+  // Today, hour by hour — straight from PostHog (the rollup is daily), same
+  // short cache and scoping as the other live queries. Powers the "Today" chip.
+  async function todayHourly(ids) {
+    const m = metricMap();
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const rows = await hogql(`
+      SELECT toString(toStartOfHour(timestamp)) AS hour, uniq(person_id) AS uniques, count() AS interactions,
+             ${countIn(m.screenEvents, 'views')}, ${countIn(m.ctaEvents, 'cta_taps')}, ${countIn(m.purchaseEvents, 'purchases')}
+      FROM events WHERE timestamp >= toStartOfDay(now())${scope} GROUP BY hour ORDER BY hour`, { ttl: LIVE_TTL });
+    return {
+      asOf: now(),
+      hours: rows.map((r) => ({ hour: String(r.hour), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, ctaTaps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0 })),
+    };
+  }
+
   // Top values of one breakdown property (interaction_type / CTA_Label / surface
   // …), counted + uniqued over the window, optionally scoped to event ids. Which
   // keys are offered comes from the mapping (metricMap().breakdownProps).
@@ -581,6 +597,12 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (eid && !ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
     res.json(await breakdown({ ids, days: req.query.days, key }));
   }));
+  app.get('/api/admin/app-analytics/today', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ asOf: now(), hours: [] });
+    res.json(await todayHourly(ids));
+  }));
   app.get('/api/admin/app-analytics/breakdown-series', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const eid = String(req.query.entityId || '');
@@ -611,6 +633,11 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (!ids.length) return res.json({ key, days: clampDays(req.query.days), values: [] });
     res.json(await breakdown({ ids, days: req.query.days, key }));
   }));
+  app.get('/api/my/app-analytics/:entityId/today', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ asOf: now(), hours: [] });
+    res.json(await todayHourly(ids));
+  }));
   app.get('/api/my/app-analytics/:entityId/breakdown-series', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
     const ids = await eventIdsForEntity(req.params.entityId);
@@ -619,7 +646,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, people, isConfigured, hogql };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

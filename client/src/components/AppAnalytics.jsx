@@ -92,6 +92,7 @@ export function PosthogSettingsCard() {
 export function AppAnalyticsAdmin() {
   const isMobile = useIsMobile();
   const [days, setDays] = useState(28);
+  const [today, setToday] = useState(false);
   const [entityId, setEntityId] = useState('');
   const [clients, setClients] = useState([]);
   const [data, setData] = useState(null);
@@ -145,7 +146,8 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
-        {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
+        <Chip on={today} onClick={() => setToday(true)}>Today</Chip>
+        {DAY_CHOICES.map((d) => <Chip key={d} on={!today && days === d} onClick={() => { setToday(false); setDays(d); }}>{d}d</Chip>)}
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
           try {
@@ -166,6 +168,9 @@ export function AppAnalyticsAdmin() {
       )}
 
       <StatRow stats={stats} isMobile={isMobile} />
+      {today ? (
+        <TodayChart key={`today-${entityId || 'all'}`} loader={() => api.adminAppToday({ entityId })} />
+      ) : (
       <SeriesCard
         series={data.series || []}
         metrics={perClient
@@ -174,6 +179,7 @@ export function AppAnalyticsAdmin() {
           : [['dau', 'Active users'], ['views', 'Views'], ['interactions', 'Interactions'], ['new_users', 'New users'], ['sessions', 'Sessions']]}
         isMobile={isMobile}
       />
+      )}
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
       <BreakdownsCard key={`bd-${entityId || 'all'}-${days}`} keys={data.breakdowns || []} days={days}
         loader={(key) => api.adminAppBreakdown({ key, days, entityId })}
@@ -191,6 +197,7 @@ export function AppAnalyticsAdmin() {
 export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
   const [days, setDays] = useState(28);
+  const [today, setToday] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -218,7 +225,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>How your events perform inside the Howler app.</span>
-        {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
+        <Chip on={today} onClick={() => setToday(true)}>Today</Chip>
+        {DAY_CHOICES.map((d) => <Chip key={d} on={!today && days === d} onClick={() => { setToday(false); setDays(d); }}>{d}d</Chip>)}
       </div>
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       <StatRow isMobile={isMobile} stats={[
@@ -228,9 +236,13 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
       ]} />
+      {today ? (
+        <TodayChart key={`today-${entityId}`} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId }) : api.myAppToday(entityId))} />
+      ) : (
       <SeriesCard series={data.series || []} isMobile={isMobile}
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
           ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
+      )}
       <EventsTable rows={data.events} title="By event" days={data.days} />
       <BreakdownsCard key={`bd-${entityId}-${days}`} keys={data.breakdowns || []} days={days}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))}
@@ -287,6 +299,58 @@ function SeriesCard({ series, metrics, isMobile }) {
       {series.length === 0
         ? <p style={sub}>No rollup data yet — run a sync (or wait for tonight's).</p>
         : <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />}
+    </div>
+  );
+}
+
+// Today, hour by hour — live from PostHog (same 4-min cache). Swaps in for the
+// daily SeriesCard when the "Today" chip is active; same one-metric-at-a-time
+// chips, zero/unmapped metrics hidden.
+function TodayChart({ loader }) {
+  const isMobile = useIsMobile();
+  const [out, setOut] = useState(null);
+  const [error, setError] = useState('');
+  const [metric, setMetric] = useState('uniques');
+  useEffect(() => {
+    let dead = false;
+    loader().then((r) => { if (!dead) setOut(r); }).catch((e) => { if (!dead) setError(e.message); });
+    return () => { dead = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope)
+  const hours = out?.hours || [];
+  const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0 };
+  for (const h of hours) { totals.interactions += h.interactions; totals.views += h.views; totals.ctaTaps += h.ctaTaps; totals.purchases += h.purchases; totals.uniques = Math.max(totals.uniques, h.uniques); }
+  const metrics = [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
+    ...[['views', 'Views', totals.views], ['ctaTaps', 'CTA taps', totals.ctaTaps], ['purchases', 'Purchases', totals.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])];
+  const option = useMemo(() => {
+    const brand = brandPrimary();
+    return {
+      animationDuration: 300,
+      grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
+      xAxis: { type: 'category', data: hours.map((h) => String(h.hour).slice(11, 16) || String(h.hour)), axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
+      series: [{
+        type: 'line', showSymbol: hours.length < 3, smooth: 0.15,
+        lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
+        data: hours.map((h) => h[metric] == null ? 0 : h[metric]),
+      }],
+    };
+  }, [out, metric]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div style={{ ...card, marginTop: 0 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
+      </div>
+      {error && <div style={errBox}>{error}</div>}
+      {!out && !error && <p style={mutedTxt}>Loading…</p>}
+      {out && hours.length === 0 && <p style={sub}>Nothing recorded yet today.</p>}
+      {out && hours.length > 0 && (
+        <>
+          <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />
+          <p style={{ ...mutedTxt, fontSize: 11 }}>Hour by hour since midnight · live from PostHog (≤5 min cache). "Unique viewers" is unique people per hour.</p>
+        </>
+      )}
     </div>
   );
 }
