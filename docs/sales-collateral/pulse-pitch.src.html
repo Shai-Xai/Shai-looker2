@@ -103,11 +103,11 @@
   .owl-core .in span { font-size: 6.6px; color: #b8b3d9; margin-top: .5mm; }
   .phones { display: flex; flex-direction: column; gap: 4mm; }
   .visrow { display: flex; gap: 5mm; margin-top: 6mm; align-items: flex-start; justify-content: center; }
-  .chatgpt { width: 62mm; background: #212121; border-radius: 3mm; padding: 3mm; font-size: 8px; }
-  .chatgpt .q { color: #ececec; background: #303030; border-radius: 2mm; padding: 1.8mm 2.4mm; margin-bottom: 1.8mm; }
-  .chatgpt .a { color: #d9d9e3; line-height: 1.5; }
-  .chatgpt .a b { color: #fff; }
-  .chatgpt .src { margin-top: 1.6mm; font-size: 6.6px; color: #8e8ea0; }
+  .aichat { width: 62mm; background: #212121; border-radius: 3mm; padding: 3mm; font-size: 8px; }
+  .aichat .q { color: #ececec; background: #303030; border-radius: 2mm; padding: 1.8mm 2.4mm; margin-bottom: 1.8mm; }
+  .aichat .a { color: #d9d9e3; line-height: 1.5; }
+  .aichat .a b { color: #fff; }
+  .aichat .src { margin-top: 1.6mm; font-size: 6.6px; color: #8e8ea0; }
 
   /* ---------- Page 4 marketer ---------- */
   .flow { display: flex; align-items: center; gap: 2mm; margin-top: 4mm; }
@@ -230,9 +230,7 @@
   .adsync { flex: 1; border: 1px solid #ece9f5; border-radius: 10px; overflow: hidden; box-shadow: 0 2mm 4mm rgba(45,43,85,.08); display: flex; flex-direction: column; }
   .ad-body { padding: 2.6mm 3mm; background: #fff; flex: 1; }
   .adrow { display: flex; align-items: center; gap: 2.4mm; border: 1px solid #ece9f5; border-radius: 2.2mm; padding: 2mm 2.4mm; margin-bottom: 2mm; background: #fbfaff; }
-  .adlogo { width: 5.4mm; height: 5.4mm; border-radius: 1.6mm; color: #fff; font-size: 8px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .adlogo.meta { background: #1877F2; }
-  .adlogo.tt { background: #010101; }
+  .adlogo { width: 5.4mm; height: 5.4mm; border-radius: 1.6mm; background: linear-gradient(135deg,#FF385C,#FF6B35); color: #fff; font-size: 8px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .adrow .t { flex: 1; }
   .adrow .t b { font-size: 8.4px; display: block; }
   .adrow .t span { font-size: 7px; color: #9a97ad; }
@@ -309,7 +307,7 @@
   <div class="loop">
     <h2>One loop that never stops turning <span class="n">· not five disconnected tools</span></h2>
     <div class="loopsteps">
-      <div class="loopstep"><div class="big">📡</div><h3>Live data lands</h3><p>Ticketing, cashless and GA4 flow in continuously, no exports, no spreadsheets.</p></div>
+      <div class="loopstep"><div class="big">📡</div><h3>Live data lands</h3><p>Ticketing, cashless and web analytics flow in continuously, no exports, no spreadsheets.</p></div>
       <div class="loopstep"><div class="big">🦉</div><h3>The Owl reads it</h3><p>AI briefings and digests tell you what changed <i>and what to do about it</i>.</p></div>
       <div class="loopstep"><div class="big">⚡</div><h3>You act</h3><p>Turn a suggestion into a branded email/SMS campaign to the exact segment, in a click.</p></div>
       <div class="loopstep"><div class="big">📈</div><h3>Results come back</h3><p>Opens, clicks, conversions and revenue tracked per recipient, straight into your dashboards.</p></div>
@@ -319,8 +317,8 @@
   </div>
 
   <div class="why">
-    <div class="whycard a"><h3>vs. a BI tool (Looker / Tableau)</h3><p>Dashboards show you the problem, then leave. Pulse <b>acts</b> on the data: campaigns, approvals, ad-audience sync, in the same place you saw it.</p></div>
-    <div class="whycard b"><h3>vs. an email tool (Mailchimp / Klaviyo)</h3><p>No CSV gymnastics. Pulse audiences come straight from your <b>live ticketing data</b>, stay current automatically, and are governed &amp; scoped to you.</p></div>
+    <div class="whycard a"><h3>vs. a dashboard tool</h3><p>Dashboards show you the problem, then leave. Pulse <b>acts</b> on the data: campaigns, approvals, ad-audience sync, in the same place you saw it.</p></div>
+    <div class="whycard b"><h3>vs. an email tool</h3><p>No list gymnastics. Pulse audiences come straight from your <b>live ticketing data</b>, stay current automatically, and are governed &amp; scoped to you.</p></div>
     <div class="whycard c"><h3>vs. doing it manually</h3><p>An installable app that <b>pings your phone</b> when a number matters, a nudge lands, you tap, you're in the right place to act. No logging in to check.</p></div>
   </div>
 
@@ -359,7 +357,38 @@
 <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 1 of 7</span></div>
 </div>
 
-<!-- ================= PAGE 2 ================= -->
+<!-- ================= PAGE 2, HOWLER ONE STACK ================= -->
+<div class="page">
+  <div class="kicker">One partner, end to end</div>
+  <h2 style="font-size:24px;">The Howler One stack · <span class="grad-text">one experience, one dataset</span></h2>
+  <div class="rule" style="width:40mm; margin-top:2mm;"></div>
+  <p style="font-size:11.5px; color:#55556d; margin-top:3mm; max-width:172mm; line-height:1.5;">Pulse isn't a bolt-on, it's the intelligence layer of <b style="color:#1a1a2e;">Howler, the Experience Operating System: one connected stack</b> that runs your entire event: selling the ticket, taking the payment, hosting the VIP, and putting the whole experience in the fan's pocket. Every layer feeds the same dataset, and Pulse turns that dataset into action.</p>
+
+  <div class="stackrow">
+    <div class="sp"><div class="ic">🎟</div><h4>Ticketing</h4><p>The box office: ticket sales, tiers &amp; releases, access control and scanning at the gates, every buyer and every entry, captured from the first on-sale minute.</p></div>
+    <div class="sp"><div class="ic">💳</div><h4>Cashless Payments</h4><p>Tap-to-pay across bars, vendors and top-ups: faster queues, higher spend, zero cash risk, and every transaction lands as live data, per station.</p></div>
+    <div class="sp"><div class="ic">📱</div><h4>SuperApp</h4><p>The fan's companion: tickets, cashless top-ups, line-ups and offers in one place, a direct, ownable channel to every attendee, before, during and after.</p></div>
+    <div class="sp"><div class="ic">🍾</div><h4>VIP Table Management</h4><p>Premium done properly: table inventory, bookings and minimum spends, hosted service, your highest-value guests, managed and measured.</p></div>
+  </div>
+  <div class="downs"><span>↓</span><span>↓</span><span>↓</span><span>↓</span></div>
+  <div class="pulsebar">
+    <div style="display:flex; align-items:center; gap:2.5mm; flex-shrink:0;"><img src="owl-mark.png" style="width:9mm; height:9mm; border-radius:50%;"><span class="big">Pulse</span></div>
+    <p><b>The brain of the stack.</b> Every ticket scanned, every tap at a bar, every SuperApp session and every VIP booking flows into one governed dataset, where the Owl reads it, your team acts on it, and the results come back measured. Insight → action → results, across the whole operation.</p>
+  </div>
+  <div class="basebar">ONE STACK · ONE DATASET · ONE BRAND EXPERIENCE · ONE PARTNER</div>
+
+  <div class="btgrid">
+    <div class="bt" style="background:linear-gradient(135deg,#FF385C,#d92b4b);"><h4>Better together: the bar</h4><p>Cashless tells Pulse the Main Bar is spiking; the ops heat map shows the hotspot; the Owl suggests moving two devices from a quiet station, while the night is still young.</p></div>
+    <div class="bt" style="background:linear-gradient(135deg,#FF6B35,#f59e0b);"><h4>Better together: the fan</h4><p>A fan buys a ticket, tops up in the SuperApp, spends at three bars. Pulse stitches it into one picture, and your next campaign targets big spenders who haven't bought next year's ticket yet.</p></div>
+    <div class="bt" style="background:linear-gradient(135deg,#7C3AED,#5b21b6);"><h4>Better together: the VIP</h4><p>Table guests are your best customers. Pulse knows who they are, what they spent and when they went quiet, so the invitation to next season's tables writes itself.</p></div>
+  </div>
+
+  <div class="quote" style="margin-top:6mm;">"Most organisers run four vendors and five spreadsheets. With Howler it's one stack, and because it's one stack, the data compounds: every layer makes every other layer smarter."</div>
+
+  <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 2 of 7</span></div>
+</div>
+
+<!-- ================= PAGE 3 ================= -->
 <div class="page">
   <div class="kicker">What you get</div>
   <h2 style="font-size:24px;">Everything an organiser needs, <span class="grad-text">in one place</span></h2>
@@ -369,7 +398,7 @@
     <div class="pillar">
       <div class="pillar-head p1"><h3>👁 SEE · dashboards &amp; AI insight</h3><span>know what's happening, without digging</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Live dashboards</b>: KPIs, tables and charts on your real ticketing &amp; GA4 data, with drill-through. Mobile-first and installable as an app.</div>
+        <div class="feat"><b>Live dashboards</b>: KPIs, tables and charts on your real ticketing &amp; web data, with drill-through. Mobile-first and installable as an app.</div>
         <div class="feat"><b>Personalised AI briefing</b>: land on a plain-English summary of what matters right now, tailored to what you follow.</div>
         <div class="feat"><b>Per-tile AI insight</b>: tap any tile and the Owl explains the numbers and answers follow-ups, grounded in that data.</div>
         <div class="feat"><b>Scheduled digests</b>: role-specific email briefings (exec / marketing / finance / ops) on your cadence, with charts rendered in the email.</div>
@@ -384,7 +413,7 @@
       <div class="pillar-body">
         <div class="feat"><b>Ask the Owl in-app</b>: "what's on sale right now?", "how does this compare to last year?", conversational answers scoped to your data.</div>
         <div class="feat"><b>The Owl on WhatsApp</b>: message the Owl from your own WhatsApp: answers, charts as images, tappable follow-ups, daily updates, even draft a campaign by reply button.</div>
-        <div class="feat"><b>Reads your Google Drive</b>: share budgets, marketing plans or sponsor decks and the Owl answers from them alongside live sales data.</div>
+        <div class="feat"><b>Reads your own documents</b>: share budgets, marketing plans or sponsor decks and the Owl answers from them alongside live sales data.</div>
         <div class="feat"><b>Take action by chat</b>: the Owl doesn't just answer: it can set up an alert, save a segment or draft a campaign straight from the conversation, with a confirm step before anything is created.</div>
       </div>
       <div class="pitchline">"Ask your data anything, in plain language, your own analyst, in your pocket."</div>
@@ -393,11 +422,11 @@
     <div class="pillar">
       <div class="pillar-head p3"><h3>⚡ ACT · Engage, the campaign engine</h3><span>from seeing a cohort to reaching it, in one click</span></div>
       <div class="pillar-body">
-        <div class="feat"><b>Live segments</b>: build audiences from a dashboard tile, a CSV, or a linked Google Sheet; combine with union / intersect / exclude (e.g. abandoned carts <i>minus</i> already-called). Always current at send time.</div>
+        <div class="feat"><b>Live segments</b>: build audiences from a dashboard tile, an uploaded list, or a linked sheet; combine them (add, overlap, exclude, e.g. abandoned carts <i>minus</i> already-called). Always current at send time.</div>
         <div class="feat"><b>Email &amp; SMS campaigns</b>: AI-drafted copy, a drag-and-drop block builder, AI-designed layouts &amp; banners, merge fields, promo codes, full open/click tracking.</div>
         <div class="feat"><b>Drip automations</b>: abandoned-cart recovery journeys that catch new abandoners in real time, stop automatically when someone buys, and show a per-step conversion waterfall.</div>
-        <div class="feat"><b>Ad-platform sync</b>: push a segment to Meta or TikTok as a Custom Audience (privacy-safe, hashed), auto-synced daily; see spend, ROAS and paid results next to ticket sales.</div>
-        <div class="feat"><b>Approvals &amp; consent built in</b>: nothing sends without explicit approval; POPIA-aware consent enforced per channel; send caps stop costly mistakes.</div>
+        <div class="feat"><b>Ad-platform sync</b>: push a segment to your ad accounts as a privacy-safe custom audience, kept in sync automatically; see spend, ROAS and paid results next to ticket sales.</div>
+        <div class="feat"><b>Approvals &amp; consent built in</b>: nothing sends without explicit approval; consent enforced per channel; send caps stop costly mistakes.</div>
         <div class="feat"><b>Owl auto-pilot</b>: one tap turns an AI suggestion into a drafted campaign; it still rides the normal review + approval gates.</div>
       </div>
       <div class="pitchline">"Personalised, on-brand email + SMS to a precise audience, with approval gates and real tracking, all from the same data."</div>
@@ -424,10 +453,10 @@
   </div>
   <div class="mockcap">The scheduled digest, built on Milk &amp; Cookies' live numbers: a role-specific read of the week, with the next actions attached.</div>
 
-<div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 2 of 7</span></div>
+<div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 3 of 7</span></div>
 </div>
 
-<!-- ================= PAGE 3, CHANNELS ================= -->
+<!-- ================= PAGE 4, CHANNELS ================= -->
 <div class="page">
   <div class="kicker">Meet your team where they are</div>
   <h2 style="font-size:24px;">One brain. <span class="grad-text">Every channel.</span></h2>
@@ -443,8 +472,8 @@
     </svg>
     <div class="hub-card" style="left:0; top:2mm;"><h4>📱 The Howler Pulse app</h4><p>Installs like a native app, works beautifully on a phone, and <b>pushes a nudge even when closed</b>: tap it and you're in the right place to act.</p></div>
     <div class="hub-card" style="left:0; top:36mm;"><h4>💬 WhatsApp</h4><p>Message the Owl like a colleague: plain-language answers, <b>charts as images</b>, daily updates, event-night reports, even draft a campaign by reply button.</p></div>
-    <div class="hub-card" style="right:0; top:2mm;"><h4>🤖 ChatGPT</h4><p>Connect Pulse to ChatGPT (including Deep Research) and ask about your events from the tool your team already has open all day.</p></div>
-    <div class="hub-card" style="right:0; top:36mm;"><h4>✳️ Claude</h4><p>The same connector plugs your event data into Claude, read-only, per-client keys you control, revocable in one tap.</p></div>
+    <div class="hub-card" style="right:0; top:2mm;"><h4>🤖 Your AI assistant</h4><p>Connect Pulse to the AI assistant your team already uses and ask about your events from the tool you have open all day.</p></div>
+    <div class="hub-card" style="right:0; top:36mm;"><h4>🔗 Connect on your terms</h4><p>However your team prefers to connect, your event data stays read-only, scoped to you, and revocable in one tap.</p></div>
     <div class="owl-core" style="background:none; padding:0;">
       <img src="owl-mark.png" style="width:32mm; height:32mm; border-radius:50%; display:block; box-shadow:0 2mm 5mm rgba(45,43,85,.28);">
       <div style="position:absolute; left:50%; bottom:-6.5mm; transform:translateX(-50%); background:#1a1a2e; color:#fff; border-radius:99px; padding:1.2mm 4mm; white-space:nowrap; text-align:center;">
@@ -488,12 +517,12 @@
         </div>
       </div>
     </div>
-    <!-- ChatGPT / Claude card -->
+    <!-- AI assistant card -->
     <div style="display:flex; flex-direction:column; gap:4mm; width:62mm;">
-      <div class="chatgpt">
+      <div class="aichat">
         <div class="q">How big is our abandoned-cart audience, and where are we against the ticket goal?</div>
         <div class="a">Your <b>Abandoned carts</b> segment holds <b>3 396 contactable people</b>. Ticket sales stand at <b>17 812 of the 18 000 North Star (99%)</b>, with General Access Phase 1 the top seller at 2 877.</div>
-        <div class="src" style="display:flex; align-items:center; gap:1.4mm;"><img src="owl-mark.png" style="width:3mm; height:3mm; border-radius:50%;"> in ChatGPT &amp; Claude · via the Pulse connector · scoped to your events</div>
+        <div class="src" style="display:flex; align-items:center; gap:1.4mm;"><img src="owl-mark.png" style="width:3mm; height:3mm; border-radius:50%;"> in your AI assistant · scoped to your events</div>
       </div>
       <div style="border:1px solid #ece9f5; border-radius:3mm; background:#fbfaff; padding:3mm 3.5mm;">
         <div style="font-size:9.5px; font-weight:800; margin-bottom:1.2mm;">🔒 One brain, one boundary</div>
@@ -506,14 +535,14 @@
     <img src="owl-mark.png" style="width:13mm; height:13mm; border-radius:50%; flex-shrink:0;">
     <div>
       <div style="font-size:13px; font-weight:900; margin-bottom:1.5mm;">Ask on the couch, at the gate, or at your desk, same Owl, same answer.</div>
-      <div style="font-size:10px; opacity:.88; line-height:1.55;">Open the app on the way to the site, WhatsApp the Owl from the gate, or ask ChatGPT or Claude from the office, every door leads to the same brain, reading the same live data. And when something matters, the Owl doesn't wait to be asked: it pushes the briefing, the digest and the alert to whichever screen you're on.</div>
+      <div style="font-size:10px; opacity:.88; line-height:1.55;">Open the app on the way to the site, WhatsApp the Owl from the gate, or ask your AI assistant from the office, every door leads to the same brain, reading the same live data. And when something matters, the Owl doesn't wait to be asked: it pushes the briefing, the digest and the alert to whichever screen you're on.</div>
     </div>
   </div>
 
-  <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 3 of 7</span></div>
+  <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 4 of 7</span></div>
 </div>
 
-<!-- ================= PAGE 4, MARKETER'S DREAM ================= -->
+<!-- ================= PAGE 5, MARKETER'S DREAM ================= -->
 <div class="page">
   <div class="kicker">For the growth team</div>
   <h2 style="font-size:24px;">The marketer's dream, <span class="grad-text">on one platform</span></h2>
@@ -527,14 +556,14 @@
     <div class="arr">→</div>
     <div class="fstep" style="background:linear-gradient(135deg,#FF6B35,#f59e0b);">🗺 JOURNEYS<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">email · SMS · drips</span></div>
     <div class="arr">→</div>
-    <div class="fstep" style="background:linear-gradient(135deg,#7C3AED,#5b21b6);">📣 AD PLATFORMS<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">Meta · TikTok sync</span></div>
+    <div class="fstep" style="background:linear-gradient(135deg,#7C3AED,#5b21b6);">📣 AD PLATFORMS<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">your ad accounts, synced</span></div>
     <div class="arr">→</div>
     <div class="fstep" style="background:linear-gradient(135deg,#059669,#047857);">💰 REVENUE<br><span style="font-weight:600;font-size:8.5px;opacity:.85;">tracked per recipient</span></div>
   </div>
 
   <div class="mkgrid">
-    <div class="mk"><h4>🎯 Audiences that never go stale</h4><p>Build a segment from a dashboard tile, a sheet or a list, it <b>re-resolves live at send time</b>. Combine sources (union / intersect / exclude), subtract suppression lists, filter on any column: ticket type, city, age, spend.</p></div>
-    <div class="mk"><h4>📣 Live data → your ad accounts</h4><p>Push any segment to <b>Meta or TikTok as a Custom Audience</b>: hashed before it leaves, mirrored daily, leavers removed automatically. Exclude buyers from prospecting. Then see <b>spend, CPC and ROAS next to actual ticket sales</b>.</p></div>
+    <div class="mk"><h4>🎯 Audiences that never go stale</h4><p>Build a segment from a dashboard tile, a sheet or a list, it <b>re-resolves live at send time</b>. Combine sources (add, overlap, exclude), subtract suppression lists, filter on any column: ticket type, city, age, spend.</p></div>
+    <div class="mk"><h4>📣 Live data → your ad accounts</h4><p>Push any segment to <b>your ad accounts as a privacy-safe custom audience</b>: kept in sync daily, leavers removed automatically. Exclude buyers from prospecting. Then see <b>spend, CPC and ROAS next to actual ticket sales</b>.</p></div>
     <div class="journey">
       <h4>🗺 Complex journeys, simple setup</h4>
       <div class="jrow"><div class="jl">1 · Reminder email</div><div class="jbar"><i style="width:100%"></i></div><div class="jv">3 396 enrolled</div></div>
@@ -544,11 +573,11 @@
       <p style="font-size:9.6px; color:#55556d; margin-top:2mm; line-height:1.5;">Your real Abandoned carts segment (3 396 people) worked automatically: timed steps, per-step copy and promo, true real-time enrolment. Step rates shown are illustrative.</p>
     </div>
     <div class="mk"><h4>✨ An AI creative studio inside</h4><p>The Owl drafts the copy, designs the <b>whole themed email layout</b>, and draws <b>on-brand banners</b> from a one-line prompt. Pick a theme, tweak in the drag-and-drop builder, save as a template. Any campaign in any language.</p></div>
-    <div class="mk"><h4>💰 Attribution you can defend</h4><p>Per-recipient <b>opens, clicks and tracked purchases</b>; UTM on every link; unique-per-person promo codes that tie a sale to a send. Campaign results flow back into the same dashboards you plan from.</p></div>
-    <div class="mk"><h4>🛡 Guardrails a CMO will love</h4><p><b>Approval gates</b> before anything sends, POPIA-aware per-channel consent, one-click unsubscribe, audience and SMS <b>send caps</b> so a big blast never becomes an expensive accident.</p></div>
+    <div class="mk"><h4>💰 Attribution you can defend</h4><p>Per-recipient <b>opens, clicks and tracked purchases</b>; tracked links on every send; unique-per-person promo codes that tie a sale to a send. Campaign results flow back into the same dashboards you plan from.</p></div>
+    <div class="mk"><h4>🛡 Guardrails a CMO will love</h4><p><b>Approval gates</b> before anything sends, consent-aware per channel, one-click unsubscribe, audience and SMS <b>send caps</b> so a big blast never becomes an expensive accident.</p></div>
   </div>
 
-  <div class="quote" style="margin-top:4mm;">"From <i>seeing</i> a cohort on a dashboard to a live journey, an ad audience and tracked revenue, without leaving the platform or exporting a single CSV. That's the whole pitch."</div>
+  <div class="quote" style="margin-top:4mm;">"From <i>seeing</i> a cohort on a dashboard to a live journey, an ad audience and tracked revenue, without leaving the platform or exporting a single spreadsheet. That's the whole pitch."</div>
 
   <div class="pairrow">
     <div class="builder">
@@ -577,19 +606,19 @@
     <div class="adsync">
       <div class="bd-bar">📣 Ad audiences<span>mirrored to your ad accounts</span></div>
       <div class="ad-body">
-        <div class="adrow"><div class="adlogo meta">f</div><div class="t"><b>Abandoned carts → Meta Custom Audience</b><span>3 396 synced · auto-sync daily</span></div><span class="adchip">● Healthy</span></div>
-        <div class="adrow"><div class="adlogo tt">♪</div><div class="t"><b>Buyer Age 18 to 22 → TikTok</b><span>1 775 synced · 1 750 SMS-reachable too</span></div><span class="adchip">● Healthy</span></div>
-        <div class="adrow"><div class="adlogo meta">f</div><div class="t"><b>Already bought → exclusion list</b><span>17 812 buyers leave the ads automatically</span></div><span class="adchip">● Healthy</span></div>
+        <div class="adrow"><div class="adlogo">📣</div><div class="t"><b>Abandoned carts → ad custom audience</b><span>3 396 synced · auto-sync daily</span></div><span class="adchip">● Healthy</span></div>
+        <div class="adrow"><div class="adlogo">📣</div><div class="t"><b>Buyer Age 18 to 22 → ad platform</b><span>1 775 synced · 1 750 SMS-reachable too</span></div><span class="adchip">● Healthy</span></div>
+        <div class="adrow"><div class="adlogo">📣</div><div class="t"><b>Already bought → exclusion list</b><span>17 812 buyers leave the ads automatically</span></div><span class="adchip">● Healthy</span></div>
       </div>
-      <div class="ad-note">🔒 Emails &amp; phones are hashed before they leave Pulse, the platforms never see raw contact details.</div>
+      <div class="ad-note">🔒 Contact details are protected before they ever leave Pulse, the ad platforms never see raw personal data.</div>
     </div>
   </div>
   <div class="mockcap">The Owl designs the email (that subject line is a real draft in your account); the audiences are your real segments, mirrored daily.</div>
 
-<div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 4 of 7</span></div>
+<div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 5 of 7</span></div>
 </div>
 
-<!-- ================= PAGE 5, EVENT OPS ================= -->
+<!-- ================= PAGE 6, EVENT OPS ================= -->
 <div class="page">
   <div class="kicker">On the ground</div>
   <h2 style="font-size:24px;">Event Ops · your operations <span class="grad-text">command centre</span></h2>
@@ -599,12 +628,12 @@
   <div class="ops-wrap">
     <div class="ops-feats">
       <div class="ops-feat"><b>🗺 The live overview</b>: one board with the whole operation: device counts by state, per-station deployment, open issues and a live activity feed. The "where is everything right now" view.</div>
-      <div class="ops-feat"><b>📟 Every device tracked</b>: scanners, payment devices, radios, printers: bulk-register a batch, then <b>scan to move</b> between the store and stations. Every move lands in an append-only audit trail, nothing is lost to memory, and every device is accounted for at event close.</div>
+      <div class="ops-feat"><b>📟 Every device tracked</b>: scanners, payment devices, radios, printers: bulk-register a batch, then <b>scan to move</b> between the store and stations. Every move lands in a tamper-proof audit trail, nothing is lost to memory, and every device is accounted for at event close.</div>
       <div class="ops-feat"><b>🔥 Hotspots &amp; the heat map</b>: every station's activity in time blocks: watch the crowd move from gates to bars, spot the overloaded station and the dead one, staff accordingly.</div>
       <div class="ops-feat"><b>🍹 Bar &amp; operator performance</b>: every bar and every bartender, live: sales and rands-per-hour per operator, who's flying and which till has gone quiet. Praise the stars at the debrief; fix the slow lane before the queue grows.</div>
       <div class="ops-feat"><b>📶 Connectivity &amp; data health</b>: is data from every station actually arriving? Minutes-since-last-record per station with alerting when a stream goes quiet; a device roster showing exactly <b>which units are offline and for how long</b>. You'll know a scanner died before the queue does.</div>
       <div class="ops-feat"><b>🩺 AI Diagnose + event report</b>: one-tap AI verdicts per station, and a post-event diagnostics report clean enough to forward to the network provider.</div>
-      <div class="ops-feat"><b>⚡ Live updates &amp; alerts</b>: a compact multi-metric report every 15–120 minutes while doors are open (gates pace, bar revenue, top vendors, device health) to inbox, push, SMS and WhatsApp, plus threshold alerts on any number, with cooldowns and quiet hours.</div>
+      <div class="ops-feat"><b>⚡ Live updates &amp; alerts</b>: compact multi-metric updates while doors are open (gates pace, bar revenue, top vendors, device health) straight to your phone, plus threshold alerts on any number that matters.</div>
     </div>
 
     <div class="opsboard">
@@ -708,37 +737,6 @@
   </div>
   <div class="mockcap">Bar &amp; operator performance, live: the lane's width is money flowing through that operator's till. Thabo is carrying Main Bar; Kea's lane has run dry, someone should check till 3. Names illustrative; the view is real.</div>
 
-  <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 5 of 7</span></div>
-</div>
-
-<!-- ================= PAGE 6, HOWLER ONE STACK ================= -->
-<div class="page">
-  <div class="kicker">One partner, end to end</div>
-  <h2 style="font-size:24px;">The Howler One stack · <span class="grad-text">one experience, one dataset</span></h2>
-  <div class="rule" style="width:40mm; margin-top:2mm;"></div>
-  <p style="font-size:11.5px; color:#55556d; margin-top:3mm; max-width:172mm; line-height:1.5;">Pulse isn't a bolt-on, it's the intelligence layer of <b style="color:#1a1a2e;">Howler, the Experience Operating System: one connected stack</b> that runs your entire event: selling the ticket, taking the payment, hosting the VIP, and putting the whole experience in the fan's pocket. Every layer feeds the same dataset, and Pulse turns that dataset into action.</p>
-
-  <div class="stackrow">
-    <div class="sp"><div class="ic">🎟</div><h4>Ticketing</h4><p>The box office: ticket sales, tiers &amp; releases, access control and scanning at the gates, every buyer and every entry, captured from the first on-sale minute.</p></div>
-    <div class="sp"><div class="ic">💳</div><h4>Cashless Payments</h4><p>Tap-to-pay across bars, vendors and top-ups: faster queues, higher spend, zero cash risk, and every transaction lands as live data, per station.</p></div>
-    <div class="sp"><div class="ic">📱</div><h4>SuperApp</h4><p>The fan's companion: tickets, cashless top-ups, line-ups and offers in one place, a direct, ownable channel to every attendee, before, during and after.</p></div>
-    <div class="sp"><div class="ic">🍾</div><h4>VIP Table Management</h4><p>Premium done properly: table inventory, bookings and minimum spends, hosted service, your highest-value guests, managed and measured.</p></div>
-  </div>
-  <div class="downs"><span>↓</span><span>↓</span><span>↓</span><span>↓</span></div>
-  <div class="pulsebar">
-    <div style="display:flex; align-items:center; gap:2.5mm; flex-shrink:0;"><img src="owl-mark.png" style="width:9mm; height:9mm; border-radius:50%;"><span class="big">Pulse</span></div>
-    <p><b>The brain of the stack.</b> Every ticket scanned, every tap at a bar, every SuperApp session and every VIP booking flows into one governed dataset, where the Owl reads it, your team acts on it, and the results come back measured. Insight → action → results, across the whole operation.</p>
-  </div>
-  <div class="basebar">ONE STACK · ONE DATASET · ONE BRAND EXPERIENCE · ONE PARTNER</div>
-
-  <div class="btgrid">
-    <div class="bt" style="background:linear-gradient(135deg,#FF385C,#d92b4b);"><h4>Better together: the bar</h4><p>Cashless tells Pulse the Main Bar is spiking; the ops heat map shows the hotspot; the Owl suggests moving two devices from a quiet station, while the night is still young.</p></div>
-    <div class="bt" style="background:linear-gradient(135deg,#FF6B35,#f59e0b);"><h4>Better together: the fan</h4><p>A fan buys a ticket, tops up in the SuperApp, spends at three bars. Pulse stitches it into one picture, and your next campaign targets big spenders who haven't bought next year's ticket yet.</p></div>
-    <div class="bt" style="background:linear-gradient(135deg,#7C3AED,#5b21b6);"><h4>Better together: the VIP</h4><p>Table guests are your best customers. Pulse knows who they are, what they spent and when they went quiet, so the invitation to next season's tables writes itself.</p></div>
-  </div>
-
-  <div class="quote" style="margin-top:6mm;">"Most organisers run four vendors and five spreadsheets. With Howler it's one stack, and because it's one stack, the data compounds: every layer makes every other layer smarter."</div>
-
   <div class="foot"><span style="display:flex; align-items:center; gap:1.6mm;"><img src="howler-logo.png" style="width:3.6mm; height:3.6mm; border-radius:1mm;"><b>Pulse</b> · flagship of the Howler Experience OS</span><span>howler-pulse-v2.onrender.com</span><span>Page 6 of 7</span></div>
 </div>
 
@@ -765,8 +763,8 @@
         <div class="feat"><b>Fully white-label</b>: your logo, colours and sender name everywhere; emails from your own domain; even a vanity login page that feels like <i>your</i> product.</div>
         <div class="feat"><b>Your language &amp; currency</b>: AI insights, briefings, digests and campaign copy in your reporting currency and your choice of language.</div>
         <div class="feat"><b>Watertight data scoping</b>: every query is force-filtered to your events server-side; it can't be bypassed and fails closed. One client can never see another's data.</div>
-        <div class="feat"><b>POPIA-minded by design</b>: per-channel consent, one-click unsubscribe, hashed identities for ad sync, no cross-client data pooling.</div>
-        <div class="feat"><b>Open by design</b>: read-only, per-client API keys; connect Claude or ChatGPT to your data. Never locked in.</div>
+        <div class="feat"><b>Privacy-minded by design</b>: per-channel consent, one-click unsubscribe, protected identities for ad sync, no cross-client data pooling.</div>
+        <div class="feat"><b>Open by design</b>: read-only, per-client keys; connect the AI assistant of your choice to your data. Never locked in.</div>
         <div class="feat"><b>Self-service, with backup</b>: manage everything yourself in Settings, or your Howler team does it for you; your named contacts are one tap away.</div>
       </div>
     </div>
@@ -774,9 +772,9 @@
 
   <table class="compare">
     <tr><th style="width:34mm;">If you're using…</th><th>The gap</th><th>What Pulse changes</th></tr>
-    <tr><td>Looker / Tableau</td><td>You see the problem, then export a CSV and switch tools to act on it.</td><td>See it and act on it in the same governed place, campaign, approval, result.</td></tr>
-    <tr><td>Mailchimp / Klaviyo</td><td>Audiences go stale the moment you upload them.</td><td>Audiences built from live ticketing data that re-resolve at send time.</td></tr>
-    <tr><td>Email + WhatsApp threads</td><td>Approvals, settlements and "did you see this?" get lost.</td><td>One inbox with read/ack trails; settlements that file themselves.</td></tr>
+    <tr><td>A dashboard tool</td><td>You see the problem, then export the data and switch tools to act on it.</td><td>See it and act on it in the same governed place, campaign, approval, result.</td></tr>
+    <tr><td>An email tool</td><td>Audiences go stale the moment you upload them.</td><td>Audiences built from live ticketing data that re-resolve at send time.</td></tr>
+    <tr><td>Email + chat threads</td><td>Approvals, settlements and "did you see this?" get lost.</td><td>One inbox with read/ack trails; settlements that file themselves.</td></tr>
     <tr><td>Gut feel on event night</td><td>You find out about problems when the queue does.</td><td>A live ops board, alerts, and a mini report every 30 minutes, on your phone.</td></tr>
   </table>
 
