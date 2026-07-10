@@ -177,12 +177,18 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
           signal: AbortSignal.timeout(45_000),
         });
       } catch {
-        throw new HttpError(502, 'Could not reach PostHog — try again in a minute.');
+        // NOT 5xx: the client UI presents gateway statuses as "Pulse is updating",
+        // which misdiagnoses a PostHog outage as a Pulse deploy. 424 keeps the
+        // real message on screen.
+        throw new HttpError(424, 'Could not reach PostHog — try again in a minute.');
       }
       if (res.status === 401 || res.status === 403) throw new HttpError(400, 'PostHog rejected the API key — it must be a personal API key with query read access.');
       if (res.status === 429) throw new HttpError(429, 'PostHog is rate-limiting us — showing the last synced data instead.');
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data) throw new HttpError(502, `PostHog returned an error (HTTP ${res.status}).`);
+      if (!res.ok || !data) {
+        const detail = String(data?.detail || data?.error || '').slice(0, 200);
+        throw new HttpError(424, `PostHog returned an error (HTTP ${res.status})${detail ? `: ${detail}` : '.'}`);
+      }
       const rows = zipRows(data);
       if (qcache.size > 200) qcache.clear();
       if (ttl) qcache.set(query, { at: Date.now(), rows });

@@ -224,12 +224,12 @@ export const api = {
   posthogDiagnose: () => fetch('/api/admin/posthog/diagnose').then(json),
   posthogPropertyValues: (event, key) => fetch(`/api/admin/posthog/property-values?event=${encodeURIComponent(event)}&key=${encodeURIComponent(key)}`).then(json),
   adminAppAnalytics: ({ days, entityId } = {}) => fetch(`/api/admin/app-analytics?days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
-  adminAppPeople: ({ days, q, entityId, offset, orderBy } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}`).then(json),
+  adminAppPeople: ({ days, q, entityId, offset, orderBy, limit } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}&limit=${limit || ''}`).then(json),
   // Manual sync recounts the FULL window (the nightly tick only restates 7 days) —
   // so a mapping/property fix backfills history in one click.
   syncAppAnalytics: () => fetch('/api/admin/app-analytics/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 90 }) }).then(json),
   myAppAnalytics: (entityId, days) => fetch(`/api/my/app-analytics/${entityId}${days ? `?days=${days}` : ''}`).then(json),
-  myAppPeople: (entityId, { days, q, offset, orderBy } = {}) => fetch(`/api/my/app-analytics/${entityId}/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}`).then(json),
+  myAppPeople: (entityId, { days, q, offset, orderBy, limit } = {}) => fetch(`/api/my/app-analytics/${entityId}/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}&limit=${limit || ''}`).then(json),
   adminAppBreakdown: ({ key, days, entityId } = {}) => fetch(`/api/admin/app-analytics/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   myAppBreakdown: (entityId, { key, days } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}`).then(json),
   adminAppBreakdownSeries: ({ key, days, entityId } = {}) => fetch(`/api/admin/app-analytics/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),

@@ -118,14 +118,15 @@ export function AppAnalyticsAdmin() {
 
   const perClient = !!entityId;
   const headline = data.headline || {};
+  // Views / CTA taps / Purchases only earn a tile once the mapping gives them
+  // data — an all-zero tile is noise, and they reappear by themselves after the
+  // mapping + sync land.
   const stats = perClient
     ? [
         ['Viewers today', data.live?.actives, true],
         ['Unique viewers', data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
-        ['Views', data.totals?.views],
-        ['CTA taps', data.totals?.ctaTaps],
-        ['Purchases', data.totals?.purchases],
+        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
       ]
     : [
         ['Active today', data.live?.actives, true],
@@ -168,7 +169,8 @@ export function AppAnalyticsAdmin() {
       <SeriesCard
         series={data.series || []}
         metrics={perClient
-          ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'], ['views', 'Views'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]
+          ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
+              ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]
           : [['dau', 'Active users'], ['views', 'Views'], ['interactions', 'Interactions'], ['new_users', 'New users'], ['sessions', 'Sessions']]}
         isMobile={isMobile}
       />
@@ -176,6 +178,7 @@ export function AppAnalyticsAdmin() {
       <BreakdownsCard key={`bd-${entityId || 'all'}-${days}`} keys={data.breakdowns || []} days={days}
         loader={(key) => api.adminAppBreakdown({ key, days, entityId })}
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, days, entityId })} />
+      <TopUsersCard key={`top-${entityId || 'all'}`} days={days} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} />
       <PeopleSection key={entityId || 'all'} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
@@ -222,16 +225,18 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ['Viewers today', data.live?.actives, true],
         ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
         ['Interactions', data.totals?.interactions],
-        ['Views', data.totals?.views],
-        ['CTA taps', data.totals?.ctaTaps],
-        ['Purchases', data.totals?.purchases],
+        // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
+        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
       ]} />
       <SeriesCard series={data.series || []} isMobile={isMobile}
-        metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'], ['views', 'Views'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]} />
+        metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
+          ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       <EventsTable rows={data.events} title="By event" days={data.days} />
       <BreakdownsCard key={`bd-${entityId}-${days}`} keys={data.breakdowns || []} days={days}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, days, entityId }) : api.myAppBreakdown(entityId, { key, days }))}
         seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, days, entityId }) : api.myAppBreakdownSeries(entityId, { key, days }))} />
+      <TopUsersCard key={`top-${entityId}`} days={days}
+        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
       <PeopleSection key={entityId} days={days}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
     </div>
@@ -288,18 +293,27 @@ function SeriesCard({ series, metrics, isMobile }) {
 
 function EventsTable({ rows, title: heading, days }) {
   if (!rows || rows.length === 0) return null;
+  // All-zero optional columns (unmapped metrics) stay hidden until they have data.
+  const cols = [
+    ['uniques', 'Uniques', true],
+    ['views', 'Views', rows.some((r) => r.views > 0)],
+    ['interactions', 'Interactions', true],
+    ['ctaTaps', 'CTA taps', rows.some((r) => r.ctaTaps > 0)],
+    ['purchases', 'Purchases', rows.some((r) => r.purchases > 0)],
+  ].filter(([, , show]) => show);
   return (
     <div style={{ ...card, marginTop: 12, overflowX: 'auto' }}>
       <div style={title}>{heading}</div>
       <p style={sub}>Last {days} days · sorted by unique viewers</p>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 520 }}>
-        <thead><tr>{['Event', 'Uniques', 'Views', 'Interactions', 'CTA taps', 'Purchases'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 420 }}>
+        <thead><tr><th style={th}>Event</th>{cols.map(([k, h]) => <th key={k} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.eventRef}>
               <td style={{ ...td, fontWeight: 600 }}>{r.eventName || `Event ${r.eventRef}`}<span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.eventRef}</span></td>
-              <td style={td}>{fmt(r.uniques)}</td><td style={td}>{fmt(r.views)}</td><td style={td}>{fmt(r.interactions)}</td>
-              <td style={td}>{fmt(r.ctaTaps)}</td><td style={td}>{fmt(r.purchases)}{r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmt(r.purchaseValue)}</span>}</td>
+              {cols.map(([k]) => (
+                <td key={k} style={td}>{fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmt(r.purchaseValue)}</span>}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -399,6 +413,51 @@ function BreakdownSeriesChart({ data }) {
   );
 }
 
+// 🏆 Top users — the 10 most active people in the window, its own card (moved
+// out of the App-users list per Shai). Auto-loads: it's a headline metric, and
+// the server caches the query.
+function TopUsersCard({ loader, days }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let dead = false;
+    setRows(null); setError('');
+    loader({ days, orderBy: 'active', limit: 10 })
+      .then((r) => { if (!dead) setRows(r.people || []); })
+      .catch((e) => { if (!dead) setError(e.message); });
+    return () => { dead = true; };
+  }, [days]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope)
+  if (rows && rows.length === 0) return null; // no signal, no card
+  const max = Math.max(1, ...(rows || []).map((p) => p.interactions || 0));
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🏆 Top users</div>
+      <p style={sub}>The 10 most active app users in this window, by interactions.</p>
+      {error && <div style={errBox}>{error}</div>}
+      {!rows && !error && <p style={mutedTxt}>Loading…</p>}
+      {rows && rows.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
+            <thead><tr>{['#', 'Name', 'Email', '', 'Interactions', 'Last seen'].map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((p, i) => (
+                <tr key={i}>
+                  <td style={{ ...td, color: 'var(--muted)' }}>{i + 1}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{[p.firstName, p.lastName].filter(Boolean).join(' ') || '—'}</td>
+                  <td style={td}>{p.email || '—'}</td>
+                  <td style={{ ...td, width: '24%', minWidth: 80 }}><span style={{ display: 'inline-block', height: 8, borderRadius: 4, background: 'var(--brand)', opacity: 0.75, width: `${Math.max(4, Math.round(((p.interactions || 0) / max) * 100))}%` }} /></td>
+                  <td style={td}>{fmt(p.interactions)}</td>
+                  <td style={td}>{p.lastSeen ? new Date(p.lastSeen).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // App-user profiles (PostHog person properties). Loaded on demand — live PostHog
 // queries are scarce, so nothing fires until someone asks for the list.
 function PeopleSection({ loader, days }) {
@@ -407,13 +466,13 @@ function PeopleSection({ loader, days }) {
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [orderBy, setOrderBy] = useState('recent');
   const [hasMore, setHasMore] = useState(false);
-  // Fresh list (new search / order switch) or append the next page.
-  const load = async (term, { append = false, order = orderBy } = {}) => {
+  // Fresh list (new search) or append the next page. Most-active ranking lives
+  // in its own TopUsersCard — this list stays most-recent-first.
+  const load = async (term, { append = false } = {}) => {
     setBusy(true); setError('');
     try {
-      const r = await loader({ days, q: term, orderBy: order, offset: append ? (rows?.length || 0) : 0 });
+      const r = await loader({ days, q: term, offset: append ? (rows?.length || 0) : 0 });
       setRows(append ? [...(rows || []), ...(r.people || [])] : (r.people || []));
       setHasMore(!!r.hasMore);
     } catch (e) { setError(e.message); }
@@ -443,8 +502,6 @@ function PeopleSection({ loader, days }) {
           <form style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); load(q); }}>
             <input style={{ ...input, flex: 1, minWidth: 180 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email or mobile…" />
             <button type="submit" style={ghostBtn} disabled={busy}>{busy ? '…' : 'Search'}</button>
-            <Chip on={orderBy === 'recent'} onClick={() => { setOrderBy('recent'); load(q, { order: 'recent' }); }}>Most recent</Chip>
-            <Chip on={orderBy === 'active'} onClick={() => { setOrderBy('active'); load(q, { order: 'active' }); }}>Most active</Chip>
           </form>
           {error && <div style={errBox}>{error}</div>}
           {busy && !rows && <p style={mutedTxt}>Loading…</p>}
