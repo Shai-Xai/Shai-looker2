@@ -545,15 +545,18 @@ export const api = {
   syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
   verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
 
-  // Social+ (social.plus) in-app community analytics (inbound). Admins pass the
-  // ownership check, so admin-preview and client self-service share /api/my/….
-  mySocialPlus: (entityId, { metric = 'members', days = 30, sort } = {}) => {
+  // Social+ (social.plus) in-app community analytics (inbound). Dual-surface
+  // like queueit: 'admin-client' hits /api/admin (ungated), 'my' the flag-gated
+  // client routes. Directory/assign power the community → client linking.
+  socialplusData: (entityId, scope, { metric = 'members', days = 30, sort } = {}) => {
     const q = new URLSearchParams({ metric, days: String(days) });
     if (sort) q.set('sort', sort);
-    return fetch(`/api/my/socialplus/${entityId}?${q}`).then(json);
+    return fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus` : `/api/my/socialplus/${entityId}`}?${q}`).then(json);
   },
-  syncSocialPlus: (entityId) => fetch(`/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
-  verifySocialPlus: (entityId) => fetch(`/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
+  socialplusSync: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/sync` : `/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
+  socialplusVerify: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/verify` : `/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
+  socialplusDirectory: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/directory` : `/api/my/socialplus/${entityId}/directory`).then(json),
+  socialplusAssign: (entityId, scope, ids) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/assign` : `/api/my/socialplus/${entityId}/assign`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then(json),
 
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),

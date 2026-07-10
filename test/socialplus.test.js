@@ -27,11 +27,47 @@ test('connection reflects the per-client key + region (region defaults to eu)', 
   const e = makeEntity('Connected', 'OrgSPB');
   db.setEntityIntegrations(e.id, { socialplusApiKey: 'k123456789' });
   assert.equal(sp.isConfigured(e.id), true);
+  assert.equal(sp.connection(e.id).source, 'client');
   assert.equal(sp.connection(e.id).region, 'eu');           // default
   db.setEntityIntegrations(e.id, { socialplusRegion: 'sg' });
   assert.equal(sp.connection(e.id).region, 'sg');
   db.setEntityIntegrations(e.id, { socialplusRegion: 'nope' });
   assert.equal(sp.connection(e.id).region, 'eu');           // unknown region falls back
+});
+
+test('blank client fields inherit the platform key (and scope rules follow the source)', async () => {
+  const e = makeEntity('PlatformRider', 'OrgSPP');
+  db.setSetting('socialplus_api_key', 'platform-key');
+  db.setSetting('socialplus_region', 'eu');
+  try {
+    const c = sp.connection(e.id);
+    assert.equal(c.source, 'platform');
+    assert.equal(c.apiKey, 'platform-key');
+    // Shared key + nothing linked → scope is NOTHING (never leak the network)…
+    assert.deepEqual(sp.scopeFor(e.id), { all: false, ids: [] });
+    // …and a sync clears rather than pulls (no network call is even attempted).
+    db.db.prepare('INSERT INTO socialplus_communities (entity_id, community_id, display_name) VALUES (?,?,?)').run(e.id, 'stale', 'Stale');
+    const r = await sp.syncEntity(e.id);
+    assert.equal(r.ok, true);
+    assert.equal(r.unassigned, true);
+    assert.deepEqual(sp.communities(e.id), []);
+    // Linking communities narrows the scope to exactly those ids…
+    db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1, event_35120' });
+    const scope = sp.scopeFor(e.id);
+    assert.equal(sp.communityInScope(scope, 'c1'), true);
+    assert.equal(sp.communityInScope(scope, 'c2'), false);
+    // …and chat channels follow the community id or the event_<id> group prefix.
+    assert.equal(sp.channelInScope(scope, 'c1'), true);                 // community feed chat
+    assert.equal(sp.channelInScope(scope, 'event_35120_main'), true);   // event chat group
+    assert.equal(sp.channelInScope(scope, 'event_99999_main'), false);  // someone else's event
+    // A client on their OWN key with no list sees everything.
+    const own = makeEntity('OwnKey', 'OrgSPQ');
+    db.setEntityIntegrations(own.id, { socialplusApiKey: 'own-key' });
+    assert.deepEqual(sp.scopeFor(own.id), { all: true, ids: [] });
+  } finally {
+    db.setSetting('socialplus_api_key', '');
+    db.setSetting('socialplus_region', '');
+  }
 });
 
 test('applyPatch writes key/region write-only; view never leaks the key', () => {
@@ -43,6 +79,8 @@ test('applyPatch writes key/region write-only; view never leaks the key', () => 
   sp.applyPatch({ socialplus: { clearApiKey: true, region: 'bogus' } }, set);
   assert.equal(store.socialplusApiKey, '');
   assert.equal(store.socialplusRegion, 'eu');              // bogus region normalised
+  sp.applyPatch({ socialplus: { communityIds: ['c1', 'c1', ' event_35120 ', ''] } }, set);
+  assert.equal(store.socialplusCommunityIds, 'c1,event_35120'); // deduped + trimmed
   // Untouched payload → nothing written.
   const store2 = {};
   sp.applyPatch({}, (k, v) => { store2[k] = v; });

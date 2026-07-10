@@ -293,13 +293,13 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       {showSocialPlus && (
         <Section title="👥 Social+ (app communities)" collapsible={collapsible} {...lockProps('socialplus')} guide={<>
           <div style={note}>
-            Pull your <b>in-app community analytics</b> from <b>Social+</b> (social.plus, formerly Amity) into Pulse — community members, chat activity, posts, comments &amp; reactions per event. <b>Read-only:</b> Pulse never posts or moderates.
+            Pull <b>in-app community analytics</b> from <b>Social+</b> (social.plus, formerly Amity) into Pulse — community members, chat activity, posts, comments &amp; reactions per event, shown on the <b>App → Community</b> tab. <b>Read-only:</b> Pulse never posts or moderates. A client left blank rides Howler's shared network — then an admin just <b>links their communities</b> to them (Admin → client → Integrations → Social+ card).
           </div>
-          <HowTo title="How to get your Social+ API key" steps={[
-            <>Open your <b>Social+ console</b> (portal) and pick the application your app communities live in.</>,
+          <HowTo title="How to get a Social+ API key" steps={[
+            <>Open the <b>Social+ console</b> (portal) and pick the application the app communities live in.</>,
             <>Go to <b>Settings → Security</b> (or <b>Settings → Integrations</b> on newer consoles) and copy the application's <b>API key</b>.</>,
-            <>Paste it into <b>API key</b> above and pick the <b>region</b> your Social+ network is hosted in (shown in the console URL / settings).</>,
-            <>Save, then open <b>Social</b> and tap <b>Refresh now</b> — communities and chat stats appear after the first sync and refresh daily.</>,
+            <>Paste it into <b>API key</b> above and pick the <b>region</b> the Social+ network is hosted in (shown in the console URL / settings).</>,
+            <>Save, then <b>link the client's communities</b> in their Social+ card (Admin → client → Integrations) — stats land on their <b>App → Community</b> tab and refresh daily.</>,
           ]} />
         </>}>
           <Lbl>API key</Lbl>
@@ -318,7 +318,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <option value="us">US East (us)</option>
             <option value="sg">Singapore (sg)</option>
           </select>
-          {value?.socialplus?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — community &amp; chat stats appear in <b>Social</b> after the next sync.</div>}
+          {value?.socialplus?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — link communities to clients and the stats appear on their <b>App → Community</b> tab.</div>}
           <SaveRow k="socialplus" />
         </Section>
       )}

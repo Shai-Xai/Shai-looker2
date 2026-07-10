@@ -15,6 +15,7 @@ import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import QueueItCard from '../components/QueueItCard.jsx';
+import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
 import { PosthogSettingsCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
@@ -5180,7 +5181,7 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit showSocialPlus clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit', 'socialplus']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
       </Section>
       <Section title="📱 PostHog — app analytics">
         <p style={hint}>One platform connection to Howler's PostHog project. Powers the 📲 App analytics tab and every client's App page (scoped to their events by the <code>eventID</code> property). Event/metric mapping lives on the App analytics tab.</p>
@@ -5505,6 +5506,7 @@ function ClientIntegrations({ entity }) {
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
       <MetaConnectCard entityId={entity.id} scope="admin-client" />
       <QueueItCard entityId={entity.id} scope="admin-client" />
+      <SocialPlusPanel entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );

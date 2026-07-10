@@ -4,13 +4,20 @@
 // (reactions, comments, impressions, reach) — the numbers behind the Social+
 // console, queried directly so they land next to everything else Pulse knows.
 //
-// Per-client connection (Admin → client → Integrations, or client self-service):
-//   socialplusApiKey  — the app API key from the Social+ console (write-only,
-//                       sealed at rest by the secret-name heuristic)
-//   socialplusRegion  — 'eu' | 'us' | 'sg' (where the Social+ network lives)
-// Auth: POST /api/v3/sessions with x-api-key mints a user access token for a
-// dedicated read-only service identity; we cache it in-memory and refresh well
-// inside its 30-day life. Endpoints verified live against apix.eu.amity.co.
+// Credentials layer like every other integration (platform default → client
+// override): per-client `socialplusApiKey` + `socialplusRegion` live in the
+// entity integrations blob (the key auto-seals via secretbox.isSecretName);
+// blank client fields fall back to the platform settings `socialplus_api_key` /
+// `socialplus_region` (Admin → Integrations) — Howler runs ONE Social+ network
+// (the Howler app), so most clients ride the shared platform key.
+//
+// Community scoping: when a client rides the PLATFORM key they sync ONLY the
+// communities an admin explicitly linked to them (`socialplusCommunityIds` —
+// community ids and/or `event_<howlerEventId>` chat-group prefixes) — never the
+// whole network. A client with their OWN key syncs everything unless the list
+// narrows it. Auth: POST /api/v3/sessions with x-api-key mints a user access
+// token for a read-only service identity; cached in-memory well inside its
+// 30-day life. Endpoints verified live against apix.eu.amity.co.
 //
 // House conventions (mirrors socialMetrics.js / slack.js):
 //   • graceful no-op until a client pastes their key,
@@ -102,16 +109,50 @@ function init(deps) {
   `);
 }
 
-// ── connection (per client, from entity integrations) ──
+// ── connection (client override → platform default, like queueit) ──
 function connection(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
-  const region = REGIONS[i.socialplusRegion] ? i.socialplusRegion : 'eu';
-  return { apiKey: (i.socialplusApiKey || '').trim(), region };
+  const clientKey = (i.socialplusApiKey || '').trim();
+  if (clientKey) return { apiKey: clientKey, region: REGIONS[i.socialplusRegion] ? i.socialplusRegion : 'eu', source: 'client' };
+  const platformKey = (db ? db.getSetting('socialplus_api_key') || '' : '').trim();
+  const platformRegion = db ? db.getSetting('socialplus_region') || '' : '';
+  if (platformKey) return { apiKey: platformKey, region: REGIONS[platformRegion] ? platformRegion : 'eu', source: 'platform' };
+  return { apiKey: '', region: 'eu', source: null };
 }
 function isConfigured(entityId) { return !!connection(entityId).apiKey; }
+
+// The per-client scope list: community ids and/or `event_<id>` channel-group
+// prefixes. Accepts an array or a comma/space-separated string.
+function idList(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(/[\s,]+/);
+  return [...new Set(arr.map((s) => String(s || '').trim()).filter(Boolean))];
+}
+function assignedIds(entityId) {
+  const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
+  return idList(i.socialplusCommunityIds);
+}
+// What may THIS client sync/see? Assigned list → exactly that. No list: their
+// own key → everything; the shared platform key → NOTHING (never leak another
+// client's communities). Mirrors queueit.visibleRooms.
+function scopeFor(entityId) {
+  const ids = assignedIds(entityId);
+  if (ids.length) return { all: false, ids };
+  return { all: connection(entityId).source === 'client', ids: [] };
+}
+const communityInScope = (scope, communityId) => scope.all || scope.ids.includes(String(communityId));
+// A channel is in scope when it IS an assigned id (community feed channels share
+// the community's id) or sits under an assigned `event_<id>` prefix.
+const channelInScope = (scope, channelId) => scope.all
+  || scope.ids.some((id) => String(channelId) === id || String(channelId).startsWith(`${id}_`));
+
 function status(entityId) {
+  const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
   const c = connection(entityId);
-  return { configured: !!c.apiKey, region: c.region };
+  return {
+    configured: !!c.apiKey, source: c.source, region: c.region,
+    clientKeySet: !!(i.socialplusApiKey || '').trim(),
+    communityIds: assignedIds(entityId),
+  };
 }
 
 // ── integration plumbing (kept here so index.js stays thin) ──
@@ -121,6 +162,7 @@ function applyPatch(body, set) {
   if (sp.apiKey) set('socialplusApiKey', String(sp.apiKey).trim());
   if (sp.clearApiKey) set('socialplusApiKey', '');
   if (sp.region !== undefined) set('socialplusRegion', REGIONS[sp.region] ? String(sp.region) : 'eu');
+  if (sp.communityIds !== undefined) set('socialplusCommunityIds', idList(sp.communityIds).join(','));
 }
 // Masked, write-only view for the settings UI (the key is reported set + hint only).
 const mask = (v) => (v ? `••••${String(v).slice(-4)}` : '');
@@ -130,18 +172,21 @@ function view(i) {
     keyHint: mask(i.socialplusApiKey),
     region: REGIONS[i.socialplusRegion] ? i.socialplusRegion : 'eu',
     configured: !!i.socialplusApiKey,
+    communityIds: idList(i.socialplusCommunityIds),
   };
 }
 
 // ── session + fetch helpers ──
-// Mint (and cache) an access token for the Pulse service identity. A changed
-// API key invalidates the cache entry so a re-pasted key takes effect at once.
-const sessions = new Map(); // entityId → { token, base, key, at }
+// Mint (and cache) an access token for the Pulse service identity. Cached per
+// key+region (NOT per entity) so every client on the shared platform key reuses
+// one session; a changed key naturally misses the cache and re-mints.
+const sessions = new Map(); // `${region}:${apiKey}` → { token, base, key, at }
 async function session(entityId) {
   const c = connection(entityId);
   if (!c.apiKey) { const e = new Error('Social+ isn’t connected for this client.'); e.httpStatus = 400; throw e; }
-  const cached = sessions.get(entityId);
-  if (cached && cached.key === c.apiKey && (Date.now() - cached.at) < TOKEN_TTL_MS) return cached;
+  const cacheKey = `${c.region}:${c.apiKey}`;
+  const cached = sessions.get(cacheKey);
+  if (cached && (Date.now() - cached.at) < TOKEN_TTL_MS) return cached;
   const base = REGIONS[c.region];
   const res = await fetch(`${base}/api/v3/sessions`, {
     method: 'POST',
@@ -156,7 +201,8 @@ async function session(entityId) {
     throw err;
   }
   const s = { token: data.accessToken, base, key: c.apiKey, at: Date.now() };
-  sessions.set(entityId, s);
+  sessions.set(cacheKey, s);
+  if (sessions.size > 50) sessions.clear(); // bound the cache; re-mints are cheap
   return s;
 }
 async function apiGet(s, path) {
@@ -241,16 +287,27 @@ function setSyncState(entityId, status, error = '') {
 }
 
 // ── the sync chokepoint — NEVER throws ──
-// Pulls communities + channels (full snapshots), post detail for the most active
-// communities, then restates today's totals row. A failure is recorded on the
-// sync row; whatever landed before the failure stays.
+// Pulls communities + channels (filtered to this client's scope), post detail
+// for the most active in-scope communities, then restates today's totals row.
+// A failure is recorded on the sync row; whatever landed before the failure stays.
 async function syncEntity(entityId) {
   if (!isConfigured(entityId)) return { ok: false, error: 'not_configured' };
+  const scope = scopeFor(entityId);
+  // Shared platform key with nothing linked yet: sync NOTHING (and clear any
+  // rows from a previous, wider assignment) — never leak other clients' data.
+  if (!scope.all && !scope.ids.length) {
+    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily']) {
+      db.db.prepare(`DELETE FROM ${t} WHERE entity_id=?`).run(entityId);
+    }
+    setSyncState(entityId, 'ok');
+    return { ok: true, totals: totals(entityId), communities: 0, channels: 0, unassigned: true };
+  }
   try {
     const s = await session(entityId);
     const now = new Date().toISOString();
 
-    const { items: comms, complete: commsComplete } = await pagedList(s, '/api/v3/communities?filter=all', 'communities');
+    const { items: allComms, complete: commsComplete } = await pagedList(s, '/api/v3/communities?filter=all', 'communities');
+    const comms = allComms.filter((c) => communityInScope(scope, String(c.communityId || c._id)));
     for (const c of comms) {
       upsertCommunity({
         entity_id: entityId, community_id: String(c.communityId || c._id),
@@ -258,10 +315,11 @@ async function syncEntity(entityId) {
         members: num(c.membersCount), posts: num(c.postsCount), created_at: c.createdAt || '', last_synced: now,
       });
     }
-    // Prune communities that no longer exist — only when we saw the full list.
+    // Prune rows that vanished (or fell out of scope) — only on a full listing.
     if (commsComplete) db.db.prepare('DELETE FROM socialplus_communities WHERE entity_id=? AND last_synced<>?').run(entityId, now);
 
-    const { items: chans, complete: chansComplete } = await pagedList(s, '/api/v3/channels?filter=all', 'channels');
+    const { items: allChans, complete: chansComplete } = await pagedList(s, '/api/v3/channels?filter=all', 'channels');
+    const chans = allChans.filter((ch) => channelInScope(scope, String(ch.channelId || ch._id)));
     for (const ch of chans) {
       upsertChannel({
         entity_id: entityId, channel_id: String(ch.channelId || ch._id),
@@ -272,7 +330,7 @@ async function syncEntity(entityId) {
     }
     if (chansComplete) db.db.prepare('DELETE FROM socialplus_channels WHERE entity_id=? AND last_synced<>?').run(entityId, now);
 
-    // Post-level detail for the most active communities (engagement lives here).
+    // Post-level detail for the most active in-scope communities.
     const active = comms.filter((c) => (c.postsCount || 0) > 0)
       .sort((a, b) => (b.postsCount || 0) - (a.postsCount || 0)).slice(0, POST_COMMUNITIES);
     for (const c of active) {
@@ -288,6 +346,14 @@ async function syncEntity(entityId) {
           impressions: num(p.impression), reach: num(p.reach),
           posted_at: p.createdAt || '', updated_at: now,
         });
+      }
+    }
+
+    // Posts from communities that fell out of scope go too (full listing only).
+    if (commsComplete) {
+      const keep = new Set(comms.map((c) => String(c.communityId || c._id)));
+      for (const row of db.db.prepare('SELECT DISTINCT community_id AS cid FROM socialplus_posts WHERE entity_id=?').all(entityId)) {
+        if (!keep.has(row.cid)) db.db.prepare('DELETE FROM socialplus_posts WHERE entity_id=? AND community_id=?').run(entityId, row.cid);
       }
     }
 
@@ -334,11 +400,15 @@ function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
     FROM socialplus_posts WHERE entity_id=? ORDER BY ${col} DESC NULLS LAST LIMIT ?`).all(entityId, Math.min(Number(limit) || 10, 50));
 }
 
-// Per-client health summary (admin monitoring + the Social page header).
+// Per-client health summary (admin monitoring + the App page header).
 function summary(entityId) {
   const sync = db.db.prepare('SELECT last_status AS lastStatus, last_error AS lastError, last_synced AS lastSynced FROM socialplus_sync WHERE entity_id=?').get(entityId) || {};
+  const st = status(entityId);
   return {
-    channel: 'socialplus', configured: isConfigured(entityId), region: connection(entityId).region,
+    channel: 'socialplus', configured: st.configured, source: st.source, region: st.region,
+    communityIds: st.communityIds,
+    // On the shared platform key a client only has data once communities are linked.
+    assigned: st.source === 'client' || st.communityIds.length > 0,
     totals: totals(entityId),
     lastStatus: sync.lastStatus || '', lastError: sync.lastError || '', lastAt: sync.lastSynced || '',
   };
@@ -400,6 +470,67 @@ function mount(app, { db: database, auth }) {
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
     res.json(await verify(id));
   }));
+
+  // ── community → client linking (the guardrail that makes the shared platform
+  // key safe to reuse, mirroring queueit's waiting-room assignment) ──
+  // The directory lists EVERYTHING on the resolved key — every community, plus
+  // chat channels rolled up into `event_<id>` groups — so an admin can tick what
+  // belongs to this client. Live read; nothing is stored.
+  async function directory(entityId) {
+    const s = await session(entityId);
+    const { items: comms } = await pagedList(s, '/api/v3/communities?filter=all', 'communities');
+    const { items: chans } = await pagedList(s, '/api/v3/channels?filter=all', 'channels');
+    const communities = comms.map((c) => ({
+      id: String(c.communityId || c._id), name: c.displayName || '(unnamed)',
+      members: num(c.membersCount), posts: num(c.postsCount), createdAt: c.createdAt || '',
+    })).sort((a, b) => (b.members || 0) - (a.members || 0));
+    // Channels grouped by their `event_<id>` prefix; community feed channels
+    // (id === a community id) ride along with the community tick automatically.
+    const groups = new Map();
+    const commIds = new Set(communities.map((c) => c.id));
+    for (const ch of chans) {
+      const id = String(ch.channelId || ch._id);
+      if (commIds.has(id)) continue;
+      const m = id.match(/^(event_\d+)_/);
+      const key = m ? m[1] : id;
+      const g = groups.get(key) || { id: key, name: '', channels: 0, members: 0, messages: 0 };
+      g.channels += 1;
+      g.members += num(ch.memberCount) || 0;
+      g.messages += num(ch.messageCount) || 0;
+      if (!g.name || /announcement|main/i.test(String(ch.displayName))) g.name = String(ch.displayName || key).replace(/\s*[-–—·|]?\s*(announcements?|main chat|main|line-?up.*|faq.*)\s*$/i, '').trim() || key;
+      groups.set(key, g);
+    }
+    const channelGroups = [...groups.values()].sort((a, b) => (b.members || 0) - (a.members || 0));
+    return { communities, channelGroups };
+  }
+  // A client may browse/edit the directory only on their OWN key; on the shared
+  // platform key linking is Howler's job (same rule as queueit room assignment).
+  const canSelfManage = (id) => connection(id).source === 'client';
+  app.get('/api/admin/entities/:id/socialplus/directory', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...(await directory(req.params.id)), assignedIds: assignedIds(req.params.id), source: connection(req.params.id).source });
+  }));
+  app.get('/api/my/socialplus/:entityId/directory', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
+    const id = req.params.entityId;
+    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+    if (req.user.role !== 'admin' && !canSelfManage(id)) return res.status(403).json({ error: 'Community linking on the shared Social+ account is managed by Howler.' });
+    res.json({ ...(await directory(id)), assignedIds: assignedIds(id), source: connection(id).source });
+  }));
+  async function saveAssignment(id, body, res) {
+    database.setEntityIntegrations(id, { socialplusCommunityIds: idList((body || {}).ids).join(',') });
+    const sync = await syncEntity(id); // re-scope the data right away
+    res.json({ ...status(id), sync });
+  }
+  app.put('/api/admin/entities/:id/socialplus/assign', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    await saveAssignment(req.params.id, req.body, res);
+  }));
+  app.put('/api/my/socialplus/:entityId/assign', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
+    const id = req.params.entityId;
+    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+    if (req.user.role !== 'admin' && !canSelfManage(id)) return res.status(403).json({ error: 'Community linking on the shared Social+ account is managed by Howler.' });
+    await saveAssignment(id, req.body, res);
+  }));
   return module.exports;
 }
 
@@ -425,6 +556,7 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
+  idList, assignedIds, scopeFor, communityInScope, channelInScope,
   syncEntity, totals, communities, channels, series, topPosts, summary, verify,
   startDailySync, stopDailySync,
 };

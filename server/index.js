@@ -143,7 +143,7 @@ const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND �
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).
 const socialMetrics = require('./socialMetrics');
-socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); const socialplus = require('./socialplus').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields) + Social+ (social.plus) in-app community analytics INBOUND (daily sync started below)
+socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields)
 require('./queueit').mount(app, { db, auth }); // Queue-it INBOUND — live waiting-room stats (read-only; platform creds with per-client override)
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
@@ -193,7 +193,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); require('./posthog').mount(app, { db, auth, runLookerQuery }); // 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (after flags so its appanalytics gate applies) → server/flags.js, server/posthog.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); require('./posthog').mount(app, { db, auth, runLookerQuery }); const socialplus = require('./socialplus').mount(app, { db, auth }); // 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -1090,8 +1090,8 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
   if (locks.chottu !== false) delete body.chottu;
-  if (locks.queueit !== false) delete body.queueit;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key' };
+  if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
   applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};

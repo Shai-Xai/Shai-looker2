@@ -90,6 +90,14 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
         keyHint: maskSecret(db.getSetting('queueit_api_key')),
         configured: !!(db.getSetting('queueit_customer_id') && db.getSetting('queueit_api_key')),
       },
+      // Social+ — Howler's ONE app network (per-client keys override; communities
+      // are linked to clients per entity, not here).
+      socialplus: {
+        keySet: !!db.getSetting('socialplus_api_key'),
+        keyHint: maskSecret(db.getSetting('socialplus_api_key')),
+        region: db.getSetting('socialplus_region') || 'eu',
+        configured: !!db.getSetting('socialplus_api_key'),
+      },
       locks: getPlatformIntegrationLocks(), // { key: true } — frozen platform integrations
     };
   }
@@ -123,7 +131,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
 
   // Platform-level integration freeze locks — same idea as per-client, but for
   // Howler's own accounts, kept in a single setting.
-  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit'];
+  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit', 'socialplus'];
   function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
   function setPlatformIntegrationLock(key, locked) {
     const cur = getPlatformIntegrationLocks();

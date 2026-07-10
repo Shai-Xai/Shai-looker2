@@ -423,20 +423,26 @@ each platform without leaving Pulse."
 followers, reach and the posts that landed — next to their ticketing numbers, all
 in one place that updates itself."
 
-### 5e-bis. Social+ — in-app community analytics  🟡 (needs connection) · 🧪
+### 5e-bis. Social+ — in-app community analytics  🟡 (needs setup) · 🧪
 - Pulls the client's **Social+** (social.plus, formerly Amity) **in-app community
-  analytics into Pulse** — the fan communities and chats living inside the app,
-  next to their organic social and ticketing numbers.
-- **What you see** (Social page → In-app communities): total **members,
-  communities, posts, comments, reactions and chat messages**; a **30-day trend**
-  with a metric switcher; the biggest **communities** per event; and **top posts**
-  ranked by reactions — each with comments, impressions and reach.
+  analytics into Pulse** — the fan communities and chats living inside the Howler
+  app, next to their app engagement and ticketing numbers.
+- **What you see** (📲 App page → **Community** tab, next to the PostHog
+  Analytics tab): total **members, communities, posts, comments, reactions and
+  chat messages**; a **30-day trend** with a metric switcher; the biggest
+  **communities**, the **busiest chats** and **top posts** ranked by reactions —
+  each with comments, impressions and reach.
 - **Chat coverage:** every channel (announcements, line-up, FAQ, event chat) with
   member and message counts — spot which event conversations are alive.
-- **Setup 🟡:** paste the Social+ **application API key** + pick the hosting
-  region in Integrations (admin on the client's behalf, or client self-service —
-  dual-surface, key is write-only + sealed). One-tap **Sync**, then daily
-  auto-refresh. Read-only: Pulse never posts or moderates.
+- **Linked per client:** Howler's ONE Social+ network holds every organiser's
+  communities, so an admin **links the right communities & event chats to each
+  client** (Admin → client → Integrations → Social+ card) — a client only ever
+  syncs and sees their own. A client can also use their own Social+ key
+  (Settings → Integrations), which unlocks self-service linking.
+- **Setup 🟡:** platform key in Admin → Integrations (once), then tick the
+  client's communities and save — the save re-syncs immediately; daily
+  auto-refresh after that. Read-only: Pulse never posts or moderates. Gated by
+  the `App analytics → Community (Social+)` feature flag.
 - 🔜 **Next:** feed community engagement into the Owl/digests and dashboard tiles.
 
 **Pitch:** "Your app community isn't a black box any more — see which event
@@ -1003,9 +1009,11 @@ see "The continuous comms loop" above.)*
 - **2026-07-10** — **👥 Social+ in-app community analytics** 🧪 (new): direct
   integration with **Social+** (social.plus) — Pulse pulls a client's app
   **communities, chat channels, posts, comments & reactions** in daily (or on-tap
-  sync) and shows them on the **Social page**: totals, a 30-day trend, biggest
-  communities and top posts. Connect with the Social+ API key + region in
-  Integrations (dual-surface, write-only secret). Read-only.
+  sync) and shows them on the **📲 App page → Community tab**: totals, a 30-day
+  trend, biggest communities, busiest chats and top posts. One platform key
+  (Admin → Integrations) covers the whole Howler network; admins **link each
+  client's communities & event chats** to them so clients only ever see their
+  own. Read-only; flag `appanalytics.socialplus`.
 - **2026-07-10** — **📲 App analytics (PostHog) ships in beta** — direct PostHog
   integration for Howler-app engagement: per-event views/uniques/CTA
   taps/purchases with live today-so-far numbers, an app-user directory
