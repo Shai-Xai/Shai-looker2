@@ -437,8 +437,8 @@ in one place that updates itself."
 - **Linked per client:** Howler's ONE Social+ network holds every organiser's
   communities, so an admin **links the right communities & event chats to each
   client** (Admin → client → Integrations → Social+ card) — a client only ever
-  syncs and sees their own. A client can also use their own Social+ key
-  (Settings → Integrations), which unlocks self-service linking.
+  syncs and sees their own. Linking (and the full network directory behind it)
+  is strictly admin-only; the client just sees what's ticked for them.
 - **Setup 🟡:** platform key in Admin → Integrations (once), then tick the
   client's communities and save — the save re-syncs immediately; daily
   auto-refresh after that. Read-only: Pulse never posts or moderates. Gated by

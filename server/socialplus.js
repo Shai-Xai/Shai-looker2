@@ -503,33 +503,19 @@ function mount(app, { db: database, auth }) {
     const channelGroups = [...groups.values()].sort((a, b) => (b.members || 0) - (a.members || 0));
     return { communities, channelGroups };
   }
-  // A client may browse/edit the directory only on their OWN key; on the shared
-  // platform key linking is Howler's job (same rule as queueit room assignment).
-  const canSelfManage = (id) => connection(id).source === 'client';
+  // Directory + assignment are ADMIN-ONLY (no /api/my/ twin, deliberately): the
+  // directory lists EVERY organiser's communities, so it must never be readable
+  // from the client surface — not even for a client with their own pasted key
+  // (which in practice is often just the shared platform key pasted per client).
   app.get('/api/admin/entities/:id/socialplus/directory', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     res.json({ ...(await directory(req.params.id)), assignedIds: assignedIds(req.params.id), source: connection(req.params.id).source });
   }));
-  app.get('/api/my/socialplus/:entityId/directory', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
-    const id = req.params.entityId;
-    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
-    if (req.user.role !== 'admin' && !canSelfManage(id)) return res.status(403).json({ error: 'Community linking on the shared Social+ account is managed by Howler.' });
-    res.json({ ...(await directory(id)), assignedIds: assignedIds(id), source: connection(id).source });
-  }));
-  async function saveAssignment(id, body, res) {
-    database.setEntityIntegrations(id, { socialplusCommunityIds: idList((body || {}).ids).join(',') });
-    const sync = await syncEntity(id); // re-scope the data right away
-    res.json({ ...status(id), sync });
-  }
   app.put('/api/admin/entities/:id/socialplus/assign', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-    await saveAssignment(req.params.id, req.body, res);
-  }));
-  app.put('/api/my/socialplus/:entityId/assign', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
-    const id = req.params.entityId;
-    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
-    if (req.user.role !== 'admin' && !canSelfManage(id)) return res.status(403).json({ error: 'Community linking on the shared Social+ account is managed by Howler.' });
-    await saveAssignment(id, req.body, res);
+    database.setEntityIntegrations(req.params.id, { socialplusCommunityIds: idList((req.body || {}).ids).join(',') });
+    const sync = await syncEntity(req.params.id); // re-scope the data right away
+    res.json({ ...status(req.params.id), sync });
   }));
   return module.exports;
 }

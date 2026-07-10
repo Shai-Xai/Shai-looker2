@@ -103,9 +103,11 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         </>
       )}
 
-      {/* Admin (or a client on their OWN key): the community → client linking. */}
-      {(scope === 'admin-client' || s.source === 'client') && (
-        <CommunityLinking entityId={entityId} scope={scope} assigned={s.communityIds || []} onSaved={load} />
+      {/* Community → client linking is ADMIN-ONLY: the picker lists the whole
+          Social+ directory (every organiser's communities), so it must never
+          render on the client surface — whichever key the client rides on. */}
+      {scope === 'admin-client' && (
+        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={load} />
       )}
     </div>
   );
@@ -239,7 +241,7 @@ function TopPosts({ rows }) {
 // The linking picker: everything on the Social+ network (communities + chat
 // groups) with ticks for what belongs to THIS client. Loads lazily — 40+
 // communities and hundreds of channels only fetch when someone opens it.
-function CommunityLinking({ entityId, scope, assigned, onSaved }) {
+function CommunityLinking({ entityId, assigned, onSaved }) {
   const [open, setOpen] = useState(false);
   const [dir, setDir] = useState(null);
   const [dirErr, setDirErr] = useState('');
@@ -249,12 +251,12 @@ function CommunityLinking({ entityId, scope, assigned, onSaved }) {
   useEffect(() => { setPicked(new Set(assigned)); }, [assigned.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open || dir) return;
-    api.socialplusDirectory(entityId, scope).then(setDir).catch((e) => setDirErr(e.message));
-  }, [open, dir, entityId, scope]);
+    api.socialplusDirectory(entityId).then(setDir).catch((e) => setDirErr(e.message));
+  }, [open, dir, entityId]);
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const save = async () => {
     setBusy(true); setDirErr('');
-    try { await api.socialplusAssign(entityId, scope, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 1600); onSaved?.(); }
+    try { await api.socialplusAssign(entityId, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 1600); onSaved?.(); }
     catch (e) { setDirErr(e.message); }
     setBusy(false);
   };
@@ -267,7 +269,7 @@ function CommunityLinking({ entityId, scope, assigned, onSaved }) {
       {open && (
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 8px' }}>
-            On the shared Howler network, tick only THIS client's communities and event chats — unticked ones stay invisible to them. Saving re-syncs their data immediately. (On a client's own Social+ account, no ticks = they see everything.)
+            Tick only THIS client's communities and event chats — unticked ones stay invisible to them. Saving re-syncs their data immediately. Only admins ever see this list; the client just sees what you tick.
           </div>
           {dirErr && <div style={errBox}>{dirErr}</div>}
           {!dir && !dirErr && <div style={mutedTxt}>Loading the Social+ directory…</div>}

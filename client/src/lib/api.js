@@ -559,8 +559,10 @@ export const api = {
   },
   socialplusSync: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/sync` : `/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
   socialplusVerify: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/verify` : `/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
-  socialplusDirectory: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/directory` : `/api/my/socialplus/${entityId}/directory`).then(json),
-  socialplusAssign: (entityId, scope, ids) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/assign` : `/api/my/socialplus/${entityId}/assign`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then(json),
+  // Directory + assign are admin-only — the directory spans every organiser's
+  // communities, so there is deliberately no client-surface twin.
+  socialplusDirectory: (entityId) => fetch(`/api/admin/entities/${entityId}/socialplus/directory`).then(json),
+  socialplusAssign: (entityId, ids) => fetch(`/api/admin/entities/${entityId}/socialplus/assign`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then(json),
 
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),
