@@ -385,7 +385,7 @@ function MappingEditor() {
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🧭 Event mapping</div>
-      <p style={sub}>Tell Pulse which PostHog events mean what — one event name per line. The catalog shows what the app actually sends, busiest first.</p>
+      <p style={sub}>Tell Pulse which PostHog events mean what — one entry per line. Either a plain event name, or <code>event : property=value</code> when one generic event carries several meanings (e.g. <code>interaction : action=event_view</code>). The catalog shows what the app actually sends, busiest first; 🔬 Diagnose shows the property keys.</p>
       <div style={grid2}>
         {[['screenEvents', 'Screen / page views'], ['ctaEvents', 'CTA taps'], ['purchaseEvents', 'Purchases'], ['notificationEvents', 'Notifications']].map(([k, label]) => (
           <label key={k} style={lbl}>{label}

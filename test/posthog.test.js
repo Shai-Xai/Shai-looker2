@@ -14,9 +14,23 @@ test('hqlStr escapes quotes and backslashes (config can never break out of a lit
   assert.equal(posthog.prop("event'ID"), "properties['event\\'ID']");
 });
 
-test('countIn with an empty mapping is a constant 0, never IN ()', () => {
+test('countIn with an empty mapping is a constant 0, never an empty OR', () => {
   assert.equal(posthog.countIn([], 'x'), '0 AS x');
-  assert.match(posthog.countIn(['$screen'], 'views'), /countIf\(event IN \('\$screen'\)\) AS views/);
+  assert.equal(posthog.countIn(['$screen'], 'views'), "countIf(event = '$screen') AS views");
+});
+
+test('property-qualified mapping entries compile to event+property conditions', () => {
+  assert.deepEqual(posthog.parseMapEntry('interaction : action=event_view'), { event: 'interaction', prop: 'action', value: 'event_view' });
+  assert.deepEqual(posthog.parseMapEntry('$screen'), { event: '$screen' });
+  assert.equal(
+    posthog.mapCond(['$screen', 'interaction : action=event_view']),
+    "event = '$screen' OR (event = 'interaction' AND toString(properties['action']) = 'event_view')",
+  );
+  // a hostile value still can't break out of the literal
+  assert.equal(
+    posthog.mapCond(["interaction : a='); DROP--=x"]),
+    "(event = 'interaction' AND toString(properties['a']) = '\\'); DROP--=x')",
+  );
 });
 
 test('nameList splits commas/newlines, trims, dedupes', () => {

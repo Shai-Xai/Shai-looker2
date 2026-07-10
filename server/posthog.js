@@ -46,9 +46,22 @@ const hqlStr = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}
 const hqlList = (arr) => arr.map(hqlStr).join(', ');
 const prop = (name) => `properties[${hqlStr(name)}]`;
 const personProp = (name) => `person.properties[${hqlStr(name)}]`;
-// countIf over a configured event-name list; an unmapped (empty) list is a
-// constant 0 so the column always exists and `IN ()` never reaches PostHog.
-const countIn = (list, as) => (list.length ? `countIf(event IN (${hqlList(list)})) AS ${as}` : `0 AS ${as}`);
+// A mapping entry is `eventName` or `eventName : property=value` — the latter for
+// apps that funnel everything through one generic event (e.g. `interaction`) and
+// distinguish views/CTAs/purchases by a property. Parsed lazily at query time so
+// the stored mapping stays plain strings.
+function parseMapEntry(s) {
+  const m = String(s).match(/^(.*?)\s*:\s*([^=:]+)=(.*)$/);
+  if (m && m[1].trim() && m[2].trim()) return { event: m[1].trim(), prop: m[2].trim(), value: m[3].trim() };
+  return { event: String(s).trim() };
+}
+const entryCond = (e) => (e.prop
+  ? `(event = ${hqlStr(e.event)} AND toString(${prop(e.prop)}) = ${hqlStr(e.value)})`
+  : `event = ${hqlStr(e.event)}`);
+// countIf over a configured mapping list; an unmapped (empty) list is a constant
+// 0 so the column always exists and an empty OR never reaches PostHog.
+const mapCond = (list) => list.map(parseMapEntry).map(entryCond).join(' OR ');
+const countIn = (list, as) => (list.length ? `countIf(${mapCond(list)}) AS ${as}` : `0 AS ${as}`);
 
 // The query API returns rows as arrays aligned to `columns` — zip into objects.
 function zipRows(data) {
@@ -196,7 +209,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       for (const r of newRows) if (r.day) upNew.run(r.day, Number(r.new_users) || 0, ts);
       const evId = prop(c.eventIdProp);
       const value = m.purchaseValueProp && m.purchaseEvents.length
-        ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), event IN (${hqlList(m.purchaseEvents)})) AS purchase_value`
+        ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), ${mapCond(m.purchaseEvents)}) AS purchase_value`
         : '0 AS purchase_value';
       const evRows = await hogql(`
         SELECT toString(toDate(timestamp)) AS day, toString(${evId}) AS event_ref,
@@ -512,4 +525,4 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, people, isConfigured, hogql };
 }
 
-module.exports = { mount, hqlStr, hqlList, prop, personProp, countIn, zipRows, nameList, DEFAULT_MAP };
+module.exports = { mount, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };
