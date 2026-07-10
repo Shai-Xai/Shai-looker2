@@ -1,6 +1,9 @@
 # Spec — Direct PostHog integration: app analytics in Pulse (v1)
 
-> Status: **draft for review** · Owner: Shai · North Star:
+> Status: **v1 SHIPPED 2026-07-10** (steps 1–3 + app-user profiles; funnels/
+> retention + the Owl tool remain — see §7) · Implementation: `server/posthog.js`,
+> `client/src/components/AppAnalytics.jsx`, `client/src/pages/AppAnalyticsPage.jsx`,
+> flag `appanalytics` (default off, beta) · Owner: Shai · North Star:
 > `docs/EXPERIENCE_OS_BRIEF.md`. Decided direction (Shai, 2026-07-10): the
 > **Looker path stays** for anything app data must join to other Howler data
 > (revenue, ticketing); a **direct PostHog path** is added for app-ONLY
@@ -149,14 +152,18 @@ snapshot so the Owl can narrate app behaviour in briefings/digests later.
 Each step ships independently; stopping after any step leaves a working,
 smaller feature.
 
-## 8. Open questions (answer before/while building)
+## 8. Open questions — ANSWERED (Shai, 2026-07-10)
 
-1. **Exact property name** carrying the Howler event id in PostHog (and is an
-   organiser/client id also stamped? If yes, client scoping gets a second,
-   stronger key).
-2. **PostHog Cloud region + project id** (EU/US host) — needed for the
-   connection card defaults.
-3. **Which funnel matters first?** Propose: app open → event page view →
-   ticket CTA tap (purchase truth stays with Looker/ticketing data).
-4. **Where does the client App section live** — its own page vs a section on
-   an existing page? Propose: section first, promote to page when it earns it.
+1. **Event-id property:** `eventID` (configurable in the connection card in
+   case the tracking plan renames it; event display names via `eventName`).
+   No organiser id stamped — scoping stays event-id based.
+2. **Region:** EU — default host `https://eu.posthog.com`.
+3. **Metrics wanted first:** active users, uniques, interactions, CTA taps,
+   notification events, purchases (+ value where the app sends it) — all in
+   the v1 rollup. Funnels/retention are the remaining step-4 work.
+4. **Client surface:** shipped as its own 📲 App page (route `/app-analytics`,
+   nav gated by the `appanalytics` flag).
+5. **(Added)** **App-user profiles:** pull person properties — email
+   (`$email`), first name, surname, mobile — per client (only people who
+   touched their events) and app-wide for management; property names
+   configurable in the mapping editor; CSV export in the UI.

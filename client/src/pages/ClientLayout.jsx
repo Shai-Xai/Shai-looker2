@@ -104,6 +104,7 @@ export default function ClientLayout() {
   const onGoals = location.pathname.startsWith('/goals');
   const onAlerts = location.pathname.startsWith('/alerts');
   const onSocial = location.pathname.startsWith('/social');
+  const onAppAnalytics = location.pathname.startsWith('/app-analytics');
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
@@ -659,6 +660,17 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
             <span style={ellip}>Social</span>
+          </button>
+          )}
+          {fl('appanalytics') && (
+          <button
+            ref={onAppAnalytics ? activeRef : null}
+            className={`nav-row${onAppAnalytics ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAppAnalytics ? 600 : 500 }}
+            onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
+            <span style={ellip}>App</span>
           </button>
           )}
           </>

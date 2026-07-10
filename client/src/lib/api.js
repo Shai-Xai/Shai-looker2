@@ -216,6 +216,16 @@ export const api = {
   syncMyMetaAds: (entityId) => fetch(`/api/my/meta-ads/${entityId}/sync`, { method: 'POST' }).then(json),
   adminMetaAds: (entityId, days) => fetch(`/api/admin/entities/${entityId}/meta-ads${days ? `?days=${days}` : ''}`).then(json),
   syncAdminMetaAds: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-ads/sync`, { method: 'POST' }).then(json),
+  // 📱 App analytics — direct PostHog integration (platform connection + dual-surface reports)
+  posthogSettings: () => fetch('/api/admin/posthog/settings').then(json),
+  savePosthogSettings: (p) => fetch('/api/admin/posthog/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  testPosthog: () => fetch('/api/admin/posthog/test', { method: 'POST' }).then(json),
+  posthogEventsCatalog: () => fetch('/api/admin/posthog/events-catalog').then(json),
+  adminAppAnalytics: ({ days, entityId } = {}) => fetch(`/api/admin/app-analytics?days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  adminAppPeople: ({ days, q, entityId } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  syncAppAnalytics: () => fetch('/api/admin/app-analytics/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),
+  myAppAnalytics: (entityId, days) => fetch(`/api/my/app-analytics/${entityId}${days ? `?days=${days}` : ''}`).then(json),
+  myAppPeople: (entityId, { days, q } = {}) => fetch(`/api/my/app-analytics/${entityId}/people?days=${days || ''}&q=${encodeURIComponent(q || '')}`).then(json),
   // Google Drive sources (the Owl reads the client's shared files) — dual-surface
   myDriveView: (entityId) => fetch(`/api/my/drive/${entityId}`).then(json),
   myDriveSetKey: (entityId, body) => fetch(`/api/my/drive/${entityId}/key`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),

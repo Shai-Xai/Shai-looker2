@@ -1,0 +1,485 @@
+// ─── PostHog app analytics — direct integration — DISPOSABLE MODULE ────────────
+// Pulls Howler-app product analytics INTO Pulse straight from PostHog
+// (https://posthog.com), skipping the PostHog → warehouse → Looker hop for
+// app-ONLY reporting: live actives, per-event attention, CTA taps, purchases,
+// notifications and app-user profiles. Anything that must JOIN app data to
+// ticketing/revenue stays on the Looker path — this module never replaces it.
+// Spec: docs/specs/POSTHOG_APP_ANALYTICS_SPEC.md.
+//
+// Connection is PLATFORM-LEVEL (one Howler app → one PostHog project), stored in
+// settings with .env fallback like Looker's: posthog_host / posthog_project_id /
+// posthog_api_key (a PERSONAL API key with query-read scope — project keys are
+// ingest-only and cannot query). The key is write-only: reads report set + mask.
+//
+// Two data tiers (PostHog rate-limits its query endpoints, so queries are scarce):
+//   • Daily rollups → SQLite (posthog_daily_app / posthog_daily_event), refreshed
+//     by a self-guarded daily tick (kill switch posthog_sync_enabled='0') and
+//     restated for the trailing week — powers trends without burning queries.
+//   • Live HogQL with a short TTL cache — "today so far", the events catalog and
+//     app-user profile lookups. A down PostHog degrades to yesterday's rollup.
+//
+// Client scoping: the app stamps every tracked event with the Howler event id
+// (property name configurable, default `eventID`). A client's visible ids come
+// from their suites' locked filters — `core_events.id` directly, event NAMES
+// resolved to ids via one cached Looker lookup — and are forced into every
+// scoped HogQL query server-side, fail-closed (no resolvable ids → no data),
+// mirroring auth.scopeForQuery for Looker.
+//
+// Mount: require('./posthog').mount(app, { db, auth, runLookerQuery })
+// Uninstall: remove the mount line + this file + PosthogCard/AppAnalytics UI +
+// the 'appanalytics' flag row. Tables are owned here and safe to drop.
+
+const { HttpError, asyncHandler } = require('./http');
+
+const DAYS_DEFAULT = 28;
+const DAYS_MAX = 90;
+const RESTATE_DAYS = 7;    // nightly window — PostHog restates late-arriving events
+const BACKFILL_DAYS = 90;  // first-ever sync reaches back this far
+const LIVE_TTL = 4 * 60_000;    // "today so far" cache
+const PEOPLE_TTL = 60_000;      // app-user lookups
+const CATALOG_TTL = 10 * 60_000;
+
+// ── HogQL building blocks (pure — exported for tests) ───────────────────────────
+// Everything user-configurable (event names, property names, event ids) reaches
+// HogQL through these two — never by direct interpolation.
+const hqlStr = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+const hqlList = (arr) => arr.map(hqlStr).join(', ');
+const prop = (name) => `properties[${hqlStr(name)}]`;
+const personProp = (name) => `person.properties[${hqlStr(name)}]`;
+// countIf over a configured event-name list; an unmapped (empty) list is a
+// constant 0 so the column always exists and `IN ()` never reaches PostHog.
+const countIn = (list, as) => (list.length ? `countIf(event IN (${hqlList(list)})) AS ${as}` : `0 AS ${as}`);
+
+// The query API returns rows as arrays aligned to `columns` — zip into objects.
+function zipRows(data) {
+  const cols = data?.columns || [];
+  return (data?.results || []).map((r) => Object.fromEntries(cols.map((c, i) => [c, r[i]])));
+}
+
+// Accepts an array or comma/newline-separated string → clean unique list.
+function nameList(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(/[\n,]+/);
+  return [...new Set(arr.map((s) => String(s || '').trim()).filter(Boolean))].slice(0, 40);
+}
+
+// Which PostHog events mean what. Defaults cover PostHog's autocapture names;
+// the real Howler taxonomy is mapped in Admin → App analytics (events catalog
+// alongside). Person-profile property names ride in the same setting.
+const DEFAULT_MAP = {
+  screenEvents: ['$screen', '$pageview'],
+  ctaEvents: [],
+  purchaseEvents: [],
+  purchaseValueProp: '',
+  notificationEvents: [],
+  personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
+};
+
+function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) {
+  const sql = db.db;
+  const doFetch = fetchImpl || fetch;
+  const now = () => new Date().toISOString();
+
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS posthog_daily_app (
+      date TEXT PRIMARY KEY,
+      dau INTEGER NOT NULL DEFAULT 0, new_users INTEGER NOT NULL DEFAULT 0,
+      sessions INTEGER NOT NULL DEFAULT 0, interactions INTEGER NOT NULL DEFAULT 0,
+      views INTEGER NOT NULL DEFAULT 0, notif_events INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS posthog_daily_event (
+      date TEXT NOT NULL,
+      event_ref TEXT NOT NULL,           -- Howler event id as stamped by the app
+      event_name TEXT NOT NULL DEFAULT '',
+      uniques INTEGER NOT NULL DEFAULT 0, interactions INTEGER NOT NULL DEFAULT 0,
+      views INTEGER NOT NULL DEFAULT 0, cta_taps INTEGER NOT NULL DEFAULT 0,
+      purchases INTEGER NOT NULL DEFAULT 0, purchase_value REAL NOT NULL DEFAULT 0,
+      synced_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (date, event_ref)
+    );
+    CREATE INDEX IF NOT EXISTS idx_posthog_event_ref ON posthog_daily_event(event_ref, date);
+  `);
+  const upApp = sql.prepare(`INSERT INTO posthog_daily_app (date,dau,new_users,sessions,interactions,views,notif_events,synced_at)
+    VALUES (@date,@dau,@new_users,@sessions,@interactions,@views,@notif_events,@synced_at)
+    ON CONFLICT(date) DO UPDATE SET dau=excluded.dau, sessions=excluded.sessions, interactions=excluded.interactions,
+      views=excluded.views, notif_events=excluded.notif_events, synced_at=excluded.synced_at`);
+  const upNew = sql.prepare(`INSERT INTO posthog_daily_app (date,new_users,synced_at) VALUES (?,?,?)
+    ON CONFLICT(date) DO UPDATE SET new_users=excluded.new_users`);
+  const upEvent = sql.prepare(`INSERT INTO posthog_daily_event (date,event_ref,event_name,uniques,interactions,views,cta_taps,purchases,purchase_value,synced_at)
+    VALUES (@date,@event_ref,@event_name,@uniques,@interactions,@views,@cta_taps,@purchases,@purchase_value,@synced_at)
+    ON CONFLICT(date,event_ref) DO UPDATE SET event_name=excluded.event_name, uniques=excluded.uniques,
+      interactions=excluded.interactions, views=excluded.views, cta_taps=excluded.cta_taps,
+      purchases=excluded.purchases, purchase_value=excluded.purchase_value, synced_at=excluded.synced_at`);
+
+  // ── connection (platform settings → .env fallback, resolved per call) ──────────
+  function conn() {
+    return {
+      host: (db.getSetting('posthog_host', '') || process.env.POSTHOG_HOST || 'https://eu.posthog.com').replace(/\/$/, ''),
+      projectId: db.getSetting('posthog_project_id', '') || process.env.POSTHOG_PROJECT_ID || '',
+      apiKey: db.getSetting('posthog_api_key', '') || process.env.POSTHOG_API_KEY || '',
+      eventIdProp: db.getSetting('posthog_event_id_property', '') || 'eventID',
+      eventNameProp: db.getSetting('posthog_event_name_property', '') || 'eventName',
+    };
+  }
+  const isConfigured = () => { const c = conn(); return !!(c.host && c.projectId && c.apiKey); };
+  function metricMap() {
+    let stored = {};
+    try { stored = JSON.parse(db.getSetting('posthog_metric_map', '') || '{}') || {}; } catch { /* keep defaults */ }
+    return {
+      screenEvents: nameList(stored.screenEvents ?? DEFAULT_MAP.screenEvents),
+      ctaEvents: nameList(stored.ctaEvents ?? DEFAULT_MAP.ctaEvents),
+      purchaseEvents: nameList(stored.purchaseEvents ?? DEFAULT_MAP.purchaseEvents),
+      purchaseValueProp: String(stored.purchaseValueProp ?? DEFAULT_MAP.purchaseValueProp).trim(),
+      notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
+      personProps: { ...DEFAULT_MAP.personProps, ...(stored.personProps && typeof stored.personProps === 'object' ? stored.personProps : {}) },
+    };
+  }
+
+  // ── HogQL runner: small concurrency gate + TTL cache. Queries are scarce. ──────
+  let active = 0;
+  const queue = [];
+  const qcache = new Map(); // query -> { at, rows }
+  async function hogql(query, { ttl = 0 } = {}) {
+    const c = conn();
+    if (!c.projectId || !c.apiKey) throw new HttpError(400, 'PostHog isn\'t connected yet — add the project ID + personal API key in Integrations.');
+    const hit = ttl && qcache.get(query);
+    if (hit && Date.now() - hit.at < ttl) return hit.rows;
+    if (active >= 2) await new Promise((r) => queue.push(r));
+    active++;
+    try {
+      let res;
+      try {
+        res = await doFetch(`${c.host}/api/projects/${encodeURIComponent(c.projectId)}/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.apiKey}` },
+          body: JSON.stringify({ query: { kind: 'HogQLQuery', query } }),
+          signal: AbortSignal.timeout(45_000),
+        });
+      } catch {
+        throw new HttpError(502, 'Could not reach PostHog — try again in a minute.');
+      }
+      if (res.status === 401 || res.status === 403) throw new HttpError(400, 'PostHog rejected the API key — it must be a personal API key with query read access.');
+      if (res.status === 429) throw new HttpError(429, 'PostHog is rate-limiting us — showing the last synced data instead.');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new HttpError(502, `PostHog returned an error (HTTP ${res.status}).`);
+      const rows = zipRows(data);
+      if (qcache.size > 200) qcache.clear();
+      if (ttl) qcache.set(query, { at: Date.now(), rows });
+      return rows;
+    } finally {
+      active--; const next = queue.shift(); if (next) next();
+    }
+  }
+
+  // ── nightly sync → rollup tables. NEVER throws (records the error instead). ────
+  async function syncDaily(days) {
+    if (!isConfigured()) return { ok: false, reason: 'not_configured', error: 'PostHog is not connected.' };
+    const first = !db.getSetting('posthog_last_sync', '');
+    const N = Math.min(Math.max(Number(days) || (first ? BACKFILL_DAYS : RESTATE_DAYS), 1), BACKFILL_DAYS);
+    const m = metricMap();
+    const c = conn();
+    const win = `timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY`;
+    try {
+      const appRows = await hogql(`
+        SELECT toString(toDate(timestamp)) AS day, uniq(person_id) AS dau,
+               uniq(${prop('$session_id')}) AS sessions, count() AS interactions,
+               ${countIn(m.screenEvents, 'views')}, ${countIn(m.notificationEvents, 'notif_events')}
+        FROM events WHERE ${win} GROUP BY day ORDER BY day`);
+      const ts = now();
+      for (const r of appRows) {
+        if (!r.day) continue;
+        upApp.run({ date: r.day, dau: Number(r.dau) || 0, new_users: 0, sessions: Number(r.sessions) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, notif_events: Number(r.notif_events) || 0, synced_at: ts });
+      }
+      const newRows = await hogql(`
+        SELECT toString(toDate(created_at)) AS day, count() AS new_users
+        FROM persons WHERE created_at >= toStartOfDay(now()) - INTERVAL ${N} DAY GROUP BY day ORDER BY day`);
+      for (const r of newRows) if (r.day) upNew.run(r.day, Number(r.new_users) || 0, ts);
+      const evId = prop(c.eventIdProp);
+      const value = m.purchaseValueProp && m.purchaseEvents.length
+        ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), event IN (${hqlList(m.purchaseEvents)})) AS purchase_value`
+        : '0 AS purchase_value';
+      const evRows = await hogql(`
+        SELECT toString(toDate(timestamp)) AS day, toString(${evId}) AS event_ref,
+               any(toString(${prop(c.eventNameProp)})) AS event_name,
+               uniq(person_id) AS uniques, count() AS interactions,
+               ${countIn(m.screenEvents, 'views')}, ${countIn(m.ctaEvents, 'cta_taps')},
+               ${countIn(m.purchaseEvents, 'purchases')}, ${value}
+        FROM events WHERE ${win} AND notEmpty(toString(${evId}))
+        GROUP BY day, event_ref ORDER BY day LIMIT 50000`);
+      let rows = 0;
+      for (const r of evRows) {
+        if (!r.day || !r.event_ref) continue;
+        upEvent.run({ date: r.day, event_ref: String(r.event_ref), event_name: String(r.event_name || ''), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, cta_taps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0, purchase_value: Number(r.purchase_value) || 0, synced_at: ts });
+        rows++;
+      }
+      // True window-uniques for the headline (daily uniques don't sum).
+      const [wk] = await hogql('SELECT uniq(person_id) AS n FROM events WHERE timestamp >= now() - INTERVAL 7 DAY');
+      const [mo] = await hogql('SELECT uniq(person_id) AS n FROM events WHERE timestamp >= now() - INTERVAL 30 DAY');
+      db.setSetting('posthog_headline', JSON.stringify({ wau: Number(wk?.n) || 0, mau: Number(mo?.n) || 0, at: ts }));
+      db.setSetting('posthog_last_sync', ts);
+      db.setSetting('posthog_last_error', '');
+      return { ok: true, days: N, appDays: appRows.length, eventRows: rows };
+    } catch (e) {
+      const msg = String(e.message || e).slice(0, 300);
+      db.setSetting('posthog_last_error', msg);
+      return { ok: false, error: msg };
+    }
+  }
+
+  // Hourly check, once per local day, kill switch posthog_sync_enabled='0'.
+  let ticking = false;
+  async function tick() {
+    if (ticking) return;
+    if (db.getSetting('posthog_sync_enabled', '1') === '0' || !isConfigured()) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (db.getSetting('posthog_last_auto', '') === today) return;
+    ticking = true;
+    try { await syncDaily(); db.setSetting('posthog_last_auto', today); }
+    catch (e) { console.error('[posthog] tick failed:', e.message); }
+    ticking = false;
+  }
+  if (startTimer) { const timer = setInterval(() => tick().catch(() => {}), 60 * 60_000); timer.unref?.(); }
+
+  // ── client scoping: entity → Howler event ids (fail closed) ────────────────────
+  // From the entity's suites' locked filters: core_events.id values directly;
+  // event NAMES resolved to ids via one Looker query (ids are stable → cached).
+  function suiteEventScope(locks) {
+    const ids = new Set(), names = new Set();
+    for (const [key, v] of Object.entries(locks || {})) {
+      if (v == null || v === '') continue;
+      const field = key.includes('.') ? key : (auth.filterNameToField ? auth.filterNameToField(key) : null);
+      if (field !== 'core_events.id' && field !== 'core_events.name') continue;
+      for (const part of String(v).split(',')) {
+        const t = part.trim();
+        if (!t || t.includes('%')) continue; // never scope on wildcard patterns
+        (field === 'core_events.id' ? ids : names).add(t);
+      }
+    }
+    return { ids: [...ids], names: [...names] };
+  }
+
+  // Find a model/explore that exposes core_events.name (for the name→id lookup)
+  // by scanning saved dashboard filters — same trick as /api/admin/filter-fields.
+  let _lookupHome = null, _lookupHomeAt = 0;
+  function lookupHome() {
+    if (_lookupHome && Date.now() - _lookupHomeAt < 10 * 60_000) return _lookupHome;
+    for (const d of db.listDashboards ? db.listDashboards() : []) {
+      const full = db.getDashboard ? db.getDashboard(d.id) : null;
+      for (const f of full?.filters || []) {
+        if ((f.field || f.dimension) === 'core_events.name' && f.model && f.explore) {
+          _lookupHome = { model: f.model, explore: f.explore }; _lookupHomeAt = Date.now();
+          return _lookupHome;
+        }
+      }
+    }
+    return null;
+  }
+  async function idsForNames(names) {
+    if (!names.length || !runLookerQuery) return [];
+    const home = lookupHome();
+    if (!home) return [];
+    try {
+      const rows = await runLookerQuery('/queries/run/json', {
+        model: home.model, view: home.explore,
+        fields: ['core_events.name', 'core_events.id'],
+        filters: { 'core_events.name': names.join(',') }, limit: 500,
+      });
+      const want = new Set(names.map((n) => n.toLowerCase()));
+      return [...new Set((rows || [])
+        .filter((r) => want.has(String(r['core_events.name'] || '').toLowerCase()) && r['core_events.id'] != null)
+        .map((r) => String(r['core_events.id'])))];
+    } catch (e) {
+      console.error('[posthog] event name→id lookup failed:', e.message);
+      return [];
+    }
+  }
+
+  async function eventIdsForEntity(entityId) {
+    const ids = new Set(), names = new Set();
+    for (const su of db.listSuitesForEntity ? db.listSuitesForEntity(entityId) : []) {
+      const scope = suiteEventScope(db.lockedFiltersForSuite(su.id));
+      scope.ids.forEach((i) => ids.add(i));
+      scope.names.forEach((n) => names.add(n));
+    }
+    const inputKey = JSON.stringify([[...ids].sort(), [...names].sort()]);
+    let cached = null;
+    try { cached = JSON.parse(db.getSetting(`posthog_evscope:${entityId}`, '') || 'null'); } catch { /* re-resolve */ }
+    if (cached && cached.key === inputKey && Date.now() - new Date(cached.at).getTime() < 6 * 3600_000) return cached.ids;
+    (await idsForNames([...names])).forEach((i) => ids.add(i));
+    const out = [...ids];
+    db.setSetting(`posthog_evscope:${entityId}`, JSON.stringify({ key: inputKey, ids: out, at: now() }));
+    return out;
+  }
+
+  // ── report views (rollup tables — no PostHog traffic) ──────────────────────────
+  const clampDays = (d) => Math.min(Math.max(Number(d) || DAYS_DEFAULT, 1), DAYS_MAX);
+  const sinceDate = (days) => new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  function status() {
+    let headline = {};
+    try { headline = JSON.parse(db.getSetting('posthog_headline', '') || '{}'); } catch { /* fine */ }
+    return { configured: isConfigured(), lastSync: db.getSetting('posthog_last_sync', ''), lastError: db.getSetting('posthog_last_error', ''), headline };
+  }
+  function appReport(days) {
+    const N = clampDays(days);
+    const series = sql.prepare('SELECT * FROM posthog_daily_app WHERE date>=? ORDER BY date ASC').all(sinceDate(N));
+    const totals = { newUsers: 0, sessions: 0, interactions: 0, views: 0, notifEvents: 0 };
+    for (const r of series) { totals.newUsers += r.new_users; totals.sessions += r.sessions; totals.interactions += r.interactions; totals.views += r.views; totals.notifEvents += r.notif_events; }
+    const topEvents = sql.prepare(`
+      SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
+             SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
+      FROM posthog_daily_event WHERE date>=? GROUP BY event_ref ORDER BY uniques DESC LIMIT 25`).all(sinceDate(N));
+    return { ...status(), days: N, totals, series, topEvents };
+  }
+  function entityReport(entityId, days, ids) {
+    const N = clampDays(days);
+    if (!ids.length) return { ...status(), days: N, scoped: false, eventIds: [], totals: null, series: [], events: [] };
+    const ph = ids.map(() => '?').join(',');
+    const series = sql.prepare(`
+      SELECT date, SUM(uniques) AS uniques, SUM(interactions) AS interactions, SUM(views) AS views,
+             SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
+      FROM posthog_daily_event WHERE date>=? AND event_ref IN (${ph}) GROUP BY date ORDER BY date ASC`).all(sinceDate(N), ...ids);
+    const events = sql.prepare(`
+      SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
+             SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
+      FROM posthog_daily_event WHERE date>=? AND event_ref IN (${ph}) GROUP BY event_ref ORDER BY uniques DESC`).all(sinceDate(N), ...ids);
+    const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0, purchaseValue: 0 };
+    for (const r of events) { totals.uniques += r.uniques; totals.interactions += r.interactions; totals.views += r.views; totals.ctaTaps += r.ctaTaps; totals.purchases += r.purchases; totals.purchaseValue += r.purchaseValue; }
+    return { ...status(), days: N, scoped: true, eventIds: ids, totals, series, events };
+  }
+
+  // ── live tier (short-TTL HogQL; callers treat a failure as "live unavailable") ──
+  async function liveToday(ids) {
+    const m = metricMap();
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const [row] = await hogql(`
+      SELECT uniq(person_id) AS actives, uniq(${prop('$session_id')}) AS sessions,
+             count() AS interactions, ${countIn(m.screenEvents, 'views')}
+      FROM events WHERE timestamp >= toStartOfDay(now())${scope}`, { ttl: LIVE_TTL });
+    return { actives: Number(row?.actives) || 0, sessions: Number(row?.sessions) || 0, interactions: Number(row?.interactions) || 0, views: Number(row?.views) || 0, asOf: now() };
+  }
+  const withLive = async (report, ids) => {
+    try { return { ...report, live: await liveToday(ids) }; }
+    catch (e) { return { ...report, live: null, liveError: e instanceof HttpError ? e.message : 'Live numbers are unavailable right now.' }; }
+  };
+
+  // App-user profiles (PostHog person properties: email / name / surname / mobile).
+  // `ids` null = whole app (admin); an array = scoped to those Howler events.
+  async function people({ ids = null, days = DAYS_DEFAULT, q = '', limit = 100 } = {}) {
+    const N = clampDays(days);
+    const L = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const m = metricMap();
+    const c = conn();
+    const p = m.personProps;
+    const term = String(q || '').trim().slice(0, 80);
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const search = term
+      ? ` AND (${[p.email, p.firstName, p.lastName, p.phone].map((f) => `toString(${personProp(f)}) ILIKE ${hqlStr(`%${term}%`)}`).join(' OR ')})`
+      : '';
+    const rows = await hogql(`
+      SELECT any(toString(${personProp(p.email)})) AS email, any(toString(${personProp(p.firstName)})) AS firstName,
+             any(toString(${personProp(p.lastName)})) AS lastName, any(toString(${personProp(p.phone)})) AS phone,
+             max(timestamp) AS lastSeen, count() AS interactions,
+             groupUniqArray(5)(toString(${prop(c.eventNameProp)})) AS eventNames
+      FROM events WHERE timestamp >= toStartOfDay(now()) - INTERVAL ${N} DAY${scope}${search}
+      GROUP BY person_id ORDER BY lastSeen DESC LIMIT ${L}`, { ttl: PEOPLE_TTL });
+    return { days: N, people: rows.map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })) };
+  }
+
+  // ── routes ──────────────────────────────────────────────────────────────────────
+  const myEntity = (req, res, next) => {
+    const eid = req.params.entityId;
+    if (req.user && (req.user.role === 'admin' || (req.user.entityIds || []).includes(eid))) return next();
+    return res.status(403).json({ error: 'Not your client.' });
+  };
+  const maskKey = (k) => (k ? `••••${String(k).slice(-4)}` : '');
+
+  // Connection + mapping (platform-level; the key is write-only).
+  app.get('/api/admin/posthog/settings', auth.requireAdmin, (_req, res) => {
+    const c = conn();
+    res.json({
+      host: db.getSetting('posthog_host', ''), projectId: db.getSetting('posthog_project_id', ''),
+      keySet: !!(db.getSetting('posthog_api_key', '') || process.env.POSTHOG_API_KEY),
+      keyHint: maskKey(db.getSetting('posthog_api_key', '')),
+      envFallback: !db.getSetting('posthog_api_key', '') && !!process.env.POSTHOG_API_KEY,
+      eventIdProp: c.eventIdProp, eventNameProp: c.eventNameProp,
+      metricMap: metricMap(), syncEnabled: db.getSetting('posthog_sync_enabled', '1') !== '0',
+      ...status(),
+    });
+  });
+  app.put('/api/admin/posthog/settings', auth.requireAdmin, (req, res) => {
+    const b = req.body || {};
+    if (b.host !== undefined) db.setSetting('posthog_host', String(b.host || '').replace(/\/$/, '').trim());
+    if (b.projectId !== undefined) db.setSetting('posthog_project_id', String(b.projectId || '').trim());
+    if (b.apiKey) db.setSetting('posthog_api_key', String(b.apiKey).trim());
+    if (b.clearApiKey) db.setSetting('posthog_api_key', '');
+    if (b.eventIdProp !== undefined) db.setSetting('posthog_event_id_property', String(b.eventIdProp || '').trim());
+    if (b.eventNameProp !== undefined) db.setSetting('posthog_event_name_property', String(b.eventNameProp || '').trim());
+    if (b.syncEnabled !== undefined) db.setSetting('posthog_sync_enabled', b.syncEnabled ? '1' : '0');
+    if (b.metricMap && typeof b.metricMap === 'object') {
+      const cur = metricMap();
+      const nx = {
+        screenEvents: nameList(b.metricMap.screenEvents ?? cur.screenEvents),
+        ctaEvents: nameList(b.metricMap.ctaEvents ?? cur.ctaEvents),
+        purchaseEvents: nameList(b.metricMap.purchaseEvents ?? cur.purchaseEvents),
+        purchaseValueProp: String(b.metricMap.purchaseValueProp ?? cur.purchaseValueProp).trim().slice(0, 80),
+        notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
+        personProps: { ...cur.personProps },
+      };
+      for (const k of ['email', 'firstName', 'lastName', 'phone']) {
+        if (b.metricMap.personProps?.[k] !== undefined) nx.personProps[k] = String(b.metricMap.personProps[k] || '').trim().slice(0, 80) || DEFAULT_MAP.personProps[k];
+      }
+      db.setSetting('posthog_metric_map', JSON.stringify(nx));
+    }
+    qcache.clear();
+    res.json({ ok: true });
+  });
+  app.post('/api/admin/posthog/test', auth.requireAdmin, asyncHandler(async (_req, res) => {
+    if (!isConfigured()) throw new HttpError(400, 'Add the PostHog host, project ID and personal API key first.');
+    const [row] = await hogql('SELECT count() AS n FROM events WHERE timestamp >= now() - INTERVAL 1 DAY');
+    res.json({ ok: true, events24h: Number(row?.n) || 0 });
+  }));
+  // What the app actually sends — for the mapping editor (top events, 30 days).
+  app.get('/api/admin/posthog/events-catalog', auth.requireAdmin, asyncHandler(async (_req, res) => {
+    const rows = await hogql('SELECT event, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY event ORDER BY n DESC LIMIT 200', { ttl: CATALOG_TTL });
+    res.json({ events: rows.map((r) => ({ event: String(r.event), count: Number(r.n) || 0 })) });
+  }));
+
+  // Management view (whole app), with an optional per-client lens (dual surface).
+  app.get('/api/admin/app-analytics', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    if (eid) {
+      const ids = await eventIdsForEntity(eid);
+      return res.json(await withLive(entityReport(eid, req.query.days, ids), ids.length ? ids : null));
+    }
+    res.json(await withLive(appReport(req.query.days), null));
+  }));
+  app.get('/api/admin/app-analytics/people', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
+    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
+  }));
+  app.post('/api/admin/app-analytics/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const r = await syncDaily(Number(req.body?.days) || undefined);
+    if (!r.ok) throw new HttpError(400, r.error || 'Sync failed.');
+    res.json({ ...r, ...appReport(req.query.days) });
+  }));
+
+  // Client self-service — scoped to their events, fail closed.
+  app.get('/api/my/app-analytics/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    const report = entityReport(req.params.entityId, req.query.days, ids);
+    res.json(ids.length ? await withLive(report, ids) : { ...report, live: null });
+  }));
+  app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ days: clampDays(req.query.days), people: [], scoped: false });
+    res.json(await people({ ids, days: req.query.days, q: req.query.q, limit: req.query.limit }));
+  }));
+
+  console.log('[posthog] app-analytics connector mounted');
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, people, isConfigured, hogql };
+}
+
+module.exports = { mount, hqlStr, hqlList, prop, personProp, countIn, zipRows, nameList, DEFAULT_MAP };

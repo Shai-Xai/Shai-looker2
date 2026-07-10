@@ -49,6 +49,7 @@ const REGISTRY = [
     { key: 'engage.links', name: 'Links', def: true, beta: true, desc: 'ChottuLink short links into the Howler app — created from Pulse, click-tracked. OFF hides the tab + removes the Owl link tools.' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
+  { key: 'appanalytics', emoji: '📱', name: 'App analytics', def: false, beta: true, desc: 'Howler-app engagement on the client\'s events, live from PostHog — views, CTAs, purchases, app users.' },
   { key: 'digests', emoji: '🗓', name: 'Digests', def: true, desc: 'Scheduled role-based briefing emails.' },
   { key: 'settlements', emoji: '🧾', name: 'Settlements', def: true, desc: 'Settlements, invoices and documents.', kids: [
     { key: 'settlements.settlements', name: 'Settlements', def: true, desc: 'Interactive settlement views.' },
@@ -124,6 +125,7 @@ const GATES = [
   ['/api/owl/act/apply-chottu-template', 'engage.links'],
   ['/api/my/onboarding', 'yourjourney'],
   ['/api/my/suite-categories', 'navcategories'],
+  ['/api/my/app-analytics', 'appanalytics'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

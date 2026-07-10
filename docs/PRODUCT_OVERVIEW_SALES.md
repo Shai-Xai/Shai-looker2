@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-09 (🌐 Sales site v2 live: new story page at /sales + grouped features page with Coming Soon roadmap at /sales/features · 🚦 Queue-it live waiting-room stats) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-10 (📲 App analytics via direct PostHog integration — per-event app engagement, live numbers, app-user directory · previously: 🌐 Sales site v2 · 🚦 Queue-it live stats) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -533,6 +533,34 @@ Meta and TikTok accounts in one click. Change pixels any time without a develope
 they're getting through, and the whole curve of the sale — next to the sales
 numbers they're about to become."
 
+### 5j. App analytics — the Howler app, live from PostHog  🟡 (needs setup) · 🧪 (new)
+- **How your events perform inside the Howler consumer app** — straight from
+  PostHog (the app's analytics platform), no warehouse detour: views, unique
+  viewers, interactions, **CTA taps** and **in-app purchases** per event, with
+  **live "today so far"** numbers and daily trends (7/28/90 days).
+- **A client sees only their own events** — every app event carries the Howler
+  event ID, and Pulse forces the client's event scope server-side (fail-closed,
+  same guarantee as dashboards). Zero per-client setup: once the platform
+  connection is in, every client's 📲 App page lights up automatically (behind
+  the `App analytics` feature flag, default off while in beta).
+- **App users, by name** — the actual people in the app (email, first name,
+  surname, mobile from PostHog profiles), searchable and exportable to CSV —
+  per client (only people who touched THEIR events) or app-wide for Howler.
+- **Management view** (Admin → 📲 App analytics): the whole app across every
+  client — active users today (live), weekly/monthly actives, new users,
+  sessions, top events by in-app attention, with a per-client lens — plus the
+  event-mapping editor (which PostHog events count as screens / CTAs /
+  purchases / notifications, with a live catalog of what the app sends).
+- **One platform connection** (Admin → Integrations → PostHog): host, project
+  ID and a write-only personal API key. Nightly rollup + short-cached live
+  queries, so a briefly unreachable PostHog degrades to yesterday's data —
+  never a broken page. Anything that joins app data to ticketing/revenue stays
+  on the Looker path.
+
+**Pitch:** "Not just how many tickets sold — how your event is performing inside
+the Howler app right now: who's looking, what they tap, and who those fans
+actually are."
+
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
   wording. Emails look like the client — sent from Howler's verified domain by
@@ -952,6 +980,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-10** — **📲 App analytics (PostHog) ships in beta** — direct PostHog
+  integration for Howler-app engagement: per-event views/uniques/CTA
+  taps/purchases with live today-so-far numbers, an app-user directory
+  (email/name/mobile, CSV export), a management view of the whole app with a
+  per-client lens + event-mapping editor, and a client 📲 App page scoped
+  server-side to their events (feature flag `App analytics`, default off).
+  Looker keeps powering all cross-domain (app × ticketing) reporting.
 - **2026-07-09** — **🌐 Sales site v2 is live** — /sales now serves the new
   story page (interactive light-mode product demo that tours real screens, the
   Owl with real channel logos, See/Ask/Act rows with a medium carousel and an

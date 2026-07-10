@@ -193,7 +193,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); // 🚩 per-client feature flags + 👁 view-as-user — mounts EARLY so its route gates register before the feature modules → server/flags.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); require('./posthog').mount(app, { db, auth, runLookerQuery }); // 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (after flags so its appanalytics gate applies) → server/flags.js, server/posthog.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
