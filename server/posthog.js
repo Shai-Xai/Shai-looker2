@@ -205,7 +205,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
                ${countIn(m.screenEvents, 'views')}, ${countIn(m.ctaEvents, 'cta_taps')},
                ${countIn(m.purchaseEvents, 'purchases')}, ${value}
         FROM events WHERE ${win} AND notEmpty(toString(${evId}))
-        GROUP BY day, event_ref ORDER BY day LIMIT 50000`);
+        GROUP BY day, event_ref ORDER BY day DESC LIMIT 50000`);
       let rows = 0;
       for (const r of evRows) {
         if (!r.day || !r.event_ref) continue;
@@ -443,6 +443,36 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   app.get('/api/admin/posthog/events-catalog', auth.requireAdmin, asyncHandler(async (_req, res) => {
     const rows = await hogql('SELECT event, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY event ORDER BY n DESC LIMIT 200', { ttl: CATALOG_TTL });
     res.json({ events: rows.map((r) => ({ event: String(r.event), count: Number(r.n) || 0 })) });
+  }));
+  // Does the configured event-id property actually exist, and what do its values
+  // look like? Answers "whole app has data but a client's view is empty" without
+  // guesswork: shows how many recent events carry the property, sample values (to
+  // eyeball against core_events.id), the real property keys the app sends (event
+  // + person), and what the local rollup holds.
+  app.get('/api/admin/posthog/diagnose', auth.requireAdmin, asyncHandler(async (_req, res) => {
+    const c = conn();
+    const [tagged] = await hogql(`SELECT count() AS n, uniq(toString(${prop(c.eventIdProp)})) AS ids FROM events WHERE timestamp >= now() - INTERVAL 7 DAY AND notEmpty(toString(${prop(c.eventIdProp)}))`);
+    const sample = await hogql(`SELECT toString(${prop(c.eventIdProp)}) AS v, any(toString(${prop(c.eventNameProp)})) AS name, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 7 DAY AND notEmpty(toString(${prop(c.eventIdProp)})) GROUP BY v ORDER BY n DESC LIMIT 12`);
+    // Key discovery can fail on older HogQL — degrade to null rather than 500.
+    const keysOf = async (expr) => {
+      try {
+        const rows = await hogql(`SELECT arrayJoin(JSONExtractKeys(${expr})) AS key, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 1 DAY GROUP BY key ORDER BY n DESC LIMIT 40`, { ttl: CATALOG_TTL });
+        return rows.map((r) => ({ key: String(r.key), count: Number(r.n) || 0 }));
+      } catch { return null; }
+    };
+    res.json({
+      eventIdProp: c.eventIdProp,
+      taggedEvents7d: Number(tagged?.n) || 0,
+      distinctIds7d: Number(tagged?.ids) || 0,
+      sampleIds: sample.map((r) => ({ id: String(r.v), name: String(r.name || ''), count: Number(r.n) || 0 })),
+      eventPropertyKeys: await keysOf('properties'),
+      personPropertyKeys: await keysOf('person.properties'),
+      rollup: {
+        eventRows: sql.prepare('SELECT COUNT(*) c FROM posthog_daily_event').get().c,
+        eventRowsLast7d: sql.prepare('SELECT COUNT(*) c FROM posthog_daily_event WHERE date>=?').get(sinceDate(7)).c,
+        appDays: sql.prepare('SELECT COUNT(*) c FROM posthog_daily_app').get().c,
+      },
+    });
   }));
 
   // Management view (whole app), with an optional per-client lens (dual surface).

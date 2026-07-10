@@ -97,6 +97,7 @@ export function AppAnalyticsAdmin() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
   useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
   const load = useCallback(() => {
     setError('');
@@ -144,11 +145,18 @@ export function AppAnalyticsAdmin() {
         <span style={{ flex: 1 }} />
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
-          setSyncing(true); setError('');
-          try { await api.syncAppAnalytics(); load(); } catch (e) { setError(e.message); }
+          setSyncing(true); setError(''); setSyncMsg('');
+          try {
+            const r = await api.syncAppAnalytics();
+            setSyncMsg(r.eventRows > 0
+              ? `✓ Synced — ${r.eventRows} event-day rows over ${r.days} days`
+              : `⚠ Synced, but 0 events carried the event-ID property — run 🔬 Diagnose below to find the right property name`);
+            load();
+          } catch (e) { setError(e.message); }
           setSyncing(false);
         }}>{syncing ? 'Syncing…' : '↻ Sync now'}</button>
       </div>
+      {syncMsg && <p style={{ fontSize: 12.5, fontWeight: 600, color: syncMsg.startsWith('✓') ? 'var(--success, #10b981)' : '#d97706', margin: '0 0 10px' }}>{syncMsg}</p>}
       {error && <div style={errBox}>{error}</div>}
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       {perClient && data.scoped === false && (
@@ -164,8 +172,9 @@ export function AppAnalyticsAdmin() {
         isMobile={isMobile}
       />
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
-      <PeopleSection loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
+      <PeopleSection key={entityId || 'all'} loader={(opts) => api.adminAppPeople({ ...opts, entityId })} days={days} />
       {!perClient && <MappingEditor />}
+      {!perClient && <DiagnoseCard />}
       {data.lastSync && <p style={{ ...mutedTxt, fontSize: 11.5, marginTop: 10 }}>Rollup last synced {new Date(data.lastSync).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · live numbers refresh on load (≤5 min cache)</p>}
     </div>
   );
@@ -215,7 +224,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <SeriesCard series={data.series || []} isMobile={isMobile}
         metrics={[['views', 'Views'], ['uniques', 'Unique viewers'], ['ctaTaps', 'CTA taps'], ['purchases', 'Purchases']]} />
       <EventsTable rows={data.events} title="By event" days={data.days} />
-      <PeopleSection days={days}
+      <PeopleSection key={entityId} days={days}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, entityId }) : api.myAppPeople(entityId, opts))} />
     </div>
   );
@@ -414,6 +423,67 @@ function MappingEditor() {
             </span>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Ask PostHog what actually exists: does the configured event-id property carry
+// values (and what do they look like next to core_events.id), and which property
+// keys does the app really send — the fast answer to "whole app has data but a
+// client's view is empty".
+function DiagnoseCard() {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    setBusy(true); setError('');
+    try { setD(await api.posthogDiagnose()); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const KeyChips = ({ items, hint }) => items === null
+    ? <p style={sub}>Couldn't list property keys on this PostHog version — check a raw event in PostHog itself.</p>
+    : (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {items.map((k) => (
+          <span key={k.key} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: `1px solid ${hint && hint(k.key) ? 'var(--brand)' : 'var(--hairline)'}`, borderRadius: 6, padding: '3px 8px' }}>
+            {k.key} <span style={{ color: 'var(--muted)' }}>· {fmt(k.count)}</span>
+          </span>
+        ))}
+      </div>
+    );
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🔬 Diagnose — is the event-ID wiring right?</div>
+      <p style={sub}>Checks how many recent app events actually carry the configured event-ID property, shows sample values (they must match Looker's <code>core_events.id</code>), and lists the property keys the app really sends.</p>
+      {!d && <button type="button" style={btn} disabled={busy} onClick={run}>{busy ? 'Checking…' : 'Run diagnosis'}</button>}
+      {error && <div style={errBox}>{error}</div>}
+      {d && (
+        <>
+          <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.taggedEvents7d > 0 ? 'var(--success, #10b981)' : 'var(--danger, #dc2626)' }}>
+            {d.taggedEvents7d > 0
+              ? `✓ ${fmt(d.taggedEvents7d)} events in the last 7 days carry "${d.eventIdProp}" (${fmt(d.distinctIds7d)} distinct events)`
+              : `✗ NO events in the last 7 days carry "${d.eventIdProp}" — the property is named differently. Pick the right key below, update it in Integrations → PostHog, then Sync now.`}
+          </p>
+          {d.sampleIds?.length > 0 && (
+            <>
+              <div style={{ ...title, fontSize: 12.5 }}>Busiest "{d.eventIdProp}" values (7d) — do these match core_events.id?</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                {d.sampleIds.map((s) => (
+                  <span key={s.id} style={{ fontSize: 11.5, border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
+                    <b style={{ fontFamily: 'ui-monospace, monospace' }}>{s.id}</b>{s.name ? ` ${s.name}` : ''} <span style={{ color: 'var(--muted)' }}>· {fmt(s.count)}</span>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+          <div style={{ ...title, fontSize: 12.5 }}>Event property keys the app sends (24h)</div>
+          <KeyChips items={d.eventPropertyKeys} hint={(k) => /event/i.test(k) && /id/i.test(k)} />
+          <div style={{ ...title, fontSize: 12.5 }}>Person profile property keys (for the App-users mapping)</div>
+          <KeyChips items={d.personPropertyKeys} hint={(k) => /mail|name|phone|mobile|surname/i.test(k)} />
+          <p style={{ ...mutedTxt, fontSize: 11.5 }}>Local rollup: {fmt(d.rollup?.eventRows)} event-day rows total · {fmt(d.rollup?.eventRowsLast7d)} in the last 7 days · {fmt(d.rollup?.appDays)} app days.</p>
+          <button type="button" style={ghostBtn} disabled={busy} onClick={run}>{busy ? 'Checking…' : 'Re-run'}</button>
+        </>
       )}
     </div>
   );

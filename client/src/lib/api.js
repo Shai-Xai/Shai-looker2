@@ -221,6 +221,7 @@ export const api = {
   savePosthogSettings: (p) => fetch('/api/admin/posthog/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
   testPosthog: () => fetch('/api/admin/posthog/test', { method: 'POST' }).then(json),
   posthogEventsCatalog: () => fetch('/api/admin/posthog/events-catalog').then(json),
+  posthogDiagnose: () => fetch('/api/admin/posthog/diagnose').then(json),
   adminAppAnalytics: ({ days, entityId } = {}) => fetch(`/api/admin/app-analytics?days=${days || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   adminAppPeople: ({ days, q, entityId } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   syncAppAnalytics: () => fetch('/api/admin/app-analytics/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json),

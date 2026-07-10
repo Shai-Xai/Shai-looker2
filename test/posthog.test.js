@@ -213,6 +213,31 @@ test('people query is scoped to the given event ids and searches person props', 
   assert.ok(captured.includes("person.properties['$email']"), 'default person props apply');
 });
 
+test('per-event sync keeps the NEWEST days if the row cap ever bites', async () => {
+  const h = makeHarness({ responder: syncResponder });
+  await h.api.syncDaily(7);
+  const evQuery = h.queries.find((q) => q.includes('GROUP BY day, event_ref'));
+  assert.match(evQuery, /ORDER BY day DESC/);
+});
+
+test('diagnose reports tagged-event counts, sample ids and rollup state (admin only)', async () => {
+  const h = makeHarness({
+    responder: (q) => {
+      if (q.includes('JSONExtractKeys(person.properties)')) return HOGQL(['key', 'n'], [['$email', 900], ['first_name', 800]]);
+      if (q.includes('JSONExtractKeys(properties)')) return HOGQL(['key', 'n'], [['eventId', 5000], ['screen', 4000]]);
+      if (q.includes('AS ids')) return HOGQL(['n', 'ids'], [[0, 0]]);
+      return HOGQL(['v', 'name', 'n'], []);
+    },
+  });
+  const out = await h.invoke('GET /api/admin/posthog/diagnose', { user: { role: 'admin' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.taggedEvents7d, 0, 'a mis-named property reads as zero tagged events');
+  assert.equal(out.body.eventPropertyKeys[0].key, 'eventId', 'the real key is surfaced for the admin to pick');
+  assert.equal(out.body.rollup.eventRows, 0);
+  const denied = await h.invoke('GET /api/admin/posthog/diagnose', { user: { role: 'member' } });
+  assert.equal(denied.status, 403);
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();
