@@ -114,10 +114,10 @@ s.addText('“Ask your data anything, in plain language, your own analyst, in yo
 /* ---------- 6 · CHANNELS (hub) ---------- */
 s = contentSlide('One brain. Every channel.', 'the Owl at the centre, the doors your team already uses around it', ORANGE, 6);
 const hubCards = [
-  ['📱 The Howler Pulse app', 'Installs like a native app; pushes a nudge even when closed, tap it and you’re in the right place to act.', 0.5, 1.75],
-  ['💬 WhatsApp', 'Message the Owl like a colleague: answers, charts as images, daily updates, event-night reports.', 0.5, 4.35],
-  ['🤖 ChatGPT', 'Connect Pulse to ChatGPT (incl. Deep Research) and ask about your events from the tool you already have open.', 9.03, 1.75],
-  ['✳️ Claude', 'The same connector plugs your event data into Claude, read-only, per-client keys you control.', 9.03, 4.35],
+  ['The Howler Pulse app', 'Installs like a native app; pushes a nudge even when closed, tap it and you’re in the right place to act.', 0.5, 1.75, 'howler-logo.png'],
+  ['WhatsApp', 'Message the Owl like a colleague: answers, charts as images, daily updates, event-night reports.', 0.5, 4.35, 'whatsapp-logo.png'],
+  ['ChatGPT', 'Connect Pulse to ChatGPT (incl. Deep Research) and ask about your events from the tool you already have open.', 9.03, 1.75, 'chatgpt-logo.png'],
+  ['Claude', 'The same connector plugs your event data into Claude, read-only, per-client keys you control.', 9.03, 4.35, 'claude-logo.png'],
 ];
 // connector lines first (behind cards)
 [[4.3, 2.7], [4.3, 5.3], [9.03, 2.7], [9.03, 5.3]].forEach(pt => {
@@ -125,7 +125,8 @@ const hubCards = [
 });
 hubCards.forEach(c => {
   s.addShape('roundRect', { x: c[2], y: c[3], w: 3.8, h: 1.9, rectRadius: 0.12, fill: { color: LIGHT }, line: { color: 'ECE9F5', width: 1 } });
-  s.addText(c[0], { x: c[2] + 0.18, y: c[3] + 0.1, w: 3.45, h: 0.42, fontSize: 14, bold: true, color: NAVY, fontFace: F });
+  s.addImage({ path: c[4], x: c[2] + 0.18, y: c[3] + 0.14, w: 0.34, h: 0.34 });
+  s.addText(c[0], { x: c[2] + 0.58, y: c[3] + 0.1, w: 3.05, h: 0.42, fontSize: 14, bold: true, color: NAVY, fontFace: F });
   s.addText(c[1], { x: c[2] + 0.18, y: c[3] + 0.55, w: 3.45, h: 1.25, fontSize: 10.5, color: GREY, fontFace: F, lineSpacing: 14, valign: 'top' });
 });
 // central owl, the real mark
