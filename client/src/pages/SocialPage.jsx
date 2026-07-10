@@ -147,6 +147,98 @@ export default function SocialPage() {
       )}
 
       {activeEntityId && !loading && <PaidPerformance entityId={activeEntityId} isMobile={isMobile} />}
+      {activeEntityId && !loading && <SocialPlusCommunities entityId={activeEntityId} isMobile={isMobile} />}
+    </div>
+  );
+}
+
+// Social+ (social.plus) in-app community analytics: total members, chat activity,
+// per-event communities and top posts, pulled daily via the per-client API key
+// connected in Settings → Integrations. Renders nothing until connected.
+function SocialPlusCommunities({ entityId, isMobile }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [spMetric, setSpMetric] = useState('members');
+  useEffect(() => { api.mySocialPlus(entityId, { metric: spMetric }).then(setData).catch(() => setData(null)); }, [entityId, spMetric]);
+  if (!data || !data.summary?.configured) return null;
+  const t = data.summary.totals || {};
+  const sync = async () => {
+    setBusy(true); setErr('');
+    try { await api.syncSocialPlus(entityId); setData(await api.mySocialPlus(entityId, { metric: spMetric })); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const metrics = [
+    { key: 'members', label: 'Members' },
+    { key: 'messages', label: 'Messages' },
+    { key: 'posts', label: 'Posts' },
+    { key: 'comments', label: 'Comments' },
+  ];
+  return (
+    <div style={{ ...card, marginTop: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>👥 In-app communities — Social+</div>
+        <button onClick={sync} disabled={busy} style={btn}>{busy ? 'Syncing…' : '↻ Sync'}</button>
+      </div>
+      {err && <div style={errBox}>{err}</div>}
+      {data.summary.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {data.summary.lastError}</div>}
+      {!data.summary.lastAt ? (
+        <div style={muted}>Connected — tap “Sync” to pull your communities, chats and posts for the first time (it also refreshes automatically once a day).</div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: isMobile ? 14 : 22, flexWrap: 'wrap', marginBottom: 14 }}>
+            <Stat label="Communities" value={fmt(t.communities)} />
+            <Stat label="Members" value={fmt(t.members)} />
+            <Stat label="Posts" value={fmt(t.posts)} />
+            <Stat label="Comments" value={fmt(t.comments)} />
+            <Stat label="Reactions" value={fmt(t.reactions)} />
+            <Stat label="Chat messages" value={fmt(t.messages)} />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, flex: 1 }}>30-day trend</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {metrics.map((m) => (
+                <button key={m.key} onClick={() => setSpMetric(m.key)} style={{ ...chip, ...(spMetric === m.key ? chipOn : null) }}>{m.label}</button>
+              ))}
+            </div>
+          </div>
+          <Sparkline series={data.series || []} />
+
+          {(data.communities || []).length > 0 && (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 13.5, margin: '16px 0 4px' }}>Communities</div>
+              {(data.communities || []).slice(0, 8).map((c) => (
+                <div key={c.communityId} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 0', borderTop: '1px solid var(--hairline)' }}>
+                  <div style={{ minWidth: 0, flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.displayName || c.communityId}</div>
+                  <div style={{ flexShrink: 0, fontSize: 12, color: 'var(--muted)' }}>👥 {fmt(c.members)}{c.posts ? <> · ✍️ {fmt(c.posts)}</> : null}</div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {(data.topPosts || []).length > 0 && (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 13.5, margin: '16px 0 4px' }}>Top posts</div>
+              {(data.topPosts || []).slice(0, 6).map((p) => (
+                <div key={p.postId} style={{ display: 'flex', gap: 10, padding: '8px 0', borderTop: '1px solid var(--hairline)' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.text || '(no text)'}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 3, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      {p.communityName && <span>{p.communityName}</span>}
+                      {p.reactions != null && <span>❤️ {fmt(p.reactions)}</span>}
+                      {p.comments != null && <span>💬 {fmt(p.comments)}</span>}
+                      {p.reach != null && <span>👁 {fmt(p.reach)} reach</span>}
+                      {p.postedAt && <span>{new Date(p.postedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

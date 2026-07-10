@@ -143,7 +143,7 @@ const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND �
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).
 const socialMetrics = require('./socialMetrics');
-socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields)
+socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); const socialplus = require('./socialplus').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields) + Social+ (social.plus) in-app community analytics INBOUND (daily sync started below)
 require('./queueit').mount(app, { db, auth }); // Queue-it INBOUND — live waiting-room stats (read-only; platform creds with per-client override)
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
@@ -1366,9 +1366,9 @@ app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, re
 app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   const clients = [];
   for (const e of db.listEntities()) {
-    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id);
-    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount)) continue;
-    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s } });
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id); const sp = socialplus.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount || sp.configured)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s, socialplus: sp } });
   }
   // Most recently active (or failing) clients first.
   clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
@@ -2932,8 +2932,8 @@ const PORT = process.env.PORT || 3045;
 const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
-  // Pull organic social stats once a day for every connected client (best-effort).
-  socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+  // Pull organic social stats + Social+ community analytics once a day (best-effort).
+  socialMetrics.startDailySync({ listEntities: () => db.listEntities() }); socialplus.startDailySync({ listEntities: () => db.listEntities() });
 });
 
 // Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new

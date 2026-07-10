@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-10 (📲 App analytics via direct PostHog integration — per-event app engagement, live numbers, app-user directory · previously: 🌐 Sales site v2 · 🚦 Queue-it live stats) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-10 (👥 Social+ in-app community analytics pulled into the Social page · 📲 App analytics via direct PostHog integration · previously: 🌐 Sales site v2 · 🚦 Queue-it live stats) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -422,6 +422,26 @@ each platform without leaving Pulse."
 **Pitch:** "See how a client's Facebook, Instagram and TikTok are really doing —
 followers, reach and the posts that landed — next to their ticketing numbers, all
 in one place that updates itself."
+
+### 5e-bis. Social+ — in-app community analytics  🟡 (needs connection) · 🧪
+- Pulls the client's **Social+** (social.plus, formerly Amity) **in-app community
+  analytics into Pulse** — the fan communities and chats living inside the app,
+  next to their organic social and ticketing numbers.
+- **What you see** (Social page → In-app communities): total **members,
+  communities, posts, comments, reactions and chat messages**; a **30-day trend**
+  with a metric switcher; the biggest **communities** per event; and **top posts**
+  ranked by reactions — each with comments, impressions and reach.
+- **Chat coverage:** every channel (announcements, line-up, FAQ, event chat) with
+  member and message counts — spot which event conversations are alive.
+- **Setup 🟡:** paste the Social+ **application API key** + pick the hosting
+  region in Integrations (admin on the client's behalf, or client self-service —
+  dual-surface, key is write-only + sealed). One-tap **Sync**, then daily
+  auto-refresh. Read-only: Pulse never posts or moderates.
+- 🔜 **Next:** feed community engagement into the Owl/digests and dashboard tiles.
+
+**Pitch:** "Your app community isn't a black box any more — see which event
+communities are growing, which chats are buzzing, and which posts land, right next
+to the ticket sales they drive."
 
 ### 5f. Paid ads performance — Meta  🟡 (needs connection)
 Your Meta (Facebook/Instagram) **ad spend and results, inside Pulse** — pulled
@@ -980,6 +1000,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-10** — **👥 Social+ in-app community analytics** 🧪 (new): direct
+  integration with **Social+** (social.plus) — Pulse pulls a client's app
+  **communities, chat channels, posts, comments & reactions** in daily (or on-tap
+  sync) and shows them on the **Social page**: totals, a 30-day trend, biggest
+  communities and top posts. Connect with the Social+ API key + region in
+  Integrations (dual-surface, write-only secret). Read-only.
 - **2026-07-10** — **📲 App analytics (PostHog) ships in beta** — direct PostHog
   integration for Howler-app engagement: per-event views/uniques/CTA
   taps/purchases with live today-so-far numbers, an app-user directory

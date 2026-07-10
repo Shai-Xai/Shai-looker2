@@ -14,6 +14,7 @@
 
 const pixel = require('./pixel'); // stateless applyPatch/view for the Pulse Pixel slice
 const queueit = require('./queueit'); // stateless applyPatch/view for the Queue-it slice
+const socialplus = require('./socialplus'); // stateless applyPatch/view for the Social+ slice
 
 function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
   function applyIntegrationsPatch(body, set) {
@@ -45,6 +46,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
     if (ch.clearApiKey) set('chottuApiKey', '');
     if (ch.domain !== undefined) set('chottuDomain', String(ch.domain || '').trim());
     queueit.applyPatch(body, set); // Queue-it: customer id + api key (server/queueit.js)
+    socialplus.applyPatch(body, set); // Social+ in-app community analytics: api key + region (server/socialplus.js)
   }
 
   function adminIntegrationsView() {
@@ -103,13 +105,14 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
       pixel: pixel.view(i),
       chottu: { keySet: !!i.chottuApiKey, keyHint: maskSecret(i.chottuApiKey), domain: i.chottuDomain || '' },
       queueit: queueit.view(i, maskSecret),
+      socialplus: socialplus.view(i),
       locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
     };
   }
 
   // Per-entity integration keys that can be frozen. A frozen section's changes are
   // dropped server-side (defence in depth — the UI also disables it).
-  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit'];
+  const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus'];
   function dropFrozenSections(entityId, body) {
     const locks = db.getEntityIntegrationLocks(entityId);
     const b = { ...(body || {}) };

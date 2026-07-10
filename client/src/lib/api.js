@@ -541,6 +541,16 @@ export const api = {
   syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
   verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
 
+  // Social+ (social.plus) in-app community analytics (inbound). Admins pass the
+  // ownership check, so admin-preview and client self-service share /api/my/….
+  mySocialPlus: (entityId, { metric = 'members', days = 30, sort } = {}) => {
+    const q = new URLSearchParams({ metric, days: String(days) });
+    if (sort) q.set('sort', sort);
+    return fetch(`/api/my/socialplus/${entityId}?${q}`).then(json);
+  },
+  syncSocialPlus: (entityId) => fetch(`/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
+  verifySocialPlus: (entityId) => fetch(`/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
+
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),
   inventiveEmbedUrl: (entityId, options) => fetch('/api/inventive/embed-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId, options }) }).then(json),

@@ -5494,8 +5494,9 @@ function ClientIntegrations({ entity }) {
         pixelEntityId={entity.id}
         onPixelStatus={() => api.getPixelStatus(entity.id)}
         onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
+        showSocialPlus
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
