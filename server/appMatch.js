@@ -18,7 +18,6 @@
 const { HttpError, asyncHandler } = require('./http');
 
 const CACHE_MS = 10 * 60_000;  // overlap is expensive (Looker + PostHog) — reuse
-const APP_PAGES = 4;           // × 500 = the client's top-2000 app users considered
 const APP_WINDOW_DAYS = 90;
 const TICKET_EMAILS = 200;     // per-request cap for tickets-by-email enrichment
 const ORG = 'core_organisers.name';
@@ -31,19 +30,17 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
 
   const cache = new Map(); // entityId → { at, data }
 
-  // The client's app people (top by interactions, 90d), scoped to their events.
+  // The client's WHOLE app audience (90d), scoped to their events: an exact
+  // uncapped headcount plus every user's email via one grouped query — no
+  // people()-style paging ceiling (a 2000-row cap misread as the total before).
   async function appUsers(entityId) {
     const ids = await posthog.eventIdsForEntity(entityId);
-    if (!ids.length) return { scoped: false, people: [] };
-    const people = [];
-    for (let page = 0; page < APP_PAGES; page++) {
-      const r = await posthog.people({ ids, days: APP_WINDOW_DAYS, limit: 500, offset: page * 500, orderBy: 'active' });
-      people.push(...(r.people || []));
-      // hasMore can't see past posthog's own 2000-row fetch ceiling, so a full
-      // final page still means "capped" — never present the cap as the total.
-      if (!r.hasMore && people.length < APP_PAGES * 500) return { scoped: true, people, capped: false };
-    }
-    return { scoped: true, people, capped: true };
+    if (!ids.length) return { scoped: false };
+    const [side, total] = await Promise.all([
+      posthog.appEmails(ids, { days: APP_WINDOW_DAYS }),
+      posthog.windowUniques(ids, { days: APP_WINDOW_DAYS }),
+    ]);
+    return { scoped: true, total: total || side.persons, emails: side.emails, capped: !!side.capped };
   }
 
   async function overlap(entityId, user) {
@@ -56,15 +53,14 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
     ]);
     if (!appSide.scoped) return { configured: true, scoped: false };
     if (buyers.error) throw new HttpError(400, `Couldn't resolve the buyer list (${buyers.error}).`);
-    // buildRows already lowercases emails on the buyer side; mirror on the app side.
+    // buildRows already lowercases emails on the buyer side; appEmails on the app side.
     const buyerEmails = new Set((buyers.raw || []).map((p) => String(p.email || '').toLowerCase()).filter(Boolean));
-    const appEmails = [...new Set(appSide.people.map((p) => String(p.email || '').toLowerCase()).filter(Boolean))];
-    const matched = appEmails.filter((e) => buyerEmails.has(e)).length;
+    const matched = appSide.emails.filter((e) => buyerEmails.has(e)).length;
     const data = {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
-      appUsers: appSide.people.length, appUsersWithEmail: appEmails.length, appCapped: !!appSide.capped,
+      appUsers: appSide.total, appUsersWithEmail: appSide.emails.length, appCapped: appSide.capped,
       buyers: buyerEmails.size, matched,
-      appNotBuyers: appEmails.length - matched,
+      appNotBuyers: appSide.emails.length - matched,
       buyersNotOnApp: Math.max(0, buyerEmails.size - matched),
     };
     if (cache.size > 100) cache.clear();

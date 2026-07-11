@@ -661,6 +661,22 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const [row] = await hogql(`SELECT uniq(person_id) AS u FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
     return Number(row?.u) || 0;
   }
+  // EVERY app user's email in the window (one grouped query, email column only)
+  // — the join key for the app↔buyers match, without people()'s paging ceiling.
+  // 50k persons covers any client's window; `capped` says if even that overflowed.
+  async function appEmails(ids, o) {
+    const w = win(o);
+    const m = metricMap();
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const rows = await hogql(`SELECT any(toString(${personProp(m.personProps.email)})) AS email FROM events WHERE ${tsWin(w)}${scope} GROUP BY person_id LIMIT 50000`, { ttl: PEOPLE_TTL });
+    const emails = new Set();
+    for (const r of rows) {
+      const e = String(r.email || '').trim().toLowerCase();
+      if (e.includes('@')) emails.add(e);
+    }
+    return { persons: rows.length, emails: [...emails], capped: rows.length >= 50000 };
+  }
   // ⏱ time in app — average session length (first→last event per $session_id)
   // and average TOTAL time per user over the window, one query for both.
   // Single-event sessions measure 0s, so treat these as floors, not truth.
@@ -1273,7 +1289,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, timeMetrics, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, appEmails, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, timeMetrics, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

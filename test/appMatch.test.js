@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const appMatch = require('../server/appMatch');
 
-function makeHarness({ people = [], hasMore = false, buyers = [], lookerRows = [], orgLocks = { 'core_organisers.name': 'G&G' } } = {}) {
+function makeHarness({ appEmails = [], appTotal = 0, appCapped = false, buyers = [], lookerRows = [], orgLocks = { 'core_organisers.name': 'G&G' } } = {}) {
   const capture = () => () => {};
   const app = { get: capture(), post: capture(), put: capture(), delete: capture() };
   const calls = { looker: [] };
@@ -16,7 +16,8 @@ function makeHarness({ people = [], hasMore = false, buyers = [], lookerRows = [
     posthog: {
       isConfigured: () => true,
       eventIdsForEntity: async () => ['101'],
-      people: async ({ offset }) => ({ people: offset ? [] : people, hasMore }),
+      appEmails: async () => ({ persons: appTotal, emails: appEmails, capped: appCapped }),
+      windowUniques: async () => appTotal,
     },
     resolveAudience: async () => ({ raw: buyers }),
     queryEngine: {
@@ -28,18 +29,20 @@ function makeHarness({ people = [], hasMore = false, buyers = [], lookerRows = [
   return { api, calls };
 }
 
-test('overlap matches app users to buyers by email — deduped, case-folded, counts only', async () => {
+test('overlap matches the WHOLE app audience to buyers by email — counts only', async () => {
   const h = makeHarness({
-    people: [{ email: 'Fan@One.com' }, { email: 'fan2@x.com' }, { email: '' }, { email: 'fan2@x.com' }],
+    appTotal: 4, // exact uncapped headcount (windowUniques)
+    appEmails: ['fan@one.com', 'fan2@x.com'], // appEmails() already deduped + case-folded
     buyers: [{ email: 'fan@one.com' }, { email: 'buyer@only.com' }],
   });
   const d = await h.api.overlap('e1', { role: 'admin' });
   assert.equal(d.appUsers, 4);
-  assert.equal(d.appUsersWithEmail, 2);   // blank dropped, duplicate folded
-  assert.equal(d.matched, 1);             // Fan@One.com ↔ fan@one.com
+  assert.equal(d.appUsersWithEmail, 2);
+  assert.equal(d.matched, 1);
   assert.equal(d.appNotBuyers, 1);
   assert.equal(d.buyers, 2);
   assert.equal(d.buyersNotOnApp, 1);
+  assert.equal(d.appCapped, false);
   // No emails in the payload — counts only.
   assert.ok(!JSON.stringify(d).includes('fan@one.com'));
 });
