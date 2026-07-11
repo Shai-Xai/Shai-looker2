@@ -467,6 +467,33 @@ test('link clicks derive daily deltas from Chottu cumulative snapshots, scoped',
   assert.deepEqual(out, [{ date: d(-1), clicks: 60 }, { date: d(0), clicks: 30 }], 'daily deltas, other entities excluded');
 });
 
+test('Owl page-summary prompt: registered in the AI audit, fact sheet covers every panel', () => {
+  const reg = posthog.promptRegistry();
+  assert.equal(reg[0].key, 'appAnalyticsSummary');
+  assert.match(reg[0].text, /Try next/);
+  const insights = require('../server/insights');
+  assert.ok(insights.promptRegistry().some((p) => p.key === 'appAnalyticsSummary'), 'insights registry spreads the module prompt (AI audit stays complete)');
+  const txt = posthog.buildAppInsightPrompt({
+    report: {
+      from: '2026-06-14', to: '2026-07-11', days: 28,
+      totals: { interactions: 10300, views: 233, ctaTaps: 107, purchases: 0, purchaseValue: 0 },
+      series: [{ date: '2026-07-10', uniques: 460, interactions: 3100, views: 90, ctaTaps: 40 }],
+      events: [{ eventRef: '40669', eventName: 'The Soirée', uniques: 1787, interactions: 10300, views: 233, ctaTaps: 107, purchases: 0 }],
+    },
+    live: { actives: 368, windowUniques: 4568 },
+    moments: [
+      { type: 'post', at: '2026-07-10T12:19:00Z', community: 'The Soirée by Stella Artois', text: 'Think you know the drill?', impressions: 361, reactions: 8, comments: 2 },
+      { type: 'campaign', at: '2026-07-09T10:00:00Z', label: 'VIP push', appLinked: true },
+    ],
+    linkClicks: [{ date: '2026-07-10', clicks: 60 }],
+    breakdowns: [{ key: 'interaction_type', values: [{ value: 'cta_click', count: 107, uniques: 45 }] }],
+    topUsers: [{ firstName: 'Thandi', lastName: 'Nkosi', email: 't@x.com', interactions: 31, lastSeen: '2026-07-10 23:33:00' }],
+  });
+  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31']) {
+    assert.ok(txt.includes(must), `fact sheet includes: ${must}`);
+  }
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();

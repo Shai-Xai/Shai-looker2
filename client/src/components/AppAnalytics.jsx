@@ -4,6 +4,7 @@ import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import DashboardInsightModal from './DashboardInsightModal.jsx';
 
 // 📱 App analytics — the UI over server/posthog.js (direct PostHog integration).
 // Three exports:
@@ -158,6 +159,7 @@ export function AppAnalyticsAdmin() {
   useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
   const [moments, setMoments] = useState([]);
   const [linkClicks, setLinkClicks] = useState([]);
+  const [owlOpen, setOwlOpen] = useState(false);
   const load = useCallback(() => {
     setError('');
     api.adminAppAnalytics({ from: range.from, to: range.to, entityId }).then(setData).catch((e) => { setError(e.message); setData(null); });
@@ -206,6 +208,7 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
+        {entityId && <Chip onClick={() => setOwlOpen(true)}>✨ Owl summary</Chip>}
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
@@ -220,6 +223,12 @@ export function AppAnalyticsAdmin() {
         }}>{syncing ? 'Syncing…' : '↻ Sync now'}</button>
       </div>
       {syncMsg && <p style={{ fontSize: 12.5, fontWeight: 600, color: syncMsg.startsWith('✓') ? 'var(--success, #10b981)' : '#d97706', margin: '0 0 10px' }}>{syncMsg}</p>}
+      {owlOpen && entityId && (
+        <DashboardInsightModal
+          kindLabel="App summary" title={clients.find((c) => c.id === entityId)?.name || 'This client'}
+          endpoint={`/api/admin/app-analytics/insight?entityId=${encodeURIComponent(entityId)}&from=${range.from}&to=${range.to}`}
+          payload={{}} onClose={() => setOwlOpen(false)} />
+      )}
       {error && <div style={errBox}>{error}</div>}
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       {perClient && data.scoped === false && (
@@ -265,6 +274,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
   const winKey = `${entityId}-${range.from}-${range.to}`;
   const [moments, setMoments] = useState([]);
   const [linkClicks, setLinkClicks] = useState([]);
+  const [owlOpen, setOwlOpen] = useState(false);
   useEffect(() => {
     if (!entityId) return;
     setError('');

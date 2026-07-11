@@ -31,6 +31,62 @@
 
 const { HttpError, asyncHandler } = require('./http');
 
+// System prompt for the App-analytics page summary (streamed by the ✨ button,
+// exact same UX as the whole-dashboard summary). Registered in the AI audit via
+// promptRegistry() below, which insights.promptRegistry() spreads in.
+const APP_INSIGHT_SYSTEM = `You are the Owl — the senior data analyst for Howler, an events ticketing platform (organisers run events; customers buy tickets and engage in the Howler consumer app; amounts in South African Rand, ZAR).
+
+You are given everything shown on one client's App analytics page for a date window: headline engagement (live actives, unique viewers), the daily series, per-event totals, interaction-type/surface breakdowns, community posts (with their view counts), campaign sends, app-link clicks and the most active app users.
+
+Write the page's story for a non-technical organiser:
+- Open with 1-2 sentences on the headline: how their events are doing inside the app this window, and the direction of travel.
+- Then 3-6 bullets with the most important specific findings, always with numbers: trend turns and spikes (tie them to the posts / campaign sends / link-click surges that plausibly drove them — they carry timestamps), what people actually do in the app (interaction types, surfaces, CTA taps vs views), the standout posts by views, and anything notable about the top users.
+- End with "Try next:" and 2-3 concrete suggestions grounded in THIS data — e.g. repeat the format/timing of the post that outperformed, tag campaigns to the app, place CTAs on the busiest surface, re-engage a quiet stretch. No generic advice.
+
+Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
+
+// Compact fact sheet the model reads — one section per page panel, numbers only.
+function buildAppInsightPrompt({ report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [] }) {
+  const L = [];
+  L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
+  if (live) L.push(`Live: ${live.actives} unique viewers today so far; ${live.windowUniques} unique viewers across the whole window.`);
+  const t = report.totals || {};
+  L.push(`Window totals: interactions ${t.interactions || 0}; views ${t.views || 0}; CTA taps ${t.ctaTaps || 0}; purchases ${t.purchases || 0}${t.purchaseValue ? ` (value ${t.purchaseValue})` : ''}.`);
+  if ((report.series || []).length) {
+    L.push('', 'Daily series (date · uniques · interactions · views · ctaTaps):');
+    for (const r of report.series.slice(-31)) L.push(`${r.date} · ${r.uniques} · ${r.interactions} · ${r.views} · ${r.ctaTaps}`);
+  }
+  if ((report.events || []).length) {
+    L.push('', 'Per event (name · uniques · interactions · views · ctaTaps · purchases):');
+    for (const e of report.events.slice(0, 10)) L.push(`${e.eventName || e.eventRef} · ${e.uniques} · ${e.interactions} · ${e.views} · ${e.ctaTaps} · ${e.purchases}`);
+  }
+  for (const b of breakdowns) {
+    if (!b.values.length) continue;
+    L.push('', `Breakdown by ${b.key} (value · count · unique people):`);
+    for (const v of b.values.slice(0, 8)) L.push(`${v.value} · ${v.count} · ${v.uniques}`);
+  }
+  const posts = mom.filter((m) => m.type === 'post');
+  if (posts.length) {
+    L.push('', 'Community posts in the window (time · community · views · reactions · comments · text):');
+    for (const p of posts.slice(0, 20)) L.push(`${String(p.at).slice(0, 16)} · ${p.community || '-'} · ${p.impressions ?? p.reach ?? '?'} · ${p.reactions ?? 0} · ${p.comments ?? 0} · ${p.text || p.label}`);
+  }
+  const camps = mom.filter((m) => m.type === 'campaign');
+  if (camps.length) {
+    L.push('', 'Campaign sends (time · title · app-relevant):');
+    for (const cpn of camps.slice(0, 20)) L.push(`${String(cpn.at).slice(0, 16)} · ${cpn.label} · ${cpn.appLinked ? 'yes' : 'no'}`);
+  }
+  if (clicks.length) L.push('', `App-link clicks by day: ${clicks.map((r) => `${r.date}:${r.clicks}`).join(' · ')} (total ${clicks.reduce((a, r) => a + r.clicks, 0)}).`);
+  if (topUsers.length) {
+    L.push('', 'Most active app users (name/email · interactions · last seen):');
+    for (const u of topUsers) L.push(`${[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'unknown'} · ${u.interactions} · ${String(u.lastSeen).slice(0, 16)}`);
+  }
+  return L.join('\n');
+}
+// Surfaced in Admin → AI "Everything the AI is told" via insights.promptRegistry().
+function promptRegistry() {
+  return [{ key: 'appAnalyticsSummary', label: 'App analytics — Owl page summary', scope: 'Summarises a client\'s App analytics page (engagement, posts, campaigns, link clicks, top users) with grounded suggestions', text: APP_INSIGHT_SYSTEM }];
+}
+
 const DAYS_DEFAULT = 28;
 const DAYS_MAX = 90;
 const RESTATE_DAYS = 7;    // nightly window — PostHog restates late-arriving events
@@ -94,7 +150,7 @@ const DEFAULT_MAP = {
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
 };
 
-function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) {
+function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true }) {
   const sql = db.db;
   const doFetch = fetchImpl || fetch;
   const now = () => new Date().toISOString();
@@ -582,6 +638,41 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     } catch { return []; /* Chottu links not installed */ }
   }
 
+  // ── 🦉 Owl summary of the whole App analytics page ──────────────────────────────
+  // Same UX as the whole-dashboard summary: gather everything the page shows for
+  // this client + window, stream an analyst read with grounded suggestions.
+  // Prompt lives here (module-owned, like journeys) and is surfaced in the AI
+  // audit via insights.promptRegistry() spreading this module's promptRegistry().
+  async function appInsightFacts(entityId, q) {
+    const w = win(q);
+    const ids = await eventIdsForEntity(entityId);
+    const rep = entityReport(entityId, w, ids);
+    if (!rep.scoped) throw new HttpError(400, 'No app data is scoped to this client yet — their suites need an event lock first.');
+    let live = null;
+    try { live = { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, w) }; } catch { /* rollup still tells the story */ }
+    const bds = [];
+    for (const key of metricMap().breakdownProps.slice(0, 3)) {
+      try { bds.push(await breakdown({ ids, from: w.from, to: w.to, key })); } catch { /* skip a failing key */ }
+    }
+    let topUsers = [];
+    try { topUsers = (await people({ ids, from: w.from, to: w.to, orderBy: 'active', limit: 10 })).people; } catch { /* optional */ }
+    return { report: rep, live, moments: moments(entityId, w), linkClicks: linkClicks(entityId, w), breakdowns: bds, topUsers };
+  }
+  async function streamAppInsight(ctx, onText) {
+    const { requireClient, systemWith, MODEL } = require('./insights'); // lazy — avoids an init-time require cycle (insights' registry requires this module)
+    const c = requireClient(ctx.apiKey);
+    const stream = c.messages.stream({
+      model: MODEL,
+      max_tokens: 1400,
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'low' },
+      system: systemWith(APP_INSIGHT_SYSTEM, ctx.instructions),
+      messages: [{ role: 'user', content: buildAppInsightPrompt(ctx) }],
+    });
+    stream.on('text', (t) => onText(t));
+    await stream.finalMessage();
+  }
+
   // ── routes ──────────────────────────────────────────────────────────────────────
   const myEntity = (req, res, next) => {
     const eid = req.params.entityId;
@@ -765,6 +856,31 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (!ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
     res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
+  // Streamed Owl summary of the page (mirrors POST /api/dashboard-insight).
+  async function insightHandler(entityId, req, res) {
+    const facts = await appInsightFacts(entityId, winQ(req));
+    const apiKey = ai?.keyFor ? ai.keyFor(entityId) : '';
+    const instructions = ai?.instructionsFor ? ai.instructionsFor(entityId) : '';
+    try {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+      const run = () => streamAppInsight({ ...facts, apiKey, instructions }, (txt) => res.write(txt));
+      await (ai?.meter ? ai.meter('app_insight', entityId, run) : run());
+      res.end();
+    } catch (err) {
+      if (res.headersSent) { res.write('\n\n[error: the summary could not be completed]'); res.end(); console.error('[posthog insight]', err.message); }
+      else throw err;
+    }
+  }
+  app.post('/api/my/app-analytics/:entityId/insight', auth.requireAuth, myEntity, asyncHandler(async (req, res) => insightHandler(req.params.entityId, req, res)));
+  app.post('/api/admin/app-analytics/insight', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || req.body?.entityId || '');
+    if (!eid) throw new HttpError(400, 'Pass entityId — the Owl summary is per client.');
+    await insightHandler(eid, req, res);
+  }));
+
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
   });
@@ -781,7 +897,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, moments, linkClicks, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },
@@ -828,4 +944,4 @@ function owlTool({ db, getApi }) {
   return { schema, run };
 }
 
-module.exports = { mount, owlTool, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };
+module.exports = { mount, owlTool, promptRegistry, buildAppInsightPrompt, hqlStr, hqlList, prop, personProp, countIn, parseMapEntry, mapCond, zipRows, nameList, DEFAULT_MAP };
