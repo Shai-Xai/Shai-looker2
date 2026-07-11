@@ -155,6 +155,66 @@ export function PosthogSettingsCard() {
   );
 }
 
+// ── 📤 PostHog warehouse bridge (Integrations, next to the connection card) ─────
+// Feeds Howler ORDER rows (via Looker) to PostHog's Custom REST source — the
+// bridge while the core Howler API is built. Token write-only (shown once);
+// the organiser allowlist fails closed.
+export function PosthogFeedCard() {
+  const [v, setV] = useState(null);
+  const [orgsText, setOrgsText] = useState('');
+  const [freshToken, setFreshToken] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => { api.feedsSettings().then((s) => { setV(s); setOrgsText((s.orgs || []).join('\n')); }).catch(() => {}); }, []);
+  if (!v) return null;
+  const url = `${window.location.origin}${v.path}`;
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>📤 Feed Howler orders INTO PostHog (bridge)</div>
+      <p style={sub}>Point PostHog's <b>Data pipeline → Sources → Custom REST source</b> at this endpoint and its warehouse gets order rows (amount, status, event, purchaser email) for the allowlisted organisers — no Howler-core API needed yet. Re-pull a trailing week on the schedule so refunds restate. Retire this when the core API ships.</p>
+      <label style={lbl}>Endpoint (add ?since=YYYY-MM-DD for incremental pulls)
+        <input style={{ ...input, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={url} readOnly onFocus={(e) => e.target.select()} />
+      </label>
+      <label style={{ ...lbl, marginTop: 10 }}>Organiser allowlist — one per line, exactly as named in Looker (empty = feed OFF)
+        <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={orgsText} onChange={(e) => setOrgsText(e.target.value)} placeholder={'G&G Productions'} />
+      </label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+        <button type="button" style={btn} onClick={async () => {
+          setError('');
+          try { await api.saveFeedsSettings({ orgs: orgsText }); setV(await api.feedsSettings()); setSaved(true); setTimeout(() => setSaved(false), 1600); }
+          catch (e) { setError(e.message); }
+        }}>Save allowlist</button>
+        <button type="button" style={ghostBtn} onClick={async () => {
+          setError('');
+          try { const r = await api.generateFeedToken(); setFreshToken(r.token); setV(await api.feedsSettings()); }
+          catch (e) { setError(e.message); }
+        }}>{v.tokenSet ? '↻ Rotate token' : 'Generate token'}</button>
+        {v.tokenSet && !freshToken && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Token set ({v.tokenHint})</span>}
+        <button type="button" style={ghostBtn} onClick={async () => {
+          setError(''); setPreview(null);
+          try { setPreview(await api.previewFeed()); } catch (e) { setError(e.message); }
+        }}>Preview rows</button>
+        {saved && <span style={okTxt}>✓ Saved</span>}
+      </div>
+      {freshToken && (
+        <p style={{ fontSize: 12.5, marginTop: 10 }}>
+          Bearer token (copy NOW — it won't be shown again):{' '}
+          <code style={{ userSelect: 'all', wordBreak: 'break-all' }}>{freshToken}</code>
+        </p>
+      )}
+      {error && <div style={errBox}>{error}</div>}
+      {preview && (
+        <p style={{ ...sub, marginTop: 10 }}>
+          {preview.orders.length
+            ? `✓ Serving rows — first: order ${preview.orders[0].order_id} · ${preview.orders[0].event_name || preview.orders[0].event_id} · ${preview.orders[0].status} · R${preview.orders[0].amount} (emails masked in preview only)`
+            : 'No rows yet — check the organiser names match Looker exactly.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Management tab (Admin → 📱 App analytics) ───────────────────────────────────
 export function AppAnalyticsAdmin() {
   const isMobile = useIsMobile();

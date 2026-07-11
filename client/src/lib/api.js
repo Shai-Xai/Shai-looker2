@@ -225,6 +225,10 @@ export const api = {
   posthogPropertyValues: (event, key) => fetch(`/api/admin/posthog/property-values?event=${encodeURIComponent(event)}&key=${encodeURIComponent(key)}`).then(json),
   posthogSearchEvents: (q) => fetch(`/api/admin/posthog/search-events?q=${encodeURIComponent(q)}`).then(json),
   posthogCommerceScan: () => fetch('/api/admin/posthog/commerce-scan').then(json),
+  feedsSettings: () => fetch('/api/admin/feeds/settings').then(json),
+  saveFeedsSettings: (body) => fetch('/api/admin/feeds/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  generateFeedToken: () => fetch('/api/admin/feeds/token', { method: 'POST' }).then(json),
+  previewFeed: () => fetch('/api/admin/feeds/preview').then(json),
   adminAppAnalytics: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   adminAppPeople: ({ days, from, to, q, entityId, offset, orderBy, limit } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&from=${from || ''}&to=${to || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}&limit=${limit || ''}`).then(json),
   // Manual sync recounts the FULL window (the nightly tick only restates 7 days) —

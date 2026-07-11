@@ -16,7 +16,7 @@ import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import QueueItCard from '../components/QueueItCard.jsx';
 import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
-import { PosthogSettingsCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
+import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -5186,6 +5186,7 @@ function AdminIntegrations() {
       <Section title="📱 PostHog — app analytics">
         <p style={hint}>One platform connection to Howler's PostHog project. Powers the 📲 App analytics tab and every client's App page (scoped to their events by the <code>eventID</code> property). Event/metric mapping lives on the App analytics tab.</p>
         <PosthogSettingsCard />
+        <PosthogFeedCard />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
