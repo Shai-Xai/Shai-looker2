@@ -1055,9 +1055,14 @@ function ValueExplorer() {
   const [error, setError] = useState('');
   const go = async (e) => {
     e?.preventDefault();
-    if (!event.trim()) return;
+    let ev = event.trim();
+    if (!ev) return;
+    // Forgiving input: "interaction_type=cta_click" without an event means the
+    // slice form minus its event — everything rides the generic `interaction`
+    // event in this app, so prefix it and show the corrected slice in the field.
+    if (ev.includes('=') && !ev.includes(':')) { ev = `interaction : ${ev}`; setEvent(ev); }
     setBusy(true); setError('');
-    try { setOut(await api.posthogPropertyValues(event.trim(), key.trim())); } catch (err) { setError(err.message); }
+    try { setOut(await api.posthogPropertyValues(ev, key.trim())); } catch (err) { setError(err.message); }
     setBusy(false);
   };
   return (
