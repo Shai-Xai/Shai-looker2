@@ -5,6 +5,7 @@ import { brandPrimary } from '../lib/brand.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import DashboardInsightModal from './DashboardInsightModal.jsx';
+import AiMark from './AiMark.jsx';
 
 // 📱 App analytics — the UI over server/posthog.js (direct PostHog integration).
 // Three exports:
@@ -46,16 +47,18 @@ function WindowControls({ gran, setGran, range, setRange }) {
       <Chip onClick={() => { setDraft(range); setOpen(true); }}>
         📅 {range.from === range.to ? fmtDay(range.from) : `${fmtDay(range.from)} – ${fmtDay(range.to)}`}
       </Chip>
-      <Chip on={range.from === isoDay(0) && range.to === isoDay(0)} onClick={() => { setGran('hour'); apply({ from: isoDay(0), to: isoDay(0) }, 'hour'); }}>Today</Chip>
-      {DAY_CHOICES.map((d) => (
-        <Chip key={d} on={range.from === presetRange(d).from && range.to === isoDay(0)}
-          onClick={() => { if (d > HOURLY_MAX_DAYS && gran === 'hour') setGran('day'); apply(presetRange(d), d > HOURLY_MAX_DAYS ? 'day' : gran); }}>{d}d</Chip>
-      ))}
       {open && (
         <div style={overlay} onClick={() => setOpen(false)}>
           <div style={modal} onClick={(e) => e.stopPropagation()}>
             <div style={{ ...title, marginBottom: 2 }}>📅 Date range</div>
             <p style={{ ...sub, marginBottom: 10 }}>Both dates inclusive{gran === 'hour' ? ` · hourly view covers at most ${HOURLY_MAX_DAYS} days` : ''}.</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              <Chip on={range.from === isoDay(0) && range.to === isoDay(0)} onClick={() => { setGran('hour'); apply({ from: isoDay(0), to: isoDay(0) }, 'hour'); setOpen(false); }}>Today</Chip>
+              {DAY_CHOICES.map((d) => (
+                <Chip key={d} on={range.from === presetRange(d).from && range.to === isoDay(0)}
+                  onClick={() => { if (d > HOURLY_MAX_DAYS && gran === 'hour') setGran('day'); apply(presetRange(d), d > HOURLY_MAX_DAYS ? 'day' : gran); setOpen(false); }}>{d}d</Chip>
+              ))}
+            </div>
             <label style={lbl}>From
               <input type="date" style={{ ...input, colorScheme: 'inherit' }} value={draft.from} max={isoDay(0)} onChange={(e) => e.target.value && setDraft({ ...draft, from: e.target.value })} />
             </label>
@@ -209,9 +212,9 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
-        <Chip onClick={() => (entityId
+        <OwlBtn onClick={() => (entityId
           ? setOwlSel({ ids: [entityId], label: clients.find((c) => c.id === entityId)?.name || 'This client' })
-          : setOwlPick(true))}>✨ Owl summary</Chip>
+          : setOwlPick(true))} />
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
@@ -310,7 +313,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         {/* The intro sentence squeezes the control chips into ragged wrapping on
             phones — the page is titled "App", so the copy is desktop-only. */}
         {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">How your events perform inside the Howler app.</span>}
-        <Chip onClick={() => setOwlOpen(true)}>✨ Owl summary</Chip>
+        <OwlBtn onClick={() => setOwlOpen(true)} />
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
       </div>
       {owlOpen && (
@@ -1127,6 +1130,16 @@ function OwlScopePicker({ clients, onPick, onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Icon-only Owl summary trigger — the SAME AiMark the dashboard summaries use.
+function OwlBtn({ onClick }) {
+  return (
+    <button type="button" onClick={onClick} title="Owl summary" aria-label="Owl summary"
+      style={{ minHeight: 32, minWidth: 44, padding: '4px 12px', borderRadius: 980, border: '1px solid var(--hairline)', background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <AiMark size={18} />
+    </button>
   );
 }
 
