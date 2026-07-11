@@ -787,11 +787,20 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // Top values of one property on one event — the tool for writing
   // `event : property=value` mapping entries (e.g. what does `interaction`'s
   // `action` property contain?). Everything escaped via hqlStr.
+  // The event accepts the qualified slice form too (`interaction : interaction_type=cta_click`)
+  // so a property that only rides one interaction type is findable. With NO key,
+  // lists the property KEYS that slice carries — the "where is the label stored?"
+  // question a top-N global key list can't answer (rare slices rank below the cap).
   app.get('/api/admin/posthog/property-values', auth.requireAdmin, asyncHandler(async (req, res) => {
     const event = String(req.query.event || '').trim().slice(0, 200);
     const key = String(req.query.key || '').trim().slice(0, 200);
-    if (!event || !key) throw new HttpError(400, 'Pass ?event= and ?key=.');
-    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n FROM events WHERE event = ${hqlStr(event)} AND timestamp >= now() - INTERVAL 30 DAY AND notEmpty(toString(${prop(key)})) GROUP BY v ORDER BY n DESC LIMIT 50`, { ttl: CATALOG_TTL });
+    if (!event) throw new HttpError(400, 'Pass ?event= (a name, or `event : property=value` for a slice).');
+    const cond = entryCond(parseMapEntry(event));
+    if (!key) {
+      const rows = await hogql(`SELECT arrayJoin(JSONExtractKeys(properties)) AS k, count() AS n FROM events WHERE ${cond} AND timestamp >= now() - INTERVAL 30 DAY GROUP BY k ORDER BY n DESC LIMIT 60`, { ttl: CATALOG_TTL });
+      return res.json({ event, keys: rows.map((r) => ({ key: String(r.k), count: Number(r.n) || 0 })) });
+    }
+    const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n FROM events WHERE ${cond} AND timestamp >= now() - INTERVAL 30 DAY AND notEmpty(toString(${prop(key)})) GROUP BY v ORDER BY n DESC LIMIT 50`, { ttl: CATALOG_TTL });
     res.json({ event, key, values: rows.map((r) => ({ value: String(r.v), count: Number(r.n) || 0 })) });
   }));
   // Does the configured event-id property actually exist, and what do its values

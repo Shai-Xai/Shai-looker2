@@ -1052,23 +1052,38 @@ function ValueExplorer() {
   const [error, setError] = useState('');
   const go = async (e) => {
     e?.preventDefault();
-    if (!event.trim() || !key.trim()) return;
+    if (!event.trim()) return;
     setBusy(true); setError('');
     try { setOut(await api.posthogPropertyValues(event.trim(), key.trim())); } catch (err) { setError(err.message); }
     setBusy(false);
   };
   return (
     <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, margin: '4px 0 12px' }}>
-      <div style={{ ...title, fontSize: 12.5 }}>Explore a property's values</div>
+      <div style={{ ...title, fontSize: 12.5 }}>Explore an event's properties</div>
+      <p style={{ ...sub, marginBottom: 8 }}>Leave the property BLANK to list the keys this event actually carries. The event accepts a slice too — e.g. <code>interaction : interaction_type=cta_click</code> to see what rides only on CTA taps.</p>
       <form style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} onSubmit={go}>
-        <input style={{ ...input, flex: 1, minWidth: 140, marginTop: 0 }} value={event} onChange={(e) => setEvent(e.target.value)} placeholder="event, e.g. interaction" />
-        <input style={{ ...input, flex: 1, minWidth: 140, marginTop: 0 }} value={key} onChange={(e) => setKey(e.target.value)} placeholder="property key, e.g. action" />
-        <button type="submit" style={ghostBtn} disabled={busy || !event.trim() || !key.trim()}>{busy ? '…' : 'Show values'}</button>
+        <input style={{ ...input, flex: 1.4, minWidth: 160, marginTop: 0 }} value={event} onChange={(e) => setEvent(e.target.value)} placeholder="event or slice, e.g. interaction : interaction_type=cta_click" />
+        <input style={{ ...input, flex: 1, minWidth: 120, marginTop: 0 }} value={key} onChange={(e) => setKey(e.target.value)} placeholder="property (blank = list keys)" />
+        <button type="submit" style={ghostBtn} disabled={busy || !event.trim()}>{busy ? '…' : key.trim() ? 'Show values' : 'List keys'}</button>
       </form>
       {error && <div style={{ ...errBox, marginTop: 8 }}>{error}</div>}
-      {out && (
+      {out && out.keys && (
+        out.keys.length === 0
+          ? <p style={{ ...sub, marginTop: 8 }}>No properties found on "{out.event}" in the last 30 days.</p>
+          : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {out.keys.map((k) => (
+                <button type="button" key={k.key} onClick={() => setKey(k.key)} title="Use as the property key"
+                  style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>
+                  {k.key} <span style={{ color: 'var(--muted)' }}>· {fmt(k.count)}</span>
+                </button>
+              ))}
+            </div>
+          )
+      )}
+      {out && out.values && (
         out.values.length === 0
-          ? <p style={{ ...sub, marginTop: 8 }}>No values for "{out.key}" on "{out.event}" in the last 30 days — try another key from the chips above.</p>
+          ? <p style={{ ...sub, marginTop: 8 }}>No values for "{out.key}" on "{out.event}" in the last 30 days — clear the property field and List keys to see what this event really carries.</p>
           : (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
               {out.values.map((v) => (

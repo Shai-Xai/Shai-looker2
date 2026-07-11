@@ -253,13 +253,23 @@ test('diagnose reports tagged-event counts, sample ids and rollup state (admin o
   assert.equal(denied.status, 403);
 });
 
-test('property-values explorer scopes to one event, escapes config, admin only', async () => {
+test('property-values explorer: values, slice-aware, key listing, escaped, admin only', async () => {
   let captured = '';
-  const h = makeHarness({ responder: (q) => { captured = q; return HOGQL(['v', 'n'], [['event_view', 9000], ['cta_tap', 800]]); } });
+  const h = makeHarness({ responder: (q) => {
+    captured = q;
+    if (q.includes('JSONExtractKeys')) return HOGQL(['k', 'n'], [['cta_label', 107], ['interaction_type', 107]]);
+    return HOGQL(['v', 'n'], [['event_view', 9000], ['cta_tap', 800]]);
+  } });
   const out = await h.invoke('GET /api/admin/posthog/property-values', { query: { event: "inter'action", key: 'action' }, user: { role: 'admin' } });
   assert.equal(out.status, 200);
   assert.equal(out.body.values[0].value, 'event_view');
   assert.ok(captured.includes("event = 'inter\\'action'"), 'event name escaped');
+  // slice form narrows to one interaction type
+  await h.invoke('GET /api/admin/posthog/property-values', { query: { event: 'interaction : interaction_type=cta_click', key: 'cta_label' }, user: { role: 'admin' } });
+  assert.ok(captured.includes("event = 'interaction' AND toString(properties['interaction_type']) = 'cta_click'"), 'qualified slice compiles');
+  // no key = list the slice's property keys
+  const keys = await h.invoke('GET /api/admin/posthog/property-values', { query: { event: 'interaction : interaction_type=cta_click' }, user: { role: 'admin' } });
+  assert.equal(keys.body.keys[0].key, 'cta_label', 'key discovery for rare slices');
   const bad = await h.invoke('GET /api/admin/posthog/property-values', { query: {}, user: { role: 'admin' } });
   assert.equal(bad.status, 400);
   const denied = await h.invoke('GET /api/admin/posthog/property-values', { query: { event: 'x', key: 'y' }, user: { role: 'member' } });
