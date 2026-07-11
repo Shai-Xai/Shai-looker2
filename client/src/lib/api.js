@@ -236,6 +236,8 @@ export const api = {
   myAppBreakdown: (entityId, { key, days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
   adminAppBreakdownSeries: ({ key, days, from, to, entityId, granularity } = {}) => fetch(`/api/admin/app-analytics/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   myAppBreakdownSeries: (entityId, { key, days, from, to, granularity } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}`).then(json),
+  adminAppFunnel: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics/funnel?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  myAppFunnel: (entityId, { days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/funnel?days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
   adminAppCtaLabels: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics/cta-labels?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   myAppCtaLabels: (entityId, { days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/cta-labels?days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
   adminAppToday: ({ entityId, from, to } = {}) => fetch(`/api/admin/app-analytics/today?entityId=${encodeURIComponent(entityId || '')}&from=${from || ''}&to=${to || ''}`).then(json),

@@ -263,6 +263,7 @@ export function AppAnalyticsAdmin() {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId })}
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
+      <FunnelCard key={`fun-${winKey}`} admin loader={() => api.adminAppFunnel({ from: range.from, to: range.to, entityId })} />
       <CtaLabelsCard key={`cta-${winKey}`} admin loader={() => api.adminAppCtaLabels({ from: range.from, to: range.to, entityId })} />
       <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
@@ -345,6 +346,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdown(entityId, { key, from: range.from, to: range.to }))}
         seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to, granularity: gran }))} />
+      <FunnelCard key={`fun-${winKey}`} admin={scope === 'admin-client'}
+        loader={() => (scope === 'admin-client' ? api.adminAppFunnel({ from: range.from, to: range.to, entityId }) : api.myAppFunnel(entityId, { from: range.from, to: range.to }))} />
       <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
         loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
       <TopUsersCard key={`top-${winKey}`} win={range}
@@ -738,6 +741,62 @@ function BreakdownSeriesChart({ data }) {
   );
 }
 
+// 🛒→✅ Checkout funnel — unique people reaching each stage in the window,
+// bar width relative to the FIRST stage, with step-over-step conversion and
+// the end-to-end rate up top. "Reached the stage", not a strict sequence —
+// honest about optional paths (cart can be skipped). Steps come from the
+// mapping (metricMap.funnelSteps) so the stages stay configurable.
+function FunnelCard({ loader, admin = false }) {
+  const [out, setOut] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let dead = false;
+    loader().then((r) => { if (!dead) setOut(r); }).catch((e) => { if (!dead) setError(e.message); });
+    return () => { dead = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
+  const steps = out?.steps || [];
+  const top = steps[0]?.people || 0;
+  if (!admin && (error || !top)) return null; // clients: no signal, no card
+  if (admin && !error && out && !steps.length) return null; // funnel unconfigured
+  const last = steps[steps.length - 1]?.people || 0;
+  const overall = top ? (last / top) * 100 : 0;
+  const pct = (v) => (v >= 10 ? Math.round(v) : v >= 1 ? v.toFixed(1) : v.toFixed(2));
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🛒 Checkout funnel</div>
+      <p style={sub}>{top
+        ? <>How ticket browsing turns into orders — unique people reaching each stage in this window. End to end: <b>{pct(overall)}%</b> of ticket viewers confirmed an order.</>
+        : 'How ticket browsing turns into orders — unique people reaching each stage in this window.'}</p>
+      {error && <div style={errBox}>{error}</div>}
+      {!error && !out && <p style={mutedTxt}>Loading…</p>}
+      {!error && out && steps.length > 0 && top === 0 && (
+        <p style={sub}>No funnel activity in this window{admin ? ' — the stages are configurable under 🧭 Event mapping → Funnel steps' : ''}.</p>
+      )}
+      {top > 0 && (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {steps.map((s, i) => {
+            const prev = i > 0 ? steps[i - 1].people : null;
+            const conv = prev ? (s.people / prev) * 100 : null;
+            return (
+              <div key={s.label}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700 }}>{s.label}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(s.people)}</span>
+                  {conv != null && <span style={{ fontSize: 11.5, color: conv < 5 ? 'var(--danger, #dc2626)' : 'var(--muted)' }}>{pct(conv)}% of previous</span>}
+                </div>
+                <div style={{ height: 14, borderRadius: 7, background: 'rgba(128,128,128,0.12)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 7, background: 'var(--brand)', opacity: 0.85, width: `${Math.max(1, (s.people / top) * 100)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {top > 0 && <p style={{ ...mutedTxt, fontSize: 11, marginTop: 10 }}>People who reached each stage in the window (not a strict step-by-step sequence) — revenue truth stays on the dashboards.</p>}
+    </div>
+  );
+}
+
 // 🎯 CTA clicks by label — which buttons people actually tap (recreates the
 // Looker "CTA clicks by label" tile, live + scoped to this view's window and
 // client). Horizontal bars, one hue — it's ONE measure across categories; the
@@ -925,13 +984,23 @@ function MappingEditor() {
   const [catErr, setCatErr] = useState('');
   const [catQ, setCatQ] = useState('');
   const [saved, setSaved] = useState(false);
-  useEffect(() => { api.posthogSettings().then((s) => setM(s.metricMap)).catch(() => {}); }, []);
+  useEffect(() => {
+    api.posthogSettings().then((s) => setM({
+      ...s.metricMap,
+      // funnel steps edit as text — `Label :: mapping entry` per line
+      funnelText: (s.metricMap.funnelSteps || []).map((f) => `${f.label} :: ${f.events.join(', ')}`).join('\n'),
+    })).catch(() => {});
+  }, []);
   if (!m) return null;
   const listVal = (k) => (Array.isArray(m[k]) ? m[k].join('\n') : m[k] || '');
   const setList = (k, v) => setM({ ...m, [k]: v.split(/\n/) });
   const setPerson = (k, v) => setM({ ...m, personProps: { ...m.personProps, [k]: v } });
   const save = async () => {
-    await api.savePosthogSettings({ metricMap: m });
+    const funnelSteps = (m.funnelText ?? '').split('\n').map((line) => {
+      const [label, ...rest] = line.split('::');
+      return { label: (label || '').trim(), events: rest.join('::').split(',').map((x) => x.trim()).filter(Boolean) };
+    }).filter((s) => s.label && s.events.length);
+    await api.savePosthogSettings({ metricMap: { ...m, funnelSteps } });
     setSaved(true); setTimeout(() => setSaved(false), 1600);
   };
   return (
@@ -954,6 +1023,10 @@ function MappingEditor() {
         </label>
         <label style={lbl}>Breakdown properties (the "What's driving it" chips)
           <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\ncta_label\nsurface'} />
+        </label>
+        <label style={{ ...lbl, gridColumn: '1 / -1' }}>Funnel steps (the 🛒 Checkout funnel) — one stage per line: <code>Label :: mapping entry</code>
+          <textarea style={{ ...input, minHeight: 84, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={m.funnelText ?? ''} onChange={(e) => setM({ ...m, funnelText: e.target.value })}
+            placeholder={'Tickets viewed :: interaction : surface=ticket_categories\nCheckout :: interaction : surface=checkout'} />
         </label>
       </div>
       <div style={{ ...title, fontSize: 12.5, marginTop: 10 }}>Person profile properties</div>

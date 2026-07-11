@@ -46,7 +46,7 @@ Write the page's story for a non-technical organiser:
 Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
 
 // Compact fact sheet the model reads — one section per page panel, numbers only.
-function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [], ctaLabels = null }) {
+function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [], ctaLabels = null, funnel = null }) {
   const L = [];
   if (scopeLabel) L.push(`Scope: ${scopeLabel}.`);
   L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
@@ -76,6 +76,10 @@ function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], li
   if (ctaLabels && (ctaLabels.labels || []).length) {
     L.push('', `CTA clicks by label (label · clicks · unique people)${ctaLabels.otherCount ? ` — plus ${ctaLabels.otherCount} smaller labels totalling ${ctaLabels.otherClicks} clicks` : ''}:`);
     for (const v of ctaLabels.labels.slice(0, 12)) L.push(`${v.label} · ${v.clicks} · ${v.uniques}`);
+  }
+  if (funnel && (funnel.steps || []).length) {
+    L.push('', 'Checkout funnel — unique people reaching each stage this window (not a strict sequence):');
+    for (const s of funnel.steps) L.push(`${s.label} · ${s.people}`);
   }
   const posts = mom.filter((m) => m.type === 'post');
   if (posts.length) {
@@ -183,6 +187,15 @@ const DEFAULT_MAP = {
   // Property keys the breakdown panels group by (Howler app taxonomy).
   breakdownProps: ['interaction_type', 'cta_label', 'surface'],
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
+  // The 🛒→✅ checkout funnel stages (label + mapping lines, OR'd within a
+  // step). Confirmed surfaces/taps from the commerce scan; cart is skipped —
+  // the app can jump straight to checkout, which would bend the funnel.
+  funnelSteps: [
+    { label: 'Tickets viewed', events: ['interaction : surface=ticket_categories'] },
+    { label: 'Checkout', events: ['interaction : surface=checkout'] },
+    { label: 'Payment tapped', events: ['interaction : interaction_type=cta_click & cta_label=pay_now'] },
+    { label: 'Order confirmed', events: ['interaction : interaction_type=content_view & surface=order_success'] },
+  ],
 };
 
 function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true }) {
@@ -248,6 +261,10 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
       breakdownProps: nameList(stored.breakdownProps ?? DEFAULT_MAP.breakdownProps),
       personProps: { ...DEFAULT_MAP.personProps, ...(stored.personProps && typeof stored.personProps === 'object' ? stored.personProps : {}) },
+      funnelSteps: (Array.isArray(stored.funnelSteps) ? stored.funnelSteps : DEFAULT_MAP.funnelSteps)
+        .map((s) => ({ label: String(s?.label || '').trim().slice(0, 60), events: nameList(s?.events) }))
+        .filter((s) => s.label && s.events.length)
+        .slice(0, 8),
     };
   }
 
@@ -621,6 +638,24 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     return { ...base, total: all.reduce((s, r) => s + r.clicks, 0), labels: all.slice(0, L), otherClicks: rest.reduce((s, r) => s + r.clicks, 0), otherCount: rest.length };
   }
 
+  // 🛒→✅ checkout funnel — unique people reaching each configured stage in
+  // the window (plus raw event counts), ONE HogQL query for all stages.
+  // Deliberately "people who reached each stage", not a strict-order sequence:
+  // honest, cheap, and robust to the app's optional paths.
+  async function funnel({ ids = null, days, from, to } = {}) {
+    const w = win({ days, from, to });
+    const steps = metricMap().funnelSteps;
+    if (!steps.length) return { days: w.days, from: w.from, to: w.to, steps: [] };
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const sel = steps.map((s, i) => `uniqIf(person_id, ${mapCond(s.events)}) AS u${i}, countIf(${mapCond(s.events)}) AS n${i}`).join(', ');
+    const [row] = await hogql(`SELECT ${sel} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
+    return {
+      days: w.days, from: w.from, to: w.to,
+      steps: steps.map((s, i) => ({ label: s.label, people: Number(row?.[`u${i}`]) || 0, events: Number(row?.[`n${i}`]) || 0 })),
+    };
+  }
+
   // Clients may only group by the admin-configured keys (no property probing).
   function breakdownKeyOrThrow(req) {
     const key = String(req.query.key || '').trim();
@@ -768,6 +803,8 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     try { topUsers = (await people({ ids, from: w.from, to: w.to, orderBy: 'active', limit: 10 })).people; } catch { /* optional */ }
     let cta = null;
     try { const r = await ctaLabels({ ids, from: w.from, to: w.to }); if (r.labels.length) cta = r; } catch { /* optional */ }
+    let fun = null;
+    try { const r = await funnel({ ids, from: w.from, to: w.to }); if (r.steps.some((s) => s.people > 0)) fun = r; } catch { /* optional */ }
     const mom = [];
     const clk = [];
     for (const eid of (list || [null])) { mom.push(...moments(eid, w)); clk.push(...linkClicks(eid, w).map((r) => r)); }
@@ -775,7 +812,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const byDay = new Map();
     for (const r of clk) byDay.set(r.date, (byDay.get(r.date) || 0) + r.clicks);
     return {
-      scopeLabel, report, live, breakdowns: bds, topUsers, ctaLabels: cta,
+      scopeLabel, report, live, breakdowns: bds, topUsers, ctaLabels: cta, funnel: fun,
       moments: mom.sort((a, b) => (a.at < b.at ? -1 : 1)).slice(0, 120),
       linkClicks: [...byDay.entries()].sort().map(([date, clicks]) => ({ date, clicks })),
     };
@@ -836,6 +873,10 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
         breakdownProps: nameList(b.metricMap.breakdownProps ?? cur.breakdownProps),
         personProps: { ...cur.personProps },
+        funnelSteps: (Array.isArray(b.metricMap.funnelSteps) ? b.metricMap.funnelSteps : cur.funnelSteps)
+          .map((s) => ({ label: String(s?.label || '').trim().slice(0, 60), events: nameList(s?.events) }))
+          .filter((s) => s.label && s.events.length)
+          .slice(0, 8),
       };
       for (const k of ['email', 'firstName', 'lastName', 'phone']) {
         if (b.metricMap.personProps?.[k] !== undefined) nx.personProps[k] = String(b.metricMap.personProps[k] || '').trim().slice(0, 80) || DEFAULT_MAP.personProps[k];
@@ -977,6 +1018,12 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, mapped: false, total: 0, labels: [], otherClicks: 0, otherCount: 0 });
     res.json(await ctaLabels({ ids, ...winQ(req), limit: req.query.limit }));
   }));
+  app.get('/api/admin/app-analytics/funnel', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, steps: [] });
+    res.json(await funnel({ ids, ...winQ(req) }));
+  }));
   app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
     const eid = String(req.query.entityId || '') || null;
     res.json({ moments: moments(eid, winQ(req)), linkClicks: linkClicks(eid, winQ(req)) });
@@ -1049,6 +1096,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (!ids.length) return res.json({ days: win(winQ(req)).days, mapped: false, total: 0, labels: [], otherClicks: 0, otherCount: 0 });
     res.json(await ctaLabels({ ids, ...winQ(req), limit: req.query.limit }));
   }));
+  app.get('/api/my/app-analytics/:entityId/funnel', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ days: win(winQ(req)).days, steps: [] });
+    res.json(await funnel({ ids, ...winQ(req) }));
+  }));
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
   });
@@ -1065,7 +1117,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

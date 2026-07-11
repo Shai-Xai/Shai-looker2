@@ -362,6 +362,40 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
   assert.equal(got.body.metricMap.ctaLabelProp, 'cta_label');
 });
 
+test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; steps configurable', async () => {
+  const queries = [];
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => { queries.push(q); return HOGQL(['u0', 'n0', 'u1', 'n1', 'u2', 'n2', 'u3', 'n3'], [[900, 4000, 220, 600, 180, 210, 65, 70]]); },
+  });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/funnel', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.deepEqual(out.body.steps.map((s) => s.label), ['Tickets viewed', 'Checkout', 'Payment tapped', 'Order confirmed']);
+  assert.deepEqual(out.body.steps.map((s) => s.people), [900, 220, 180, 65]);
+  assert.equal(out.body.steps[0].events, 4000);
+  assert.equal(queries.length, 1, 'all stages ride ONE HogQL query');
+  const q = queries[0];
+  assert.ok(q.includes("uniqIf(person_id, (event = 'interaction' AND toString(properties['surface']) = 'ticket_categories'))"), 'stage condition compiles from the mapping grammar');
+  assert.ok(q.includes("toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success'"), 'the & chain reaches the query');
+  assert.ok(q.includes("IN ('101')"), 'scoped to the client\'s events');
+  // no locks → fail closed, empty
+  const h2 = makeHarness({ suites: [{ id: 's2', entityId: 'e2' }], locks: {} });
+  const closed = await h2.invoke('GET /api/my/app-analytics/:entityId/funnel', { params: { entityId: 'e2' }, user: { id: 'u2', role: 'member', entityIds: ['e2'] } });
+  assert.equal(closed.status, 200);
+  assert.deepEqual(closed.body.steps, []);
+  assert.equal(h2.queries.length, 0, 'no ids, no query');
+  // custom steps round-trip; junk (blank label / no events) is dropped
+  const put = await h.invoke('PUT /api/admin/posthog/settings', { user: { id: 'a', role: 'admin' }, body: { metricMap: { funnelSteps: [
+    { label: '  Browsed  ', events: 'interaction : surface=home' },
+    { label: '', events: ['interaction : surface=x'] },
+    { label: 'No events', events: [] },
+  ] } } });
+  assert.equal(put.status, 200);
+  const got = await h.invoke('GET /api/admin/posthog/settings', { user: { id: 'a', role: 'admin' } });
+  assert.deepEqual(got.body.metricMap.funnelSteps, [{ label: 'Browsed', events: ['interaction : surface=home'] }]);
+});
+
 test('commerce scan sweeps a year of event names + mapped property values for order terms', async () => {
   const queries = [];
   const h = makeHarness({
@@ -614,8 +648,9 @@ test('Owl page-summary prompt: registered in the AI audit, fact sheet covers eve
     breakdowns: [{ key: 'interaction_type', values: [{ value: 'cta_click', count: 107, uniques: 45 }] }],
     topUsers: [{ firstName: 'Thandi', lastName: 'Nkosi', email: 't@x.com', interactions: 31, lastSeen: '2026-07-10 23:33:00' }],
     ctaLabels: { labels: [{ label: 'view_tickets', clicks: 1326, uniques: 402 }], otherCount: 5, otherClicks: 587 },
+    funnel: { steps: [{ label: 'Tickets viewed', people: 900 }, { label: 'Order confirmed', people: 65 }] },
   });
-  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31', 'view_tickets · 1326 · 402', '5 smaller labels totalling 587']) {
+  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31', 'view_tickets · 1326 · 402', '5 smaller labels totalling 587', 'Tickets viewed · 900', 'Order confirmed · 65']) {
     assert.ok(txt.includes(must), `fact sheet includes: ${must}`);
   }
 });

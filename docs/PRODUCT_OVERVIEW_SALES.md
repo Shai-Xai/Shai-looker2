@@ -580,6 +580,10 @@ numbers they're about to become."
   (`view_tickets`, `buy_tickets`, `pay_now`, …) as a ranked bar chart, live,
   window-filtered and scoped per client — the Looker CTA tile, now self-serve
   inside Pulse.
+- **🛒 Checkout funnel** — ticket browsing → checkout → payment tap → order
+  confirmed, with step-over-step conversion % and the end-to-end rate, live
+  and per client. Shows exactly where fans drop out of buying in the app
+  (stages configurable in the event mapping).
 - **Ask the Owl** — "how is my event doing in the Howler app?" is a native Owl
   question (`getAppAnalytics`): live + windowed engagement, per event, with
   breakdowns — scoped exactly like the client's App page.
@@ -1017,6 +1021,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-11** — **🛒 Checkout funnel + in-app order tracking** on App
+  analytics 🧪: Purchases now counts real order confirmations (the app's
+  order-success screen), and a live funnel card shows tickets viewed →
+  checkout → payment tapped → order confirmed with conversion % per step —
+  per client, any date window.
 - **2026-07-11** — **🎯 CTA clicks by label** on App analytics 🧪: the Looker
   "CTA clicks by label" tile recreated inside Pulse — live ranked bar chart of
   which buttons people press in the app (`view_tickets`, `buy_tickets`, …),
