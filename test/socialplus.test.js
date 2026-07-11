@@ -136,6 +136,11 @@ test('posts upsert on post id and rank via topPosts', () => {
   assert.equal(top.length, 2);
   assert.equal(top[0].postId, 'p2');                       // highest reactions first
   assert.equal(top[0].reactions, 9);
+  // 'recent' flips to newest-first regardless of engagement.
+  db.db.prepare('UPDATE socialplus_posts SET posted_at=? WHERE entity_id=? AND post_id=?').run('2026-07-11T08:00:00Z', e.id, 'p1');
+  db.db.prepare('UPDATE socialplus_posts SET posted_at=? WHERE entity_id=? AND post_id=?').run('2026-07-01T08:00:00Z', e.id, 'p2');
+  const recent = sp.topPosts(e.id, { sort: 'recent', limit: 10 });
+  assert.equal(recent[0].postId, 'p1');                    // newer wins despite fewer reactions
 });
 
 test('buildMembersCurve reconstructs the growth curve from join dates', () => {

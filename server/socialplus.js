@@ -520,9 +520,64 @@ function series(entityId, { metric = 'members', days = 30 } = {}) {
   return rows.reverse();
 }
 function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
-  const col = ['reactions', 'comments', 'impressions', 'reach', 'shares'].includes(sort) ? sort : 'reactions';
+  const order = sort === 'recent' ? 'posted_at DESC'
+    : `${['reactions', 'comments', 'impressions', 'reach', 'shares'].includes(sort) ? sort : 'reactions'} DESC NULLS LAST`;
   return db.db.prepare(`SELECT post_id AS postId, community_id AS communityId, community_name AS communityName, data_type AS dataType, text, reactions, comments, shares, flags, impressions, reach, posted_at AS postedAt
-    FROM socialplus_posts WHERE entity_id=? ORDER BY ${col} DESC NULLS LAST LIMIT ?`).all(entityId, Math.min(Number(limit) || 10, 50));
+    FROM socialplus_posts WHERE entity_id=? ORDER BY ${order} LIMIT ?`).all(entityId, Math.min(Number(limit) || 10, 50));
+}
+
+// ── Today, hour by hour ──
+// Joins carry full timestamps, so today's NEW MEMBERS come live from Social+
+// (walking each community's newest members back to midnight — cheap) and the
+// MEMBERS curve derives from them; POSTS bucket from the synced posted_at.
+// Messages/comments/reactions only exist as daily snapshots — no hourly truth.
+const todayCache = new Map(); // entityId → { at, data } (a page of viewers shares one walk)
+async function todayHourly(entityId) {
+  const hit = todayCache.get(entityId);
+  if (hit && Date.now() - hit.at < 4 * 60_000) return hit.data;
+  const day = today();
+  const dayStart = `${day}T00:00:00.000Z`;
+  const joinsByHour = {};
+  const scope = scopeFor(entityId);
+  if (isConfigured(entityId) && (scope.all || scope.ids.length)) {
+    const s = await session(entityId);
+    for (const c of communities(entityId, { limit: 100 })) {
+      let token = '';
+      for (let page = 0; page < 10; page++) {
+        const sep = token ? `&options%5Btoken%5D=${encodeURIComponent(token)}` : '';
+        const data = await apiGet(s, `/api/v3/communities/${encodeURIComponent(c.communityId)}/users?memberships%5B%5D=member&options%5BsortBy%5D=lastCreated&options%5Blimit%5D=${PAGE_LIMIT}${sep}`);
+        let past = false;
+        for (const u of (data.communityUsers || [])) {
+          const ts = String(u.createdAt || '');
+          if (ts < dayStart) { past = true; break; }
+          const h = ts.slice(11, 13);
+          joinsByHour[h] = (joinsByHour[h] || 0) + 1;
+        }
+        token = data.paging?.next || '';
+        if (past || !token) break;
+      }
+    }
+  }
+  const postsByHour = {};
+  for (const r of db.db.prepare('SELECT posted_at AS ts FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, dayStart)) {
+    const h = String(r.ts).slice(11, 13);
+    postsByHour[h] = (postsByHour[h] || 0) + 1;
+  }
+  // Members at the end of hour h = members now − joins after h (same derivation
+  // as buildMembersCurve, on hour grain).
+  const totalMembers = totals(entityId).members;
+  const nowHour = Number(new Date().toISOString().slice(11, 13));
+  const hours = [];
+  let after = 0;
+  for (let h = nowHour; h >= 0; h--) {
+    const hh = String(h).padStart(2, '0');
+    hours.unshift({ hour: `${day}T${hh}:00:00Z`, members: totalMembers - after, new_members: joinsByHour[hh] || 0, posts: postsByHour[hh] || 0 });
+    after += joinsByHour[hh] || 0;
+  }
+  const out = { asOf: new Date().toISOString(), date: day, hours };
+  if (todayCache.size > 100) todayCache.clear();
+  todayCache.set(entityId, { at: Date.now(), data: out });
+  return out;
 }
 
 // Per-client health summary (admin monitoring + the App page header).
@@ -564,6 +619,7 @@ function mount(app, { db: database, auth }) {
     channels: channels(id),
     series: series(id, { metric: q.metric ? String(q.metric) : undefined, days: Number(q.days) || 30 }),
     topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12 }),
+    recentPosts: topPosts(id, { sort: 'recent', limit: 12 }),
   });
   // Admin: any client.
   app.get('/api/admin/entities/:id/socialplus', auth.requireAdmin, (req, res) => {
@@ -594,6 +650,17 @@ function mount(app, { db: database, auth }) {
     const id = req.params.entityId;
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
     res.json(await verify(id));
+  }));
+  // Today by hour — live joins + synced posts, briefly cached per entity.
+  app.get('/api/admin/entities/:id/socialplus/today', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    res.json(await todayHourly(req.params.id));
+  }));
+  app.get('/api/my/socialplus/:entityId/today', auth.requireAuth, asyncHandler(async (req, res) => {
+    const id = req.params.entityId;
+    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+    if (!database.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+    res.json(await todayHourly(id));
   }));
   // Refresh-on-open: any viewer of the page may trigger it (no integrations.manage
   // — it's a read-side top-up, throttled by REFRESH_MAX_AGE_MIN and deduped so
@@ -681,6 +748,6 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
   idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve,
-  syncEntity, syncIfStale, totals, communities, channels, series, topPosts, summary, verify,
+  syncEntity, syncIfStale, totals, communities, channels, series, topPosts, todayHourly, summary, verify,
   startDailySync, stopDailySync,
 };

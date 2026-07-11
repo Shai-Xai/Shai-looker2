@@ -25,20 +25,36 @@ const METRICS = [
   ['comments', 'Comments'],
   ['reactions', 'Reactions'],
 ];
+// Only these have hourly truth (join + post timestamps) — the rest are daily snapshots.
+const TODAY_METRICS = [
+  ['members', 'Members'],
+  ['new_members', 'New members'],
+  ['posts', 'Posts'],
+];
 
 export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(30);   // 'today' | 7 | 30 | 90
   const [metric, setMetric] = useState('members');
   const [data, setData] = useState(null);
+  const [todayData, setTodayData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [err, setErr] = useState('');
+  const hourly = days === 'today';
 
   const load = useCallback(() => {
-    api.socialplusData(entityId, scope, { metric, days }).then(setData).catch((e) => { setData(null); setErr(e.message); });
-  }, [entityId, scope, metric, days]);
+    api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days }).then(setData).catch((e) => { setData(null); setErr(e.message); });
+  }, [entityId, scope, metric, days, hourly]);
   useEffect(() => { setData(null); setErr(''); load(); }, [load]);
+  // The hourly view is a separate live read (today's joins straight from Social+).
+  useEffect(() => {
+    if (!hourly) return;
+    let dead = false;
+    setTodayData(null);
+    api.socialplusToday(entityId, scope).then((t) => { if (!dead) setTodayData(t); }).catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [hourly, entityId, scope]);
 
   // Auto-refresh on open: cached numbers render instantly, a background sync
   // tops them up (the server skips it when data is <30 min old and dedupes
@@ -86,6 +102,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         {updating
           ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)' }}>⟳ Updating…</span>
           : s.lastAt && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Updated {new Date(s.lastAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
+        <Chip on={hourly} onClick={() => { setDays('today'); if (!TODAY_METRICS.some(([k]) => k === metric)) setMetric('members'); }}>Today</Chip>
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
         {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
@@ -118,10 +135,18 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
             ['Reactions', t.reactions],
             ['Chat messages', t.messages],
           ]} />
-          <SeriesCard series={data.series || []} metric={metric} setMetric={setMetric} days={days} isMobile={isMobile} />
+          {hourly
+            ? <SeriesCard
+                series={(todayData?.hours || []).map((h) => ({ date: h.hour, value: h[metric] }))}
+                metric={metric} setMetric={setMetric} metrics={TODAY_METRICS}
+                emptyText={todayData ? 'Nothing yet today — the hours fill in as fans join and posts land.' : 'Reading today\'s activity from Social+…'}
+                isMobile={isMobile} />
+            : <SeriesCard series={data.series || []} metric={metric} setMetric={setMetric} metrics={METRICS}
+                emptyText={`Not enough data for a ${days}-day trend yet — it builds up over the first few daily syncs.`}
+                isMobile={isMobile} />}
           <CommunitiesTable rows={data.communities || []} />
           <ChatsTable rows={data.channels || []} />
-          <TopPosts rows={data.topPosts || []} />
+          <PostsCard top={data.topPosts || []} recent={data.recentPosts || []} />
         </>
       )}
 
@@ -150,7 +175,8 @@ function StatRow({ stats, isMobile }) {
 }
 
 // One recessive line chart; chips pick WHICH single series shows (one axis).
-function SeriesCard({ series, metric, setMetric, days, isMobile }) {
+// Day and hour grain both ride the time axis — the caller shapes the rows.
+function SeriesCard({ series, metric, setMetric, metrics, emptyText, isMobile }) {
   const option = useMemo(() => {
     const brand = brandPrimary();
     return {
@@ -170,10 +196,10 @@ function SeriesCard({ series, metric, setMetric, days, isMobile }) {
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        {METRICS.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
+        {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
       </div>
       {series.length < 2
-        ? <p style={{ ...sub, marginBottom: 0 }}>Not enough data for a {days}-day trend yet — it builds up over the first few daily syncs.</p>
+        ? <p style={{ ...sub, marginBottom: 0 }}>{emptyText}</p>
         : <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />}
     </div>
   );
@@ -231,26 +257,33 @@ function ChatsTable({ rows }) {
   );
 }
 
-// Top posts by reactions — engagement figures as compact labelled stats per row.
-function TopPosts({ rows }) {
-  if (!rows.length) return null;
+// Posts — two views of the same rows: 🔥 Top (ranked by reactions) and
+// 🕐 Recent (newest first, ranks replaced by dates).
+function PostsCard({ top, recent }) {
+  const [tab, setTab] = useState('top');
+  if (!top.length && !recent.length) return null;
+  const rows = tab === 'top' ? top : recent;
   return (
     <div style={{ ...card, marginTop: 12 }}>
-      <div style={title}>🔥 Top posts</div>
-      <p style={sub}>Ranked by reactions over all synced posts</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>{tab === 'top' ? '🔥 Top posts' : '🕐 Recent posts'}</div>
+        <Chip on={tab === 'top'} onClick={() => setTab('top')}>🔥 Top</Chip>
+        <Chip on={tab === 'recent'} onClick={() => setTab('recent')}>🕐 Recent</Chip>
+      </div>
+      <p style={{ ...sub, marginTop: 6 }}>{tab === 'top' ? 'Ranked by reactions over all synced posts' : 'Newest first'}</p>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {rows.slice(0, 6).map((p, i) => (
+        {rows.slice(0, tab === 'top' ? 6 : 10).map((p, i) => (
           <div key={p.postId} style={{ display: 'flex', gap: 12, padding: '10px 0', borderTop: i ? '1px solid var(--hairline)' : 'none' }}>
-            <div style={{ flexShrink: 0, width: 22, fontSize: 13, fontWeight: 800, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', paddingTop: 1 }}>{i + 1}</div>
+            {tab === 'top' && <div style={{ flexShrink: 0, width: 22, fontSize: 13, fontWeight: 800, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', paddingTop: 1 }}>{i + 1}</div>}
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 13, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.text || '(no text)'}</div>
               <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+                {p.postedAt && <span style={tab === 'recent' ? { fontWeight: 700, color: 'var(--text)' } : undefined}>{new Date(p.postedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</span>}
                 {p.communityName && <span style={{ fontWeight: 600 }}>{p.communityName}</span>}
                 <span>❤️ {fmt(p.reactions)}</span>
                 <span>💬 {fmt(p.comments)}</span>
                 {p.reach != null && <span>👁 {fmt(p.reach)} reach</span>}
                 {p.impressions != null && <span>{fmt(p.impressions)} impressions</span>}
-                {p.postedAt && <span>{new Date(p.postedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</span>}
               </div>
             </div>
           </div>
