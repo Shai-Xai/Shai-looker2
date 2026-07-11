@@ -281,7 +281,9 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>How your events perform inside the Howler app.</span>
+        {/* The intro sentence squeezes the control chips into ragged wrapping on
+            phones — the page is titled "App", so the copy is desktop-only. */}
+        {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">How your events perform inside the Howler app.</span>}
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
       </div>
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
