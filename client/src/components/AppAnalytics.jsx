@@ -279,8 +279,10 @@ export function AppAnalyticsAdmin() {
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
       <FunnelCard key={`fun-${winKey}`} admin loader={() => api.adminAppFunnel({ from: range.from, to: range.to, entityId })} />
       <CtaLabelsCard key={`cta-${winKey}`} admin loader={() => api.adminAppCtaLabels({ from: range.from, to: range.to, entityId })} />
+      {perClient && <AudienceMatchCard entityId={entityId} scope="admin-client" isMobile={isMobile} />}
       <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
-      <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
+      <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })}
+        ticketsLoader={perClient ? (emails) => api.appTickets(entityId, 'admin-client', emails) : null} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
       {!perClient && <CommerceScanCard />}
@@ -370,10 +372,12 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         loader={() => (scope === 'admin-client' ? api.adminAppFunnel({ from: range.from, to: range.to, entityId }) : api.myAppFunnel(entityId, { from: range.from, to: range.to }))} />
       <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
         loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
+      <AudienceMatchCard entityId={entityId} scope={scope} isMobile={isMobile} />
       <TopUsersCard key={`top-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`} win={range}
-        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
+        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))}
+        ticketsLoader={(emails) => api.appTickets(entityId, scope, emails)} />
     </div>
   );
 }
@@ -994,13 +998,77 @@ function TopUsersCard({ loader, win }) {
 
 // App-user profiles (PostHog person properties). Loaded on demand — live PostHog
 // queries are scarce, so nothing fires until someone asks for the list.
-function PeopleSection({ loader, win }) {
+// 🎟 App audience vs buyers — the email join between the client's app users
+// (PostHog) and their ticket buyers (Looker, hard-scoped). Counts only; the
+// underlying emails never reach the browser. Renders nothing until it can
+// compute (PostHog + event scope + buyers all resolvable).
+function AudienceMatchCard({ entityId, scope, isMobile }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let dead = false;
+    setD(null); setErr('');
+    api.appAudience(entityId, scope).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
+    return () => { dead = true; };
+  }, [entityId, scope]);
+  if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your buyers</div><div style={errBox}>{err}</div></div>;
+  if (!d) return null;
+  if (!d.configured || !d.scoped) return null;
+  const pctOf = (n, base) => (base > 0 ? ` · ${Math.round((n / base) * 100)}%` : '');
+  const tiles = [
+    [`App users (${d.windowDays}d)`, d.appUsers, ''],
+    ['Also your buyers', d.matched, pctOf(d.matched, d.appUsersWithEmail)],
+    ['Not bought yet', d.appNotBuyers, pctOf(d.appNotBuyers, d.appUsersWithEmail)],
+    ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers)],
+  ];
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🎟 App audience vs your buyers</div>
+      <p style={sub}>Your app users matched to your ticket buyers by email — who converts, who hasn't yet, and who buys without the app.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
+        {tiles.map(([label, v, pct]) => (
+          <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+              {fmt(v)}{pct && <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)' }}>{pct}</span>}
+            </div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+      <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
+        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {fmt(d.buyers)} buyers on record.
+        "Not bought yet" is your warm retargeting audience.
+      </p>
+    </div>
+  );
+}
+
+function PeopleSection({ loader, win, ticketsLoader }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [hasMore, setHasMore] = useState(false);
+  // email → [{event, tickets}] — the ticketing join for the emails on screen.
+  const [tickets, setTickets] = useState({});
+  useEffect(() => {
+    if (!ticketsLoader || !rows?.length) return;
+    let dead = false;
+    const emails = [...new Set(rows.map((p) => String(p.email || '').toLowerCase()).filter(Boolean))].filter((e) => !(e in tickets));
+    if (!emails.length) return;
+    ticketsLoader(emails)
+      .then((r) => { if (!dead) setTickets((t) => ({ ...Object.fromEntries(emails.map((e) => [e, []])), ...t, ...(r.byEmail || {}) })); })
+      .catch(() => { /* enrichment only — the table stands without it */ });
+    return () => { dead = true; };
+  }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ticketCell = (p) => {
+    const list = tickets[String(p.email || '').toLowerCase()];
+    if (!list) return '…';
+    if (!list.length) return '—';
+    const shown = list.slice(0, 2).map((t) => `${t.event}${t.tickets > 1 ? ` ×${t.tickets}` : ''}`).join(', ');
+    return list.length > 2 ? `${shown} +${list.length - 2}` : shown;
+  };
   // Fresh list (new search) or append the next page. Most-active ranking lives
   // in its own TopUsersCard — this list stays most-recent-first.
   const load = async (term, { append = false } = {}) => {
@@ -1013,8 +1081,9 @@ function PeopleSection({ loader, win }) {
     setBusy(false);
   };
   const exportCsv = () => {
-    const head = ['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events'];
-    const csv = [head, ...(rows || []).map((p) => [p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; ')])]
+    const head = ['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events', ...(ticketsLoader ? ['Tickets'] : [])];
+    const csv = [head, ...(rows || []).map((p) => [p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; '),
+      ...(ticketsLoader ? [(tickets[String(p.email || '').toLowerCase()] || []).map((t) => `${t.event} x${t.tickets}`).join('; ')] : [])])]
       .map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -1043,7 +1112,7 @@ function PeopleSection({ loader, win }) {
           {rows && rows.length > 0 && (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
-                <thead><tr>{['Name', 'Email', 'Mobile', 'Interactions', 'Last seen', 'Events'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                <thead><tr>{['Name', 'Email', 'Mobile', 'Interactions', 'Last seen', 'Events', ...(ticketsLoader ? ['🎟 Tickets'] : [])].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
                 <tbody>
                   {rows.map((p, i) => (
                     <tr key={i}>
@@ -1053,6 +1122,7 @@ function PeopleSection({ loader, win }) {
                       <td style={td}>{fmt(p.interactions)}</td>
                       <td style={td}>{p.lastSeen ? new Date(p.lastSeen).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                       <td style={{ ...td, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{(p.eventNames || []).join(', ') || '—'}</td>
+                      {ticketsLoader && <td style={{ ...td, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.email ? ticketCell(p) : '—'}</td>}
                     </tr>
                   ))}
                 </tbody>

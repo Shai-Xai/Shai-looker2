@@ -1021,6 +1021,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-11** — **🎟 App audience ↔ buyers (email join)** 🧪 (new): the App
+  page's Analytics tab gains an **"App audience vs your buyers"** card — the
+  client's app users (PostHog) matched by email against their ticket buyers
+  (Looker, hard-scoped): who converts, the **"not bought yet"** warm audience,
+  and buyers who skip the app. The **App-users table** gains a 🎟 **Tickets**
+  column (which events each app user holds tickets for) incl. CSV export.
+  Counts stay server-side; only emails already on screen are enriched.
 - **2026-07-11** — **🛒 Checkout funnel + in-app order tracking** on App
   analytics 🧪: Purchases now counts real order confirmations (the app's
   order-success screen), and a live funnel card shows tickets viewed →

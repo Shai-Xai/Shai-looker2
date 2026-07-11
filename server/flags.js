@@ -129,6 +129,8 @@ const GATES = [
   ['/api/my/onboarding', 'yourjourney'],
   ['/api/my/suite-categories', 'navcategories'],
   ['/api/my/app-analytics', 'appanalytics'],
+  ['/api/my/app-audience', 'appanalytics'],
+  ['/api/my/app-tickets', 'appanalytics'],
   ['/api/my/socialplus', 'appanalytics.socialplus'],
 ];
 
