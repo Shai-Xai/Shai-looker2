@@ -778,9 +778,58 @@ function DiagnoseCard() {
           <div style={{ ...title, fontSize: 12.5 }}>Person profile property keys (for the App-users mapping)</div>
           <KeyChips items={d.personPropertyKeys} hint={(k) => /mail|name|phone|mobile|surname/i.test(k)} />
           <p style={{ ...mutedTxt, fontSize: 11.5 }}>Local rollup: {fmt(d.rollup?.eventRows)} event-day rows total · {fmt(d.rollup?.eventRowsLast7d)} in the last 7 days · {fmt(d.rollup?.appDays)} app days.</p>
+          <HistoryHunt />
           <ValueExplorer />
           <button type="button" style={ghostBtn} disabled={busy} onClick={run}>{busy ? 'Checking…' : 'Re-run'}</button>
         </>
+      )}
+    </div>
+  );
+}
+
+// Does something exist ANYWHERE in the data? Sweeps a full year of event names
+// AND breakdown-property values for a term (e.g. "notif"), with first/last seen —
+// settles "I'm sure we track this" definitively, including things that stopped.
+function HistoryHunt() {
+  const [q, setQ] = useState('notif');
+  const [out, setOut] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const go = async (e) => {
+    e?.preventDefault();
+    if (!q.trim()) return;
+    setBusy(true); setError('');
+    try { setOut(await api.posthogSearchEvents(q.trim())); } catch (err) { setError(err.message); }
+    setBusy(false);
+  };
+  const when = (r) => `${String(r.firstSeen).slice(0, 10)} → ${String(r.lastSeen).slice(0, 10)}`;
+  return (
+    <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, margin: '4px 0 12px' }}>
+      <div style={{ ...title, fontSize: 12.5 }}>Search a full year of history</div>
+      <p style={{ ...sub, marginBottom: 8 }}>Looks for the term in event names AND in the breakdown properties' values — with first/last seen, so events that stopped firing still show.</p>
+      <form style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} onSubmit={go}>
+        <input style={{ ...input, flex: 1, minWidth: 140, marginTop: 0 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. notif, push, receive" />
+        <button type="submit" style={ghostBtn} disabled={busy || !q.trim()}>{busy ? 'Searching…' : 'Search history'}</button>
+      </form>
+      {error && <div style={{ ...errBox, marginTop: 8 }}>{error}</div>}
+      {out && out.events.length === 0 && out.values.length === 0 && (
+        <p style={{ ...sub, marginTop: 8 }}>Nothing matching "{out.q}" in the last 365 days — not as an event name, not as a value of the breakdown properties. If it's tracked, it's under a different word (try another term) or a property Pulse isn't grouping by yet.</p>
+      )}
+      {out && (out.events.length > 0 || out.values.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+          {out.events.map((r) => (
+            <div key={r.event} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{r.event}</span>
+              <span style={{ color: 'var(--muted)' }}>event · {fmt(r.count)} · {when(r)}</span>
+            </div>
+          ))}
+          {out.values.map((r) => (
+            <div key={`${r.key}:${r.value}`} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{r.key}={r.value}</span>
+              <span style={{ color: 'var(--muted)' }}>property value · {fmt(r.count)} · {when(r)}</span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

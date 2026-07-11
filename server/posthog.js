@@ -560,6 +560,27 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const rows = await hogql('SELECT event, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY event ORDER BY n DESC LIMIT 200', { ttl: CATALOG_TTL });
     res.json({ events: rows.map((r) => ({ event: String(r.event), count: Number(r.n) || 0 })) });
   }));
+  // History hunt: does ANYTHING matching a term exist — searching a full year of
+  // event NAMES and the configured breakdown-property VALUES (a "notification
+  // opened" can hide as interaction_type=notification_opened rather than its own
+  // event). Returns counts + first/last seen so "we used to track it" shows too.
+  app.get('/api/admin/posthog/search-events', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const q = String(req.query.q || '').trim().slice(0, 60);
+    if (!q) throw new HttpError(400, 'Pass ?q= — e.g. notif.');
+    const like = hqlStr(`%${q}%`);
+    const events = await hogql(`SELECT event, count() AS n, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND event ILIKE ${like} GROUP BY event ORDER BY n DESC LIMIT 40`, { ttl: CATALOG_TTL });
+    const values = [];
+    for (const key of metricMap().breakdownProps) {
+      const rows = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND toString(${prop(key)}) ILIKE ${like} GROUP BY v ORDER BY n DESC LIMIT 20`, { ttl: CATALOG_TTL });
+      for (const r of rows) values.push({ key, value: String(r.v), count: Number(r.n) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) });
+    }
+    res.json({
+      q,
+      events: events.map((r) => ({ event: String(r.event), count: Number(r.n) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) })),
+      values,
+    });
+  }));
+
   // Top values of one property on one event — the tool for writing
   // `event : property=value` mapping entries (e.g. what does `interaction`'s
   // `action` property contain?). Everything escaped via hqlStr.

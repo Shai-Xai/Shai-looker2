@@ -391,6 +391,28 @@ test('today view returns hourly rows, scoped and fail-closed', async () => {
   assert.deepEqual(closed.body.hours, [], 'no event scope → empty, never whole-app');
 });
 
+test('history search sweeps event names AND breakdown values over a year, escaped, admin only', async () => {
+  const queries = [];
+  const h = makeHarness({
+    responder: (q) => {
+      queries.push(q);
+      if (q.includes('GROUP BY event')) return HOGQL(['event', 'n', 'firstSeen', 'lastSeen'], [['notification_opened', 3200, '2025-09-01 10:00:00', '2026-02-14 08:00:00']]);
+      return HOGQL(['v', 'n', 'firstSeen', 'lastSeen'], []);
+    },
+  });
+  const out = await h.invoke('GET /api/admin/posthog/search-events', { query: { q: "not'if" }, user: { role: 'admin' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.events[0].event, 'notification_opened');
+  assert.equal(out.body.events[0].firstSeen.slice(0, 10), '2025-09-01', 'first/last seen ride along');
+  assert.ok(queries[0].includes('INTERVAL 365 DAY'), 'searches the full year');
+  assert.ok(queries[0].includes("%not\\'if%"), 'term is escaped');
+  assert.equal(queries.length, 4, 'one event-name sweep + one per configured breakdown property');
+  const noQ = await h.invoke('GET /api/admin/posthog/search-events', { query: {}, user: { role: 'admin' } });
+  assert.equal(noQ.status, 400);
+  const denied = await h.invoke('GET /api/admin/posthog/search-events', { query: { q: 'x' }, user: { role: 'member' } });
+  assert.equal(denied.status, 403);
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();
