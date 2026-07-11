@@ -1075,12 +1075,23 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
   const [event, setEvent] = useState(''); // '' = all the client's Pulse events
+  const [segBusy, setSegBusy] = useState(''); // group key mid-create
+  const [segMsg, setSegMsg] = useState(null); // { name, count, truncated } on success
+  const [segErr, setSegErr] = useState('');
   useEffect(() => {
     let dead = false;
-    setD(null); setErr('');
+    setD(null); setErr(''); setSegMsg(null); setSegErr('');
     api.appAudience(entityId, scope, { event }).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
   }, [entityId, scope, event]);
+  const makeSegment = async (group) => {
+    setSegBusy(group); setSegMsg(null); setSegErr('');
+    try {
+      const r = await api.appAudienceSegment(entityId, scope, { group, event });
+      setSegMsg({ name: r.segment?.name, count: r.count, truncated: r.truncated });
+    } catch (e) { setSegErr(e.message); }
+    setSegBusy('');
+  };
   if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your fans</div><div style={errBox}>{err}</div></div>;
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
@@ -1125,9 +1136,30 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
           </div>
         ))}
       </div>
+      {/* One click → a saved Engage segment (snapshot of the group, dated). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>🎯 Save as segment:</span>
+        {[
+          ['never_ticket', hasAtt ? '📲 Never held a ticket' : '📲 Not bought yet'],
+          ...(hasAtt ? [['holders_not_app', '🎟 Holders not on the app']] : []),
+          ['buyers_not_app', '💳 Buyers not on the app'],
+          ...(hasAtt ? [['group_buy', '🎟 Held a ticket, never paid']] : []),
+        ].map(([g, label]) => (
+          <button key={g} style={{ ...ghostBtn, padding: '7px 12px', opacity: segBusy && segBusy !== g ? 0.5 : 1 }} disabled={!!segBusy} onClick={() => makeSegment(g)}>
+            {segBusy === g ? 'Creating…' : label}
+          </button>
+        ))}
+      </div>
+      {segMsg && (
+        <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text)' }}>
+          ✓ Segment saved — <b>{segMsg.name}</b> ({fmt(segMsg.count)} people{segMsg.truncated ? ' — the full group was larger, capped for send safety' : ''}). <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>Open Segments →</a>
+        </div>
+      )}
+      {segErr && <div style={{ ...errBox, marginTop: 8 }}>{segErr}</div>}
       <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
         Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers — counted for {event ? 'this event' : 'these events'} only.
         {hasAtt ? ' "Holders who never paid" (the gap between the two matches) is your group-buy upgrade audience.' : ''}
+        {' '}Saved segments are a snapshot of the group on the day you create them — live in <a href="/engage/segments" style={{ color: 'var(--brand)' }}>Engage → Segments</a>.
       </p>
     </div>
   );

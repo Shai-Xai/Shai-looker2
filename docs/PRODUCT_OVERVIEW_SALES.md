@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-11 (🎯 CTA clicks by label on App analytics · previously: 👥 Social+ in-app community analytics · 📲 App analytics via direct PostHog integration · 🌐 Sales site v2) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-11 (🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join · previously: 👥 Social+ in-app community analytics · 📲 App analytics via direct PostHog integration) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1021,6 +1021,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-11** — **🎯 App-audience groups → Engage segments** 🧪 (new): the
+  App-audience card gains **"Save as segment"** — one tap turns any group
+  (app fans who never held a ticket, holders/buyers not on the app, held-but-
+  never-paid group buyers) into a dated, ready-to-send **Engage segment**
+  (folder "App audience"), per event or across the client's Pulse. Closes the
+  loop: app insight → targetable audience → campaign. Emails stay server-side;
+  requires campaign-approve permission.
 - **2026-07-11** — **🎟 App audience ↔ buyers (email join)** 🧪 (new): the App
   page's Analytics tab gains an **"App audience vs your buyers"** card — the
   client's app users (PostHog) matched by email against their ticket buyers
