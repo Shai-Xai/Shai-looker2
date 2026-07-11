@@ -138,6 +138,21 @@ test('posts upsert on post id and rank via topPosts', () => {
   assert.equal(top[0].reactions, 9);
 });
 
+test('buildMembersCurve reconstructs the growth curve from join dates', () => {
+  // 100 members today; 5 joined today, 10 yesterday, 0 the day before, 20 before that.
+  const joins = { '2026-07-11': 5, '2026-07-10': 10, '2026-07-08': 20 };
+  const curve = sp.buildMembersCurve(100, joins, '2026-07-08', '2026-07-11');
+  assert.deepEqual(curve, [
+    { date: '2026-07-08', members: 85 },  // end of day: the 20 who joined that day count; the later 15 don't
+    { date: '2026-07-09', members: 85 },  // quiet day — flat
+    { date: '2026-07-10', members: 95 },  // 100 − 5 still to come
+    { date: '2026-07-11', members: 100 }, // today = the live total
+  ]);
+  // Curve monotonically climbs to today's total (joins only — leavers approximate).
+  assert.equal(curve[curve.length - 1].members, 100);
+  assert.ok(curve.every((p, i) => i === 0 || p.members >= curve[i - 1].members));
+});
+
 test('summary rolls up totals + sync health; failed syncs surface their error', async () => {
   const e = makeEntity('Summary', 'OrgSPE');
   db.setEntityIntegrations(e.id, { socialplusApiKey: 'bad-key', socialplusRegion: 'eu' });

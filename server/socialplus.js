@@ -35,6 +35,8 @@ const PAGE_LIMIT = 100;                // page size for list endpoints
 const MAX_PAGES = 10;                  // pagination cap per list per sync
 const POST_COMMUNITIES = 30;           // communities we pull post-level detail for
 const TOKEN_TTL_MS = 12 * 3600 * 1000; // re-mint sessions well inside their 30 days
+const JOIN_WINDOW_DAYS = 90;           // how far back the member-growth backfill reaches
+const MEMBER_PAGES = 40;               // membership pagination cap per community per sync
 
 let db = null;
 function init(deps) {
@@ -96,6 +98,16 @@ function init(deps) {
       comments     INTEGER,
       reactions    INTEGER,
       PRIMARY KEY (entity_id, date)
+    );
+    -- Joins per community per day, reconstructed from membership join dates.
+    -- Powers the "New members" metric AND the members-curve backfill, so the
+    -- growth trend has history from the very first sync.
+    CREATE TABLE IF NOT EXISTS socialplus_joins (
+      entity_id    TEXT NOT NULL,
+      community_id TEXT NOT NULL,
+      date         TEXT NOT NULL,               -- YYYY-MM-DD (join day)
+      joins        INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (entity_id, community_id, date)
     );
     -- Per-entity sync health (what the UI shows next to the refresh button).
     CREATE TABLE IF NOT EXISTS socialplus_sync (
@@ -234,6 +246,7 @@ async function pagedList(s, path, listKey) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const num = (v) => (v == null || v === '' ? null : Number(v));
+const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 // ── upserts ──
 function upsertCommunity(row) {
@@ -280,10 +293,60 @@ function upsertDaily(row) {
       comments=excluded.comments, reactions=excluded.reactions`)
     .run({ communities: null, members: null, posts: null, channels: null, chat_members: null, messages: null, comments: null, reactions: null, ...row });
 }
+function upsertDailyMembers(entityId, date, members) {
+  // Members-only restate for backfilled days — never touches the other columns.
+  db.db.prepare(`INSERT INTO socialplus_daily (entity_id, date, members) VALUES (?,?,?)
+    ON CONFLICT(entity_id, date) DO UPDATE SET members=excluded.members`).run(entityId, date, members);
+}
 function setSyncState(entityId, status, error = '') {
   db.db.prepare(`INSERT INTO socialplus_sync (entity_id, last_status, last_error, last_synced) VALUES (?,?,?,?)
     ON CONFLICT(entity_id) DO UPDATE SET last_status=excluded.last_status, last_error=excluded.last_error, last_synced=excluded.last_synced`)
     .run(entityId, status, String(error).slice(0, 300), new Date().toISOString());
+}
+
+// Walk a community's membership list newest-first, counting joins per day back
+// to windowStart. Returns { joinsByDate, coveredFrom }: coveredFrom is the
+// earliest day with COMPLETE data — when the page cap truncates a big community
+// the half-fetched earliest day is dropped so the curve never lies.
+async function fetchJoins(s, communityId, windowStart) {
+  const joinsByDate = {};
+  let token = '';
+  let capped = true; // stays true unless we walk past the window (or run out of members)
+  outer: for (let page = 0; page < MEMBER_PAGES; page++) {
+    const url = `/api/v3/communities/${encodeURIComponent(communityId)}/users?memberships%5B%5D=member&options%5BsortBy%5D=lastCreated&options%5Blimit%5D=${PAGE_LIMIT}${token ? `&options%5Btoken%5D=${encodeURIComponent(token)}` : ''}`;
+    const data = await apiGet(s, url);
+    for (const u of (data.communityUsers || [])) {
+      const day = String(u.createdAt || '').slice(0, 10);
+      if (!day) continue;
+      if (day < windowStart) { capped = false; break outer; }
+      joinsByDate[day] = (joinsByDate[day] || 0) + 1;
+    }
+    token = data.paging?.next || '';
+    if (!token) { capped = false; break; } // reached the very first member
+  }
+  let coveredFrom = windowStart;
+  if (capped) {
+    const days = Object.keys(joinsByDate).sort();
+    const partial = days[0];
+    if (partial) { delete joinsByDate[partial]; coveredFrom = addDays(partial, 1); }
+    else coveredFrom = today();
+  }
+  return { joinsByDate, coveredFrom };
+}
+
+// Members on day d = members now − everyone who joined after d. Leavers make
+// this an approximation — it's a growth curve, not an audit. Pure; exported
+// for tests.
+function buildMembersCurve(totalNow, joinsByDate, fromDate, toDate) {
+  const days = [];
+  for (let d = fromDate; d <= toDate; d = addDays(d, 1)) days.push(d);
+  const out = [];
+  let joinsAfter = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    out.unshift({ date: days[i], members: totalNow - joinsAfter });
+    joinsAfter += joinsByDate[days[i]] || 0; // joins ON day d roll into earlier days
+  }
+  return out;
 }
 
 // ── the sync chokepoint — NEVER throws ──
@@ -296,7 +359,7 @@ async function syncEntity(entityId) {
   // Shared platform key with nothing linked yet: sync NOTHING (and clear any
   // rows from a previous, wider assignment) — never leak other clients' data.
   if (!scope.all && !scope.ids.length) {
-    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily']) {
+    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily', 'socialplus_joins']) {
       db.db.prepare(`DELETE FROM ${t} WHERE entity_id=?`).run(entityId);
     }
     setSyncState(entityId, 'ok');
@@ -349,16 +412,42 @@ async function syncEntity(entityId) {
       }
     }
 
-    // Posts from communities that fell out of scope go too (full listing only).
+    // Posts + joins from communities that fell out of scope go too (full listing only).
     if (commsComplete) {
       const keep = new Set(comms.map((c) => String(c.communityId || c._id)));
-      for (const row of db.db.prepare('SELECT DISTINCT community_id AS cid FROM socialplus_posts WHERE entity_id=?').all(entityId)) {
-        if (!keep.has(row.cid)) db.db.prepare('DELETE FROM socialplus_posts WHERE entity_id=? AND community_id=?').run(entityId, row.cid);
+      for (const table of ['socialplus_posts', 'socialplus_joins']) {
+        for (const row of db.db.prepare(`SELECT DISTINCT community_id AS cid FROM ${table} WHERE entity_id=?`).all(entityId)) {
+          if (!keep.has(row.cid)) db.db.prepare(`DELETE FROM ${table} WHERE entity_id=? AND community_id=?`).run(entityId, row.cid);
+        }
       }
     }
 
-    // Restate today's totals from the fresh snapshots.
+    // Member-growth backfill: reconstruct joins-per-day from membership join
+    // dates so the trend has history from the FIRST sync (a flat just-started
+    // snapshot line was the alternative). Best-effort per community.
+    const windowStart = addDays(today(), -JOIN_WINDOW_DAYS);
+    const allJoins = {};
+    let coveredFrom = windowStart;
+    for (const c of comms) {
+      const cid = String(c.communityId || c._id);
+      try {
+        const { joinsByDate, coveredFrom: cf } = await fetchJoins(s, cid, windowStart);
+        if (cf > coveredFrom) coveredFrom = cf;
+        db.db.prepare('DELETE FROM socialplus_joins WHERE entity_id=? AND community_id=? AND date>=?').run(entityId, cid, cf);
+        const ins = db.db.prepare('INSERT INTO socialplus_joins (entity_id, community_id, date, joins) VALUES (?,?,?,?) ON CONFLICT(entity_id, community_id, date) DO UPDATE SET joins=excluded.joins');
+        for (const [d, n] of Object.entries(joinsByDate)) {
+          if (d >= cf) ins.run(entityId, cid, d, n);
+          allJoins[d] = (allJoins[d] || 0) + n;
+        }
+      } catch { /* joins are an enrichment — a failure never breaks the sync */ }
+    }
+
+    // Restate today's totals from the fresh snapshots, then overwrite the
+    // members column across the covered window with the reconstructed curve.
     const t = totals(entityId);
+    for (const p of buildMembersCurve(t.members, allJoins, coveredFrom, today())) {
+      upsertDailyMembers(entityId, p.date, p.members);
+    }
     upsertDaily({ entity_id: entityId, date: today(), ...t });
     setSyncState(entityId, 'ok');
     return { ok: true, totals: t, communities: comms.length, channels: chans.length };
@@ -388,10 +477,25 @@ function channels(entityId, { limit = 50 } = {}) {
     FROM socialplus_channels WHERE entity_id=? ORDER BY messages DESC NULLS LAST, members DESC NULLS LAST LIMIT ?`).all(entityId, limit);
 }
 // Daily totals series for one metric, oldest→newest, last `days`.
+// 'new_members' reads the reconstructed join dates (zero-filled so quiet days
+// show as zero, not as a gap the line glides over).
 function series(entityId, { metric = 'members', days = 30 } = {}) {
+  const limit = Math.min(Math.max(Number(days) || 30, 1), 365);
+  if (metric === 'new_members') {
+    const from = addDays(today(), -(limit - 1));
+    const byDate = Object.fromEntries(
+      db.db.prepare('SELECT date, SUM(joins) AS n FROM socialplus_joins WHERE entity_id=? AND date>=? GROUP BY date').all(entityId, from)
+        .map((r) => [r.date, num(r.n) || 0]),
+    );
+    const dates = Object.keys(byDate).sort();
+    if (!dates.length) return [];
+    const out = [];
+    for (let d = dates[0]; d <= today(); d = addDays(d, 1)) out.push({ date: d, value: byDate[d] || 0 });
+    return out;
+  }
   const col = ['communities', 'members', 'posts', 'channels', 'chat_members', 'messages', 'comments', 'reactions'].includes(metric) ? metric : 'members';
   const rows = db.db.prepare(`SELECT date, ${col} AS value FROM socialplus_daily WHERE entity_id=? ORDER BY date DESC LIMIT ?`)
-    .all(entityId, Math.min(Math.max(Number(days) || 30, 1), 365));
+    .all(entityId, limit);
   return rows.reverse();
 }
 function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
@@ -542,7 +646,7 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
-  idList, assignedIds, scopeFor, communityInScope, channelInScope,
+  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve,
   syncEntity, totals, communities, channels, series, topPosts, summary, verify,
   startDailySync, stopDailySync,
 };

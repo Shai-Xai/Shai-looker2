@@ -19,6 +19,7 @@ const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n
 const DAY_CHOICES = [7, 30, 90];
 const METRICS = [
   ['members', 'Members'],
+  ['new_members', 'New members'],
   ['messages', 'Messages'],
   ['posts', 'Posts'],
   ['comments', 'Comments'],
