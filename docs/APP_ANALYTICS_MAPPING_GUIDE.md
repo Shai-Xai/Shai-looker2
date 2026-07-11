@@ -64,7 +64,7 @@ whole app" selector active):
 | **Notifications** | notification opt-ins/opens | map when the app sends them |
 | **Purchase value property** | the property carrying an amount on purchase events | only if Purchases is mapped |
 | **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | `cta_label` ✅ confirmed (lowercase — NOT `CTA_Label`) — now the built-in default |
-| **Breakdown properties** | which property chips show in "What's driving it" | `interaction_type`, `cta_label`, `surface` — now the built-in default |
+| **Breakdown properties** | which property chips show in "What's driving it" — line order = chip order | `surface`, `cta_label`, `interaction_type` — now the built-in default |
 | **Funnel steps** | the stages of the 🛒 **Checkout funnel** card, one per line as `Label :: mapping entry` | Tickets viewed → Checkout → Payment tapped → Order confirmed (confirmed surfaces/taps) — now the built-in default |
 | **Person profile properties** | where names/emails/mobiles live on PostHog person profiles | run 🔬 Diagnose and copy the real keys (email is `$email`; the name/surname/mobile keys likely differ from the defaults) |
 

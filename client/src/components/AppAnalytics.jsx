@@ -1022,7 +1022,7 @@ function MappingEditor() {
           <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. cta_label" autoComplete="off" />
         </label>
         <label style={lbl}>Breakdown properties (the "What's driving it" chips)
-          <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\ncta_label\nsurface'} />
+          <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'surface\ncta_label\ninteraction_type'} />
         </label>
         <label style={{ ...lbl, gridColumn: '1 / -1' }}>Funnel steps (the 🛒 Checkout funnel) — one stage per line: <code>Label :: mapping entry</code>
           <textarea style={{ ...input, minHeight: 84, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={m.funnelText ?? ''} onChange={(e) => setM({ ...m, funnelText: e.target.value })}

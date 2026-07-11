@@ -185,7 +185,7 @@ const DEFAULT_MAP = {
   purchaseValueProp: '',
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
-  breakdownProps: ['interaction_type', 'cta_label', 'surface'],
+  breakdownProps: ['surface', 'cta_label', 'interaction_type'], // chip order = display order (surface first per Shai)
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
   // The 🛒→✅ checkout funnel stages (label + mapping lines, OR'd within a
   // step). Confirmed surfaces/taps from the commerce scan; cart is skipped —
@@ -387,7 +387,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   let healed = false;
   try {
     const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
-    if (ver < 2) {
+    if (ver < 3) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
@@ -406,10 +406,15 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         // surface=order_success — an empty Purchases box gets the confirmed
         // slice. A deliberately mapped one is kept.
         if (!nameList(m.purchaseEvents ?? []).length) m.purchaseEvents = DEFAULT_MAP.purchaseEvents;
+        // v3 (2026-07-11): chip order — when the stored chips are exactly the
+        // standard set, adopt the preferred display order (surface first). A
+        // customised set is left alone.
+        const bd3 = nameList(m.breakdownProps ?? []);
+        if (bd3.length === DEFAULT_MAP.breakdownProps.length && DEFAULT_MAP.breakdownProps.every((k) => bd3.includes(k))) m.breakdownProps = [...DEFAULT_MAP.breakdownProps];
         db.setSetting('posthog_metric_map', JSON.stringify(m));
         healed = true;
       }
-      db.setSetting('posthog_map_healed', '2');
+      db.setSetting('posthog_map_healed', '3');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {
@@ -1155,7 +1160,7 @@ function owlTool({ db, getApi }) {
   }
   const schema = {
     name: 'getAppAnalytics',
-    description: 'Howler CONSUMER APP engagement for this client\'s events, from PostHog: unique viewers (live + window), views, interactions, CTA taps and in-app purchase signals — per event, with optional breakdowns (e.g. interaction_type, cta_label, surface — the reply lists breakdownsAvailable). Use for "how is my event doing in the app", "what are people tapping", "app views this week". Read-only.',
+    description: 'Howler CONSUMER APP engagement for this client\'s events, from PostHog: unique viewers (live + window), views, interactions, CTA taps and in-app purchase signals — per event, with optional breakdowns (e.g. surface, cta_label, interaction_type — the reply lists breakdownsAvailable). Use for "how is my event doing in the app", "what are people tapping", "app views this week". Read-only.',
     input_schema: { type: 'object', properties: {
       days: { type: 'number', description: 'Window in days (default 28, max 90).' },
       breakdown: { type: 'string', description: 'Optional property to break down by — call without it first; the reply lists breakdownsAvailable.' },
