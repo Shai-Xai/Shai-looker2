@@ -179,7 +179,10 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
           )}
           <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
           <PresenceCard presence={data.presence} isMobile={isMobile} />
-          <EngagementCard engagement={data.engagement} isMobile={isMobile} />
+          {/* 🎯 Member engagement (contribution-based) is HIDDEN for now — presence
+              (the card above) is the activity story; the actor data keeps
+              collecting server-side, so re-enabling is one line:
+              <EngagementCard engagement={data.engagement} isMobile={isMobile} /> */}
           {hourly
             ? <SeriesCard
                 series={(todayData?.hours || []).map((h) => ({ date: h.hour, value: h[metric] }))}
