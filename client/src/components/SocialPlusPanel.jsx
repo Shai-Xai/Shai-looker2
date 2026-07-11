@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ReactECharts from 'echarts-for-react/lib/core';
 import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
@@ -56,6 +56,24 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
     return () => { dead = true; };
   }, [hourly, entityId, scope]);
 
+  // Syncs run in the BACKGROUND server-side (a full pull outlives proxy
+  // timeouts), so after kicking one we poll until summary.lastAt passes the
+  // kick time — shared by save-linking, the admin Sync button and first-open.
+  const pollRef = useRef(null);
+  useEffect(() => () => clearInterval(pollRef.current), []);
+  const waitForSync = (since) => {
+    clearInterval(pollRef.current);
+    setUpdating(true);
+    let tries = 0;
+    pollRef.current = setInterval(() => {
+      tries += 1;
+      const stop = () => { clearInterval(pollRef.current); setUpdating(false); };
+      api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days })
+        .then((d) => { setData(d); if ((d.summary?.lastAt || '') > since || tries >= 30) stop(); })
+        .catch(() => { if (tries >= 30) stop(); });
+    }, 4000);
+  };
+
   // Auto-refresh on open: cached numbers render instantly, a background sync
   // tops them up (the server skips it when data is <30 min old and dedupes
   // simultaneous viewers), then the page reloads itself. Nobody taps Sync.
@@ -63,9 +81,8 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
     let dead = false;
     setUpdating(true);
     api.socialplusRefresh(entityId, scope)
-      .then((r) => { if (!dead && r.refreshed) load(); })
-      .catch(() => { /* refresh is best-effort — the cached view stands */ })
-      .finally(() => { if (!dead) setUpdating(false); });
+      .then((r) => { if (dead) return; if (r.refreshed && r.started) waitForSync(r.started); else setUpdating(false); })
+      .catch(() => { if (!dead) setUpdating(false); }); // best-effort — the cached view stands
     return () => { dead = true; };
   }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps -- once per surface, not per metric/days
 
@@ -88,7 +105,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const t = s.totals || {};
   const sync = async () => {
     setBusy(true); setErr('');
-    try { await api.socialplusSync(entityId, scope); load(); }
+    try { const r = await api.socialplusSync(entityId, scope); waitForSync(r.started || new Date().toISOString()); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -154,7 +171,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
           Social+ directory (every organiser's communities), so it must never
           render on the client surface — whichever key the client rides on. */}
       {scope === 'admin-client' && (
-        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={load} />
+        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={(started) => waitForSync(started)} />
       )}
     </div>
   );
@@ -278,7 +295,11 @@ function PostsCard({ top, recent }) {
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 13, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.text || '(no text)'}</div>
               <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
-                {p.postedAt && <span style={tab === 'recent' ? { fontWeight: 700, color: 'var(--text)' } : undefined}>{new Date(p.postedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}</span>}
+                {p.postedAt && <span style={tab === 'recent' ? { fontWeight: 700, color: 'var(--text)' } : undefined}>
+                  {tab === 'recent'
+                    ? new Date(p.postedAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                    : new Date(p.postedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}
+                </span>}
                 {p.communityName && <span style={{ fontWeight: 600 }}>{p.communityName}</span>}
                 <span>❤️ {fmt(p.reactions)}</span>
                 <span>💬 {fmt(p.comments)}</span>
@@ -311,7 +332,9 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const save = async () => {
     setBusy(true); setDirErr('');
-    try { await api.socialplusAssign(entityId, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 1600); onSaved?.(); }
+    // The server answers as soon as the links are stored (the re-sync runs in
+    // the background) — the parent polls the data in while we show ✓ Saved.
+    try { const r = await api.socialplusAssign(entityId, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 2500); onSaved?.(r.started || new Date().toISOString()); }
     catch (e) { setDirErr(e.message); }
     setBusy(false);
   };

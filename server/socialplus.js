@@ -364,15 +364,18 @@ function syncEntity(entityId, opts = {}) {
   syncing.set(entityId, p);
   return p;
 }
-// Refresh-on-open: skip when fresh, quick-window when it's a routine top-up,
-// full window on the very first pull. Never throws (syncEntity doesn't).
+// Refresh-on-open: skip when fresh; otherwise KICK the sync in the background
+// and answer immediately (a first pull can outlive proxy timeouts — the UI
+// polls `summary.lastAt` past `started` instead of holding the request open).
+// Quick window for routine top-ups, full window on the very first pull.
 async function syncIfStale(entityId, { maxAgeMinutes = REFRESH_MAX_AGE_MIN } = {}) {
   if (!isConfigured(entityId)) return { ok: false, error: 'not_configured', refreshed: false };
   const row = db.db.prepare('SELECT last_synced FROM socialplus_sync WHERE entity_id=?').get(entityId);
   const last = row?.last_synced ? Date.parse(row.last_synced) : 0;
   if (last && Date.now() - last < maxAgeMinutes * 60 * 1000) return { ok: true, refreshed: false, lastAt: row.last_synced };
-  const r = await syncEntity(entityId, { joinWindowDays: last ? QUICK_JOIN_DAYS : JOIN_WINDOW_DAYS });
-  return { ...r, refreshed: true };
+  const started = new Date().toISOString();
+  syncEntity(entityId, { joinWindowDays: last ? QUICK_JOIN_DAYS : JOIN_WINDOW_DAYS }).catch(() => { /* recorded on the sync row */ });
+  return { ok: true, refreshed: true, started };
 }
 async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}) {
   if (!isConfigured(entityId)) return { ok: false, error: 'not_configured' };
@@ -626,10 +629,15 @@ function mount(app, { db: database, auth }) {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     res.json(payload(req.params.id, req.query));
   });
-  app.post('/api/admin/entities/:id/socialplus/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
+  // Sync/assign answer IMMEDIATELY and run the sync in the background — a full
+  // pull can outlive proxy timeouts, which left buttons spinning on work that
+  // had already succeeded. The UI polls summary.lastAt past `started`.
+  app.post('/api/admin/entities/:id/socialplus/sync', auth.requireAdmin, (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-    res.json(await syncEntity(req.params.id));
-  }));
+    const started = new Date().toISOString();
+    syncEntity(req.params.id).catch(() => { /* recorded on the sync row */ });
+    res.json({ ok: true, started });
+  });
   app.post('/api/admin/entities/:id/socialplus/verify', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     res.json(await verify(req.params.id));
@@ -641,11 +649,13 @@ function mount(app, { db: database, auth }) {
     if (!database.getEntity(id)) return res.status(404).json({ error: 'Not found' });
     res.json(payload(id, req.query));
   });
-  app.post('/api/my/socialplus/:entityId/sync', auth.requireAuth, auth.requirePermission('integrations.manage'), asyncHandler(async (req, res) => {
+  app.post('/api/my/socialplus/:entityId/sync', auth.requireAuth, auth.requirePermission('integrations.manage'), (req, res) => {
     const id = req.params.entityId;
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
-    res.json(await syncEntity(id));
-  }));
+    const started = new Date().toISOString();
+    syncEntity(id).catch(() => { /* recorded on the sync row */ });
+    res.json({ ok: true, started });
+  });
   app.post('/api/my/socialplus/:entityId/verify', auth.requireAuth, asyncHandler(async (req, res) => {
     const id = req.params.entityId;
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
@@ -716,12 +726,13 @@ function mount(app, { db: database, auth }) {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     res.json({ ...(await directory(req.params.id)), assignedIds: assignedIds(req.params.id), source: connection(req.params.id).source });
   }));
-  app.put('/api/admin/entities/:id/socialplus/assign', auth.requireAdmin, asyncHandler(async (req, res) => {
+  app.put('/api/admin/entities/:id/socialplus/assign', auth.requireAdmin, (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     database.setEntityIntegrations(req.params.id, { socialplusCommunityIds: idList((req.body || {}).ids).join(',') });
-    const sync = await syncEntity(req.params.id); // re-scope the data right away
-    res.json({ ...status(req.params.id), sync });
-  }));
+    const started = new Date().toISOString();
+    syncEntity(req.params.id).catch(() => { /* recorded on the sync row */ }); // re-scope in the background
+    res.json({ ...status(req.params.id), started });
+  });
   return module.exports;
 }
 

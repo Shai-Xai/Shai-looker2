@@ -172,11 +172,16 @@ test('syncIfStale skips when fresh, syncs when stale, no-ops unconfigured', asyn
     const r = await sp.syncIfStale(e.id);
     assert.equal(r.refreshed, false);
     assert.equal(r.ok, true);
-    // Stale (an hour old) → it DOES attempt the sync (our stub makes it fail fast).
+    // Stale (an hour old) → it answers immediately with `started` and kicks the
+    // sync in the BACKGROUND (our stub makes that attempt fail fast).
     db.db.prepare('UPDATE socialplus_sync SET last_synced=? WHERE entity_id=?').run(new Date(Date.now() - 3600_000).toISOString(), e.id);
     const r2 = await sp.syncIfStale(e.id);
     assert.equal(r2.refreshed, true);
-    assert.equal(r2.ok, false); // the stubbed network refused — but it tried
+    assert.ok(r2.started, 'returns the kick time for the UI to poll past');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // let the background sync settle
+    const s = sp.summary(e.id);
+    assert.equal(s.lastStatus, 'error'); // the stubbed network refused — but it tried
+    assert.match(s.lastError, /network must not be hit when fresh/);
   } finally { global.fetch = realFetch; }
 });
 
