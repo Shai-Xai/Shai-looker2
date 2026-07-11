@@ -37,6 +37,8 @@ const POST_COMMUNITIES = 30;           // communities we pull post-level detail 
 const TOKEN_TTL_MS = 12 * 3600 * 1000; // re-mint sessions well inside their 30 days
 const JOIN_WINDOW_DAYS = 90;           // how far back the member-growth backfill reaches
 const MEMBER_PAGES = 40;               // membership pagination cap per community per sync
+const REFRESH_MAX_AGE_MIN = 30;        // page-open refresh: skip when synced this recently
+const QUICK_JOIN_DAYS = 7;             // page-open refresh only re-walks recent joins
 
 let db = null;
 function init(deps) {
@@ -353,7 +355,26 @@ function buildMembersCurve(totalNow, joinsByDate, fromDate, toDate) {
 // Pulls communities + channels (filtered to this client's scope), post detail
 // for the most active in-scope communities, then restates today's totals row.
 // A failure is recorded on the sync row; whatever landed before the failure stays.
-async function syncEntity(entityId) {
+// Concurrent calls per entity share ONE run (page-opens auto-refresh — see
+// syncIfStale — so simultaneous viewers must not stack syncs).
+const syncing = new Map(); // entityId → in-flight promise
+function syncEntity(entityId, opts = {}) {
+  if (syncing.has(entityId)) return syncing.get(entityId);
+  const p = doSyncEntity(entityId, opts).finally(() => syncing.delete(entityId));
+  syncing.set(entityId, p);
+  return p;
+}
+// Refresh-on-open: skip when fresh, quick-window when it's a routine top-up,
+// full window on the very first pull. Never throws (syncEntity doesn't).
+async function syncIfStale(entityId, { maxAgeMinutes = REFRESH_MAX_AGE_MIN } = {}) {
+  if (!isConfigured(entityId)) return { ok: false, error: 'not_configured', refreshed: false };
+  const row = db.db.prepare('SELECT last_synced FROM socialplus_sync WHERE entity_id=?').get(entityId);
+  const last = row?.last_synced ? Date.parse(row.last_synced) : 0;
+  if (last && Date.now() - last < maxAgeMinutes * 60 * 1000) return { ok: true, refreshed: false, lastAt: row.last_synced };
+  const r = await syncEntity(entityId, { joinWindowDays: last ? QUICK_JOIN_DAYS : JOIN_WINDOW_DAYS });
+  return { ...r, refreshed: true };
+}
+async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}) {
   if (!isConfigured(entityId)) return { ok: false, error: 'not_configured' };
   const scope = scopeFor(entityId);
   // Shared platform key with nothing linked yet: sync NOTHING (and clear any
@@ -425,7 +446,7 @@ async function syncEntity(entityId) {
     // Member-growth backfill: reconstruct joins-per-day from membership join
     // dates so the trend has history from the FIRST sync (a flat just-started
     // snapshot line was the alternative). Best-effort per community.
-    const windowStart = addDays(today(), -JOIN_WINDOW_DAYS);
+    const windowStart = addDays(today(), -joinWindowDays);
     const allJoins = {};
     let coveredFrom = windowStart;
     for (const c of comms) {
@@ -574,6 +595,19 @@ function mount(app, { db: database, auth }) {
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
     res.json(await verify(id));
   }));
+  // Refresh-on-open: any viewer of the page may trigger it (no integrations.manage
+  // — it's a read-side top-up, throttled by REFRESH_MAX_AGE_MIN and deduped so
+  // simultaneous opens share one sync).
+  app.post('/api/admin/entities/:id/socialplus/refresh', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    res.json(await syncIfStale(req.params.id));
+  }));
+  app.post('/api/my/socialplus/:entityId/refresh', auth.requireAuth, asyncHandler(async (req, res) => {
+    const id = req.params.entityId;
+    if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
+    if (!database.getEntity(id)) return res.status(404).json({ error: 'Not found' });
+    res.json(await syncIfStale(id));
+  }));
 
   // ── community → client linking (the guardrail that makes the shared platform
   // key safe to reuse, mirroring queueit's waiting-room assignment) ──
@@ -647,6 +681,6 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
   idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve,
-  syncEntity, totals, communities, channels, series, topPosts, summary, verify,
+  syncEntity, syncIfStale, totals, communities, channels, series, topPosts, summary, verify,
   startDailySync, stopDailySync,
 };

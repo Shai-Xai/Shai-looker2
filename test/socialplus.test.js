@@ -153,6 +153,28 @@ test('buildMembersCurve reconstructs the growth curve from join dates', () => {
   assert.ok(curve.every((p, i) => i === 0 || p.members >= curve[i - 1].members));
 });
 
+test('syncIfStale skips when fresh, syncs when stale, no-ops unconfigured', async () => {
+  const e = makeEntity('AutoRefresh', 'OrgSPR');
+  // Unconfigured → explicit no-op.
+  assert.deepEqual(await sp.syncIfStale(e.id), { ok: false, error: 'not_configured', refreshed: false });
+  db.setEntityIntegrations(e.id, { socialplusApiKey: 'k-refresh' });
+  // Freshly synced → skipped, and the network is never touched.
+  db.db.prepare(`INSERT INTO socialplus_sync (entity_id, last_status, last_synced) VALUES (?,?,?)
+    ON CONFLICT(entity_id) DO UPDATE SET last_synced=excluded.last_synced`).run(e.id, 'ok', new Date().toISOString());
+  const realFetch = global.fetch;
+  global.fetch = async () => { throw new Error('network must not be hit when fresh'); };
+  try {
+    const r = await sp.syncIfStale(e.id);
+    assert.equal(r.refreshed, false);
+    assert.equal(r.ok, true);
+    // Stale (an hour old) → it DOES attempt the sync (our stub makes it fail fast).
+    db.db.prepare('UPDATE socialplus_sync SET last_synced=? WHERE entity_id=?').run(new Date(Date.now() - 3600_000).toISOString(), e.id);
+    const r2 = await sp.syncIfStale(e.id);
+    assert.equal(r2.refreshed, true);
+    assert.equal(r2.ok, false); // the stubbed network refused — but it tried
+  } finally { global.fetch = realFetch; }
+});
+
 test('summary rolls up totals + sync health; failed syncs surface their error', async () => {
   const e = makeEntity('Summary', 'OrgSPE');
   db.setEntityIntegrations(e.id, { socialplusApiKey: 'bad-key', socialplusRegion: 'eu' });

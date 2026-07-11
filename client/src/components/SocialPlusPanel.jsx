@@ -32,12 +32,26 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const [metric, setMetric] = useState('members');
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [err, setErr] = useState('');
 
   const load = useCallback(() => {
     api.socialplusData(entityId, scope, { metric, days }).then(setData).catch((e) => { setData(null); setErr(e.message); });
   }, [entityId, scope, metric, days]);
   useEffect(() => { setData(null); setErr(''); load(); }, [load]);
+
+  // Auto-refresh on open: cached numbers render instantly, a background sync
+  // tops them up (the server skips it when data is <30 min old and dedupes
+  // simultaneous viewers), then the page reloads itself. Nobody taps Sync.
+  useEffect(() => {
+    let dead = false;
+    setUpdating(true);
+    api.socialplusRefresh(entityId, scope)
+      .then((r) => { if (!dead && r.refreshed) load(); })
+      .catch(() => { /* refresh is best-effort — the cached view stands */ })
+      .finally(() => { if (!dead) setUpdating(false); });
+    return () => { dead = true; };
+  }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps -- once per surface, not per metric/days
 
   if (!data) {
     if (err && scope === 'admin-client') return <div style={card}><p style={sub}>{err}</p></div>;
@@ -68,9 +82,12 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {scope === 'admin-client'
           ? <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>👥 Social+ — in-app communities</div>
-          : <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>Your fan communities and chats inside the Howler app{s.source === 'client' ? ' · own Social+ account' : ''}.</span>}
+          : <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>Your fan communities and chats inside the Howler app.</span>}
+        {updating
+          ? <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)' }}>⟳ Updating…</span>
+          : s.lastAt && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Updated {new Date(s.lastAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
-        <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>
+        {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
       {err && <div style={errBox}>{err}</div>}
       {s.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {s.lastError}</div>}
@@ -85,7 +102,11 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         </div>
       ) : !s.lastAt ? (
         <div style={card}>
-          <p style={{ ...sub, marginBottom: 0 }}>Connected — tap <b>↻ Sync</b> to pull the linked communities, chats and posts for the first time (it also refreshes automatically once a day).</p>
+          <p style={{ ...sub, marginBottom: 0 }}>
+            {updating
+              ? 'Pulling your communities, chats and posts for the first time — usually under a minute. The page updates itself when it\'s done.'
+              : 'Connected — your communities load on the next visit (data refreshes automatically whenever you open this page).'}
+          </p>
         </div>
       ) : (
         <>
