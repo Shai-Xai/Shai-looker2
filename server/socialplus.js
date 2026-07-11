@@ -36,7 +36,7 @@ const MAX_PAGES = 10;                  // pagination cap per list per sync
 const POST_COMMUNITIES = 30;           // communities we pull post-level detail for
 const TOKEN_TTL_MS = 12 * 3600 * 1000; // re-mint sessions well inside their 30 days
 const JOIN_WINDOW_DAYS = 90;           // how far back the member-growth backfill reaches
-const MEMBER_PAGES = 40;               // membership pagination cap per community per sync
+const MEMBER_PAGES = 80;               // membership pagination cap per community per sync (8k joins)
 const REFRESH_MAX_AGE_MIN = 30;        // page-open refresh: skip when synced this recently
 const QUICK_JOIN_DAYS = 7;             // page-open refresh only re-walks recent joins
 
@@ -393,6 +393,16 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
     setSyncState(entityId, 'ok');
     return { ok: true, totals: totals(entityId), communities: 0, channels: 0, unassigned: true };
   }
+  // A CHANGED scope makes the accumulated history lie (G&G's trend showed the
+  // whole network's 130k members from before their 9 were linked): wipe the
+  // daily series + joins and rebuild fresh — members re-backfills immediately
+  // from join dates, the snapshot metrics restart honestly from today.
+  const scopeSig = scope.ids.slice().sort().join(',');
+  if (db.getSetting(`socialplus_scope_sig:${entityId}`, null) !== scopeSig) {
+    db.db.prepare('DELETE FROM socialplus_daily WHERE entity_id=?').run(entityId);
+    db.db.prepare('DELETE FROM socialplus_joins WHERE entity_id=?').run(entityId);
+    db.setSetting(`socialplus_scope_sig:${entityId}`, scopeSig);
+  }
   try {
     const s = await session(entityId);
     const now = new Date().toISOString();
@@ -539,13 +549,72 @@ function series(entityId, { metric = 'members', days = 30 } = {}) {
     .all(entityId, limit);
   return rows.reverse();
 }
-function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
+function topPosts(entityId, { sort = 'reactions', limit = 10, community = null } = {}) {
   const order = sort === 'recent' ? 'posted_at DESC'
     : `${['reactions', 'comments', 'impressions', 'reach', 'shares'].includes(sort) ? sort : 'reactions'} DESC NULLS LAST`;
   const scope = scopeFor(entityId);
   return db.db.prepare(`SELECT post_id AS postId, community_id AS communityId, community_name AS communityName, data_type AS dataType, text, reactions, comments, shares, flags, impressions, reach, posted_at AS postedAt
     FROM socialplus_posts WHERE entity_id=? ORDER BY ${order}`).all(entityId)
-    .filter((r) => communityInScope(scope, r.communityId)).slice(0, Math.min(Number(limit) || 10, 50));
+    .filter((r) => (community ? r.communityId === community : communityInScope(scope, r.communityId)))
+    .slice(0, Math.min(Number(limit) || 10, 50));
+}
+
+// Per-community trend — derived from the tables that carry a community id
+// (joins + posts), since the daily rollup is entity-level. Members/new-members/
+// posts only; the snapshot metrics have no per-community history.
+function communitySeries(entityId, cid, { metric = 'members', days = 30 } = {}) {
+  const limit = Math.min(Math.max(Number(days) || 30, 1), 365);
+  const from = addDays(today(), -(limit - 1));
+  const zeroFill = (byDate) => {
+    const dates = Object.keys(byDate).sort();
+    if (!dates.length) return [];
+    const out = [];
+    for (let d = dates[0]; d <= today(); d = addDays(d, 1)) out.push({ date: d, value: byDate[d] || 0 });
+    return out;
+  };
+  if (metric === 'posts') {
+    const byDate = {};
+    for (const r of db.db.prepare('SELECT posted_at AS ts FROM socialplus_posts WHERE entity_id=? AND community_id=? AND posted_at>=?').all(entityId, cid, `${from}T00:00:00.000Z`)) {
+      const d = String(r.ts).slice(0, 10);
+      byDate[d] = (byDate[d] || 0) + 1;
+    }
+    return zeroFill(byDate);
+  }
+  const joins = Object.fromEntries(
+    db.db.prepare('SELECT date, joins FROM socialplus_joins WHERE entity_id=? AND community_id=? AND date>=?').all(entityId, cid, from)
+      .map((r) => [r.date, num(r.joins) || 0]),
+  );
+  if (metric === 'new_members') return zeroFill(joins);
+  const c = db.db.prepare('SELECT members FROM socialplus_communities WHERE entity_id=? AND community_id=?').get(entityId, cid);
+  const covered = Object.keys(joins).sort()[0] || today();
+  return buildMembersCurve(num(c?.members) || 0, joins, covered > from ? covered : from, today())
+    .map((p) => ({ date: p.date, value: p.members }));
+}
+
+// Today's activity — the closest honest read the Social+ API allows (there is
+// no per-community DAU endpoint): fans who JOINED today, POSTS made today, and
+// the day-over-day movement of the snapshot counters. Entity-wide deltas only —
+// per community the daily rollup has no history, so those come back null.
+function todayActivity(entityId, cid = null) {
+  const day = today();
+  const scope = scopeFor(entityId);
+  let newMembers = 0;
+  for (const r of db.db.prepare('SELECT community_id AS c, joins FROM socialplus_joins WHERE entity_id=? AND date=?').all(entityId, day)) {
+    if (cid ? r.c === cid : communityInScope(scope, r.c)) newMembers += num(r.joins) || 0;
+  }
+  let posts = 0;
+  for (const r of db.db.prepare('SELECT community_id AS c FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, `${day}T00:00:00.000Z`)) {
+    if (cid ? r.c === cid : communityInScope(scope, r.c)) posts += 1;
+  }
+  let messages = null, comments = null, reactions = null;
+  if (!cid) {
+    const rows = db.db.prepare('SELECT date, messages, comments, reactions FROM socialplus_daily WHERE entity_id=? AND date>=? ORDER BY date').all(entityId, addDays(day, -1));
+    const yd = rows.find((r) => r.date === addDays(day, -1));
+    const td = rows.find((r) => r.date === day);
+    const delta = (k) => (yd && td && td[k] != null && yd[k] != null ? Math.max(0, td[k] - yd[k]) : null);
+    messages = delta('messages'); comments = delta('comments'); reactions = delta('reactions');
+  }
+  return { newMembers, posts, messages, comments, reactions };
 }
 
 // ── Today, hour by hour ──
@@ -553,17 +622,19 @@ function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
 // (walking each community's newest members back to midnight — cheap) and the
 // MEMBERS curve derives from them; POSTS bucket from the synced posted_at.
 // Messages/comments/reactions only exist as daily snapshots — no hourly truth.
-const todayCache = new Map(); // entityId → { at, data } (a page of viewers shares one walk)
-async function todayHourly(entityId) {
-  const hit = todayCache.get(entityId);
+const todayCache = new Map(); // `${entityId}:${cid}` → { at, data } (viewers share one walk)
+async function todayHourly(entityId, cid = null) {
+  const cacheKey = `${entityId}:${cid || ''}`;
+  const hit = todayCache.get(cacheKey);
   if (hit && Date.now() - hit.at < 4 * 60_000) return hit.data;
   const day = today();
   const dayStart = `${day}T00:00:00.000Z`;
   const joinsByHour = {};
   const scope = scopeFor(entityId);
+  const comms = communities(entityId, { limit: 100 }).filter((c) => !cid || c.communityId === cid);
   if (isConfigured(entityId) && (scope.all || scope.ids.length)) {
     const s = await session(entityId);
-    for (const c of communities(entityId, { limit: 100 })) {
+    for (const c of comms) {
       let token = '';
       for (let page = 0; page < 10; page++) {
         const sep = token ? `&options%5Btoken%5D=${encodeURIComponent(token)}` : '';
@@ -581,13 +652,14 @@ async function todayHourly(entityId) {
     }
   }
   const postsByHour = {};
-  for (const r of db.db.prepare('SELECT posted_at AS ts FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, dayStart)) {
+  for (const r of db.db.prepare('SELECT posted_at AS ts, community_id AS c FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, dayStart)) {
+    if (cid && r.c !== cid) continue;
     const h = String(r.ts).slice(11, 13);
     postsByHour[h] = (postsByHour[h] || 0) + 1;
   }
   // Members at the end of hour h = members now − joins after h (same derivation
   // as buildMembersCurve, on hour grain).
-  const totalMembers = totals(entityId).members;
+  const totalMembers = cid ? comms.reduce((a, c) => a + (num(c.members) || 0), 0) : totals(entityId).members;
   const nowHour = Number(new Date().toISOString().slice(11, 13));
   const hours = [];
   let after = 0;
@@ -598,7 +670,7 @@ async function todayHourly(entityId) {
   }
   const out = { asOf: new Date().toISOString(), date: day, hours };
   if (todayCache.size > 100) todayCache.clear();
-  todayCache.set(entityId, { at: Date.now(), data: out });
+  todayCache.set(cacheKey, { at: Date.now(), data: out });
   return out;
 }
 
@@ -635,14 +707,24 @@ function mount(app, { db: database, auth }) {
   init({ db: database });
   const { asyncHandler } = require('./http');
   const ownsEntity = (req, id) => req.user.role === 'admin' || (req.user.entityIds || []).includes(id);
-  const payload = (id, q = {}) => ({
-    summary: summary(id),
-    communities: communities(id),
-    channels: channels(id),
-    series: series(id, { metric: q.metric ? String(q.metric) : undefined, days: Number(q.days) || 30 }),
-    topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12 }),
-    recentPosts: topPosts(id, { sort: 'recent', limit: 12 }),
-  });
+  const payload = (id, q = {}) => {
+    const scope = scopeFor(id);
+    // The community filter narrows every block; it must itself be in scope.
+    const cid = q.community && communityInScope(scope, String(q.community)) ? String(q.community) : null;
+    const metric = q.metric ? String(q.metric) : undefined;
+    const days = Number(q.days) || 30;
+    const all = communities(id);
+    return {
+      summary: { ...summary(id), todayActivity: todayActivity(id, cid) },
+      community: cid,
+      allCommunities: all.map((c) => ({ communityId: c.communityId, displayName: c.displayName })),
+      communities: cid ? all.filter((c) => c.communityId === cid) : all,
+      channels: cid ? channels(id).filter((c) => c.channelId === cid) : channels(id),
+      series: cid ? communitySeries(id, cid, { metric, days }) : series(id, { metric, days }),
+      topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12, community: cid }),
+      recentPosts: topPosts(id, { sort: 'recent', limit: 12, community: cid }),
+    };
+  };
   // Admin: any client.
   app.get('/api/admin/entities/:id/socialplus', auth.requireAdmin, (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
@@ -681,15 +763,16 @@ function mount(app, { db: database, auth }) {
     res.json(await verify(id));
   }));
   // Today by hour — live joins + synced posts, briefly cached per entity.
+  const todayCid = (id, q) => (q.community && communityInScope(scopeFor(id), String(q.community)) ? String(q.community) : null);
   app.get('/api/admin/entities/:id/socialplus/today', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-    res.json(await todayHourly(req.params.id));
+    res.json(await todayHourly(req.params.id, todayCid(req.params.id, req.query)));
   }));
   app.get('/api/my/socialplus/:entityId/today', auth.requireAuth, asyncHandler(async (req, res) => {
     const id = req.params.entityId;
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
     if (!database.getEntity(id)) return res.status(404).json({ error: 'Not found' });
-    res.json(await todayHourly(id));
+    res.json(await todayHourly(id, todayCid(id, req.query)));
   }));
   // Refresh-on-open: any viewer of the page may trigger it (no integrations.manage
   // — it's a read-side top-up, throttled by REFRESH_MAX_AGE_MIN and deduped so
@@ -777,7 +860,7 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
-  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve,
+  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve, communitySeries, todayActivity,
   syncEntity, syncIfStale, totals, communities, channels, series, topPosts, todayHourly, summary, verify,
   startDailySync, stopDailySync,
 };

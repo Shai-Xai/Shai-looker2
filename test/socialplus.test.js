@@ -177,6 +177,55 @@ test('reads re-apply the scope — stale rows from a wider sync never leak', () 
   assert.equal(sp.summary(e.id).assigned, false);
 });
 
+test('a scope CHANGE wipes the daily history (it mixes scopes and lies)', async () => {
+  const e = makeEntity('SigWipe', 'OrgSPW');
+  db.setEntityIntegrations(e.id, { socialplusApiKey: 'k-sig', socialplusCommunityIds: 'c1' });
+  const insDaily = db.db.prepare('INSERT INTO socialplus_daily (entity_id, date, members) VALUES (?,?,?)');
+  insDaily.run(e.id, '2026-07-01', 130000); // written under the OLD (network-wide) scope
+  const realFetch = global.fetch;
+  global.fetch = async () => { throw new Error('offline'); };
+  try {
+    await sp.syncEntity(e.id); // errors at the session — but the wipe runs first
+    assert.equal(db.db.prepare('SELECT COUNT(*) c FROM socialplus_daily WHERE entity_id=?').get(e.id).c, 0, 'lying history gone');
+    // Same scope again → no wipe: rows written after the sig stick around.
+    insDaily.run(e.id, '2026-07-02', 500);
+    await sp.syncEntity(e.id);
+    assert.equal(db.db.prepare('SELECT COUNT(*) c FROM socialplus_daily WHERE entity_id=?').get(e.id).c, 1, 'unchanged scope keeps history');
+  } finally { global.fetch = realFetch; }
+});
+
+test('communitySeries + todayActivity derive per-community numbers from joins/posts', () => {
+  const e = makeEntity('PerCommunity', 'OrgSPX');
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1,c2' });
+  const day = new Date().toISOString().slice(0, 10);
+  const yday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+  db.db.prepare('INSERT INTO socialplus_communities (entity_id, community_id, display_name, members) VALUES (?,?,?,?)').run(e.id, 'c1', 'Mine', 100);
+  const insJ = db.db.prepare('INSERT INTO socialplus_joins (entity_id, community_id, date, joins) VALUES (?,?,?,?)');
+  insJ.run(e.id, 'c1', yday, 10);
+  insJ.run(e.id, 'c1', day, 5);
+  insJ.run(e.id, 'c2', day, 99); // other community — must not bleed in
+  db.db.prepare('INSERT INTO socialplus_posts (entity_id, post_id, community_id, posted_at) VALUES (?,?,?,?)').run(e.id, 'p1', 'c1', `${day}T10:00:00Z`);
+  // Members curve: yesterday = 100 − 5 still to come; today = 100.
+  const curve = sp.communitySeries(e.id, 'c1', { metric: 'members', days: 30 });
+  assert.deepEqual(curve.slice(-2).map((p) => p.value), [95, 100]);
+  const nm = sp.communitySeries(e.id, 'c1', { metric: 'new_members', days: 30 });
+  assert.deepEqual(nm.map((p) => p.value), [10, 5]);
+  assert.deepEqual(sp.communitySeries(e.id, 'c1', { metric: 'posts', days: 30 }), [{ date: day, value: 1 }]);
+  // Today's activity: per community counts joins + posts for THAT community only.
+  const a1 = sp.todayActivity(e.id, 'c1');
+  assert.equal(a1.newMembers, 5);
+  assert.equal(a1.posts, 1);
+  assert.equal(a1.messages, null); // per-community deltas have no history
+  // Entity-wide: joins across scope + counter deltas vs yesterday's snapshot.
+  db.db.prepare('INSERT INTO socialplus_daily (entity_id, date, messages, comments, reactions) VALUES (?,?,?,?,?)').run(e.id, yday, 100, 20, 50);
+  db.db.prepare('INSERT INTO socialplus_daily (entity_id, date, messages, comments, reactions) VALUES (?,?,?,?,?)').run(e.id, day, 130, 22, 48);
+  const a = sp.todayActivity(e.id);
+  assert.equal(a.newMembers, 5 + 99);
+  assert.equal(a.messages, 30);
+  assert.equal(a.comments, 2);
+  assert.equal(a.reactions, 0); // counters can restate down — never negative
+});
+
 test('buildMembersCurve reconstructs the growth curve from join dates', () => {
   // 100 members today; 5 joined today, 10 yesterday, 0 the day before, 20 before that.
   const joins = { '2026-07-11': 5, '2026-07-10': 10, '2026-07-08': 20 };

@@ -564,15 +564,16 @@ export const api = {
   // Social+ (social.plus) in-app community analytics (inbound). Dual-surface
   // like queueit: 'admin-client' hits /api/admin (ungated), 'my' the flag-gated
   // client routes. Directory/assign power the community → client linking.
-  socialplusData: (entityId, scope, { metric = 'members', days = 30, sort } = {}) => {
+  socialplusData: (entityId, scope, { metric = 'members', days = 30, sort, community } = {}) => {
     const q = new URLSearchParams({ metric, days: String(days) });
     if (sort) q.set('sort', sort);
+    if (community) q.set('community', community);
     return fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus` : `/api/my/socialplus/${entityId}`}?${q}`).then(json);
   },
   socialplusSync: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/sync` : `/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
   // Fired on page open — the server skips it when data is fresh (<30 min).
   socialplusRefresh: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/refresh` : `/api/my/socialplus/${entityId}/refresh`, { method: 'POST' }).then(json),
-  socialplusToday: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/today` : `/api/my/socialplus/${entityId}/today`).then(json),
+  socialplusToday: (entityId, scope, { community } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/today` : `/api/my/socialplus/${entityId}/today`}${community ? `?community=${encodeURIComponent(community)}` : ''}`).then(json),
   socialplusVerify: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/verify` : `/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
   // Directory + assign are admin-only — the directory spans every organiser's
   // communities, so there is deliberately no client-surface twin.

@@ -36,25 +36,29 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
   const [days, setDays] = useState(30);   // 'today' | 7 | 30 | 90
   const [metric, setMetric] = useState('members');
+  const [community, setCommunity] = useState(''); // '' = all linked communities
   const [data, setData] = useState(null);
   const [todayData, setTodayData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [err, setErr] = useState('');
   const hourly = days === 'today';
+  // A single community only has per-community truth for these (joins + posts).
+  const filtered = !!community;
+  const metricChoices = hourly || filtered ? TODAY_METRICS : METRICS;
 
   const load = useCallback(() => {
-    api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days }).then(setData).catch((e) => { setData(null); setErr(e.message); });
-  }, [entityId, scope, metric, days, hourly]);
+    api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days, community }).then(setData).catch((e) => { setData(null); setErr(e.message); });
+  }, [entityId, scope, metric, days, hourly, community]);
   useEffect(() => { setData(null); setErr(''); load(); }, [load]);
   // The hourly view is a separate live read (today's joins straight from Social+).
   useEffect(() => {
     if (!hourly) return;
     let dead = false;
     setTodayData(null);
-    api.socialplusToday(entityId, scope).then((t) => { if (!dead) setTodayData(t); }).catch((e) => { if (!dead) setErr(e.message); });
+    api.socialplusToday(entityId, scope, { community }).then((t) => { if (!dead) setTodayData(t); }).catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
-  }, [hourly, entityId, scope]);
+  }, [hourly, entityId, scope, community]);
 
   // Syncs run in the BACKGROUND server-side (a full pull outlives proxy
   // timeouts), so after kicking one we poll until summary.lastAt passes the
@@ -68,7 +72,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
     pollRef.current = setInterval(() => {
       tries += 1;
       const stop = () => { clearInterval(pollRef.current); setUpdating(false); };
-      api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days })
+      api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days, community })
         .then((d) => { setData(d); if ((d.summary?.lastAt || '') > since || tries >= 30) stop(); })
         .catch(() => { if (tries >= 30) stop(); });
     }, 4000);
@@ -123,6 +127,15 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
         {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
+      {(data.allCommunities || []).length > 1 && (
+        <select
+          value={community}
+          onChange={(e) => { setCommunity(e.target.value); if (e.target.value && !TODAY_METRICS.some(([k]) => k === metric)) setMetric('members'); }}
+          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 12, padding: '9px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, minHeight: 40 }}>
+          <option value="">🏟 All communities</option>
+          {data.allCommunities.map((c) => <option key={c.communityId} value={c.communityId}>{c.displayName || c.communityId}</option>)}
+        </select>
+      )}
       {err && <div style={errBox}>{err}</div>}
       {s.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {s.lastError}</div>}
 
@@ -144,21 +157,31 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         </div>
       ) : (
         <>
-          <StatRow isMobile={isMobile} stats={[
-            ['Members', t.members],
-            ['Communities', t.communities],
-            ['Posts', t.posts],
-            ['Comments', t.comments],
-            ['Reactions', t.reactions],
-            ['Chat messages', t.messages],
-          ]} />
+          {filtered ? (
+            <StatRow isMobile={isMobile} stats={[
+              ['Members', t.members],
+              ['Posts', t.posts],
+              ['Comments', t.comments],
+              ['Reactions', t.reactions],
+            ]} />
+          ) : (
+            <StatRow isMobile={isMobile} stats={[
+              ['Members', t.members],
+              ['Communities', t.communities],
+              ['Posts', t.posts],
+              ['Comments', t.comments],
+              ['Reactions', t.reactions],
+              ['Chat messages', t.messages],
+            ]} />
+          )}
+          <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
           {hourly
             ? <SeriesCard
                 series={(todayData?.hours || []).map((h) => ({ date: h.hour, value: h[metric] }))}
                 metric={metric} setMetric={setMetric} metrics={TODAY_METRICS}
                 emptyText={todayData ? 'Nothing yet today — the hours fill in as fans join and posts land.' : 'Reading today\'s activity from Social+…'}
                 isMobile={isMobile} />
-            : <SeriesCard series={data.series || []} metric={metric} setMetric={setMetric} metrics={METRICS}
+            : <SeriesCard series={data.series || []} metric={metric} setMetric={setMetric} metrics={metricChoices}
                 emptyText={`Not enough data for a ${days}-day trend yet — it builds up over the first few daily syncs.`}
                 isMobile={isMobile} />}
           <CommunitiesTable rows={data.communities || []} />
@@ -178,6 +201,35 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
 }
 
 // ── pieces (mirroring AppAnalytics.jsx so the two App tabs read as one) ─────────
+// What's moving TODAY — joins and posts are exact; messages/comments/reactions
+// are day-over-day movement of the counters (they need yesterday's snapshot, so
+// they appear from the second day and stay entity-wide). Social+ has no
+// active-user API — true app DAU lives on the 📊 Analytics tab.
+function ActivityRow({ activity, isMobile }) {
+  const a = activity || {};
+  const tiles = [
+    ['New members', a.newMembers],
+    ['Posts', a.posts],
+    ['Chat messages', a.messages],
+    ['Comments', a.comments],
+    ['Reactions', a.reactions],
+  ].filter(([, v]) => v != null);
+  if (!tiles.length) return null;
+  return (
+    <>
+      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '2px 0 6px' }}>⚡ Today's activity</div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 110 : 130}px, 1fr))`, gap: 8, marginBottom: 12 }}>
+        {tiles.map(([label, v]) => (
+          <div key={label} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '9px 12px' }}>
+            <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{v > 0 ? `+${fmt(v)}` : fmt(v)}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function StatRow({ stats, isMobile }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 150}px, 1fr))`, gap: 8, marginBottom: 12 }}>
