@@ -1017,20 +1017,25 @@ function CtaLabelsCard({ loader, admin = false }) {
 function TopUsersCard({ loader, win }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
+  // TRUE fans by default — Howler staff emails are excluded until toggled in.
+  const [withStaff, setWithStaff] = useState(false);
   useEffect(() => {
     let dead = false;
     setRows(null); setError('');
-    loader({ orderBy: 'active', limit: 10 })
+    loader({ orderBy: 'active', limit: 10, excludeStaff: !withStaff })
       .then((r) => { if (!dead) setRows(r.people || []); })
       .catch((e) => { if (!dead) setError(e.message); });
     return () => { dead = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
-  if (rows && rows.length === 0) return null; // no signal, no card
+  }, [withStaff]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
+  if (rows && rows.length === 0 && !withStaff) return null; // no signal, no card
   const max = Math.max(1, ...(rows || []).map((p) => p.interactions || 0));
   return (
     <div style={{ ...card, marginTop: 12 }}>
-      <div style={title}>🏆 Super fans</div>
-      <p style={sub}>Your 10 biggest super fans {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'} — the most active people in the app, by interactions.</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ ...title, flex: 1, marginBottom: 0 }}>🏆 Super fans</div>
+        <Chip on={!withStaff} onClick={() => setWithStaff(!withStaff)}>{withStaff ? 'Howler staff shown' : '🚫 Howler staff excluded'}</Chip>
+      </div>
+      <p style={sub}>Your 10 biggest super fans {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'} — the most active people in the app, by interactions{withStaff ? '' : ' (Howler email addresses excluded)'}.</p>
       {error && <div style={errBox}>{error}</div>}
       {!rows && !error && <p style={mutedTxt}>Loading…</p>}
       {rows && rows.length > 0 && (

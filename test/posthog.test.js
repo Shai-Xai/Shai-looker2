@@ -259,6 +259,9 @@ test('people query is scoped to the given event ids and searches person props', 
   assert.ok(captured.includes("IN ('101')"), 'event-id scope is in the query');
   assert.ok(captured.includes("\\'brien"), 'search terms are escaped');
   assert.ok(captured.includes("person.properties['$email']"), 'default person props apply');
+  assert.ok(!captured.includes('@howler.'), 'staff ride along unless excluded');
+  await h.api.people({ ids: ['101'], days: 28, orderBy: 'active', excludeStaff: true });
+  assert.ok(captured.includes("NOT (toString(person.properties['$email']) ILIKE '%@howler.%')"), 'the Super-fans toggle drops Howler staff emails');
 });
 
 test('per-event sync keeps the NEWEST days if the row cap ever bites', async () => {

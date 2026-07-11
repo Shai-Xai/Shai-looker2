@@ -814,8 +814,9 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // App-user profiles (PostHog person properties: email / name / surname / mobile).
   // `ids` null = whole app (admin); an array = scoped to those Howler events.
   // Paged (offset + hasMore) and orderable: 'recent' (last seen) or 'active'
-  // (most interactions — the "top users" view).
-  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent' } = {}) {
+  // (most interactions — the "Super fans" view). excludeStaff drops @howler.*
+  // email addresses so staff testing doesn't rank as a fan.
+  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent', excludeStaff = false } = {}) {
     const w = win({ days, from, to });
     const L = Math.min(Math.max(Number(limit) || 200, 1), 500);
     const off = Math.min(Math.max(Number(offset) || 0, 0), 1800);
@@ -828,6 +829,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const search = term
       ? ` AND (${[p.email, p.firstName, p.lastName, p.phone].map((f) => `toString(${personProp(f)}) ILIKE ${hqlStr(`%${term}%`)}`).join(' OR ')})`
       : '';
+    const staff = excludeStaff ? ` AND NOT (toString(${personProp(p.email)}) ILIKE '%@howler.%')` : '';
     // Personal API keys forbid OFFSET (PostHog HTTP 400) — fetch up to the end of
     // the requested page in one bounded query and slice the page out locally.
     const fetchN = Math.min(off + L + 1, 2000);
@@ -836,7 +838,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
              any(toString(${personProp(p.lastName)})) AS lastName, any(toString(${personProp(p.phone)})) AS phone,
              max(timestamp) AS lastSeen, count() AS interactions,
              groupUniqArray(5)(toString(${prop(c.eventNameProp)})) AS eventNames
-      FROM events WHERE ${tsWin(w)}${scope}${search}
+      FROM events WHERE ${tsWin(w)}${scope}${search}${staff}
       GROUP BY person_id ORDER BY ${order} LIMIT ${fetchN}`, { ttl: PEOPLE_TTL });
     return {
       days: w.days, offset: off, orderBy: orderBy === 'active' ? 'active' : 'recent', hasMore: rows.length > off + L,
@@ -1154,7 +1156,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
-    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1' }));
   }));
   app.get('/api/admin/app-analytics/breakdown', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
@@ -1221,7 +1223,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
-    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy }));
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1' }));
   }));
   app.get('/api/my/app-analytics/:entityId/breakdown', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
