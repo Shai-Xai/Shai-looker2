@@ -159,7 +159,8 @@ export function AppAnalyticsAdmin() {
   useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
   const [moments, setMoments] = useState([]);
   const [linkClicks, setLinkClicks] = useState([]);
-  const [owlOpen, setOwlOpen] = useState(false);
+  const [owlSel, setOwlSel] = useState(null); // { ids: null|string[], label } → opens the summary
+  const [owlPick, setOwlPick] = useState(false);
   const load = useCallback(() => {
     setError('');
     api.adminAppAnalytics({ from: range.from, to: range.to, entityId }).then(setData).catch((e) => { setError(e.message); setData(null); });
@@ -208,7 +209,9 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
-        {entityId && <Chip onClick={() => setOwlOpen(true)}>✨ Owl summary</Chip>}
+        <Chip onClick={() => (entityId
+          ? setOwlSel({ ids: [entityId], label: clients.find((c) => c.id === entityId)?.name || 'This client' })
+          : setOwlPick(true))}>✨ Owl summary</Chip>
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
@@ -223,11 +226,13 @@ export function AppAnalyticsAdmin() {
         }}>{syncing ? 'Syncing…' : '↻ Sync now'}</button>
       </div>
       {syncMsg && <p style={{ fontSize: 12.5, fontWeight: 600, color: syncMsg.startsWith('✓') ? 'var(--success, #10b981)' : '#d97706', margin: '0 0 10px' }}>{syncMsg}</p>}
-      {owlOpen && entityId && (
+      {owlPick && <OwlScopePicker clients={clients} onClose={() => setOwlPick(false)}
+        onPick={(sel) => { setOwlPick(false); setOwlSel(sel); }} />}
+      {owlSel && (
         <DashboardInsightModal
-          kindLabel="App summary" title={clients.find((c) => c.id === entityId)?.name || 'This client'}
-          endpoint={`/api/admin/app-analytics/insight?entityId=${encodeURIComponent(entityId)}&from=${range.from}&to=${range.to}`}
-          payload={{}} onClose={() => setOwlOpen(false)} />
+          kindLabel="App summary" title={owlSel.label}
+          endpoint={`/api/admin/app-analytics/insight?from=${range.from}&to=${range.to}${owlSel.ids ? `&entityIds=${encodeURIComponent(owlSel.ids.join(','))}` : ''}`}
+          payload={{}} onClose={() => setOwlSel(null)} />
       )}
       {error && <div style={errBox}>{error}</div>}
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
@@ -1065,6 +1070,38 @@ function ValueExplorer() {
             </div>
           )
       )}
+    </div>
+  );
+}
+
+// Admin Owl-summary scope: the whole app in one go, or a hand-picked set of
+// clients (their event ids are unioned server-side).
+function OwlScopePicker({ clients, onPick, onClose }) {
+  const [picked, setPicked] = useState(() => new Set());
+  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const names = clients.filter((c) => picked.has(c.id)).map((c) => c.name);
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ ...modal, maxWidth: 420, maxHeight: '70vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...title, marginBottom: 2 }}>✨ Summarise what?</div>
+        <p style={{ ...sub, marginBottom: 10 }}>The whole app across every client, or a set of clients you pick.</p>
+        <button type="button" style={{ ...btn, marginBottom: 10 }} onClick={() => onPick({ ids: null, label: 'All clients — whole app' })}>🌍 Whole app — all clients</button>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid var(--hairline)', paddingTop: 8 }}>
+          {clients.map((c) => (
+            <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minHeight: 36, cursor: 'pointer' }}>
+              <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
+          <button type="button" style={ghostBtn} onClick={onClose}>Cancel</button>
+          <button type="button" style={btn} disabled={!picked.size}
+            onClick={() => onPick({ ids: [...picked], label: names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ') })}>
+            Summarise {picked.size || ''} client{picked.size === 1 ? '' : 's'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

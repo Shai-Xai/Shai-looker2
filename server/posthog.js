@@ -46,18 +46,26 @@ Write the page's story for a non-technical organiser:
 Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
 
 // Compact fact sheet the model reads — one section per page panel, numbers only.
-function buildAppInsightPrompt({ report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [] }) {
+function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [] }) {
   const L = [];
+  if (scopeLabel) L.push(`Scope: ${scopeLabel}.`);
   L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
   if (live) L.push(`Live: ${live.actives} unique viewers today so far; ${live.windowUniques} unique viewers across the whole window.`);
   const t = report.totals || {};
-  L.push(`Window totals: interactions ${t.interactions || 0}; views ${t.views || 0}; CTA taps ${t.ctaTaps || 0}; purchases ${t.purchases || 0}${t.purchaseValue ? ` (value ${t.purchaseValue})` : ''}.`);
+  L.push(report.kind === 'app'
+    ? `Window totals (whole app): interactions ${t.interactions || 0}; views ${t.views || 0}; new users ${t.newUsers || 0}; sessions ${t.sessions || 0}.`
+    : `Window totals: interactions ${t.interactions || 0}; views ${t.views || 0}; CTA taps ${t.ctaTaps || 0}; purchases ${t.purchases || 0}${t.purchaseValue ? ` (value ${t.purchaseValue})` : ''}.`);
   if ((report.series || []).length) {
-    L.push('', 'Daily series (date · uniques · interactions · views · ctaTaps):');
-    for (const r of report.series.slice(-31)) L.push(`${r.date} · ${r.uniques} · ${r.interactions} · ${r.views} · ${r.ctaTaps}`);
+    if (report.kind === 'app') {
+      L.push('', 'Daily series (date · daily actives · interactions · views · sessions):');
+      for (const r of report.series.slice(-31)) L.push(`${r.date} · ${r.dau} · ${r.interactions} · ${r.views} · ${r.sessions}`);
+    } else {
+      L.push('', 'Daily series (date · uniques · interactions · views · ctaTaps):');
+      for (const r of report.series.slice(-31)) L.push(`${r.date} · ${r.uniques} · ${r.interactions} · ${r.views} · ${r.ctaTaps}`);
+    }
   }
   if ((report.events || []).length) {
-    L.push('', 'Per event (name · uniques · interactions · views · ctaTaps · purchases):');
+    L.push('', `${report.kind === 'app' ? 'Top events across every client' : 'Per event'} (name · uniques · interactions · views · ctaTaps · purchases):`);
     for (const e of report.events.slice(0, 10)) L.push(`${e.eventName || e.eventRef} · ${e.uniques} · ${e.interactions} · ${e.views} · ${e.ctaTaps} · ${e.purchases}`);
   }
   for (const b of breakdowns) {
@@ -643,11 +651,24 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // this client + window, stream an analyst read with grounded suggestions.
   // Prompt lives here (module-owned, like journeys) and is surfaced in the AI
   // audit via insights.promptRegistry() spreading this module's promptRegistry().
-  async function appInsightFacts(entityId, q) {
+  // entities: null = the WHOLE app (management view), or an array of entity ids
+  // (one = a client's page; several = a hand-picked group, ids unioned).
+  async function appInsightFacts(entities, q) {
     const w = win(q);
-    const ids = await eventIdsForEntity(entityId);
-    const rep = entityReport(entityId, w, ids);
-    if (!rep.scoped) throw new HttpError(400, 'No app data is scoped to this client yet — their suites need an event lock first.');
+    const list = entities == null ? null : [].concat(entities);
+    let report, ids = null, scopeLabel;
+    if (list == null) {
+      const rep = appReport({ from: w.from, to: w.to });
+      report = { ...rep, kind: 'app', events: rep.topEvents };
+      scopeLabel = 'the whole Howler app — every client';
+    } else {
+      const sets = [];
+      for (const eid of list) sets.push(await eventIdsForEntity(eid));
+      ids = [...new Set(sets.flat())];
+      report = entityReport(list[0], w, ids); // the report SQL keys off ids only
+      if (!report.scoped) throw new HttpError(400, 'No app data is scoped to the selected client(s) yet — their suites need an event lock first.');
+      scopeLabel = list.map((eid) => db.getEntity?.(eid)?.name || eid).join(', ');
+    }
     let live = null;
     try { live = { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, w) }; } catch { /* rollup still tells the story */ }
     const bds = [];
@@ -656,7 +677,17 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     }
     let topUsers = [];
     try { topUsers = (await people({ ids, from: w.from, to: w.to, orderBy: 'active', limit: 10 })).people; } catch { /* optional */ }
-    return { report: rep, live, moments: moments(entityId, w), linkClicks: linkClicks(entityId, w), breakdowns: bds, topUsers };
+    const mom = [];
+    const clk = [];
+    for (const eid of (list || [null])) { mom.push(...moments(eid, w)); clk.push(...linkClicks(eid, w).map((r) => r)); }
+    // Multi-entity link clicks: merge per-day sums.
+    const byDay = new Map();
+    for (const r of clk) byDay.set(r.date, (byDay.get(r.date) || 0) + r.clicks);
+    return {
+      scopeLabel, report, live, breakdowns: bds, topUsers,
+      moments: mom.sort((a, b) => (a.at < b.at ? -1 : 1)).slice(0, 120),
+      linkClicks: [...byDay.entries()].sort().map(([date, clicks]) => ({ date, clicks })),
+    };
   }
   async function streamAppInsight(ctx, onText) {
     const { requireClient, systemWith, MODEL } = require('./insights'); // lazy — avoids an init-time require cycle (insights' registry requires this module)
@@ -857,28 +888,30 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
   // Streamed Owl summary of the page (mirrors POST /api/dashboard-insight).
-  async function insightHandler(entityId, req, res) {
-    const facts = await appInsightFacts(entityId, winQ(req));
-    const apiKey = ai?.keyFor ? ai.keyFor(entityId) : '';
-    const instructions = ai?.instructionsFor ? ai.instructionsFor(entityId) : '';
+  async function insightHandler(entities, req, res) {
+    const facts = await appInsightFacts(entities, winQ(req));
+    const first = entities?.[0] || '';
+    const apiKey = ai?.keyFor ? ai.keyFor(first) : '';
+    const instructions = ai?.instructionsFor ? ai.instructionsFor(first) : '';
     try {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders?.();
       const run = () => streamAppInsight({ ...facts, apiKey, instructions }, (txt) => res.write(txt));
-      await (ai?.meter ? ai.meter('app_insight', entityId, run) : run());
+      await (ai?.meter ? ai.meter('app_insight', first, run) : run());
       res.end();
     } catch (err) {
       if (res.headersSent) { res.write('\n\n[error: the summary could not be completed]'); res.end(); console.error('[posthog insight]', err.message); }
       else throw err;
     }
   }
-  app.post('/api/my/app-analytics/:entityId/insight', auth.requireAuth, myEntity, asyncHandler(async (req, res) => insightHandler(req.params.entityId, req, res)));
+  app.post('/api/my/app-analytics/:entityId/insight', auth.requireAuth, myEntity, asyncHandler(async (req, res) => insightHandler([req.params.entityId], req, res)));
   app.post('/api/admin/app-analytics/insight', auth.requireAdmin, asyncHandler(async (req, res) => {
-    const eid = String(req.query.entityId || req.body?.entityId || '');
-    if (!eid) throw new HttpError(400, 'Pass entityId — the Owl summary is per client.');
-    await insightHandler(eid, req, res);
+    // No ids = the whole app; one or more (CSV) = those clients, ids unioned.
+    const csv = String(req.query.entityIds || req.query.entityId || req.body?.entityId || '');
+    const list = csv.split(',').map((x) => x.trim()).filter(Boolean);
+    await insightHandler(list.length ? list : null, req, res);
   }));
 
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
