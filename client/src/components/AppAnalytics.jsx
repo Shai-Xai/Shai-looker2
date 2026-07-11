@@ -1085,14 +1085,20 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
   const pctOf = (n, base) => (base > 0 ? ` · ${Math.round((n / base) * 100)}%` : '');
+  const pctPlain = (n, base) => (base > 0 ? `${Math.round((n / base) * 100)}%` : null);
   const hasAtt = d.attendees != null;
   // Two distinct segments on purpose: ATTENDEES (held a ticket — core_users) is
   // the wide "our fans" set; BUYERS (paid — core_purchasers) is the spenders.
+  // The match tiles carry BOTH readings: the inline % is "of app users"; the
+  // flip line is the money one — how much of the holder/buyer base uses the app.
   const tiles = [
     [`App users (${d.windowDays}d)`, d.appUsers, ''],
-    ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.appUsersWithEmail)]] : []),
-    ['Also buyers (paid)', d.matched, pctOf(d.matched, d.appUsersWithEmail)],
-    [hasAtt ? 'Never held a ticket' : 'Not bought yet', hasAtt ? d.appNotAttendees : d.appNotBuyers, pctOf(hasAtt ? d.appNotAttendees : d.appNotBuyers, d.appUsersWithEmail)],
+    ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.appUsersWithEmail),
+      pctPlain(d.matchedAttendees, d.attendees) && `📲 ${pctPlain(d.matchedAttendees, d.attendees)} of your ${fmt(d.attendees)} holders use the app`]] : []),
+    ['Also buyers (paid)', d.matched, pctOf(d.matched, d.appUsersWithEmail),
+      pctPlain(d.matched, d.buyers) && `📲 ${pctPlain(d.matched, d.buyers)} of your ${fmt(d.buyers)} buyers use the app`],
+    [hasAtt ? 'Never held a ticket' : 'Not bought yet', hasAtt ? d.appNotAttendees : d.appNotBuyers, pctOf(hasAtt ? d.appNotAttendees : d.appNotBuyers, d.appUsersWithEmail),
+      '🎯 your warm retargeting audience'],
     ...(hasAtt ? [['Ticket holders not on the app', d.attendeesNotOnApp, pctOf(d.attendeesNotOnApp, d.attendees)]] : []),
     ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers)],
   ];
@@ -1109,18 +1115,19 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
       </div>
       <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
-        {tiles.map(([label, v, pct]) => (
+        {tiles.map(([label, v, pct, flip]) => (
           <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
             <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
               {fmt(v)}{pct && <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)' }}>{pct}</span>}
             </div>
             <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+            {flip && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.35 }}>{flip}</div>}
           </div>
         ))}
       </div>
       <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
-        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers — counted for these events only.
-        "{hasAtt ? 'Never held a ticket' : 'Not bought yet'}" is your warm retargeting audience{hasAtt ? '; "holders who never paid" (the gap between the two matches) is your group-buy upgrade audience' : ''}.
+        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers — counted for {event ? 'this event' : 'these events'} only.
+        {hasAtt ? ' "Holders who never paid" (the gap between the two matches) is your group-buy upgrade audience.' : ''}
       </p>
     </div>
   );
