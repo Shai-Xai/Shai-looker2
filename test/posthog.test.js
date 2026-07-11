@@ -362,6 +362,35 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
   assert.equal(got.body.metricMap.ctaLabelProp, 'cta_label');
 });
 
+test('blank event names fill in from Looker (id → name), persist, and survive a re-sync', async () => {
+  const nameless = (q) => {
+    if (q.includes('GROUP BY day, event_ref')) {
+      return HOGQL(['day', 'event_ref', 'event_name', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases', 'purchase_value', 'notif_events'],
+        [[today, '39450', '', 2053, 5166, 547, 646, 0, 0, 0]]); // the app didn't stamp eventName
+    }
+    return syncResponder(q);
+  };
+  const h = makeHarness({
+    responder: nameless,
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '39450' } },
+    dashboards: [{ id: 'd1', filters: [{ field: 'core_events.name', model: 'howler', explore: 'tickets' }] }],
+    lookerRows: [{ 'core_events.id': 39450, 'core_events.name': 'G&G Winter Fest' }],
+  });
+  await h.api.syncDaily(7);
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.events[0].eventName, 'G&G Winter Fest', 'the Looker name replaces the blank');
+  assert.equal(h.sqlite.prepare('SELECT event_name FROM posthog_daily_event WHERE event_ref=?').get('39450').event_name,
+    'G&G Winter Fest', 'the learned name is persisted into the rollup');
+  const calls = h.lookerCalls.length;
+  await h.invoke('GET /api/my/app-analytics/:entityId', { params: { entityId: 'e1' } });
+  assert.equal(h.lookerCalls.length, calls, 'no repeat lookup once the rollup carries the name');
+  // a re-sync with a blank incoming name must NOT blank the learned one
+  await h.api.syncDaily(7);
+  assert.equal(h.sqlite.prepare('SELECT event_name FROM posthog_daily_event WHERE event_ref=?').get('39450').event_name, 'G&G Winter Fest');
+});
+
 test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; steps configurable', async () => {
   const queries = [];
   const h = makeHarness({

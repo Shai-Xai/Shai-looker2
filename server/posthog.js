@@ -234,7 +234,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     ON CONFLICT(date) DO UPDATE SET new_users=excluded.new_users`);
   const upEvent = sql.prepare(`INSERT INTO posthog_daily_event (date,event_ref,event_name,uniques,interactions,views,cta_taps,purchases,purchase_value,notif_events,synced_at)
     VALUES (@date,@event_ref,@event_name,@uniques,@interactions,@views,@cta_taps,@purchases,@purchase_value,@notif_events,@synced_at)
-    ON CONFLICT(date,event_ref) DO UPDATE SET event_name=excluded.event_name, uniques=excluded.uniques,
+    ON CONFLICT(date,event_ref) DO UPDATE SET event_name=CASE WHEN excluded.event_name='' THEN posthog_daily_event.event_name ELSE excluded.event_name END, uniques=excluded.uniques,
       interactions=excluded.interactions, views=excluded.views, cta_taps=excluded.cta_taps,
       purchases=excluded.purchases, purchase_value=excluded.purchase_value, notif_events=excluded.notif_events, synced_at=excluded.synced_at`);
 
@@ -478,6 +478,59 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       console.error('[posthog] event name→id lookup failed:', e.message);
       return [];
     }
+  }
+
+  // The reverse lookup — id → name — fills the gap when the app doesn't stamp
+  // eventName on its events ("Event 39450" tells nobody anything). Names are
+  // stable → long in-memory cache; misses are negative-cached so one dead id
+  // doesn't re-query Looker on every page load.
+  const _nameCache = new Map(); // id -> { name, at }
+  async function namesForIds(idList) {
+    const FRESH = 12 * 3600_000;
+    const out = new Map();
+    const missing = [];
+    for (const id of idList) {
+      const hit = _nameCache.get(id);
+      if (hit && Date.now() - hit.at < FRESH) { if (hit.name) out.set(id, hit.name); }
+      else missing.push(id);
+    }
+    if (missing.length && runLookerQuery) {
+      const home = lookupHome();
+      if (home) {
+        try {
+          const rows = await runLookerQuery('/queries/run/json', {
+            model: home.model, view: home.explore,
+            fields: ['core_events.id', 'core_events.name'],
+            filters: { 'core_events.id': missing.join(',') }, limit: 500,
+          });
+          for (const r of rows || []) {
+            const id = String(r['core_events.id'] ?? '');
+            const name = String(r['core_events.name'] || '').trim();
+            if (id && name) { _nameCache.set(id, { name, at: Date.now() }); out.set(id, name); }
+          }
+          for (const id of missing) if (!out.has(id)) _nameCache.set(id, { name: '', at: Date.now() });
+        } catch (e) { console.error('[posthog] event id→name lookup failed:', e.message); }
+      }
+    }
+    return out;
+  }
+  // Fill blank event names on a report's rows from Looker and PERSIST them into
+  // the rollup (so exports and future loads have them without another lookup).
+  // Cosmetic — never throws.
+  const persistName = sql.prepare("UPDATE posthog_daily_event SET event_name=? WHERE event_ref=? AND event_name=''");
+  async function withNames(report) {
+    try {
+      const rows = [...(report.events || []), ...(report.topEvents || [])];
+      const blank = [...new Set(rows.filter((r) => !String(r.eventName || '').trim()).map((r) => String(r.eventRef)))];
+      if (!blank.length) return report;
+      const names = await namesForIds(blank);
+      for (const r of rows) {
+        if (String(r.eventName || '').trim()) continue;
+        const name = names.get(String(r.eventRef));
+        if (name) { r.eventName = name; persistName.run(name, String(r.eventRef)); }
+      }
+    } catch { /* names are nice-to-have */ }
+    return report;
   }
 
   async function eventIdsForEntity(entityId) {
@@ -787,14 +840,14 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const list = entities == null ? null : [].concat(entities);
     let report, ids = null, scopeLabel;
     if (list == null) {
-      const rep = appReport({ from: w.from, to: w.to });
+      const rep = await withNames(appReport({ from: w.from, to: w.to }));
       report = { ...rep, kind: 'app', events: rep.topEvents };
       scopeLabel = 'the whole Howler app — every client';
     } else {
       const sets = [];
       for (const eid of list) sets.push(await eventIdsForEntity(eid));
       ids = [...new Set(sets.flat())];
-      report = entityReport(list[0], w, ids); // the report SQL keys off ids only
+      report = await withNames(entityReport(list[0], w, ids)); // the report SQL keys off ids only
       if (!report.scoped) throw new HttpError(400, 'No app data is scoped to the selected client(s) yet — their suites need an event lock first.');
       scopeLabel = list.map((eid) => db.getEntity?.(eid)?.name || eid).join(', ');
     }
@@ -1000,9 +1053,9 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const eid = String(req.query.entityId || '');
     if (eid) {
       const ids = await eventIdsForEntity(eid);
-      return res.json(await withLive(entityReport(eid, winQ(req), ids), ids.length ? ids : null));
+      return res.json(await withNames(await withLive(entityReport(eid, winQ(req), ids), ids.length ? ids : null)));
     }
-    res.json(await withLive(appReport(winQ(req)), null));
+    res.json(await withNames(await withLive(appReport(winQ(req)), null)));
   }));
   app.get('/api/admin/app-analytics/people', auth.requireAdmin, asyncHandler(async (req, res) => {
     const eid = String(req.query.entityId || '');
@@ -1056,7 +1109,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/my/app-analytics/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     const report = entityReport(req.params.entityId, winQ(req), ids);
-    res.json(ids.length ? await withLive(report, ids) : { ...report, live: null });
+    res.json(ids.length ? await withNames(await withLive(report, ids)) : { ...report, live: null });
   }));
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
@@ -1122,7 +1175,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },
@@ -1144,6 +1197,7 @@ function owlTool({ db, getApi }) {
     const ids = await api.eventIdsForEntity(eid);
     const rep = api.entityReport(eid, days, ids);
     if (!rep.scoped) return refuse('no_scope', 'No Howler event ids resolve for this client yet — their suites need an event lock before app data can be scoped to them.');
+    if (api.withNames) await api.withNames(rep); // blank names read as ids otherwise
     let live = null; // a briefly unreachable PostHog degrades to the rollup, never an error
     try { live = { ...(await api.liveToday(ids)), windowUniques: await api.windowUniques(ids, days) }; } catch { live = null; }
     let breakdown = null;
