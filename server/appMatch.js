@@ -56,13 +56,16 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue }) {
     } catch { return null; }
   }
 
-  async function overlap(entityId, user) {
-    const hit = cache.get(entityId);
+  async function overlap(entityId, user, { event = '' } = {}) {
+    const cacheKey = `${entityId}:${event}`;
+    const hit = cache.get(cacheKey);
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
     if (!posthog.isConfigured()) return { configured: false };
-    // ONE event scope drives everything: the client's suite-locked events.
-    const eventIds = await posthog.eventIdsForEntity(entityId);
+    // ONE event scope drives everything: the client's suite-locked events —
+    // optionally narrowed to a single one of them (never widened beyond them).
+    let eventIds = await posthog.eventIdsForEntity(entityId);
     if (!eventIds.length) return { configured: true, scoped: false };
+    if (event && eventIds.includes(String(event))) eventIds = [String(event)];
     const [appSide, appTotal, buyerEmails, attendees] = await Promise.all([
       posthog.appEmails(eventIds, { days: APP_WINDOW_DAYS }),
       posthog.windowUniques(eventIds, { days: APP_WINDOW_DAYS }),
@@ -74,6 +77,7 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue }) {
     const matchedAttendees = attendees ? appSide.emails.filter((e) => attendees.has(e)).length : null;
     const data = {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
+      event: eventIds.length === 1 && event ? String(event) : '',
       appUsers: appTotal || appSide.persons, appUsersWithEmail: appSide.emails.length, appCapped: !!appSide.capped,
       // Who PAID for THESE events (purchaser contact on the order) …
       buyers: buyerEmails.size, matched,
@@ -86,7 +90,7 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue }) {
       attendeesNotOnApp: attendees ? Math.max(0, attendees.size - matchedAttendees) : null,
     };
     if (cache.size > 100) cache.clear();
-    cache.set(entityId, { at: Date.now(), data });
+    cache.set(cacheKey, { at: Date.now(), data });
     return data;
   }
 
@@ -128,11 +132,11 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue }) {
     return res.status(403).json({ error: 'Not your client.' });
   };
   app.get('/api/my/app-audience/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
-    res.json(await overlap(req.params.entityId, req.user));
+    res.json(await overlap(req.params.entityId, req.user, { event: String(req.query.event || '') }));
   }));
   app.get('/api/admin/entities/:id/app-audience', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!db.getEntity(req.params.id)) throw new HttpError(404, 'Not found');
-    res.json(await overlap(req.params.id, req.user));
+    res.json(await overlap(req.params.id, req.user, { event: String(req.query.event || '') }));
   }));
   app.post('/api/my/app-tickets/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     res.json({ byEmail: await ticketsByEmail(req.params.entityId, req.user, (req.body || {}).emails) });

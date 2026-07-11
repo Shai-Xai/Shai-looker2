@@ -576,7 +576,7 @@ export const api = {
   },
   socialplusSync: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/sync` : `/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
   // App audience ↔ buyers (email join) + per-app-user ticket holdings.
-  appAudience: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-audience` : `/api/my/app-audience/${entityId}`).then(json),
+  appAudience: (entityId, scope, { event } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-audience` : `/api/my/app-audience/${entityId}`}${event ? `?event=${encodeURIComponent(event)}` : ''}`).then(json),
   appTickets: (entityId, scope, emails) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-tickets` : `/api/my/app-tickets/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }) }).then(json),
   // Fired on page open — the server skips it when data is fresh (<30 min).
   socialplusRefresh: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/refresh` : `/api/my/socialplus/${entityId}/refresh`, { method: 'POST' }).then(json),

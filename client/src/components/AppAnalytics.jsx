@@ -339,7 +339,7 @@ export function AppAnalyticsAdmin() {
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
       <FunnelCard key={`fun-${winKey}`} admin loader={() => api.adminAppFunnel({ from: range.from, to: range.to, entityId })} />
       <CtaLabelsCard key={`cta-${winKey}`} admin loader={() => api.adminAppCtaLabels({ from: range.from, to: range.to, entityId })} />
-      {perClient && <AudienceMatchCard entityId={entityId} scope="admin-client" isMobile={isMobile} />}
+      {perClient && <AudienceMatchCard entityId={entityId} scope="admin-client" events={data.events || []} isMobile={isMobile} />}
       <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })}
         ticketsLoader={perClient ? (emails) => api.appTickets(entityId, 'admin-client', emails) : null}
@@ -433,7 +433,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         loader={() => (scope === 'admin-client' ? api.adminAppFunnel({ from: range.from, to: range.to, entityId }) : api.myAppFunnel(entityId, { from: range.from, to: range.to }))} />
       <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
         loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
-      <AudienceMatchCard entityId={entityId} scope={scope} isMobile={isMobile} />
+      <AudienceMatchCard entityId={entityId} scope={scope} events={data.events || []} isMobile={isMobile} />
       <TopUsersCard key={`top-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`} win={range}
@@ -1071,15 +1071,16 @@ function TopUsersCard({ loader, win }) {
 // (PostHog) and their ticket buyers (Looker, hard-scoped). Counts only; the
 // underlying emails never reach the browser. Renders nothing until it can
 // compute (PostHog + event scope + buyers all resolvable).
-function AudienceMatchCard({ entityId, scope, isMobile }) {
+function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState('');
+  const [event, setEvent] = useState(''); // '' = all the client's Pulse events
   useEffect(() => {
     let dead = false;
     setD(null); setErr('');
-    api.appAudience(entityId, scope).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
+    api.appAudience(entityId, scope, { event }).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
-  }, [entityId, scope]);
+  }, [entityId, scope, event]);
   if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your fans</div><div style={errBox}>{err}</div></div>;
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
@@ -1097,8 +1098,16 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
   ];
   return (
     <div style={{ ...card, marginTop: 12 }}>
-      <div style={title}>🎟 App audience vs your fans</div>
-      <p style={sub}>Your app users matched by email against two segments <b>for the events in your Pulse</b>: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>🎟 App audience vs your fans</div>
+        {events.length > 1 && (
+          <select value={event} onChange={(e) => setEvent(e.target.value)} style={{ ...input, width: 'auto', minWidth: 150, marginTop: 0 }}>
+            <option value="">All your events</option>
+            {events.map((ev) => <option key={ev.eventRef} value={ev.eventRef}>{ev.eventName || `Event ${ev.eventRef}`}</option>)}
+          </select>
+        )}
+      </div>
+      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
         {tiles.map(([label, v, pct]) => (
           <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>

@@ -70,6 +70,15 @@ test('overlap matches the WHOLE app audience to BOTH segments — counts only', 
   assert.ok(!JSON.stringify(d).includes('fan@one.com'));
 });
 
+test('overlap narrows to ONE event when asked — but never widens beyond scope', async () => {
+  const h = makeHarness({ appTotal: 2, appEmails: ['fan@one.com'], buyerRows: [] });
+  await h.api.overlap('e1', { role: 'admin' }, { event: '101' });
+  assert.equal(h.calls.looker[0].filters['core_events.id'], '101');
+  // An event OUTSIDE the client's scope is ignored (falls back to all their events).
+  await h.api.overlap('e1', { role: 'admin' }, { event: '999' });
+  assert.equal(h.calls.looker[2].filters['core_events.id'], '101');
+});
+
 test('overlap degrades to buyers-only when the attendee field is unavailable', async () => {
   const h = makeHarness({
     appTotal: 2, appEmails: ['fan@one.com'],
