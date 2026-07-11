@@ -179,6 +179,39 @@ test('scoping: id locks pass straight through; wildcards are never scope', () =>
   assert.deepEqual(s.names, [], 'LIKE patterns must not become scope');
 });
 
+test('organiser locks widen scope to ALL that organiser\'s events — past ones without suites included', async () => {
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'Organiser Name': 'G&G Productions', 'core_events.id': '39450' } },
+    dashboards: [{ id: 'd1', filters: [{ field: 'core_events.name', model: 'howler', explore: 'tickets' }] }],
+    lookerRows: [{ 'core_events.id': 39450 }, { 'core_events.id': 38001 }, { 'core_events.id': 37200 }],
+  });
+  const s = h.api.suiteEventScope({ 'Organiser Name': 'G&G Productions' });
+  assert.deepEqual(s.orgs, ['G&G Productions']);
+  const ids = await h.api.eventIdsForEntity('e1');
+  assert.deepEqual(ids.sort(), ['37200', '38001', '39450'], 'organiser lookup unions with explicit id locks');
+  const q = h.lookerCalls.find((c) => c.filters?.['core_organisers.name']);
+  assert.equal(q.filters['core_organisers.name'], 'G&G Productions');
+});
+
+test('ticket revenue rides the report from Looker — per event and window total', async () => {
+  const h = makeHarness({
+    responder: syncResponder,
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    dashboards: [{ id: 'd1', filters: [{ field: 'core_events.name', model: 'howler', explore: 'tickets' }] }],
+    lookerRows: [{ 'core_events.id': 101, 'core_tickets.sum_revenue_decimal': 125000.5 }],
+  });
+  await h.api.syncDaily(7);
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.events[0].revenue, 125000.5, 'per-event revenue attached');
+  assert.equal(out.body.revenueTotal, 125000.5, 'window total attached');
+  const q = h.lookerCalls.find((c) => (c.fields || []).includes('core_tickets.sum_revenue_decimal'));
+  assert.ok(q, 'revenue comes from Looker, never PostHog');
+  assert.match(String(q.filters['core_tickets.purchased_date']), /^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/, 'windowed on purchase date');
+});
+
 test('eventIdsForEntity resolves NAME locks to ids via Looker and caches the result', async () => {
   const h = makeHarness({
     suites: [{ id: 's1', entityId: 'e1' }],
