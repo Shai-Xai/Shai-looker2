@@ -604,6 +604,20 @@ export default function ClientLayout() {
             <span style={ellip}>Your journey</span>
           </button>
           )}
+          {/* App — the client's events inside the Howler consumer app (PostHog).
+              Top-level on purpose: it's insight, not an Engage feature, and must
+              not depend on the engage flag or campaign permissions. */}
+          {!opsOnly && fl('appanalytics') && (
+          <button
+            ref={onAppAnalytics ? activeRef : null}
+            className={`nav-row${onAppAnalytics ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAppAnalytics ? 600 : 500 }}
+            onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
+            <span style={ellip}>App</span>
+          </button>
+          )}
           {/* Product — report bugs/ideas and track them (everyone, incl. ops-only). */}
           {fl('report') && (<>
           <button
@@ -660,17 +674,6 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📱</span>
             <span style={ellip}>Social</span>
-          </button>
-          )}
-          {fl('appanalytics') && (
-          <button
-            ref={onAppAnalytics ? activeRef : null}
-            className={`nav-row${onAppAnalytics ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onAppAnalytics ? 600 : 500 }}
-            onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
-            <span style={ellip}>App</span>
           </button>
           )}
           </>
