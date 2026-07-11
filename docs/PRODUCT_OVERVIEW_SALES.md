@@ -1021,13 +1021,17 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
-- **2026-07-11** — **🎯 App-audience groups → Engage segments** 🧪 (new): the
-  App-audience card gains **"Save as segment"** — one tap turns any group
-  (app fans who never held a ticket, holders/buyers not on the app, held-but-
-  never-paid group buyers) into a dated, ready-to-send **Engage segment**
-  (folder "App audience"), per event or across the client's Pulse. Closes the
-  loop: app insight → targetable audience → campaign. Emails stay server-side;
-  requires campaign-approve permission.
+- **2026-07-11** — **🎯 App-audience groups → LIVE Engage segments** 🧪 (new):
+  **tap any tile** on the App-audience card (app users, holders/buyers on or
+  off the app, never-ticketed fans, group-buy upgraders) to save that group as
+  a **live Engage segment** — members re-compute from PostHog + ticketing at
+  every count and send, per event or across the client's Pulse. The card also
+  gains a **headline insight banner** ("5,142 engaged · 38% of holders are app
+  users · 3,981 never got a ticket") with an **📣 Engage them** button that
+  saves the segment and opens a pre-filled campaign; a **🎫 tickets-in-app-hands**
+  summary (share of all tickets sold held by app users, by ticket type); and
+  the **🏆 Super fans** leaderboard gets a Top 10–250 range + save-as-live-segment.
+  Emails stay server-side; requires campaign-approve permission.
 - **2026-07-11** — **🎟 App audience ↔ buyers (email join)** 🧪 (new): the App
   page's Analytics tab gains an **"App audience vs your buyers"** card — the
   client's app users (PostHog) matched by email against their ticket buyers

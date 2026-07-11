@@ -77,7 +77,7 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     ]);
     if (!buyerEmails) throw new HttpError(400, 'Couldn\'t resolve the buyer list for these events.');
     const sets = {
-      configured: true, scoped: true, event: eventIds.length === 1 && event ? String(event) : '',
+      configured: true, scoped: true, event: eventIds.length === 1 && event ? String(event) : '', eventIds,
       appEmails: appSide.emails, appTotal: appTotal || appSide.persons, appCapped: !!appSide.capped,
       buyers: buyerEmails, attendees,
     };
@@ -107,51 +107,114 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     };
   }
 
-  // ── the payoff: turn a group into a real Engage segment ──
-  // Paste-mode (static snapshot) segments — the groups mix PostHog + Looker
-  // identity, which no live Looker query can express. Members are computed
-  // server-side from the same sets as the card; the browser only names a group.
+  // ── the payoff: turn a group into a real LIVE Engage segment ──
+  // The groups mix PostHog + Looker identity, which no single Looker query can
+  // express — so the segment stores { mode: 'appmatch', group, appEvent } and
+  // the campaign engine calls back into groupEmails() at EVERY resolve (reach
+  // check, preview, send). Members are always computed server-side; the browser
+  // only ever names a group.
   const GROUPS = {
+    app_users: { label: '📲 App users', make: (s) => s.appEmails },
+    app_holders: { label: '🎟 App users with a ticket', make: (s) => (s.attendees ? s.appEmails.filter((e) => s.attendees.has(e)) : null) },
+    app_buyers: { label: '💳 App users who bought', make: (s) => s.appEmails.filter((e) => s.buyers.has(e)) },
     never_ticket: { label: '📲 App fans — never held a ticket', make: (s) => (s.attendees ? s.appEmails.filter((e) => !s.attendees.has(e)) : s.appEmails.filter((e) => !s.buyers.has(e))) },
     holders_not_app: { label: '🎟 Ticket holders not on the app', make: (s) => (s.attendees ? [...s.attendees].filter((e) => !s.appSet.has(e)) : null) },
     buyers_not_app: { label: '💳 Buyers not on the app', make: (s) => [...s.buyers].filter((e) => !s.appSet.has(e)) },
     group_buy: { label: '🎟 Held a ticket, never paid', make: (s) => (s.attendees ? [...s.attendees].filter((e) => !s.buyers.has(e)) : null) },
   };
-  const SEGMENT_MAX = 7500;       // most groups fit; bigger ones are truncated (flagged)
-  const PASTE_BUDGET = 190000;    // segments cap `pasted` at 200k chars — stop cleanly before it
-  async function createGroupSegment(entityId, user, { group, event = '' } = {}) {
+  const SEGMENT_MAX = 20000; // sanity ceiling per resolve — the campaign cap still applies after
+  const SUPER_MIN = 10, SUPER_MAX = 500; // 🏆 super-fans segment size bounds
+  async function groupEmails(entityId, user, { group, event = '', size = 0 } = {}) {
+    // 🏆 super_fans is PostHog-only: the top-N most active app users in the
+    // window (staff excluded) — ranked live, so the segment tracks the leaderboard.
+    if (String(group) === 'super_fans') {
+      if (!posthog.isConfigured()) throw new HttpError(400, 'App analytics isn\'t configured.');
+      let eventIds = await posthog.eventIdsForEntity(entityId);
+      if (!eventIds.length) throw new HttpError(400, 'App analytics isn\'t scoped for this client yet.');
+      if (event && eventIds.includes(String(event))) eventIds = [String(event)];
+      const n = Math.min(Math.max(Number(size) || 50, SUPER_MIN), SUPER_MAX);
+      const { people: fans } = await posthog.people({ ids: eventIds, days: APP_WINDOW_DAYS, orderBy: 'active', limit: n, excludeStaff: true });
+      const emails = [...new Set(fans.map((p) => String(p.email || '').trim().toLowerCase()).filter((e) => e.includes('@')))];
+      return { emails, total: emails.length, size: n, sets: { event: event && eventIds.length === 1 ? String(event) : '' }, label: `🏆 Top ${n} super fans` };
+    }
     const g = GROUPS[String(group || '')];
     if (!g) throw new HttpError(400, 'Unknown group.');
-    const segmentsApi = segApi();
-    if (!segmentsApi || typeof segmentsApi.createSegment !== 'function') throw new HttpError(400, 'Segments are not available.');
     const s = await resolveSets(entityId, user, event);
     if (!s.configured || !s.scoped) throw new HttpError(400, 'App analytics isn\'t scoped for this client yet.');
     // The not-on-app groups dedupe against a Set of app emails — build once.
     const raw = g.make({ ...s, appSet: new Set(s.appEmails) });
     if (raw === null) throw new HttpError(400, 'Ticket-holder data isn\'t available for this client.');
-    if (!raw.length) throw new HttpError(400, 'No one is in this group right now.');
-    // Build the paste inside BOTH caps so no email is ever clipped mid-line.
-    const lines = ['email']; let chars = 5;
-    for (const e of raw) {
-      if (lines.length - 1 >= SEGMENT_MAX || chars + e.length + 1 > PASTE_BUDGET) break;
-      lines.push(e); chars += e.length + 1;
-    }
-    const count = lines.length - 1;
-    // Name it by scope + date — paste segments are a snapshot, and the name says so.
+    return { emails: raw.slice(0, SEGMENT_MAX), total: raw.length, size: 0, sets: s, label: g.label };
+  }
+  async function createGroupSegment(entityId, user, { group, event = '', size = 0 } = {}) {
+    const segmentsApi = segApi();
+    if (!segmentsApi || typeof segmentsApi.createSegment !== 'function') throw new HttpError(400, 'Segments are not available.');
+    const { emails, sets: s, label, size: n } = await groupEmails(entityId, user, { group, event, size });
+    if (!emails.length) throw new HttpError(400, 'No one is in this group right now.');
     let eventName = '';
     if (s.event) {
       try { eventName = String(db.db.prepare('SELECT event_name FROM posthog_daily_event WHERE event_ref=? AND event_name<>\'\' LIMIT 1').get(s.event)?.event_name || ''); } catch { /* name is a nicety */ }
     }
-    const day = new Date().toISOString().slice(0, 10);
-    const name = `${g.label} · ${eventName || (s.event ? `event ${s.event}` : 'all events')} · ${day}`.slice(0, 120);
+    const name = `${label} · ${eventName || (s.event ? `event ${s.event}` : 'all events')}`.slice(0, 120);
     const out = segmentsApi.createSegment({
       entityId, user, via: 'app-match',
       name,
       folder: 'App audience',
-      definition: { mode: 'paste', emailField: 'email', pasted: lines.join('\n') },
+      definition: { mode: 'appmatch', group: String(group), appEvent: s.event, appSize: n || 0 },
     });
     if (!out.ok) throw new HttpError(400, out.error || 'Could not create the segment.');
-    return { ok: true, segment: { id: out.segment.id, name: out.segment.name }, count, truncated: raw.length > count };
+    return { ok: true, segment: { id: out.segment.id, name: out.segment.name }, count: emails.length, live: true };
+  }
+
+  // ── 🎫 what the matched app users actually HOLD, ticket-type by ticket-type —
+  // plus the share of ALL tickets sold that sit in app users' hands. Aggregates
+  // only (type name + counts) cross the wire; the email lists stay server-side.
+  const TYPE_EMAILS = 3000;  // matched-holder ceiling for the type breakdown (chunked queries)
+  async function ticketSummary(entityId, user, { event = '' } = {}) {
+    const cacheKey = `types:${entityId}:${event}`;
+    const hit = cache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CACHE_MS) return hit.sets;
+    const s = await resolveSets(entityId, user, event);
+    if (!s.configured || !s.scoped) return { configured: !!s.configured, scoped: false };
+    const scopeFilters = { 'core_events.id': s.eventIds.join(',') };
+    const locks = auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+    if (!locks || !locks[ORG]) return { configured: true, scoped: false }; // fail closed
+    const run = async (fields, extraFilters) => {
+      const body = { model: cat.model, view: cat.explore, fields, filters: { ...scopeFilters, ...locks, ...extraFilters }, limit: 5000 };
+      const allowed = await query.applyScope(body, user, null);
+      if (allowed === false) return null;
+      return query.runLookerQuery('/queries/run/json', body);
+    };
+    // Total tickets sold for the scope — the denominator.
+    const totalRows = await run(['core_tickets.count'], {});
+    if (!totalRows) return { configured: true, scoped: false };
+    const totalTickets = Number(totalRows[0]?.['core_tickets.count']) || 0;
+    // The matched app users (holders when we have them, buyers otherwise), then
+    // their tickets grouped by type — chunked email-IN queries, summed. Chunks
+    // are disjoint emails, so per-type counts add cleanly.
+    const matched = s.attendees ? s.appEmails.filter((e) => s.attendees.has(e)) : s.appEmails.filter((e) => s.buyers.has(e));
+    const idField = s.attendees ? 'core_users.email' : ID_EMAIL;
+    const use = matched.slice(0, TYPE_EMAILS);
+    const types = new Map();
+    let appTickets = 0;
+    for (let i = 0; i < use.length; i += 250) {
+      const rows = await run(['core_ticket_types.name', 'core_tickets.count'], { [idField]: use.slice(i, i + 250).join(',') });
+      for (const r of (rows || [])) {
+        const t = String(r['core_ticket_types.name'] || '').trim() || 'Other';
+        const n = Number(r['core_tickets.count']) || 0;
+        if (!n) continue;
+        types.set(t, (types.get(t) || 0) + n);
+        appTickets += n;
+      }
+    }
+    const out = {
+      configured: true, scoped: true, event: s.event,
+      totalTickets, appTickets, appHolders: matched.length, holdersCapped: matched.length > use.length,
+      types: [...types.entries()].map(([type, tickets]) => ({ type, tickets })).sort((a, b) => b.tickets - a.tickets).slice(0, 12),
+    };
+    if (cache.size > 100) cache.clear();
+    cache.set(cacheKey, { at: Date.now(), sets: out });
+    return out;
   }
 
   // Which of the client's events do these emails hold tickets for? Keyed by the
@@ -207,15 +270,23 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
   }));
   // One click on the card → a real Engage segment. createSegmentFor re-checks
   // entity ownership + campaigns.approve, so the route only gates "your client".
+  const segBody = (req) => ({ group: String((req.body || {}).group || ''), event: String((req.body || {}).event || ''), size: Number((req.body || {}).size) || 0 });
   app.post('/api/my/app-audience/:entityId/segment', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
-    res.json(await createGroupSegment(req.params.entityId, req.user, { group: String((req.body || {}).group || ''), event: String((req.body || {}).event || '') }));
+    res.json(await createGroupSegment(req.params.entityId, req.user, segBody(req)));
   }));
   app.post('/api/admin/entities/:id/app-audience/segment', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!db.getEntity(req.params.id)) throw new HttpError(404, 'Not found');
-    res.json(await createGroupSegment(req.params.id, req.user, { group: String((req.body || {}).group || ''), event: String((req.body || {}).event || '') }));
+    res.json(await createGroupSegment(req.params.id, req.user, segBody(req)));
+  }));
+  app.get('/api/my/app-audience/:entityId/tickets-summary', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    res.json(await ticketSummary(req.params.entityId, req.user, { event: String(req.query.event || '') }));
+  }));
+  app.get('/api/admin/entities/:id/app-audience/tickets-summary', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!db.getEntity(req.params.id)) throw new HttpError(404, 'Not found');
+    res.json(await ticketSummary(req.params.id, req.user, { event: String(req.query.event || '') }));
   }));
 
-  return { overlap, ticketsByEmail, createGroupSegment };
+  return { overlap, ticketsByEmail, createGroupSegment, groupEmails, ticketSummary };
 }
 
 module.exports = { mount };

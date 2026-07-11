@@ -193,7 +193,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); // 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); // 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -2530,7 +2530,7 @@ const billing = require('./billing').mount(app, { db, auth });
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os, billing,
+  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {

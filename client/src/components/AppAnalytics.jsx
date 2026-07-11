@@ -342,7 +342,7 @@ export function AppAnalyticsAdmin() {
       <FunnelCard key={`fun-${winKey}`} admin loader={() => api.adminAppFunnel({ from: range.from, to: range.to, entityId })} />
       <CtaLabelsCard key={`cta-${winKey}`} admin loader={() => api.adminAppCtaLabels({ from: range.from, to: range.to, entityId })} />
       {perClient && <AudienceMatchCard entityId={entityId} scope="admin-client" events={data.events || []} isMobile={isMobile} />}
-      <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
+      <TopUsersCard key={`top-${winKey}`} win={range} entityId={perClient ? entityId : ''} scope="admin-client" loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })}
         ticketsLoader={perClient ? (emails) => api.appTickets(entityId, 'admin-client', emails) : null}
         exportUrl={(q) => `/api/admin/app-analytics/people.csv?from=${range.from}&to=${range.to}&entityId=${encodeURIComponent(entityId)}&q=${encodeURIComponent(q || '')}`} />
@@ -436,7 +436,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
         loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
       <AudienceMatchCard entityId={entityId} scope={scope} events={data.events || []} isMobile={isMobile} />
-      <TopUsersCard key={`top-${winKey}`} win={range}
+      <TopUsersCard key={`top-${winKey}`} win={range} entityId={entityId} scope={scope}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))}
@@ -1020,28 +1020,52 @@ function CtaLabelsCard({ loader, admin = false }) {
 // 🏆 Super fans — the 10 most active people in the window, its own card (moved
 // out of the App-users list per Shai). Auto-loads: it's a headline metric, and
 // the server caches the query.
-function TopUsersCard({ loader, win }) {
+function TopUsersCard({ loader, win, entityId, scope }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   // TRUE fans by default — Howler staff emails are excluded until toggled in.
   const [withStaff, setWithStaff] = useState(false);
+  const [size, setSize] = useState(10); // leaderboard depth — also the segment size
+  const [segBusy, setSegBusy] = useState(false);
+  const [segMsg, setSegMsg] = useState('');
   useEffect(() => {
     let dead = false;
     setRows(null); setError('');
-    loader({ orderBy: 'active', limit: 10, excludeStaff: !withStaff })
+    loader({ orderBy: 'active', limit: size, excludeStaff: !withStaff })
       .then((r) => { if (!dead) setRows(r.people || []); })
       .catch((e) => { if (!dead) setError(e.message); });
     return () => { dead = true; };
-  }, [withStaff]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
+  }, [withStaff, size]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
+  const saveSegment = async () => {
+    setSegBusy(true); setSegMsg('');
+    try {
+      const r = await api.appAudienceSegment(entityId, scope, { group: 'super_fans', size });
+      setSegMsg(`✓ Live segment saved — ${r.segment?.name}. It re-ranks itself every time a campaign uses it.`);
+    } catch (e) { setSegMsg(`✗ ${e.message}`); }
+    setSegBusy(false);
+  };
   if (rows && rows.length === 0 && !withStaff) return null; // no signal, no card
   const max = Math.max(1, ...(rows || []).map((p) => p.interactions || 0));
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ ...title, flex: 1, marginBottom: 0 }}>🏆 Super fans</div>
+        <select value={size} onChange={(e) => setSize(Number(e.target.value))} style={{ ...input, width: 'auto', minWidth: 90, marginTop: 0 }}>
+          {[10, 25, 50, 100, 250].map((n) => <option key={n} value={n}>Top {n}</option>)}
+        </select>
         <Chip on={!withStaff} onClick={() => setWithStaff(!withStaff)}>{withStaff ? 'Howler staff shown' : '🚫 Howler staff excluded'}</Chip>
+        {entityId && (
+          <button style={{ ...ghostBtn, padding: '7px 12px' }} disabled={segBusy} onClick={saveSegment}>
+            {segBusy ? 'Saving…' : '🎯 Save as segment'}
+          </button>
+        )}
       </div>
-      <p style={sub}>Your 10 biggest super fans {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'} — the most active people in the app, by interactions{withStaff ? '' : ' (Howler email addresses excluded)'}.</p>
+      <p style={sub}>Your {size} biggest super fans {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'} — the most active people in the app, by interactions{withStaff ? '' : ' (Howler email addresses excluded)'}.</p>
+      {segMsg && (
+        <div style={{ fontSize: 12, marginBottom: 8, color: segMsg.startsWith('✗') ? 'var(--error,#ef4444)' : 'var(--text)' }}>
+          {segMsg}{!segMsg.startsWith('✗') && <> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>Open Segments →</a></>}
+        </div>
+      )}
       {error && <div style={errBox}>{error}</div>}
       {!rows && !error && <p style={mutedTxt}>Loading…</p>}
       {rows && rows.length > 0 && (
@@ -1078,12 +1102,20 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   const [err, setErr] = useState('');
   const [event, setEvent] = useState(''); // '' = all the client's Pulse events
   const [segBusy, setSegBusy] = useState(''); // group key mid-create
-  const [segMsg, setSegMsg] = useState(null); // { name, count, truncated } on success
+  const [segMsg, setSegMsg] = useState(null); // { name, count } on success
   const [segErr, setSegErr] = useState('');
+  const [sheet, setSheet] = useState(null); // tap-a-tile action sheet: { label, value, acts }
+  const [tix, setTix] = useState(null); // 🎫 ticket-type summary (lazy second fetch)
   useEffect(() => {
     let dead = false;
-    setD(null); setErr(''); setSegMsg(null); setSegErr('');
-    api.appAudience(entityId, scope, { event }).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
+    setD(null); setErr(''); setSegMsg(null); setSegErr(''); setTix(null);
+    api.appAudience(entityId, scope, { event }).then((r) => {
+      if (dead) return;
+      setD(r);
+      // The type breakdown runs several scoped queries server-side — fetch it
+      // after the counts so the headline never waits on it.
+      if (r?.configured && r?.scoped) api.appTicketSummary(entityId, scope, { event }).then((t) => { if (!dead) setTix(t); }).catch(() => {});
+    }).catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
   }, [entityId, scope, event]);
   const makeSegment = async (group) => {
@@ -1126,16 +1158,24 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   // your holders use the app") — the flip line carries the app-side reading.
   const holderPct = hasAtt ? pctPlain(d.matchedAttendees, d.attendees) : null;
   const neverCount = hasAtt ? d.appNotAttendees : d.appNotBuyers;
+  // Every tile is TAPPABLE (same interaction as dashboard tiles): tap → an
+  // action sheet with that tile's audience actions. `acts` lists them —
+  // [group key, action label, extra handler?].
   const tiles = [
-    [`App users (${d.windowDays}d)`, d.appUsers, ''],
+    [`App users (${d.windowDays}d)`, d.appUsers, '', '', [['app_users', '🎯 Save app users as a live segment']]],
     ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.attendees),
-      `📲 of your ${fmt(d.attendees)} holders${pctPlain(d.matchedAttendees, d.appUsersWithEmail) ? ` · ${pctPlain(d.matchedAttendees, d.appUsersWithEmail)} of app users` : ''}`]] : []),
+      `📲 of your ${fmt(d.attendees)} holders${pctPlain(d.matchedAttendees, d.appUsersWithEmail) ? ` · ${pctPlain(d.matchedAttendees, d.appUsersWithEmail)} of app users` : ''}`,
+      [['app_holders', '🎯 Save app users with a ticket'], ['group_buy', '🎯 Save "held a ticket, never paid"']]]] : []),
     ['Also buyers (paid)', d.matched, pctOf(d.matched, d.buyers),
-      `📲 of your ${fmt(d.buyers)} buyers${pctPlain(d.matched, d.appUsersWithEmail) ? ` · ${pctPlain(d.matched, d.appUsersWithEmail)} of app users` : ''}`],
+      `📲 of your ${fmt(d.buyers)} buyers${pctPlain(d.matched, d.appUsersWithEmail) ? ` · ${pctPlain(d.matched, d.appUsersWithEmail)} of app users` : ''}`,
+      [['app_buyers', '🎯 Save app users who bought']]],
     [hasAtt ? 'Never held a ticket' : 'Not bought yet', neverCount, pctOf(neverCount, d.appUsersWithEmail),
-      '🎯 your warm retargeting audience'],
-    ...(hasAtt ? [['Ticket holders not on the app', d.attendeesNotOnApp, pctOf(d.attendeesNotOnApp, d.attendees)]] : []),
-    ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers)],
+      '🎯 your warm retargeting audience',
+      [['never_ticket', '🎯 Save as a live segment'], ['__engage', '📣 Engage them — start a campaign']]],
+    ...(hasAtt ? [['Ticket holders not on the app', d.attendeesNotOnApp, pctOf(d.attendeesNotOnApp, d.attendees), '',
+      [['holders_not_app', '🎯 Save as a live segment']]]] : []),
+    ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers), '',
+      [['buyers_not_app', '🎯 Save as a live segment']]],
   ];
   return (
     <div style={{ ...card, marginTop: 12 }}>
@@ -1148,7 +1188,7 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
           </select>
         )}
       </div>
-      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
+      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders). <b>Tap any tile</b> to save that group as a live segment.</p>
       {/* The headline insight — the sentence a client repeats in a meeting —
           with the action right next to it. */}
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'color-mix(in srgb, var(--brand) 6%, transparent)' }}>
@@ -1164,40 +1204,71 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
         )}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
-        {tiles.map(([label, v, pct, flip]) => (
-          <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
+        {tiles.map(([label, v, pct, flip, acts]) => (
+          <div key={label} role="button" tabIndex={0}
+            onClick={() => acts?.length && setSheet({ label, value: v, acts })}
+            onKeyDown={(e) => { if (e.key === 'Enter' && acts?.length) setSheet({ label, value: v, acts }); }}
+            style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px', cursor: acts?.length ? 'pointer' : 'default', position: 'relative' }}>
             <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
               {fmt(v)}{pct && <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)' }}>{pct}</span>}
             </div>
             <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
             {flip && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.35 }}>{flip}</div>}
+            {acts?.length > 0 && <span style={{ position: 'absolute', top: 8, right: 10, fontSize: 11, color: 'var(--muted)' }}>⋯</span>}
           </div>
         ))}
       </div>
-      {/* One click → a saved Engage segment (snapshot of the group, dated). */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>🎯 Save as segment:</span>
-        {[
-          ['never_ticket', hasAtt ? '📲 Never held a ticket' : '📲 Not bought yet'],
-          ...(hasAtt ? [['holders_not_app', '🎟 Holders not on the app']] : []),
-          ['buyers_not_app', '💳 Buyers not on the app'],
-          ...(hasAtt ? [['group_buy', '🎟 Held a ticket, never paid']] : []),
-        ].map(([g, label]) => (
-          <button key={g} style={{ ...ghostBtn, padding: '7px 12px', opacity: segBusy && segBusy !== g ? 0.5 : 1 }} disabled={!!segBusy} onClick={() => makeSegment(g)}>
-            {segBusy === g ? 'Creating…' : label}
-          </button>
-        ))}
-      </div>
+      {/* Tap-a-tile action sheet — the same interaction as dashboard tiles. */}
+      {sheet && (
+        <div onClick={() => setSheet(null)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: isMobile ? '16px 16px 0 0' : 16, padding: '16px 16px 20px', width: isMobile ? '100%' : 420, maxWidth: '100%', boxSizing: 'border-box', border: '1px solid var(--hairline)' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{sheet.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, margin: '4px 0 12px' }}>{fmt(sheet.value)}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sheet.acts.map(([g, actLabel]) => (
+                <button key={g} disabled={!!segBusy}
+                  onClick={() => (g === '__engage' ? (setSheet(null), engageThem()) : makeSegment(g).then(() => setSheet(null)))}
+                  style={{ ...ghostBtn, textAlign: 'left', width: '100%', padding: '11px 14px' }}>
+                  {segBusy === g ? 'Creating…' : actLabel}
+                </button>
+              ))}
+              <button onClick={() => setSheet(null)} style={{ ...ghostBtn, width: '100%', padding: '11px 14px', color: 'var(--muted)' }}>Cancel</button>
+            </div>
+            <p style={{ ...mutedTxt, fontSize: 11, marginTop: 10, marginBottom: 0 }}>Segments made here are <b>live</b> — members re-compute every time a campaign uses them.</p>
+          </div>
+        </div>
+      )}
+      {/* 🎫 What the matched app users hold — ticket-type mix + the share of ALL
+          tickets sold sitting in app hands. Loads after the counts (chunked queries). */}
+      {tix?.scoped && tix.totalTickets > 0 && (
+        <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px', marginTop: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>🎫 Tickets in app users' hands</div>
+          <div style={{ fontSize: 15, marginTop: 6, lineHeight: 1.5 }}>
+            <b>{fmt(tix.appTickets)}</b> of the <b>{fmt(tix.totalTickets)}</b> tickets sold{event ? ' for this event' : ''} belong to app users
+            {tix.totalTickets > 0 && <b> · {Math.round((tix.appTickets / tix.totalTickets) * 100)}%</b>}
+            <span style={{ color: 'var(--muted)' }}> (held by {fmt(tix.appHolders)} matched app users{tix.holdersCapped ? ', largest holders counted' : ''})</span>
+          </div>
+          {tix.types?.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {tix.types.map((t) => (
+                <span key={t.type} style={{ fontSize: 11.5, fontWeight: 600, border: '1px solid var(--hairline)', borderRadius: 980, padding: '4px 10px', color: 'var(--text)' }}>
+                  {t.type} <b>×{fmt(t.tickets)}</b>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {segMsg && (
         <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text)' }}>
-          ✓ Segment saved — <b>{segMsg.name}</b> ({fmt(segMsg.count)} people{segMsg.truncated ? ' — the full group was larger, capped for send safety' : ''}). <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>Open Segments →</a>
+          ✓ Live segment saved — <b>{segMsg.name}</b> ({fmt(segMsg.count)} people right now — it re-computes itself every time a campaign uses it). <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>Open Segments →</a>
         </div>
       )}
       {segErr && <div style={{ ...errBox, marginTop: 8 }}>{segErr}</div>}
       <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
         Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers — counted for {event ? 'this event' : 'these events'} only.
         {hasAtt ? ' "Holders who never paid" (the gap between the two matches) is your group-buy upgrade audience.' : ''}
-        {' '}Saved segments are a snapshot of the group on the day you create them — live in <a href="/engage/segments" style={{ color: 'var(--brand)' }}>Engage → Segments</a>.
+        {' '}Saved segments are <b>live</b> — the members re-compute at every count and send, in <a href="/engage/segments" style={{ color: 'var(--brand)' }}>Engage → Segments</a>.
       </p>
     </div>
   );
