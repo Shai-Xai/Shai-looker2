@@ -226,6 +226,28 @@ test('communitySeries + todayActivity derive per-community numbers from joins/po
   assert.equal(a.reactions, 0); // counters can restate down — never negative
 });
 
+test('engagement counts DISTINCT contributing fans (staff excluded) against members', () => {
+  const e = makeEntity('Engaged', 'OrgSPY');
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1,event_42' });
+  db.db.prepare('INSERT INTO socialplus_communities (entity_id, community_id, display_name, members) VALUES (?,?,?,?)').run(e.id, 'c1', 'Mine', 1000);
+  const day = new Date().toISOString().slice(0, 10);
+  const old = '2026-01-01T10:00:00Z';
+  const ins = db.db.prepare('INSERT INTO socialplus_actors (entity_id, community_id, user_id, kind, last_at) VALUES (?,?,?,?,?)');
+  ins.run(e.id, 'c1', 'fan1', 'reaction', `${day}T09:00:00Z`);   // active this week
+  ins.run(e.id, 'c1', 'fan1', 'post', old);                      // same fan, older post — still ONE fan
+  ins.run(e.id, 'event_42', 'fan2', 'message', `${day}T08:00:00Z`); // chatter via the event group
+  ins.run(e.id, 'c1', 'fan3', 'reaction', old);                  // engaged once, long ago
+  ins.run(e.id, 'other', 'fan4', 'reaction', `${day}T07:00:00Z`); // OUT of scope — invisible
+  const g = sp.engagement(e.id);
+  assert.equal(g.members, 1000);
+  assert.equal(g.active7d, 2);   // fan1 + fan2
+  assert.equal(g.ever, 3);       // + fan3
+  assert.equal(g.breakdown.reactors, 1);
+  assert.equal(g.breakdown.chatters, 1);
+  // Per-community: only c1's actors count (the chat group is its own bucket).
+  assert.equal(sp.engagement(e.id, 'c1').ever, 2);
+});
+
 test('buildMembersCurve reconstructs the growth curve from join dates', () => {
   // 100 members today; 5 joined today, 10 yesterday, 0 the day before, 20 before that.
   const joins = { '2026-07-11': 5, '2026-07-10': 10, '2026-07-08': 20 };

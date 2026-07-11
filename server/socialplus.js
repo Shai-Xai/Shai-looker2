@@ -111,6 +111,18 @@ function init(deps) {
       joins        INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (entity_id, community_id, date)
     );
+    -- Who actually DID something (posted / reacted / chatted) and when last —
+    -- the engagement measure. One row per (community-or-chat-group, user, kind);
+    -- last_at restates forward on every full sync. The Social+ API exposes no
+    -- presence/DAU, so contribution is the honest activity signal.
+    CREATE TABLE IF NOT EXISTS socialplus_actors (
+      entity_id    TEXT NOT NULL,
+      community_id TEXT NOT NULL,               -- community id, or event_<id> chat group
+      user_id      TEXT NOT NULL,
+      kind         TEXT NOT NULL,               -- 'post' | 'reaction' | 'message'
+      last_at      TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (entity_id, community_id, user_id, kind)
+    );
     -- Per-entity sync health (what the UI shows next to the refresh button).
     CREATE TABLE IF NOT EXISTS socialplus_sync (
       entity_id   TEXT PRIMARY KEY,
@@ -299,6 +311,15 @@ function upsertDailyMembers(entityId, date, members) {
   db.db.prepare(`INSERT INTO socialplus_daily (entity_id, date, members) VALUES (?,?,?)
     ON CONFLICT(entity_id, date) DO UPDATE SET members=excluded.members`).run(entityId, date, members);
 }
+// Record that a fan did something. Staff/service identities don't count as
+// engagement (the admin console account posts most content).
+function upsertActor(entityId, communityId, userId, kind, at) {
+  const uid = String(userId || '');
+  if (!uid || /^_admin_/i.test(uid) || uid === SYNC_USER) return;
+  db.db.prepare(`INSERT INTO socialplus_actors (entity_id, community_id, user_id, kind, last_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(entity_id, community_id, user_id, kind) DO UPDATE SET last_at=MAX(socialplus_actors.last_at, excluded.last_at)`)
+    .run(entityId, String(communityId), uid, kind, String(at || ''));
+}
 function setSyncState(entityId, status, error = '') {
   db.db.prepare(`INSERT INTO socialplus_sync (entity_id, last_status, last_error, last_synced) VALUES (?,?,?,?)
     ON CONFLICT(entity_id) DO UPDATE SET last_status=excluded.last_status, last_error=excluded.last_error, last_synced=excluded.last_synced`)
@@ -387,7 +408,7 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
   // Shared platform key with nothing linked yet: sync NOTHING (and clear any
   // rows from a previous, wider assignment) — never leak other clients' data.
   if (!scope.all && !scope.ids.length) {
-    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily', 'socialplus_joins']) {
+    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily', 'socialplus_joins', 'socialplus_actors']) {
       db.db.prepare(`DELETE FROM ${t} WHERE entity_id=?`).run(entityId);
     }
     setSyncState(entityId, 'ok');
@@ -401,6 +422,7 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
   if (db.getSetting(`socialplus_scope_sig:${entityId}`, null) !== scopeSig) {
     db.db.prepare('DELETE FROM socialplus_daily WHERE entity_id=?').run(entityId);
     db.db.prepare('DELETE FROM socialplus_joins WHERE entity_id=?').run(entityId);
+    db.db.prepare('DELETE FROM socialplus_actors WHERE entity_id=?').run(entityId);
     db.setSetting(`socialplus_scope_sig:${entityId}`, scopeSig);
   }
   try {
@@ -434,6 +456,7 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
     // Post-level detail for the most active in-scope communities.
     const active = comms.filter((c) => (c.postsCount || 0) > 0)
       .sort((a, b) => (b.postsCount || 0) - (a.postsCount || 0)).slice(0, POST_COMMUNITIES);
+    const full = joinWindowDays >= JOIN_WINDOW_DAYS; // quick top-ups skip the actor walk
     for (const c of active) {
       const cid = String(c.communityId || c._id);
       const { items: posts } = await pagedList(s, `/api/v4/posts?targetType=community&targetId=${encodeURIComponent(cid)}&sortBy=lastCreated`, 'posts');
@@ -447,6 +470,35 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
           impressions: num(p.impression), reach: num(p.reach),
           posted_at: p.createdAt || '', updated_at: now,
         });
+        upsertActor(entityId, cid, p.postedUserId, 'post', p.createdAt);
+        // Who reacted (userId + when) — one bounded read per engaged post, full syncs only.
+        if (full && (num(p.reactionsCount) || 0) > 0) {
+          try {
+            const data = await apiGet(s, `/api/v3/reactions?referenceType=post&referenceId=${encodeURIComponent(String(p.postId || p._id))}&options%5Blimit%5D=100`);
+            for (const r of (data.reactions || [])) {
+              for (const who of (r.reactors || [])) upsertActor(entityId, cid, who.userId, 'reaction', who.createdAt);
+            }
+          } catch { /* engagement is an enrichment — never break the sync */ }
+        }
+      }
+    }
+    // Who chats — walk each in-scope channel's messages (bounded), full syncs only.
+    // Actors are keyed by the channel's event_<id> group (or the channel id).
+    if (full) {
+      for (const ch of chans) {
+        const chId = String(ch.channelId || ch._id);
+        if (!(num(ch.messageCount) > 0)) continue;
+        const groupKey = (chId.match(/^(event_\d+)_/) || [])[1] || chId;
+        try {
+          let token = '';
+          for (let page = 0; page < 10; page++) {
+            const sep = token ? `&options%5Btoken%5D=${encodeURIComponent(token)}` : '';
+            const data = await apiGet(s, `/api/v3/messages?channelId=${encodeURIComponent(chId)}&options%5Blimit%5D=${PAGE_LIMIT}${sep}`);
+            for (const m of (data.messages || [])) upsertActor(entityId, groupKey, m.userId, 'message', m.createdAt);
+            token = data.paging?.next || '';
+            if (!token) break;
+          }
+        } catch { /* engagement is an enrichment — never break the sync */ }
       }
     }
 
@@ -591,6 +643,33 @@ function communitySeries(entityId, cid, { metric = 'members', days = 30 } = {}) 
     .map((p) => ({ date: p.date, value: p.members }));
 }
 
+// Member engagement — how many DISTINCT fans actually did something (posted /
+// reacted / chatted), lately and ever, against the member count. This is the
+// "how active is this community really" number; Social+ exposes no DAU, so
+// contribution is the truth we can stand behind.
+function engagement(entityId, cid = null) {
+  const scope = scopeFor(entityId);
+  const cut7 = addDays(today(), -7);
+  const cut30 = addDays(today(), -30);
+  const ever = new Set(), a7 = new Set(), a30 = new Set();
+  const kinds = { post: new Set(), reaction: new Set(), message: new Set() };
+  for (const r of db.db.prepare('SELECT community_id AS c, user_id AS u, kind, last_at AS at FROM socialplus_actors WHERE entity_id=?').all(entityId)) {
+    const ok = cid ? r.c === cid : (communityInScope(scope, r.c) || channelInScope(scope, r.c));
+    if (!ok) continue;
+    ever.add(r.u);
+    const d = String(r.at).slice(0, 10);
+    if (d >= cut7) a7.add(r.u);
+    if (d >= cut30) { a30.add(r.u); kinds[r.kind]?.add(r.u); }
+  }
+  const members = cid
+    ? num(db.db.prepare('SELECT members FROM socialplus_communities WHERE entity_id=? AND community_id=?').get(entityId, cid)?.members) || 0
+    : totals(entityId).members;
+  return {
+    members, active7d: a7.size, active30d: a30.size, ever: ever.size,
+    breakdown: { posters: kinds.post.size, reactors: kinds.reaction.size, chatters: kinds.message.size },
+  };
+}
+
 // Today's activity — the closest honest read the Social+ API allows (there is
 // no per-community DAU endpoint): fans who JOINED today, POSTS made today, and
 // the day-over-day movement of the snapshot counters. Entity-wide deltas only —
@@ -716,6 +795,7 @@ function mount(app, { db: database, auth }) {
     const all = communities(id);
     return {
       summary: { ...summary(id), todayActivity: todayActivity(id, cid) },
+      engagement: engagement(id, cid),
       community: cid,
       allCommunities: all.map((c) => ({ communityId: c.communityId, displayName: c.displayName })),
       communities: cid ? all.filter((c) => c.communityId === cid) : all,
@@ -860,7 +940,7 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
-  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve, communitySeries, todayActivity,
+  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve, communitySeries, todayActivity, engagement,
   syncEntity, syncIfStale, totals, communities, channels, series, topPosts, todayHourly, summary, verify,
   startDailySync, stopDailySync,
 };

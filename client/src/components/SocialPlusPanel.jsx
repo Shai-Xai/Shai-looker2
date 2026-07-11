@@ -175,6 +175,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
             ]} />
           )}
           <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
+          <EngagementCard engagement={data.engagement} isMobile={isMobile} />
           {hourly
             ? <SeriesCard
                 series={(todayData?.hours || []).map((h) => ({ date: h.hour, value: h[metric] }))}
@@ -227,6 +228,55 @@ function ActivityRow({ activity, isMobile }) {
         ))}
       </div>
     </>
+  );
+}
+
+// How active the MEMBERS are: distinct fans who posted, reacted or chatted —
+// this week / this month / ever — against the member count. Contribution-based
+// (Social+ has no presence/DAU API); true app actives live on 📊 Analytics.
+function EngagementCard({ engagement, isMobile }) {
+  const e = engagement || {};
+  if (!e.members || e.ever == null) return null;
+  if (!e.ever) return null; // nothing collected yet (fills in on the next full sync)
+  const pct = (n) => (e.members > 0 ? `${Math.min(100, Math.round((n / e.members) * 1000) / 10)}%` : '—');
+  const tiles = [
+    ['Active this week', e.active7d],
+    ['Active this month', e.active30d],
+    ['Ever engaged', e.ever],
+  ];
+  const max = Math.max(1, e.breakdown?.reactors || 0, e.breakdown?.chatters || 0, e.breakdown?.posters || 0);
+  const bars = [
+    ['❤️ Reactors', e.breakdown?.reactors || 0],
+    ['💬 Chatters', e.breakdown?.chatters || 0],
+    ['✍️ Posters', e.breakdown?.posters || 0],
+  ];
+  return (
+    <div style={{ ...card, marginTop: 0, marginBottom: 12 }}>
+      <div style={title}>🎯 Member engagement</div>
+      <p style={sub}>Fans who actually did something — posted, reacted or sent a chat message — out of {fmt(e.members)} members.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 150}px, 1fr))`, gap: 8, marginBottom: 12 }}>
+        {tiles.map(([label, v]) => (
+          <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+              {fmt(v)} <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)' }}>· {pct(v)}</span>
+            </div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {bars.map(([label, v]) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+            <span style={{ flexShrink: 0, width: 96, fontWeight: 600 }}>{label}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'inline-block', height: 8, borderRadius: 4, background: 'var(--brand)', opacity: 0.75, width: `${Math.max(3, Math.round((v / max) * 100))}%` }} />
+            </span>
+            <span style={{ flexShrink: 0, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>{fmt(v)}</span>
+          </div>
+        ))}
+      </div>
+      <p style={{ ...sub, fontSize: 11, margin: '10px 0 0' }}>Last 30 days · contribution-based (Social+ has no “opened the app” signal — live app actives are on the 📊 Analytics tab).</p>
+    </div>
   );
 }
 
