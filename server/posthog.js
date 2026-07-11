@@ -114,22 +114,41 @@ const hqlStr = (v) => `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}
 const hqlList = (arr) => arr.map(hqlStr).join(', ');
 const prop = (name) => `properties[${hqlStr(name)}]`;
 const personProp = (name) => `person.properties[${hqlStr(name)}]`;
-// A mapping entry is `eventName` or `eventName : property=value` — the latter for
-// apps that funnel everything through one generic event (e.g. `interaction`) and
-// distinguish views/CTAs/purchases by a property. Parsed lazily at query time so
+// A mapping entry is `eventName`, `eventName : property=value`, or several
+// pairs chained with `&` (ALL must hold) — for apps that funnel everything
+// through one generic event (e.g. `interaction`) and distinguish meanings by
+// properties: `interaction : interaction_type=content_view & surface=order_success`
+// is "a view OF the order-confirmation screen". Parsed lazily at query time so
 // the stored mapping stays plain strings.
 function parseMapEntry(s) {
-  const m = String(s).match(/^(.*?)\s*:\s*([^=:]+)=(.*)$/);
-  if (m && m[1].trim() && m[2].trim()) return { event: m[1].trim(), prop: m[2].trim(), value: m[3].trim() };
-  return { event: String(s).trim() };
+  const str = String(s);
+  const m = str.match(/^(.*?)\s*:\s*(.+)$/);
+  if (m && m[1].trim()) {
+    const segs = m[2].split('&').map((x) => x.match(/^\s*([^=:]+?)\s*=\s*(.*?)\s*$/));
+    if (segs.length && segs.every((p) => p && p[1].trim())) {
+      const pairs = segs.map((p) => ({ prop: p[1].trim(), value: p[2].trim() }));
+      return { event: m[1].trim(), prop: pairs[0].prop, value: pairs[0].value, pairs };
+    }
+    // Not clean k=v & k=v segments (a value containing & or =): the original
+    // single-pair parse still applies, greedily keeping everything after the
+    // first `=` as the value.
+    const one = str.match(/^(.*?)\s*:\s*([^=:]+)=(.*)$/);
+    if (one && one[1].trim() && one[2].trim()) {
+      const pair = { prop: one[2].trim(), value: one[3].trim() };
+      return { event: one[1].trim(), ...pair, pairs: [pair] };
+    }
+  }
+  return { event: str.trim() };
 }
+// `key=*` = the property is PRESENT with any value (e.g. every `interaction`
+// carrying a cta_label counts as a CTA tap).
+const pairCond = (p) => (p.value === '*'
+  ? `notEmpty(toString(${prop(p.prop)}))`
+  : `toString(${prop(p.prop)}) = ${hqlStr(p.value)}`);
 const entryCond = (e) => {
-  if (!e.prop) return `event = ${hqlStr(e.event)}`;
-  // `event : key=*` = the property is PRESENT with any value (e.g. every
-  // `interaction` carrying a CTA_Label counts as a CTA tap).
-  return e.value === '*'
-    ? `(event = ${hqlStr(e.event)} AND notEmpty(toString(${prop(e.prop)})))`
-    : `(event = ${hqlStr(e.event)} AND toString(${prop(e.prop)}) = ${hqlStr(e.value)})`;
+  const pairs = e.pairs || [];
+  if (!pairs.length) return `event = ${hqlStr(e.event)}`;
+  return `(${[`event = ${hqlStr(e.event)}`, ...pairs.map(pairCond)].join(' AND ')})`;
 };
 // countIf over a configured mapping list; an unmapped (empty) list is a constant
 // 0 so the column always exists and an empty OR never reaches PostHog.
@@ -156,7 +175,9 @@ const DEFAULT_MAP = {
   screenEvents: ['interaction : interaction_type=content_view'],
   ctaEvents: ['interaction : interaction_type=cta_click'],
   ctaLabelProp: 'cta_label',
-  purchaseEvents: [],
+  // A view OF the order-confirmation screen = an order completed in the app
+  // (surface=order_success confirmed via the commerce scan, 2026-07-11).
+  purchaseEvents: ['interaction : interaction_type=content_view & surface=order_success'],
   purchaseValueProp: '',
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
@@ -348,23 +369,30 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // ever fighting a deliberate later edit.
   let healed = false;
   try {
-    if (db.getSetting('posthog_map_healed', '') !== '1') {
+    const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
+    if (ver < 2) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
-        const scr = nameList(m.screenEvents ?? []);
-        if (!scr.length || scr.every((e) => e === '$screen' || e === '$pageview')) m.screenEvents = DEFAULT_MAP.screenEvents;
-        const cta = nameList(m.ctaEvents ?? []).filter((e) => e.toLowerCase() !== 'interaction');
-        m.ctaEvents = cta.length ? cta : DEFAULT_MAP.ctaEvents;
-        let bd = nameList(m.breakdownProps ?? []).filter((k) => k !== 'CTA_Label');
-        if (!bd.length) bd = [...DEFAULT_MAP.breakdownProps];
-        else if (!bd.includes('cta_label')) bd.splice(1, 0, 'cta_label');
-        m.breakdownProps = bd;
-        if (String(m.ctaLabelProp || '') === 'CTA_Label') m.ctaLabelProp = DEFAULT_MAP.ctaLabelProp;
+        if (ver < 1) {
+          const scr = nameList(m.screenEvents ?? []);
+          if (!scr.length || scr.every((e) => e === '$screen' || e === '$pageview')) m.screenEvents = DEFAULT_MAP.screenEvents;
+          const cta = nameList(m.ctaEvents ?? []).filter((e) => e.toLowerCase() !== 'interaction');
+          m.ctaEvents = cta.length ? cta : DEFAULT_MAP.ctaEvents;
+          let bd = nameList(m.breakdownProps ?? []).filter((k) => k !== 'CTA_Label');
+          if (!bd.length) bd = [...DEFAULT_MAP.breakdownProps];
+          else if (!bd.includes('cta_label')) bd.splice(1, 0, 'cta_label');
+          m.breakdownProps = bd;
+          if (String(m.ctaLabelProp || '') === 'CTA_Label') m.ctaLabelProp = DEFAULT_MAP.ctaLabelProp;
+        }
+        // v2 (2026-07-11): the commerce scan pinned order confirmations to
+        // surface=order_success — an empty Purchases box gets the confirmed
+        // slice. A deliberately mapped one is kept.
+        if (!nameList(m.purchaseEvents ?? []).length) m.purchaseEvents = DEFAULT_MAP.purchaseEvents;
         db.setSetting('posthog_metric_map', JSON.stringify(m));
         healed = true;
       }
-      db.setSetting('posthog_map_healed', '1');
+      db.setSetting('posthog_map_healed', '2');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {

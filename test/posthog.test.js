@@ -20,7 +20,8 @@ test('countIn with an empty mapping is a constant 0, never an empty OR', () => {
 });
 
 test('property-qualified mapping entries compile to event+property conditions', () => {
-  assert.deepEqual(posthog.parseMapEntry('interaction : action=event_view'), { event: 'interaction', prop: 'action', value: 'event_view' });
+  assert.deepEqual(posthog.parseMapEntry('interaction : action=event_view'),
+    { event: 'interaction', prop: 'action', value: 'event_view', pairs: [{ prop: 'action', value: 'event_view' }] });
   assert.deepEqual(posthog.parseMapEntry('$screen'), { event: '$screen' });
   assert.equal(
     posthog.mapCond(['$screen', 'interaction : action=event_view']),
@@ -30,6 +31,23 @@ test('property-qualified mapping entries compile to event+property conditions', 
   assert.equal(
     posthog.mapCond(["interaction : a='); DROP--=x"]),
     "(event = 'interaction' AND toString(properties['a']) = '\\'); DROP--=x')",
+  );
+});
+
+test('`&` chains pairs into an AND slice (the order-confirmation mapping)', () => {
+  assert.equal(
+    posthog.mapCond(['interaction : interaction_type=content_view & surface=order_success']),
+    "(event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')",
+  );
+  // `=*` (present with any value) works inside a chain
+  assert.equal(
+    posthog.mapCond(['interaction : cta_label=* & surface=checkout']),
+    "(event = 'interaction' AND notEmpty(toString(properties['cta_label'])) AND toString(properties['surface']) = 'checkout')",
+  );
+  // a value containing & (not pair syntax) still parses as ONE pair, greedily
+  assert.equal(
+    posthog.mapCond(['interaction : label=Tickets & Beer']),
+    "(event = 'interaction' AND toString(properties['label']) = 'Tickets & Beer')",
   );
 });
 
@@ -377,12 +395,22 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.deepEqual(m.ctaEvents, ['interaction : interaction_type=cta_click'], 'bare mis-cased Interaction → confirmed CTA slice');
   assert.deepEqual(m.breakdownProps, ['interaction_type', 'cta_label', 'surface'], 'CTA_Label chip swapped for the real cta_label key');
   assert.equal(m.ctaLabelProp, 'cta_label');
+  assert.deepEqual(m.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'blank Purchases → confirmed order-confirmation slice (v2)');
   assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
-  assert.equal(h.settings.posthog_map_healed, '1');
-  // Once healed, later deliberate edits are never fought — flag short-circuits.
-  const custom = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
-  const h2 = makeHarness({ presetSettings: { posthog_metric_map: custom, posthog_map_healed: '1' } });
-  assert.equal(h2.settings.posthog_metric_map, custom, 'healed flag makes the migration a no-op');
+  assert.equal(h.settings.posthog_map_healed, '2');
+  // A v1-healed install upgrades to v2 (purchases fill) WITHOUT re-running the
+  // v1 rewrites — deliberate edits stay.
+  const v1 = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
+  const h2 = makeHarness({ presetSettings: { posthog_metric_map: v1, posthog_map_healed: '1' } });
+  const m2 = JSON.parse(h2.settings.posthog_metric_map);
+  assert.deepEqual(m2.ctaEvents, ['my_custom_cta'], 'v1 rewrites do not re-run');
+  assert.deepEqual(m2.screenEvents, ['$screen'], 'v1 rewrites do not re-run');
+  assert.deepEqual(m2.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'v2 fills the blank Purchases box');
+  assert.equal(h2.settings.posthog_map_healed, '2');
+  // Fully healed → the migration is a no-op, deliberate purchase mappings kept.
+  const done = JSON.stringify({ purchaseEvents: ['my_purchase'] });
+  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '2' } });
+  assert.equal(h3.settings.posthog_metric_map, done, 'healed flag makes the migration a no-op');
 });
 
 test('reports carry the configured breakdown keys and live window uniques', async () => {

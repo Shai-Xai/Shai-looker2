@@ -937,7 +937,7 @@ function MappingEditor() {
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🧭 Event mapping</div>
-      <p style={sub}>Tell Pulse which PostHog events mean what — one entry per line. Either a plain event name, or <code>event : property=value</code> when one generic event carries several meanings (e.g. <code>interaction : interaction_type=event_view</code>). <code>property=*</code> means "the property is present with any value" (e.g. <code>interaction : CTA_Label=*</code> counts every labelled CTA tap). The catalog shows what the app actually sends, busiest first; 🔬 Diagnose shows the property keys and values.</p>
+      <p style={sub}>Tell Pulse which PostHog events mean what — one entry per line. Either a plain event name, or <code>event : property=value</code> when one generic event carries several meanings (e.g. <code>interaction : interaction_type=content_view</code>). Chain conditions with <code>&amp;</code> — <code>interaction : interaction_type=content_view &amp; surface=order_success</code> is "a view of the order-confirmation screen". <code>property=*</code> means "the property is present with any value" (e.g. <code>interaction : cta_label=*</code> counts every labelled CTA tap). The catalog shows what the app actually sends, busiest first; 🔬 Diagnose shows the property keys and values.</p>
       <div style={grid2}>
         {[['screenEvents', 'Screen / page views'], ['ctaEvents', 'CTA taps'], ['purchaseEvents', 'Purchases'], ['notificationEvents', 'Notifications']].map(([k, label]) => (
           <label key={k} style={lbl}>{label}

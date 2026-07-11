@@ -28,22 +28,26 @@ matches something real, that metric reads zero and its tile stays hidden.
 
 ## The syntax (one definition per line)
 
-Each box in the 🧭 Event mapping card takes one or more lines. Three forms:
+Each box in the 🧭 Event mapping card takes one or more lines. Four forms:
 
 ```
 $screen                                ← a plain event name: every event called $screen counts
 interaction : interaction_type=cta_click   ← event + property: only interactions whose
                                              interaction_type equals cta_click count
-interaction : CTA_Label=*              ← the * wildcard: any interaction that HAS a
-                                             CTA_Label (whatever its value) counts
+interaction : cta_label=*              ← the * wildcard: any interaction that HAS a
+                                             cta_label (whatever its value) counts
+interaction : interaction_type=content_view & surface=order_success
+                                       ← & chains conditions (ALL must hold): a
+                                             content_view ON the order_success screen
 ```
 
 Rules:
 - **One definition per line.** Multiple lines are OR'd — an event matching any
   line counts.
+- **`&` inside a line ANDs conditions** — every `property=value` pair must hold.
 - **Names are case-sensitive.** `CTA_Label` ≠ `cta_label`. Always copy names
   from the catalog/Diagnose, never type from memory.
-- Spaces around the `:` and `=` don't matter.
+- Spaces around the `:`, `=` and `&` don't matter.
 
 ---
 
@@ -56,7 +60,7 @@ whole app" selector active):
 |---|---|---|
 | **Screen / page views** | what counts as a "view" | `interaction : interaction_type=content_view` ✅ confirmed — now the built-in default |
 | **CTA taps** | ticket-button and other CTA taps | `interaction : interaction_type=cta_click` ✅ confirmed — now the built-in default |
-| **Purchases** | in-app purchase events | only if a purchase-ish value exists; otherwise **leave empty** — real ticket revenue lives in the Looker dashboards |
+| **Purchases** | orders completed in the app | `interaction : interaction_type=content_view & surface=order_success` ✅ confirmed (a view of the order-confirmation screen) — now the built-in default. Revenue amounts still live in the Looker dashboards |
 | **Notifications** | notification opt-ins/opens | map when the app sends them |
 | **Purchase value property** | the property carrying an amount on purchase events | only if Purchases is mapped |
 | **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | `cta_label` ✅ confirmed (lowercase — NOT `CTA_Label`) — now the built-in default |
