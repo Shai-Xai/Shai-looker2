@@ -17,6 +17,8 @@ import AiMark from './AiMark.jsx';
 // Uninstall with server/posthog.js — see that file's header.
 
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
+// Rand amounts (in-app revenue tracked by PostHog) — compact above 100k.
+const fmtR = (v) => (v == null ? '—' : `R${Intl.NumberFormat('en-ZA', { notation: v >= 100000 ? 'compact' : 'standard', maximumFractionDigits: v >= 100000 ? 1 : 0 }).format(v)}`);
 // Seconds → "4m 32s" / "1h 12m" for the time-in-app tiles.
 const fmtDur = (s) => {
   s = Math.max(0, Math.round(s || 0));
@@ -199,6 +201,7 @@ export function AppAnalyticsAdmin() {
         ['Unique viewers', data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
+        ...(data.totals?.purchaseValue > 0 ? [['In-app revenue', fmtR(data.totals.purchaseValue)]] : []),
         ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]
     : [
@@ -345,6 +348,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
+        ...(data.totals?.purchaseValue > 0 ? [['In-app revenue', fmtR(data.totals.purchaseValue)]] : []),
         ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]} />
       {gran === 'hour' ? (
@@ -731,7 +735,7 @@ function EventsTable({ rows, title: heading, days }) {
             <tr key={r.eventRef}>
               <td style={{ ...td, fontWeight: 600 }}>{r.eventName || `Event ${r.eventRef}`}<span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.eventRef}</span></td>
               {cols.map(([k]) => (
-                <td key={k} style={td}>{fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmt(r.purchaseValue)}</span>}</td>
+                <td key={k} style={td}>{fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmtR(r.purchaseValue)}</span>}</td>
               ))}
             </tr>
           ))}
@@ -1107,7 +1111,11 @@ function MappingEditor() {
       </div>
       <div style={grid2}>
         <label style={lbl}>Purchase value property
-          <input style={input} value={m.purchaseValueProp || ''} onChange={(e) => setM({ ...m, purchaseValueProp: e.target.value })} placeholder="e.g. value" autoComplete="off" />
+          <input style={input} value={m.purchaseValueProp || ''} onChange={(e) => setM({ ...m, purchaseValueProp: e.target.value })} placeholder="e.g. order_amount_cents" autoComplete="off" />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!m.purchaseValueCents} onChange={(e) => setM({ ...m, purchaseValueCents: e.target.checked })} />
+            value is in cents (÷100 → rand)
+          </span>
         </label>
         <label style={lbl}>CTA label property (the 🎯 "CTA clicks by label" chart)
           <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. cta_label" autoComplete="off" />

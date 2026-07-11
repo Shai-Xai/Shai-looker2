@@ -55,7 +55,7 @@ function buildAppInsightPrompt({ scopeLabel, report, live, time = null, moments:
   const t = report.totals || {};
   L.push(report.kind === 'app'
     ? `Window totals (whole app): interactions ${t.interactions || 0}; views ${t.views || 0}; new users ${t.newUsers || 0}; sessions ${t.sessions || 0}.`
-    : `Window totals: interactions ${t.interactions || 0}; views ${t.views || 0}; CTA taps ${t.ctaTaps || 0}; purchases ${t.purchases || 0}${t.purchaseValue ? ` (value ${t.purchaseValue})` : ''}.`);
+    : `Window totals: interactions ${t.interactions || 0}; views ${t.views || 0}; CTA taps ${t.ctaTaps || 0}; purchases ${t.purchases || 0}${t.purchaseValue ? ` (in-app revenue R${Math.round(t.purchaseValue)})` : ''}.`);
   if ((report.series || []).length) {
     if (report.kind === 'app') {
       L.push('', 'Daily series (date · daily actives · interactions · views · sessions):');
@@ -183,7 +183,10 @@ const DEFAULT_MAP = {
   // A view OF the order-confirmation screen = an order completed in the app
   // (surface=order_success confirmed via the commerce scan, 2026-07-11).
   purchaseEvents: ['interaction : interaction_type=content_view & surface=order_success'],
-  purchaseValueProp: '',
+  // PostHog's own revenue tracking property; it carries CENTS (÷100 → rand,
+  // controlled by purchaseValueCents so a rand-denominated prop stays exact).
+  purchaseValueProp: 'order_amount_cents',
+  purchaseValueCents: true,
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
   breakdownProps: ['surface', 'cta_label', 'interaction_type'], // chip order = display order (surface first per Shai)
@@ -259,6 +262,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       ctaLabelProp: String(stored.ctaLabelProp ?? DEFAULT_MAP.ctaLabelProp).trim(),
       purchaseEvents: nameList(stored.purchaseEvents ?? DEFAULT_MAP.purchaseEvents),
       purchaseValueProp: String(stored.purchaseValueProp ?? DEFAULT_MAP.purchaseValueProp).trim(),
+      purchaseValueCents: stored.purchaseValueCents === undefined ? DEFAULT_MAP.purchaseValueCents : !!stored.purchaseValueCents,
       notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
       breakdownProps: nameList(stored.breakdownProps ?? DEFAULT_MAP.breakdownProps),
       personProps: { ...DEFAULT_MAP.personProps, ...(stored.personProps && typeof stored.personProps === 'object' ? stored.personProps : {}) },
@@ -335,8 +339,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         FROM persons WHERE created_at >= toStartOfDay(now()) - INTERVAL ${N} DAY GROUP BY day ORDER BY day`);
       for (const r of newRows) if (r.day) upNew.run(r.day, Number(r.new_users) || 0, ts);
       const evId = prop(c.eventIdProp);
-      const value = m.purchaseValueProp && m.purchaseEvents.length
-        ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), ${mapCond(m.purchaseEvents)}) AS purchase_value`
+      // The value property may not ride the purchase-mapping slice itself (the
+      // amount can sit on a sibling event) — sum it wherever it appears on the
+      // event's traffic; cents-denominated props land ÷100 so reports read rand.
+      const value = m.purchaseValueProp
+        ? `sum(toFloat(${prop(m.purchaseValueProp)}))${m.purchaseValueCents ? ' / 100' : ''} AS purchase_value`
         : '0 AS purchase_value';
       const evRows = await hogql(`
         SELECT toString(toDate(timestamp)) AS day, toString(${evId}) AS event_ref,
@@ -388,7 +395,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   let healed = false;
   try {
     const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
-    if (ver < 3) {
+    if (ver < 4) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
@@ -412,10 +419,13 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         // customised set is left alone.
         const bd3 = nameList(m.breakdownProps ?? []);
         if (bd3.length === DEFAULT_MAP.breakdownProps.length && DEFAULT_MAP.breakdownProps.every((k) => bd3.includes(k))) m.breakdownProps = [...DEFAULT_MAP.breakdownProps];
+        // v4 (2026-07-11): PostHog's revenue tracker is order_amount_cents —
+        // a blank Purchase value box gets it (cents ÷100). Deliberate values kept.
+        if (!String(m.purchaseValueProp || '').trim()) { m.purchaseValueProp = DEFAULT_MAP.purchaseValueProp; m.purchaseValueCents = true; }
         db.setSetting('posthog_metric_map', JSON.stringify(m));
         healed = true;
       }
-      db.setSetting('posthog_map_healed', '3');
+      db.setSetting('posthog_map_healed', '4');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {
@@ -994,6 +1004,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         ctaLabelProp: String(b.metricMap.ctaLabelProp ?? cur.ctaLabelProp).trim().slice(0, 80),
         purchaseEvents: nameList(b.metricMap.purchaseEvents ?? cur.purchaseEvents),
         purchaseValueProp: String(b.metricMap.purchaseValueProp ?? cur.purchaseValueProp).trim().slice(0, 80),
+        purchaseValueCents: b.metricMap.purchaseValueCents === undefined ? cur.purchaseValueCents : !!b.metricMap.purchaseValueCents,
         notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
         breakdownProps: nameList(b.metricMap.breakdownProps ?? cur.breakdownProps),
         personProps: { ...cur.personProps },
