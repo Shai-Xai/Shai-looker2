@@ -696,6 +696,24 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     return { ...base, total: all.reduce((s, r) => s + r.clicks, 0), labels: all.slice(0, L), otherClicks: rest.reduce((s, r) => s + r.clicks, 0), otherCount: rest.length };
   }
 
+  // Per-event daily lines for the chart's event filter — straight from the
+  // rollup, zero PostHog queries. Callers validate `refs` against the caller's
+  // entitled ids BEFORE calling (scope is a hard wall).
+  async function eventSeries(refs, o) {
+    const w = win(o);
+    const ph = refs.map(() => '?').join(',');
+    const rows = sql.prepare(`
+      SELECT date, event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
+             SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(notif_events) AS notifications
+      FROM posthog_daily_event WHERE date>=? AND date<=? AND event_ref IN (${ph}) GROUP BY date, event_ref ORDER BY date ASC`).all(w.from, w.to, ...refs);
+    const events = [];
+    const seen = new Set();
+    for (const r of rows) if (!seen.has(r.eventRef)) { seen.add(r.eventRef); events.push({ eventRef: String(r.eventRef), eventName: String(r.eventName || '') }); }
+    const blank = events.filter((e) => !e.eventName).map((e) => e.eventRef);
+    if (blank.length) { try { const names = await namesForIds(blank); for (const e of events) if (!e.eventName) e.eventName = names.get(e.eventRef) || ''; } catch { /* cosmetic */ } }
+    return { days: w.days, from: w.from, to: w.to, events, series: rows.map((r) => ({ ...r, eventRef: String(r.eventRef) })) };
+  }
+
   // 🛒→✅ checkout funnel — unique people reaching each configured stage in
   // the window (plus raw event counts), ONE HogQL query for all stages.
   // Deliberately "people who reached each stage", not a strict-order sequence:
@@ -1082,6 +1100,20 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, steps: [] });
     res.json(await funnel({ ids, ...winQ(req) }));
   }));
+  app.get('/api/admin/app-analytics/event-series', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    const want = String(req.query.events || '').split(',').map((x) => x.trim()).filter(Boolean);
+    let refs = want;
+    if (ids) refs = want.length ? want.filter((r) => ids.includes(r)) : ids;
+    else if (!want.length) {
+      // whole app, nothing named → the window's top events by uniques
+      const w = win(winQ(req));
+      refs = sql.prepare('SELECT event_ref FROM posthog_daily_event WHERE date>=? AND date<=? GROUP BY event_ref ORDER BY SUM(uniques) DESC LIMIT 8').all(w.from, w.to).map((r) => String(r.event_ref));
+    }
+    if (!refs.length) return res.json({ days: win(winQ(req)).days, events: [], series: [] });
+    res.json(await eventSeries(refs.slice(0, 12), winQ(req)));
+  }));
   app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
     const eid = String(req.query.entityId || '') || null;
     res.json({ moments: moments(eid, winQ(req)), linkClicks: linkClicks(eid, winQ(req)) });
@@ -1159,6 +1191,13 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (!ids.length) return res.json({ days: win(winQ(req)).days, steps: [] });
     res.json(await funnel({ ids, ...winQ(req) }));
   }));
+  app.get('/api/my/app-analytics/:entityId/event-series', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    const want = String(req.query.events || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const refs = want.length ? want.filter((r) => ids.includes(r)) : ids; // never beyond their own events
+    if (!refs.length) return res.json({ days: win(winQ(req)).days, events: [], series: [] });
+    res.json(await eventSeries(refs.slice(0, 12), winQ(req)));
+  }));
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
   });
@@ -1175,7 +1214,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

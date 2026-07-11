@@ -248,9 +248,12 @@ export function AppAnalyticsAdmin() {
         <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => api.adminAppToday({ entityId, from: range.from, to: range.to })} />
       ) : (
       <SeriesCard
+        key={`series-${winKey}`}
         series={data.series || []}
         moments={moments}
         linkClicks={linkClicks}
+        events={(perClient ? data.events : data.topEvents) || []}
+        eventSeriesLoader={(refs) => api.adminAppEventSeries({ from: range.from, to: range.to, entityId, events: refs.join(',') })}
         metrics={perClient
           ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
               ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases], ['notifications', 'Notifications', data.totals?.notifications]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]
@@ -338,7 +341,11 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       {gran === 'hour' ? (
         <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
       ) : (
-      <SeriesCard series={data.series || []} moments={moments} linkClicks={linkClicks} isMobile={isMobile}
+      <SeriesCard key={`series-${winKey}`} series={data.series || []} moments={moments} linkClicks={linkClicks} isMobile={isMobile}
+        events={data.events || []}
+        eventSeriesLoader={(refs) => (scope === 'admin-client'
+          ? api.adminAppEventSeries({ from: range.from, to: range.to, entityId, events: refs.join(',') })
+          : api.myAppEventSeries(entityId, { from: range.from, to: range.to, events: refs.join(',') }))}
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
           ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases], ['notifications', 'Notifications', data.totals?.notifications]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       )}
@@ -491,9 +498,47 @@ function MomentToggles({ moments, hiddenPosts, setHiddenPosts, showCampaigns, se
 const shownMoments = (moments, hiddenPosts, showCampaigns, showOther) =>
   (moments || []).filter((m) => (m.type === 'post' ? !hiddenPosts.has(momentKey(m)) : m.type === 'campaign' ? (m.appLinked ? showCampaigns : showOther) : false)).slice(0, 60);
 
+// The 🎪 Events chip opens a picker: All events = the combined line; ticking
+// events (up to 8) draws each as its own line for comparison.
+function EventPicker({ events, sel, setSel, onClose }) {
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ ...modal, maxWidth: 420, maxHeight: '70vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...title, marginBottom: 2 }}>🎪 Events on the chart</div>
+        <p style={{ ...sub, marginBottom: 8 }}>All events = one combined line. Tick events (up to 8) to compare them — each gets its own line.</p>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <button type="button" style={ghostBtn} onClick={() => setSel(null)}>All events (combined)</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {events.map((e) => {
+            const k = String(e.eventRef);
+            const on = !!sel && sel.has(k);
+            return (
+              <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minHeight: 36, cursor: 'pointer' }}>
+                <input type="checkbox" checked={on}
+                  onChange={() => setSel((s) => {
+                    const n = new Set(s || []);
+                    if (n.has(k)) n.delete(k); else if (n.size < 8) n.add(k);
+                    return n.size ? n : null;
+                  })} />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.eventName || `Event ${k}`}</span>
+                <span style={{ color: 'var(--muted)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{k}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button type="button" style={btn} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // One recessive line chart; chips pick WHICH single series shows (one axis, no
-// dual scales). `series` rows are the rollup rows keyed by `date`.
-function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }) {
+// dual scales). `series` rows are the rollup rows keyed by `date`. With events
+// picked (🎪), the chart compares them — one line per event of the same metric.
+function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile, events = [], eventSeriesLoader }) {
   const [metric, setMetric] = useState(metrics[0][0]);
   const [hiddenPosts, setHiddenPosts] = useState(() => new Set());
   const [showCampaigns, setShowCampaigns] = useState(true);
@@ -501,26 +546,47 @@ function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }
   const [showClicks, setShowClicks] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [eventSel, setEventSel] = useState(null); // null = All (one combined line)
+  const [evOpen, setEvOpen] = useState(false);
+  const [evData, setEvData] = useState(null);
+  const [evErr, setEvErr] = useState('');
   const totalClicks = linkClicks.reduce((a, r) => a + (r.clicks || 0), 0);
   const marks = shownMoments(moments, hiddenPosts, showCampaigns, showOther);
+  const selKey = eventSel ? [...eventSel].sort().join(',') : '';
+  const perEvent = !!eventSel && eventSel.size > 0;
+  useEffect(() => {
+    if (!perEvent || !eventSeriesLoader) { setEvData(null); return; }
+    let dead = false;
+    setEvErr('');
+    eventSeriesLoader([...eventSel]).then((r) => { if (!dead) setEvData(r); }).catch((e) => { if (!dead) { setEvErr(e.message); setEvData(null); } });
+    return () => { dead = true; };
+  }, [selKey]); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount; selKey encodes the selection
   const option = useMemo(() => {
     const brand = brandPrimary();
     const metricLabel = (metrics.find(([k]) => k === metric) || [])[1] || metric;
-    const withClicks = showClicks && linkClicks.length > 0;
-    return {
-      animationDuration: 300,
-      grid: { left: 8, right: 12, top: withClicks ? 30 : 12, bottom: 8, containLabel: true },
-      legend: withClicks ? { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } } : undefined,
-      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')), extraCssText: 'z-index: 40;' },
-      xAxis: { type: 'time', axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
-      yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
-      series: [{
+    const withClicks = !perEvent && showClicks && linkClicks.length > 0;
+    const toX = (m) => String(m.at).replace('T', ' ').slice(0, 19);
+    let lines;
+    if (perEvent && evData) {
+      // one line per picked event, same metric, fixed validated palette
+      const names = new Map(evData.events.map((e) => [e.eventRef, e.eventName || `Event ${e.eventRef}`]));
+      const byRef = new Map();
+      for (const r of evData.series) { if (!byRef.has(r.eventRef)) byRef.set(r.eventRef, []); byRef.get(r.eventRef).push([r.date, r[metric] == null ? 0 : r[metric]]); }
+      const maxV = Math.max(0, ...evData.series.map((r) => r[metric] || 0));
+      lines = [...byRef.entries()].map(([ref, data], i) => ({
+        name: names.get(ref) || ref, type: 'line', showSymbol: data.length < 3, smooth: 0.15,
+        lineStyle: { width: 2, color: SERIES_COLORS[i % SERIES_COLORS.length] }, itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+        data,
+        ...(i === 0 ? { markLine: momentMarkLine(marks, toX, maxV) } : {}),
+      }));
+    } else {
+      lines = [{
         name: metricLabel,
         type: 'line', showSymbol: false, smooth: 0.15,
         lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
         data: series.map((r) => [r.date, r[metric] == null ? 0 : r[metric]]),
-        markLine: momentMarkLine(marks, (m) => String(m.at).replace('T', ' ').slice(0, 19), Math.max(0, ...series.map((r) => r[metric] || 0))),
+        markLine: momentMarkLine(marks, toX, Math.max(0, ...series.map((r) => r[metric] || 0))),
       },
       // ChottuLink clicks ride the SAME count axis (both are event counts) as a
       // thin dashed companion line — never a second y-axis.
@@ -529,20 +595,36 @@ function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }
         type: 'line', showSymbol: false, smooth: 0.15,
         lineStyle: { width: 2, type: 'dashed', color: '#0891b2' }, itemStyle: { color: '#0891b2' },
         data: linkClicks.map((r) => [r.date, r.clicks]),
-      }] : [])],
+      }] : [])];
+    }
+    const legend = withClicks || (perEvent && lines.length > 1);
+    return {
+      animationDuration: 300,
+      grid: { left: 8, right: 12, top: legend ? 30 : 12, bottom: 8, containLabel: true },
+      legend: legend ? { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } } : undefined,
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')), extraCssText: 'z-index: 40;' },
+      xAxis: { type: 'time', axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
+      series: lines,
     };
-  }, [series, metric, metrics, moments, hiddenPosts, showCampaigns, showOther, showClicks, linkClicks]); // eslint-disable-line react-hooks/exhaustive-deps -- marks derives from these
+  }, [series, metric, metrics, moments, hiddenPosts, showCampaigns, showOther, showClicks, linkClicks, perEvent, evData]); // eslint-disable-line react-hooks/exhaustive-deps -- marks derives from these
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
+        {events.length > 1 && eventSeriesLoader && (
+          <Chip on={perEvent} onClick={() => setEvOpen(true)}>🎪 Events ({perEvent ? eventSel.size : 'All'}) ▾</Chip>
+        )}
         <MomentToggles moments={moments} hiddenPosts={hiddenPosts} setHiddenPosts={setHiddenPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} showOther={showOther} setShowOther={setShowOther} openPicker={() => setPickerOpen(true)} />
-        {linkClicks.length > 0 && <Chip on={showClicks} onClick={() => setShowClicks(!showClicks)}>🔗 Link clicks ({fmt(totalClicks)})</Chip>}
+        {!perEvent && linkClicks.length > 0 && <Chip on={showClicks} onClick={() => setShowClicks(!showClicks)}>🔗 Link clicks ({fmt(totalClicks)})</Chip>}
       </div>
+      {evErr && <div style={errBox}>{evErr}</div>}
+      {perEvent && !evData && !evErr && <p style={mutedTxt}>Loading events…</p>}
       {series.length === 0
         ? <p style={sub}>No rollup data yet — run a sync (or wait for tonight's).</p>
         : <ReactECharts echarts={echarts} option={option} notMerge onEvents={{ click: momentClick(marks, setDetail) }} style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />}
       {pickerOpen && <PostPicker posts={moments.filter((m) => m.type === 'post')} hidden={hiddenPosts} setHidden={setHiddenPosts} onClose={() => setPickerOpen(false)} />}
+      {evOpen && <EventPicker events={events} sel={eventSel} setSel={setEventSel} onClose={() => setEvOpen(false)} />}
       <MomentDetail m={detail} onClose={() => setDetail(null)} />
     </div>
   );

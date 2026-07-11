@@ -391,6 +391,38 @@ test('blank event names fill in from Looker (id → name), persist, and survive 
   assert.equal(h.sqlite.prepare('SELECT event_name FROM posthog_daily_event WHERE event_ref=?').get('39450').event_name, 'G&G Winter Fest');
 });
 
+test('event-series: per-event daily rows from the rollup, scope is a hard wall', async () => {
+  const twoEvents = (q) => {
+    if (q.includes('GROUP BY day, event_ref')) {
+      return HOGQL(['day', 'event_ref', 'event_name', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases', 'purchase_value', 'notif_events'],
+        [[today, '39450', 'Winter Fest', 2053, 5166, 547, 646, 0, 0, 0], [today, '39451', 'Summer Fest', 1800, 4713, 537, 729, 0, 0, 0], [today, '999', 'Not Yours', 50, 60, 5, 1, 0, 0, 0]]);
+    }
+    return syncResponder(q);
+  };
+  const h = makeHarness({
+    responder: twoEvents,
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '39450,39451' } },
+  });
+  await h.api.syncDaily(7);
+  // no ?events= → all their events, one row per (day, event)
+  const all = await h.invoke('GET /api/my/app-analytics/:entityId/event-series', { params: { entityId: 'e1' } });
+  assert.equal(all.status, 200);
+  assert.deepEqual(all.body.events.map((e) => e.eventRef).sort(), ['39450', '39451']);
+  assert.equal(all.body.series.find((r) => r.eventRef === '39450').uniques, 2053);
+  // asking for a foreign event id gets silently filtered — never their data
+  const sneaky = await h.invoke('GET /api/my/app-analytics/:entityId/event-series', { params: { entityId: 'e1' }, query: { events: '999,39451' } });
+  assert.deepEqual(sneaky.body.events.map((e) => e.eventRef), ['39451'], 'foreign ids are dropped by the scope wall');
+  // no locks → fail closed
+  const h2 = makeHarness({ suites: [{ id: 's2', entityId: 'e2' }], locks: {} });
+  const closed = await h2.invoke('GET /api/my/app-analytics/:entityId/event-series', { params: { entityId: 'e2' }, user: { id: 'u2', role: 'member', entityIds: ['e2'] } });
+  assert.deepEqual(closed.body.series, []);
+  // admin whole-app with nothing named defaults to the window's top events
+  const top = await h.invoke('GET /api/admin/app-analytics/event-series', { user: { id: 'a', role: 'admin' } });
+  assert.equal(top.status, 200);
+  assert.ok(top.body.events.length >= 2, 'top events fill the default selection');
+});
+
 test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; steps configurable', async () => {
   const queries = [];
   const h = makeHarness({
