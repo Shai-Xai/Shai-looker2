@@ -310,8 +310,17 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         {/* The intro sentence squeezes the control chips into ragged wrapping on
             phones — the page is titled "App", so the copy is desktop-only. */}
         {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">How your events perform inside the Howler app.</span>}
+        <Chip onClick={() => setOwlOpen(true)}>✨ Owl summary</Chip>
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
       </div>
+      {owlOpen && (
+        <DashboardInsightModal
+          kindLabel="App summary" title="Your events in the Howler app"
+          endpoint={scope === 'admin-client'
+            ? `/api/admin/app-analytics/insight?entityIds=${encodeURIComponent(entityId)}&from=${range.from}&to=${range.to}`
+            : `/api/my/app-analytics/${entityId}/insight?from=${range.from}&to=${range.to}`}
+          payload={{}} onClose={() => setOwlOpen(false)} />
+      )}
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
       <StatRow isMobile={isMobile} stats={[
         ['Viewers today', data.live?.actives, true],
