@@ -1076,20 +1076,25 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
     api.appAudience(entityId, scope).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
   }, [entityId, scope]);
-  if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your buyers</div><div style={errBox}>{err}</div></div>;
+  if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your fans</div><div style={errBox}>{err}</div></div>;
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
   const pctOf = (n, base) => (base > 0 ? ` · ${Math.round((n / base) * 100)}%` : '');
+  const hasAtt = d.attendees != null;
+  // Two distinct segments on purpose: ATTENDEES (held a ticket — core_users) is
+  // the wide "our fans" set; BUYERS (paid — core_purchasers) is the spenders.
   const tiles = [
     [`App users (${d.windowDays}d)`, d.appUsers, ''],
-    ['Also your buyers', d.matched, pctOf(d.matched, d.appUsersWithEmail)],
-    ['Not bought yet', d.appNotBuyers, pctOf(d.appNotBuyers, d.appUsersWithEmail)],
+    ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.appUsersWithEmail)]] : []),
+    ['Also buyers (paid)', d.matched, pctOf(d.matched, d.appUsersWithEmail)],
+    [hasAtt ? 'Never held a ticket' : 'Not bought yet', hasAtt ? d.appNotAttendees : d.appNotBuyers, pctOf(hasAtt ? d.appNotAttendees : d.appNotBuyers, d.appUsersWithEmail)],
+    ...(hasAtt ? [['Ticket holders not on the app', d.attendeesNotOnApp, pctOf(d.attendeesNotOnApp, d.attendees)]] : []),
     ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers)],
   ];
   return (
     <div style={{ ...card, marginTop: 12 }}>
-      <div style={title}>🎟 App audience vs your buyers</div>
-      <p style={sub}>Your app users matched to your ticket buyers by email — who converts, who hasn't yet, and who buys without the app.</p>
+      <div style={title}>🎟 App audience vs your fans</div>
+      <p style={sub}>Your app users matched by email against two segments: <b>ticket holders</b> (anyone who's held a ticket for your events) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
         {tiles.map(([label, v, pct]) => (
           <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
@@ -1101,8 +1106,8 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
         ))}
       </div>
       <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
-        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {fmt(d.buyers)} buyers on record.
-        "Not bought yet" is your warm retargeting audience.
+        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers on record.
+        "{hasAtt ? 'Never held a ticket' : 'Not bought yet'}" is your warm retargeting audience{hasAtt ? '; "holders who never paid" (the gap between the two matches) is your group-buy upgrade audience' : ''}.
       </p>
     </div>
   );

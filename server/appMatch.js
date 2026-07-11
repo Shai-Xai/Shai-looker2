@@ -43,25 +43,55 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
     return { scoped: true, total: total || side.persons, emails: side.emails, capped: !!side.capped };
   }
 
+  // Everyone who has ever HELD a ticket for this client (core_users.email — the
+  // attendee on each ticket), as opposed to who PAID (core_purchasers.email).
+  // A group buy = one buyer, many attendees, so this is the wider audience.
+  // Returns null (degrade to buyers-only) if the explore doesn't carry the field.
+  async function attendeeEmails(entityId, user) {
+    const body = { model: cat.model, view: cat.explore, fields: ['core_users.email'], filters: {}, limit: 500000 };
+    const allowed = await query.applyScope(body, user, null);
+    if (allowed === false) return null;
+    const locks = auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+    if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+    else if (!body.filters[ORG]) return null; // fail closed — never resolve cross-client
+    try {
+      const rows = await query.runLookerQuery('/queries/run/json', body);
+      const set = new Set();
+      for (const r of (rows || [])) {
+        const e = String(r['core_users.email'] || '').trim().toLowerCase();
+        if (e.includes('@')) set.add(e);
+      }
+      return set;
+    } catch { return null; }
+  }
+
   async function overlap(entityId, user) {
     const hit = cache.get(entityId);
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
     if (!posthog.isConfigured()) return { configured: false };
-    const [appSide, buyers] = await Promise.all([
+    const [appSide, buyers, attendees] = await Promise.all([
       appUsers(entityId),
       resolve({ entityId, definition: { model: cat.model, view: cat.explore, queryFilters: {} }, user, limit: 500000 }),
+      attendeeEmails(entityId, user),
     ]);
     if (!appSide.scoped) return { configured: true, scoped: false };
     if (buyers.error) throw new HttpError(400, `Couldn't resolve the buyer list (${buyers.error}).`);
     // buildRows already lowercases emails on the buyer side; appEmails on the app side.
     const buyerEmails = new Set((buyers.raw || []).map((p) => String(p.email || '').toLowerCase()).filter(Boolean));
     const matched = appSide.emails.filter((e) => buyerEmails.has(e)).length;
+    const matchedAttendees = attendees ? appSide.emails.filter((e) => attendees.has(e)).length : null;
     const data = {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
       appUsers: appSide.total, appUsersWithEmail: appSide.emails.length, appCapped: appSide.capped,
+      // Who PAID (purchaser contact on the order) …
       buyers: buyerEmails.size, matched,
       appNotBuyers: appSide.emails.length - matched,
       buyersNotOnApp: Math.max(0, buyerEmails.size - matched),
+      // … vs who ATTENDED (the user on each ticket) — the wider segment.
+      attendees: attendees ? attendees.size : null,
+      matchedAttendees,
+      appNotAttendees: attendees ? appSide.emails.length - matchedAttendees : null,
+      attendeesNotOnApp: attendees ? Math.max(0, attendees.size - matchedAttendees) : null,
     };
     if (cache.size > 100) cache.clear();
     cache.set(entityId, { at: Date.now(), data });
