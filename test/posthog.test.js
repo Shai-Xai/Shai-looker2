@@ -99,8 +99,8 @@ const today = new Date().toISOString().slice(0, 10);
 function syncResponder(q) {
   if (q.includes('FROM persons')) return HOGQL(['day', 'new_users'], [[today, 41]]);
   if (q.includes('GROUP BY day, event_ref')) {
-    return HOGQL(['day', 'event_ref', 'event_name', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases', 'purchase_value'],
-      [[today, '101', 'Milk & Cookies JHB', 500, 2000, 900, 120, 30, 4500], [today, '202', 'Ultra SA', 300, 1100, 500, 60, 10, 1500]]);
+    return HOGQL(['day', 'event_ref', 'event_name', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases', 'purchase_value', 'notif_events'],
+      [[today, '101', 'Milk & Cookies JHB', 500, 2000, 900, 120, 30, 4500, 75], [today, '202', 'Ultra SA', 300, 1100, 500, 60, 10, 1500, 25]]);
   }
   if (q.includes('INTERVAL 7 DAY') && q.includes('uniq(person_id) AS n')) return HOGQL(['n'], [[2100]]);
   if (q.includes('INTERVAL 30 DAY') && q.includes('uniq(person_id) AS n')) return HOGQL(['n'], [[6800]]);
@@ -120,6 +120,7 @@ test('syncDaily writes both rollup tables, the headline uniques and last-sync', 
   const ev = h.sqlite.prepare('SELECT * FROM posthog_daily_event WHERE event_ref=?').get('101');
   assert.equal(ev.uniques, 500);
   assert.equal(ev.purchase_value, 4500);
+  assert.equal(ev.notif_events, 75, 'notification counts land per event too');
   assert.ok(h.settings.posthog_last_sync, 'last sync recorded');
   assert.deepEqual(JSON.parse(h.settings.posthog_headline).wau, 2100);
 });

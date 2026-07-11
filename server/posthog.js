@@ -114,22 +114,25 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       uniques INTEGER NOT NULL DEFAULT 0, interactions INTEGER NOT NULL DEFAULT 0,
       views INTEGER NOT NULL DEFAULT 0, cta_taps INTEGER NOT NULL DEFAULT 0,
       purchases INTEGER NOT NULL DEFAULT 0, purchase_value REAL NOT NULL DEFAULT 0,
+      notif_events INTEGER NOT NULL DEFAULT 0,
       synced_at TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (date, event_ref)
     );
     CREATE INDEX IF NOT EXISTS idx_posthog_event_ref ON posthog_daily_event(event_ref, date);
   `);
+  // Existing deployments predate the per-event notification count.
+  try { sql.exec('ALTER TABLE posthog_daily_event ADD COLUMN notif_events INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
   const upApp = sql.prepare(`INSERT INTO posthog_daily_app (date,dau,new_users,sessions,interactions,views,notif_events,synced_at)
     VALUES (@date,@dau,@new_users,@sessions,@interactions,@views,@notif_events,@synced_at)
     ON CONFLICT(date) DO UPDATE SET dau=excluded.dau, sessions=excluded.sessions, interactions=excluded.interactions,
       views=excluded.views, notif_events=excluded.notif_events, synced_at=excluded.synced_at`);
   const upNew = sql.prepare(`INSERT INTO posthog_daily_app (date,new_users,synced_at) VALUES (?,?,?)
     ON CONFLICT(date) DO UPDATE SET new_users=excluded.new_users`);
-  const upEvent = sql.prepare(`INSERT INTO posthog_daily_event (date,event_ref,event_name,uniques,interactions,views,cta_taps,purchases,purchase_value,synced_at)
-    VALUES (@date,@event_ref,@event_name,@uniques,@interactions,@views,@cta_taps,@purchases,@purchase_value,@synced_at)
+  const upEvent = sql.prepare(`INSERT INTO posthog_daily_event (date,event_ref,event_name,uniques,interactions,views,cta_taps,purchases,purchase_value,notif_events,synced_at)
+    VALUES (@date,@event_ref,@event_name,@uniques,@interactions,@views,@cta_taps,@purchases,@purchase_value,@notif_events,@synced_at)
     ON CONFLICT(date,event_ref) DO UPDATE SET event_name=excluded.event_name, uniques=excluded.uniques,
       interactions=excluded.interactions, views=excluded.views, cta_taps=excluded.cta_taps,
-      purchases=excluded.purchases, purchase_value=excluded.purchase_value, synced_at=excluded.synced_at`);
+      purchases=excluded.purchases, purchase_value=excluded.purchase_value, notif_events=excluded.notif_events, synced_at=excluded.synced_at`);
 
   // ── connection (platform settings → .env fallback, resolved per call) ──────────
   function conn() {
@@ -230,13 +233,13 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
                any(toString(${prop(c.eventNameProp)})) AS event_name,
                uniq(person_id) AS uniques, count() AS interactions,
                ${countIn(m.screenEvents, 'views')}, ${countIn(m.ctaEvents, 'cta_taps')},
-               ${countIn(m.purchaseEvents, 'purchases')}, ${value}
+               ${countIn(m.purchaseEvents, 'purchases')}, ${value}, ${countIn(m.notificationEvents, 'notif_events')}
         FROM events WHERE ${win} AND notEmpty(toString(${evId}))
         GROUP BY day, event_ref ORDER BY day DESC LIMIT 50000`);
       let rows = 0;
       for (const r of evRows) {
         if (!r.day || !r.event_ref) continue;
-        upEvent.run({ date: r.day, event_ref: String(r.event_ref), event_name: String(r.event_name || ''), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, cta_taps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0, purchase_value: Number(r.purchase_value) || 0, synced_at: ts });
+        upEvent.run({ date: r.day, event_ref: String(r.event_ref), event_name: String(r.event_name || ''), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, cta_taps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0, purchase_value: Number(r.purchase_value) || 0, notif_events: Number(r.notif_events) || 0, synced_at: ts });
         rows++;
       }
       // True window-uniques for the headline (daily uniques don't sum).
@@ -365,6 +368,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   }
   function appReport(o) {
     const w = win(o);
+    const m = metricMap();
     const series = sql.prepare('SELECT * FROM posthog_daily_app WHERE date>=? AND date<=? ORDER BY date ASC').all(w.from, w.to);
     const totals = { newUsers: 0, sessions: 0, interactions: 0, views: 0, notifEvents: 0 };
     for (const r of series) { totals.newUsers += r.new_users; totals.sessions += r.sessions; totals.interactions += r.interactions; totals.views += r.views; totals.notifEvents += r.notif_events; }
@@ -372,23 +376,26 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
       SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
              SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
       FROM posthog_daily_event WHERE date>=? AND date<=? GROUP BY event_ref ORDER BY uniques DESC LIMIT 25`).all(w.from, w.to);
-    return { ...status(), days: w.days, from: w.from, to: w.to, totals, series, topEvents, breakdowns: metricMap().breakdownProps };
+    return { ...status(), days: w.days, from: w.from, to: w.to, totals, series, topEvents, breakdowns: m.breakdownProps, notificationsMapped: m.notificationEvents.length > 0 };
   }
   function entityReport(entityId, o, ids) {
     const w = win(o);
+    const m = metricMap();
     if (!ids.length) return { ...status(), days: w.days, from: w.from, to: w.to, scoped: false, eventIds: [], totals: null, series: [], events: [] };
     const ph = ids.map(() => '?').join(',');
     const series = sql.prepare(`
       SELECT date, SUM(uniques) AS uniques, SUM(interactions) AS interactions, SUM(views) AS views,
-             SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
+             SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue,
+             SUM(notif_events) AS notifications
       FROM posthog_daily_event WHERE date>=? AND date<=? AND event_ref IN (${ph}) GROUP BY date ORDER BY date ASC`).all(w.from, w.to, ...ids);
     const events = sql.prepare(`
       SELECT event_ref AS eventRef, MAX(event_name) AS eventName, SUM(uniques) AS uniques, SUM(interactions) AS interactions,
-             SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue
+             SUM(views) AS views, SUM(cta_taps) AS ctaTaps, SUM(purchases) AS purchases, SUM(purchase_value) AS purchaseValue,
+             SUM(notif_events) AS notifications
       FROM posthog_daily_event WHERE date>=? AND date<=? AND event_ref IN (${ph}) GROUP BY event_ref ORDER BY uniques DESC`).all(w.from, w.to, ...ids);
-    const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0, purchaseValue: 0 };
-    for (const r of events) { totals.uniques += r.uniques; totals.interactions += r.interactions; totals.views += r.views; totals.ctaTaps += r.ctaTaps; totals.purchases += r.purchases; totals.purchaseValue += r.purchaseValue; }
-    return { ...status(), days: w.days, from: w.from, to: w.to, scoped: true, eventIds: ids, totals, series, events, breakdowns: metricMap().breakdownProps };
+    const totals = { uniques: 0, interactions: 0, views: 0, ctaTaps: 0, purchases: 0, purchaseValue: 0, notifications: 0 };
+    for (const r of events) { totals.uniques += r.uniques; totals.interactions += r.interactions; totals.views += r.views; totals.ctaTaps += r.ctaTaps; totals.purchases += r.purchases; totals.purchaseValue += r.purchaseValue; totals.notifications += r.notifications; }
+    return { ...status(), days: w.days, from: w.from, to: w.to, scoped: true, eventIds: ids, totals, series, events, breakdowns: m.breakdownProps, notificationsMapped: m.notificationEvents.length > 0 };
   }
 
   // ── live tier (short-TTL HogQL; callers treat a failure as "live unavailable") ──

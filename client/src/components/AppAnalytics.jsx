@@ -186,7 +186,7 @@ export function AppAnalyticsAdmin() {
         ['Viewers today', data.live?.actives, true],
         ['Unique viewers', data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
-        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
+        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
       ]
     : [
         ['Active today', data.live?.actives, true],
@@ -195,6 +195,7 @@ export function AppAnalyticsAdmin() {
         ['New users', data.totals?.newUsers],
         ['Sessions', data.totals?.sessions],
         ['Interactions', data.totals?.interactions],
+        ...[['Notifications', data.totals?.notifEvents]].filter(([, v]) => v > 0),
       ];
 
   return (
@@ -235,8 +236,9 @@ export function AppAnalyticsAdmin() {
         linkClicks={linkClicks}
         metrics={perClient
           ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
-              ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]
-          : [['dau', 'Active users'], ['views', 'Views'], ['interactions', 'Interactions'], ['new_users', 'New users'], ['sessions', 'Sessions']]}
+              ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases], ['notifications', 'Notifications', data.totals?.notifications]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]
+          : [['dau', 'Active users'], ['views', 'Views'], ['interactions', 'Interactions'], ['new_users', 'New users'], ['sessions', 'Sessions'],
+              ...[['notif_events', 'Notifications', data.totals?.notifEvents]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]}
         isMobile={isMobile}
       />
       )}
@@ -301,14 +303,14 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
-        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
+        ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
       ]} />
       {gran === 'hour' ? (
         <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
       ) : (
       <SeriesCard series={data.series || []} moments={moments} linkClicks={linkClicks} isMobile={isMobile}
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
-          ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
+          ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases], ['notifications', 'Notifications', data.totals?.notifications]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       )}
       <EventsTable rows={data.events} title="By event" days={data.days} />
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
@@ -832,6 +834,7 @@ function MappingEditor() {
   const [m, setM] = useState(null);
   const [catalog, setCatalog] = useState(null);
   const [catErr, setCatErr] = useState('');
+  const [catQ, setCatQ] = useState('');
   const [saved, setSaved] = useState(false);
   useEffect(() => { api.posthogSettings().then((s) => setM(s.metricMap)).catch(() => {}); }, []);
   if (!m) return null;
@@ -879,13 +882,22 @@ function MappingEditor() {
       </div>
       {catErr && <div style={errBox}>{catErr}</div>}
       {catalog && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-          {catalog.slice(0, 60).map((c) => (
-            <span key={c.event} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
-              {c.event} <span style={{ color: 'var(--muted)' }}>· {fmt(c.count)}</span>
-            </span>
-          ))}
-        </div>
+        <>
+          {/* Low-volume events (a notification open, a rare purchase) drown below
+              the busiest chips — the filter is how you actually find them. */}
+          <input style={{ ...input, marginTop: 10 }} value={catQ} onChange={(e) => setCatQ(e.target.value)}
+            placeholder={`Filter ${catalog.length} events… try "notif", "push", "purchase"`} autoComplete="off" />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+            {catalog.filter((c) => !catQ.trim() || c.event.toLowerCase().includes(catQ.trim().toLowerCase())).slice(0, 60).map((c) => (
+              <span key={c.event} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
+                {c.event} <span style={{ color: 'var(--muted)' }}>· {fmt(c.count)}</span>
+              </span>
+            ))}
+            {catQ.trim() && !catalog.some((c) => c.event.toLowerCase().includes(catQ.trim().toLowerCase())) && (
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>No event matches "{catQ.trim()}" — the app may track it as a property value instead; try the 🔬 Diagnose property explorer below (e.g. event <code>interaction</code>, key <code>interaction_type</code>).</span>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
