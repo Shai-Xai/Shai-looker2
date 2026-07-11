@@ -344,6 +344,13 @@ test('breakdown-series charts per-value daily lines, scoped, top-N when unnamed'
   const seriesQ = queries.find((q) => q.includes('GROUP BY day, v'));
   assert.ok(seriesQ.includes("IN ('101')"), 'scoped to the client\'s events');
   assert.ok(seriesQ.includes("IN ('event_detail', 'home_feed')"), 'restricted to the chosen values');
+  // hourly granularity buckets by hour (the "hourly today" breakdown view)
+  const hr = await h.invoke('GET /api/my/app-analytics/:entityId/breakdown-series', { params: { entityId: 'e1' }, query: { key: 'surface', granularity: 'hour', from: today, to: today } });
+  assert.equal(hr.status, 200);
+  assert.equal(hr.body.granularity, 'hour');
+  assert.ok(queries[queries.length - 1].includes('toStartOfHour'), 'hourly grain reaches the query');
+  const tooLong = await h.invoke('GET /api/my/app-analytics/:entityId/breakdown-series', { params: { entityId: 'e1' }, query: { key: 'surface', granularity: 'hour', days: 28 } });
+  assert.equal(tooLong.status, 400, 'hourly is capped at 14 days');
 });
 
 test('people supports order-by-activity and OFFSET-free paging (personal keys forbid OFFSET)', async () => {

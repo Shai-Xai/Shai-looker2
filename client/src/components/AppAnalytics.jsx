@@ -214,9 +214,9 @@ export function AppAnalyticsAdmin() {
       />
       )}
       <EventsTable rows={perClient ? data.events : data.topEvents} title={perClient ? 'Their events in the app' : 'Top events by in-app attention'} days={data.days} />
-      <BreakdownsCard key={`bd-${winKey}`} keys={data.breakdowns || []}
+      <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId })}
-        seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId })} />
+        seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
       <TopUsersCard key={`top-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       {!perClient && <MappingEditor />}
@@ -278,9 +278,9 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
           ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       )}
       <EventsTable rows={data.events} title="By event" days={data.days} />
-      <BreakdownsCard key={`bd-${winKey}`} keys={data.breakdowns || []}
+      <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdown(entityId, { key, from: range.from, to: range.to }))}
-        seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to }))} />
+        seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to, granularity: gran }))} />
       <TopUsersCard key={`top-${winKey}`}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`}
@@ -494,10 +494,10 @@ function BreakdownSeriesChart({ data }) {
       grid: { left: 8, right: 12, top: 34, bottom: 8, containLabel: true },
       legend: { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } },
       tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
-      xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (d) => String(d).slice(5) }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (d) => String(d).slice(5, 16) }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: data.values.map((v, i) => ({
-        name: v, type: 'line', showSymbol: false, smooth: 0.15,
+        name: v, type: 'line', showSymbol: days.length < 3, smooth: 0.15,
         lineStyle: { width: 2, color: SERIES_COLORS[i % SERIES_COLORS.length] },
         itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
         data: days.map((d) => byValue.get(v)?.get(d) ?? 0),

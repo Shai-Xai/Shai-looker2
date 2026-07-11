@@ -448,15 +448,18 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   // Daily time-series per breakdown VALUE (the "show it in the line graph" view):
   // one row per (day, value) for the given values — or the window's top 6 when
   // none are named. Same scoping and key rules as breakdown().
-  async function breakdownSeries({ ids = null, days, from, to, key, values = [] }) {
+  async function breakdownSeries({ ids = null, days, from, to, key, values = [], granularity = 'day' }) {
     const w = win({ days, from, to });
+    const hourly = granularity === 'hour';
+    if (hourly && w.days > 14) throw new HttpError(400, 'Hourly view covers at most 14 days — narrow the date range.');
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     let vals = nameList(values).slice(0, 8);
     if (!vals.length) vals = (await breakdown({ ids, from: w.from, to: w.to, key })).values.slice(0, 6).map((v) => v.value);
-    if (!vals.length) return { key, days: w.days, values: [], series: [] };
-    const rows = await hogql(`SELECT toString(toDate(timestamp)) AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE ${tsWin(w)} AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
-    return { key, days: w.days, values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
+    if (!vals.length) return { key, days: w.days, granularity: hourly ? 'hour' : 'day', values: [], series: [] };
+    const bucket = hourly ? 'toString(toStartOfHour(timestamp))' : 'toString(toDate(timestamp))';
+    const rows = await hogql(`SELECT ${bucket} AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE ${tsWin(w)} AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
+    return { key, days: w.days, granularity: hourly ? 'hour' : 'day', values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
   }
   // Clients may only group by the admin-configured keys (no property probing).
   function breakdownKeyOrThrow(req) {
@@ -631,7 +634,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ key, days: win(winQ(req)).days, values: [], series: [] });
-    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values }));
+    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values, granularity: req.query.granularity }));
   }));
   app.post('/api/admin/app-analytics/sync', auth.requireAdmin, asyncHandler(async (req, res) => {
     const r = await syncDaily(Number(req.body?.days) || undefined);
@@ -665,7 +668,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const key = breakdownKeyOrThrow(req);
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ key, days: win(winQ(req)).days, values: [], series: [] });
-    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values }));
+    res.json(await breakdownSeries({ ids, ...winQ(req), key, values: req.query.values, granularity: req.query.granularity }));
   }));
 
   console.log('[posthog] app-analytics connector mounted');
