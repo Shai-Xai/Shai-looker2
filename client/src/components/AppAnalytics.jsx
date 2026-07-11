@@ -239,8 +239,8 @@ export function AppAnalyticsAdmin() {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId })}
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
-      <TopUsersCard key={`top-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
-      <PeopleSection key={`ppl-${winKey}`} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
+      <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
+      <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
       {data.lastSync && <p style={{ ...mutedTxt, fontSize: 11.5, marginTop: 10 }}>Rollup last synced {new Date(data.lastSync).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · live numbers refresh on load (≤5 min cache)</p>}
@@ -305,9 +305,9 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdown(entityId, { key, from: range.from, to: range.to }))}
         seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to, granularity: gran }))} />
-      <TopUsersCard key={`top-${winKey}`}
+      <TopUsersCard key={`top-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
-      <PeopleSection key={`ppl-${winKey}`}
+      <PeopleSection key={`ppl-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
     </div>
   );
@@ -538,7 +538,7 @@ function BreakdownSeriesChart({ data }) {
 // 🏆 Top users — the 10 most active people in the window, its own card (moved
 // out of the App-users list per Shai). Auto-loads: it's a headline metric, and
 // the server caches the query.
-function TopUsersCard({ loader }) {
+function TopUsersCard({ loader, win }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -554,7 +554,7 @@ function TopUsersCard({ loader }) {
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🏆 Top users</div>
-      <p style={sub}>The 10 most active app users in this window, by interactions.</p>
+      <p style={sub}>The 10 most active app users {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'}, by interactions.</p>
       {error && <div style={errBox}>{error}</div>}
       {!rows && !error && <p style={mutedTxt}>Loading…</p>}
       {rows && rows.length > 0 && (
@@ -582,7 +582,7 @@ function TopUsersCard({ loader }) {
 
 // App-user profiles (PostHog person properties). Loaded on demand — live PostHog
 // queries are scarce, so nothing fires until someone asks for the list.
-function PeopleSection({ loader }) {
+function PeopleSection({ loader, win }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
@@ -616,7 +616,7 @@ function PeopleSection({ loader }) {
         <div style={{ ...title, flex: 1, marginBottom: 0 }}>👤 App users</div>
         {rows && rows.length > 0 && <button type="button" style={ghostBtn} onClick={exportCsv}>Export CSV</button>}
       </div>
-      <p style={sub}>Who's actually in the app — profile details (email, name, mobile) from PostHog, most recent first.</p>
+      <p style={sub}>Who's actually in the app {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : ''} — profile details (email, name, mobile) from PostHog, most recent first.</p>
       {!open ? (
         <button type="button" style={btn} onClick={() => { setOpen(true); load(''); }}>Load app users</button>
       ) : (
