@@ -23,32 +23,23 @@ const TICKET_EMAILS = 200;     // per-request cap for tickets-by-email enrichmen
 const ORG = 'core_organisers.name';
 const ID_EMAIL = 'core_purchasers.email';
 
-function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue }) {
+function mount(app, { db, auth, posthog, queryEngine, catalogue }) {
   const cat = catalogue || require('./owlCatalogueSeed');
-  const resolve = resolveAudience || require('./audienceQuery')({ auth, db }).resolveQueryAudience;
   const query = queryEngine || require('./query')({ looker: require('./looker'), auth });
 
   const cache = new Map(); // entityId → { at, data }
 
-  // The client's WHOLE app audience (90d), scoped to their events: an exact
-  // uncapped headcount plus every user's email via one grouped query — no
-  // people()-style paging ceiling (a 2000-row cap misread as the total before).
-  async function appUsers(entityId) {
-    const ids = await posthog.eventIdsForEntity(entityId);
-    if (!ids.length) return { scoped: false };
-    const [side, total] = await Promise.all([
-      posthog.appEmails(ids, { days: APP_WINDOW_DAYS }),
-      posthog.windowUniques(ids, { days: APP_WINDOW_DAYS }),
-    ]);
-    return { scoped: true, total: total || side.persons, emails: side.emails, capped: !!side.capped };
-  }
-
-  // Everyone who has ever HELD a ticket for this client (core_users.email — the
-  // attendee on each ticket), as opposed to who PAID (core_purchasers.email).
-  // A group buy = one buyer, many attendees, so this is the wider audience.
-  // Returns null (degrade to buyers-only) if the explore doesn't carry the field.
-  async function attendeeEmails(entityId, user) {
-    const body = { model: cat.model, view: cat.explore, fields: ['core_users.email'], filters: {}, limit: 500000 };
+  // Distinct emails for one identity field (purchaser or ticket user), scoped
+  // to the SAME Howler event ids the app side uses — so both sides of the match
+  // describe the same events, and the base equals the per-event "unique
+  // customers" number the client sees on their dashboards (not all-time
+  // organiser history). Org-locked and fail-closed like every people query.
+  // Returns null (degrade) if the field isn't in the explore.
+  async function identityEmails(entityId, user, field, eventIds) {
+    const body = {
+      model: cat.model, view: cat.explore, fields: [field],
+      filters: { 'core_events.id': eventIds.join(',') }, limit: 500000,
+    };
     const allowed = await query.applyScope(body, user, null);
     if (allowed === false) return null;
     const locks = auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
@@ -58,7 +49,7 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
       const rows = await query.runLookerQuery('/queries/run/json', body);
       const set = new Set();
       for (const r of (rows || [])) {
-        const e = String(r['core_users.email'] || '').trim().toLowerCase();
+        const e = String(r[field] || '').trim().toLowerCase();
         if (e.includes('@')) set.add(e);
       }
       return set;
@@ -69,25 +60,26 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
     const hit = cache.get(entityId);
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
     if (!posthog.isConfigured()) return { configured: false };
-    const [appSide, buyers, attendees] = await Promise.all([
-      appUsers(entityId),
-      resolve({ entityId, definition: { model: cat.model, view: cat.explore, queryFilters: {} }, user, limit: 500000 }),
-      attendeeEmails(entityId, user),
+    // ONE event scope drives everything: the client's suite-locked events.
+    const eventIds = await posthog.eventIdsForEntity(entityId);
+    if (!eventIds.length) return { configured: true, scoped: false };
+    const [appSide, appTotal, buyerEmails, attendees] = await Promise.all([
+      posthog.appEmails(eventIds, { days: APP_WINDOW_DAYS }),
+      posthog.windowUniques(eventIds, { days: APP_WINDOW_DAYS }),
+      identityEmails(entityId, user, ID_EMAIL, eventIds),
+      identityEmails(entityId, user, 'core_users.email', eventIds),
     ]);
-    if (!appSide.scoped) return { configured: true, scoped: false };
-    if (buyers.error) throw new HttpError(400, `Couldn't resolve the buyer list (${buyers.error}).`);
-    // buildRows already lowercases emails on the buyer side; appEmails on the app side.
-    const buyerEmails = new Set((buyers.raw || []).map((p) => String(p.email || '').toLowerCase()).filter(Boolean));
+    if (!buyerEmails) throw new HttpError(400, 'Couldn\'t resolve the buyer list for these events.');
     const matched = appSide.emails.filter((e) => buyerEmails.has(e)).length;
     const matchedAttendees = attendees ? appSide.emails.filter((e) => attendees.has(e)).length : null;
     const data = {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
-      appUsers: appSide.total, appUsersWithEmail: appSide.emails.length, appCapped: appSide.capped,
-      // Who PAID (purchaser contact on the order) …
+      appUsers: appTotal || appSide.persons, appUsersWithEmail: appSide.emails.length, appCapped: !!appSide.capped,
+      // Who PAID for THESE events (purchaser contact on the order) …
       buyers: buyerEmails.size, matched,
       appNotBuyers: appSide.emails.length - matched,
       buyersNotOnApp: Math.max(0, buyerEmails.size - matched),
-      // … vs who ATTENDED (the user on each ticket) — the wider segment.
+      // … vs who HELD a ticket for them (the user on each ticket) — the wider segment.
       attendees: attendees ? attendees.size : null,
       matchedAttendees,
       appNotAttendees: attendees ? appSide.emails.length - matchedAttendees : null,

@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const appMatch = require('../server/appMatch');
 
-function makeHarness({ appEmails = [], appTotal = 0, appCapped = false, buyers = [], attendeeRows = [], attendeesThrow = false, lookerRows = [], orgLocks = { 'core_organisers.name': 'G&G' } } = {}) {
+function makeHarness({ appEmails = [], appTotal = 0, appCapped = false, buyerRows = [], attendeeRows = [], attendeesThrow = false, lookerRows = [], orgLocks = { 'core_organisers.name': 'G&G' } } = {}) {
   const capture = () => () => {};
   const app = { get: capture(), post: capture(), put: capture(), delete: capture() };
   const calls = { looker: [] };
@@ -19,7 +19,6 @@ function makeHarness({ appEmails = [], appTotal = 0, appCapped = false, buyers =
       appEmails: async () => ({ persons: appTotal, emails: appEmails, capped: appCapped }),
       windowUniques: async () => appTotal,
     },
-    resolveAudience: async () => ({ raw: buyers }),
     queryEngine: {
       applyScope: async () => true,
       runLookerQuery: async (path, body) => {
@@ -28,6 +27,7 @@ function makeHarness({ appEmails = [], appTotal = 0, appCapped = false, buyers =
           if (attendeesThrow) throw new Error('unknown field');
           return attendeeRows;
         }
+        if ((body.fields || []).includes('core_purchasers.email') && body.fields.length === 1) return buyerRows;
         return lookerRows;
       },
     },
@@ -40,7 +40,7 @@ test('overlap matches the WHOLE app audience to BOTH segments — counts only', 
   const h = makeHarness({
     appTotal: 4, // exact uncapped headcount (windowUniques)
     appEmails: ['fan@one.com', 'fan2@x.com'], // appEmails() already deduped + case-folded
-    buyers: [{ email: 'fan@one.com' }, { email: 'buyer@only.com' }],
+    buyerRows: [{ 'core_purchasers.email': 'Fan@One.com' }, { 'core_purchasers.email': 'buyer@only.com' }],
     // Attendees (held a ticket) is the WIDER set: fan2 attended via a group buy.
     attendeeRows: [
       { 'core_users.email': 'FAN@one.com' },
@@ -51,6 +51,10 @@ test('overlap matches the WHOLE app audience to BOTH segments — counts only', 
   const d = await h.api.overlap('e1', { role: 'admin' });
   assert.equal(d.appUsers, 4);
   assert.equal(d.appUsersWithEmail, 2);
+  // BOTH identity queries are scoped to the SAME events as the app side.
+  const idQueries = h.calls.looker.filter((b) => b.fields.length === 1);
+  assert.equal(idQueries.length, 2);
+  for (const b of idQueries) assert.equal(b.filters['core_events.id'], '101');
   // Buyers (paid): only fan@one matches.
   assert.equal(d.matched, 1);
   assert.equal(d.appNotBuyers, 1);
@@ -69,7 +73,7 @@ test('overlap matches the WHOLE app audience to BOTH segments — counts only', 
 test('overlap degrades to buyers-only when the attendee field is unavailable', async () => {
   const h = makeHarness({
     appTotal: 2, appEmails: ['fan@one.com'],
-    buyers: [{ email: 'fan@one.com' }],
+    buyerRows: [{ 'core_purchasers.email': 'fan@one.com' }],
     attendeesThrow: true,
   });
   const d = await h.api.overlap('e1', { role: 'admin' });

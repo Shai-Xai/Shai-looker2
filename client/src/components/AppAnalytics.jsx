@@ -1094,7 +1094,7 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🎟 App audience vs your fans</div>
-      <p style={sub}>Your app users matched by email against two segments: <b>ticket holders</b> (anyone who's held a ticket for your events) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
+      <p style={sub}>Your app users matched by email against two segments <b>for the events in your Pulse</b>: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
         {tiles.map(([label, v, pct]) => (
           <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
@@ -1106,7 +1106,7 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
         ))}
       </div>
       <p style={{ ...mutedTxt, fontSize: 11, marginTop: 8 }}>
-        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers on record.
+        Matched by email: {fmt(d.appUsersWithEmail)} of the {fmt(d.appUsers)} app users carry one{d.appCapped ? ' (top app users considered)' : ''} · {hasAtt ? `${fmt(d.attendees)} ticket holders · ` : ''}{fmt(d.buyers)} buyers — counted for these events only.
         "{hasAtt ? 'Never held a ticket' : 'Not bought yet'}" is your warm retargeting audience{hasAtt ? '; "holders who never paid" (the gap between the two matches) is your group-buy upgrade audience' : ''}.
       </p>
     </div>
