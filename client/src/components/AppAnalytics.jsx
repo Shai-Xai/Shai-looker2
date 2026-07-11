@@ -477,7 +477,7 @@ function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }
       animationDuration: 300,
       grid: { left: 8, right: 12, top: withClicks ? 30 : 12, bottom: 8, containLabel: true },
       legend: withClicks ? { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } } : undefined,
-      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')), extraCssText: 'z-index: 40;' },
       xAxis: { type: 'time', axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: [{
@@ -522,8 +522,11 @@ function TodayChart({ loader, moments = [] }) {
   const [out, setOut] = useState(null);
   const [error, setError] = useState('');
   const [metric, setMetric] = useState('uniques');
-  const [showPosts, setShowPosts] = useState(true);
+  const [hiddenPosts, setHiddenPosts] = useState(() => new Set());
   const [showCampaigns, setShowCampaigns] = useState(true);
+  const [showOther, setShowOther] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
   useEffect(() => {
     let dead = false;
     loader().then((r) => { if (!dead) setOut(r); }).catch((e) => { if (!dead) setError(e.message); });
@@ -549,7 +552,7 @@ function TodayChart({ loader, moments = [] }) {
     return {
       animationDuration: 300,
       grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
-      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')), extraCssText: 'z-index: 40;' },
       xAxis: { type: 'category', data: buckets, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (v) => String(v).slice(11, 16) }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: [{
@@ -686,7 +689,7 @@ function BreakdownSeriesChart({ data }) {
       animationDuration: 300,
       grid: { left: 8, right: 12, top: 34, bottom: 8, containLabel: true },
       legend: { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } },
-      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')), extraCssText: 'z-index: 40;' },
       xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (d) => String(d).slice(5, 16) }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: data.values.map((v, i) => ({
