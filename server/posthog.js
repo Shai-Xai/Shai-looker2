@@ -512,16 +512,45 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     const cap = `${w.to}~`;
     const out = [];
     try {
+      const COLS = 'post_id, community_name, text, posted_at, impressions, reach, reactions, comments, shares';
       const rows = entityId
-        ? sql.prepare('SELECT community_name, text, posted_at FROM socialplus_posts WHERE entity_id=? AND posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100').all(entityId, w.from, cap)
-        : sql.prepare('SELECT community_name, text, posted_at FROM socialplus_posts WHERE posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100').all(w.from, cap);
-      for (const r of rows) out.push({ at: String(r.posted_at), type: 'post', label: `${r.community_name ? `${r.community_name}: ` : ''}${String(r.text || '').replace(/\s+/g, ' ').slice(0, 60) || 'Community post'}` });
+        ? sql.prepare(`SELECT ${COLS} FROM socialplus_posts WHERE entity_id=? AND posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100`).all(entityId, w.from, cap)
+        : sql.prepare(`SELECT ${COLS} FROM socialplus_posts WHERE posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100`).all(w.from, cap);
+      for (const r of rows) {
+        const text = String(r.text || '').replace(/\s+/g, ' ');
+        out.push({
+          at: String(r.posted_at), type: 'post', appLinked: true,
+          label: `${r.community_name ? `${r.community_name}: ` : ''}${text.slice(0, 60) || 'Community post'}`,
+          // Full metadata for the tap-a-marker detail card + views-scaled stems.
+          postId: String(r.post_id || ''), community: String(r.community_name || ''), text: text.slice(0, 240),
+          impressions: r.impressions == null ? null : Number(r.impressions), reach: r.reach == null ? null : Number(r.reach),
+          reactions: r.reactions == null ? null : Number(r.reactions), comments: r.comments == null ? null : Number(r.comments),
+          shares: r.shares == null ? null : Number(r.shares),
+        });
+      }
     } catch { /* Social+ not installed — no post markers */ }
     try {
       const rows = entityId
-        ? sql.prepare("SELECT title, approved_at FROM actions WHERE entity_id=? AND approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(entityId, w.from, cap)
-        : sql.prepare("SELECT title, approved_at FROM actions WHERE approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(w.from, cap);
-      for (const r of rows) out.push({ at: String(r.approved_at), type: 'campaign', label: String(r.title || 'Campaign').slice(0, 60) });
+        ? sql.prepare("SELECT title, approved_at, config FROM actions WHERE entity_id=? AND approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(entityId, w.from, cap)
+        : sql.prepare("SELECT title, approved_at, config FROM actions WHERE approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(w.from, cap);
+      // Is this campaign app-relevant? The composer's explicit channel tag wins
+      // (config.channelTag, 'app' = yes, any other tag = no); untagged campaigns
+      // are auto-detected: content carrying a ChottuLink short URL (those exist
+      // to deep-link into the Howler app) counts as app-driving. Raw substring
+      // scan of the config JSON — bodies/steps/CTAs all live in there.
+      let shortUrls = [];
+      try {
+        shortUrls = (entityId
+          ? sql.prepare("SELECT short_url FROM chottu_links WHERE entity_id=? AND short_url != '' LIMIT 300").all(entityId)
+          : sql.prepare("SELECT short_url FROM chottu_links WHERE short_url != '' LIMIT 300").all()
+        ).map((r) => String(r.short_url));
+      } catch { /* Chottu not installed — tag-only detection */ }
+      for (const r of rows) {
+        let tag = '';
+        try { tag = String(JSON.parse(r.config || '{}').channelTag || ''); } catch { /* unreadable config — treat as untagged */ }
+        const appLinked = tag ? tag === 'app' : shortUrls.some((u) => String(r.config || '').includes(u));
+        out.push({ at: String(r.approved_at), type: 'campaign', label: String(r.title || 'Campaign').slice(0, 60), tag, appLinked });
+      }
     } catch { /* Engage not installed — no campaign markers */ }
     return out.sort((a, b) => (a.at < b.at ? -1 : 1));
   }

@@ -330,6 +330,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // each recipient gets an email (if they have an address) and an SMS (if
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
+      // What the campaign DRIVES (app/ticketing/cashless/…) — set in the composer;
+      // powers the App analytics moments overlay and channel reporting. '' = untagged.
+      channelTag: ['app', 'ticketing', 'cashless', 'web', 'other'].includes(body.channelTag) ? body.channelTag : '',
       audience: shapeAudience(aud),
       // Delivery mode: 'once' = single send; 'sequence' = automated drip (enroll, timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',

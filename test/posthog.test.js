@@ -418,18 +418,31 @@ test('moments overlay merges posts + campaign sends, scoped and windowed; gracef
   // Fresh harness has neither sibling module's tables — must degrade, not throw.
   assert.deepEqual(h.api.moments('e1', { days: 28 }), []);
   h.sqlite.exec(`
-    CREATE TABLE socialplus_posts (entity_id TEXT, post_id TEXT, community_name TEXT, text TEXT, posted_at TEXT);
-    CREATE TABLE actions (entity_id TEXT, title TEXT, status TEXT, approved_at TEXT);
+    CREATE TABLE socialplus_posts (entity_id TEXT, post_id TEXT, community_name TEXT, text TEXT, posted_at TEXT, impressions INTEGER, reach INTEGER, reactions INTEGER, comments INTEGER, shares INTEGER);
+    CREATE TABLE actions (entity_id TEXT, title TEXT, status TEXT, approved_at TEXT, config TEXT);
+    CREATE TABLE chottu_links (id TEXT PRIMARY KEY, entity_id TEXT, short_url TEXT);
   `);
-  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e1', 'p1', 'Stella fans', 'Lineup drop! 🎉', `${today}T09:00:00.000Z`);
-  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e2', 'p2', 'Other club', 'not yours', `${today}T10:00:00.000Z`);
-  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e1', 'p3', 'Stella fans', 'ancient post', '2020-01-01T09:00:00.000Z');
-  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?)').run('e1', 'VIP push', 'done', `${today}T12:00:00.000Z`);
-  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?)').run('e1', 'Unsent draft', 'draft', `${today}T13:00:00.000Z`);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?,?,?,?,?,?)').run('e1', 'p1', 'Stella fans', 'Lineup drop! 🎉', `${today}T09:00:00.000Z`, 5400, 3100, 210, 33, 12);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?,?,?,?,?,?)').run('e2', 'p2', 'Other club', 'not yours', `${today}T10:00:00.000Z`, 1, 1, 0, 0, 0);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?,?,?,?,?,?)').run('e1', 'p3', 'Stella fans', 'ancient post', '2020-01-01T09:00:00.000Z', 1, 1, 0, 0, 0);
+  h.sqlite.prepare('INSERT INTO chottu_links VALUES (?,?,?)').run('l1', 'e1', 'https://hwlr.app/x1');
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?,?)').run('e1', 'VIP push', 'done', `${today}T12:00:00.000Z`, JSON.stringify({ channelTag: 'app' }));
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?,?)').run('e1', 'Cashless topup', 'done', `${today}T13:00:00.000Z`, JSON.stringify({ channelTag: 'cashless', body: 'topup at https://hwlr.app/x1' }));
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?,?)').run('e1', 'Untagged with link', 'done', `${today}T14:00:00.000Z`, JSON.stringify({ body: 'get the app https://hwlr.app/x1 now' }));
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?,?)').run('e1', 'Untagged no link', 'done', `${today}T15:00:00.000Z`, JSON.stringify({ body: 'nothing appy here' }));
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?,?)').run('e1', 'Unsent draft', 'draft', `${today}T16:00:00.000Z`, '{}');
   const m = h.api.moments('e1', { days: 28 });
-  assert.deepEqual(m.map((x) => x.type), ['post', 'campaign'], 'their post + their sent campaign, in time order');
+  assert.deepEqual(m.map((x) => x.type), ['post', 'campaign', 'campaign', 'campaign', 'campaign'], 'their post + their sent campaigns, in time order');
   assert.match(m[0].label, /Stella fans: Lineup drop/);
-  assert.equal(m[1].label, 'VIP push');
+  assert.equal(m[0].appLinked, true, 'posts are in-app by nature');
+  assert.equal(m[0].impressions, 5400, 'post view metadata rides along for the detail card + stem height');
+  assert.equal(m[0].reactions, 210);
+  assert.deepEqual(m.slice(1).map((x) => [x.label, x.appLinked]), [
+    ['VIP push', true],            // explicit app tag
+    ['Cashless topup', false],     // explicit non-app tag WINS over the link in its body
+    ['Untagged with link', true],  // auto-detected via the Chottu short URL
+    ['Untagged no link', false],
+  ]);
   assert.ok(!m.some((x) => /not yours|ancient|Unsent/.test(x.label)), 'other entities, out-of-window and unsent drafts excluded');
   const denied = await h.invoke('GET /api/my/app-analytics/:entityId/moments', { params: { entityId: 'e2' }, user: { id: 'u1', role: 'member', entityIds: ['e1'] } });
   assert.equal(denied.status, 403);

@@ -338,45 +338,137 @@ function StatRow({ stats, isMobile }) {
   );
 }
 
-// Moments (community posts, campaign sends) drawn as dashed vertical markers so
-// spikes line up with their cause. Campaign #3b82f6 / post #0d9488 — validated
-// series palette members; hover a line for its name.
+// Moments (community posts, campaign sends) drawn on the charts so spikes line
+// up with their cause. Campaigns = full-height dashed lines; posts = STEMS whose
+// height scales with that post's views (impressions, falling back to reach) —
+// taller stem, more-seen post. Tap any marker for its detail card. Campaign
+// #3b82f6 / post #0d9488 — validated series palette members.
 const MOMENT_COLOR = { campaign: '#3b82f6', post: '#0d9488' };
-const momentMarkLine = (moments, toX) => ({
-  symbol: 'none', animation: false,
-  label: { show: false },
-  emphasis: { label: { show: true, formatter: (pp) => pp.name, fontSize: 10, color: 'var(--text, #333)' } },
-  data: moments.map((m) => ({
-    name: `${m.type === 'campaign' ? '📣' : '👥'} ${m.label}`,
-    xAxis: toX(m),
-    lineStyle: { color: MOMENT_COLOR[m.type] || '#888', width: 1.5, opacity: 0.75, type: 'dashed' },
-  })).filter((d) => d.xAxis != null),
-});
-function MomentToggles({ moments, showPosts, setShowPosts, showCampaigns, setShowCampaigns }) {
-  const nPosts = moments.filter((m) => m.type === 'post').length;
-  const nCampaigns = moments.filter((m) => m.type === 'campaign').length;
-  if (!nPosts && !nCampaigns) return null;
+const postViews = (m) => (m.impressions != null ? m.impressions : m.reach != null ? m.reach : null);
+const momentKey = (m) => `${m.type}|${m.at}|${m.label}`;
+// marks entries carry their index as the data `name` — the emphasis label and
+// the click handler both resolve back through it.
+function momentMarkLine(marks, toX, seriesMax) {
+  const maxV = Math.max(0, ...marks.filter((m) => m.type === 'post').map((m) => postViews(m) || 0));
+  return {
+    symbol: 'none', animation: false,
+    label: { show: false },
+    emphasis: { lineStyle: { width: 4 }, label: { show: true, formatter: (pp) => { const m = marks[Number(pp.name)]; return m ? `${m.type === 'campaign' ? '📣' : '👥'} ${m.label}` : ''; }, fontSize: 10, color: 'var(--text, #333)' } },
+    data: marks.map((m, i) => {
+      const x = toX(m);
+      if (x == null) return null;
+      const style = { color: MOMENT_COLOR[m.type] || '#888', width: m.type === 'post' ? 2.5 : 1.5, opacity: 0.8, type: 'dashed' };
+      if (m.type === 'post' && seriesMax > 0) {
+        const v = postViews(m);
+        const h = seriesMax * (maxV > 0 && v != null ? 0.15 + 0.85 * (v / maxV) : 0.5);
+        return [{ coord: [x, 0], name: String(i), lineStyle: style }, { coord: [x, h] }];
+      }
+      return { name: String(i), xAxis: x, lineStyle: style };
+    }).filter(Boolean),
+  };
+}
+// Click → the moment's detail card (post text + views/reactions, campaign tag).
+const momentClick = (marks, setDetail) => (p) => {
+  if (p.componentType !== 'markLine') return;
+  const m = marks[Number(p.data?.name ?? p.name)];
+  if (m) setDetail(m);
+};
+function MomentDetail({ m, onClose }) {
+  if (!m) return null;
+  const stats = m.type === 'post'
+    ? [['Views', postViews(m)], ['Impressions', m.impressions], ['Reach', m.reach], ['Reactions', m.reactions], ['Comments', m.comments], ['Shares', m.shares]].filter(([, v]) => v != null)
+    : [];
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...title, marginBottom: 2 }}>{m.type === 'campaign' ? '📣 Campaign' : `👥 ${m.community || 'Community post'}`}</div>
+        <p style={{ ...sub, marginBottom: 8 }}>{new Date(m.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{m.type === 'campaign' && m.tag ? ` · tagged ${m.tag}` : ''}</p>
+        <p style={{ fontSize: 13.5, margin: '0 0 10px', lineHeight: 1.5 }}>{m.type === 'post' ? (m.text || m.label) : m.label}</p>
+        {stats.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8 }}>
+            {stats.map(([l, v]) => (
+              <div key={l} style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 10px' }}>
+                <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmt(v)}</div>
+                <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {m.type === 'post' && stats.length === 0 && <p style={sub}>No view stats captured for this post yet.</p>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+          <button type="button" style={ghostBtn} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// The Posts chip opens a picker: every post in the window, individually
+// toggleable (hidden set), with its views alongside.
+function PostPicker({ posts, hidden, setHidden, onClose }) {
+  const allOff = posts.every((m) => hidden.has(momentKey(m)));
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ ...modal, maxWidth: 420, maxHeight: '70vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...title, marginBottom: 2 }}>👥 Posts on the chart</div>
+        <p style={{ ...sub, marginBottom: 8 }}>Tick a post to show its marker — stem height tracks its views.</p>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <button type="button" style={ghostBtn} onClick={() => setHidden(new Set())}>All on</button>
+          <button type="button" style={ghostBtn} onClick={() => setHidden(new Set(posts.map(momentKey)))}>All off</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {posts.map((m) => {
+            const k = momentKey(m);
+            const v = postViews(m);
+            return (
+              <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minHeight: 36, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!hidden.has(k)} onChange={() => setHidden((h) => { const n = new Set(h); if (n.has(k)) n.delete(k); else n.add(k); return n; })} />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</span>
+                <span style={{ color: 'var(--muted)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{String(m.at).slice(5, 10)}{v != null ? ` · ${fmt(v)} views` : ''}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <button type="button" style={btn} onClick={onClose}>{allOff ? 'Close (all hidden)' : 'Done'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function MomentToggles({ moments, hiddenPosts, setHiddenPosts, showCampaigns, setShowCampaigns, showOther, setShowOther, openPicker }) {
+  const posts = moments.filter((m) => m.type === 'post');
+  const nShown = posts.filter((m) => !hiddenPosts.has(momentKey(m))).length;
+  const nApp = moments.filter((m) => m.type === 'campaign' && m.appLinked).length;
+  const nOther = moments.filter((m) => m.type === 'campaign' && !m.appLinked).length;
+  if (!posts.length && !nApp && !nOther) return null;
   return (
     <>
-      {nCampaigns > 0 && <Chip on={showCampaigns} onClick={() => setShowCampaigns(!showCampaigns)}>📣 Campaigns ({nCampaigns})</Chip>}
-      {nPosts > 0 && <Chip on={showPosts} onClick={() => setShowPosts(!showPosts)}>👥 Posts ({nPosts})</Chip>}
+      {nApp > 0 && <Chip on={showCampaigns} onClick={() => setShowCampaigns(!showCampaigns)}>📣 App campaigns ({nApp})</Chip>}
+      {posts.length > 0 && <Chip on={nShown > 0} onClick={openPicker}>👥 Posts ({nShown}/{posts.length}) ▾</Chip>}
+      {nOther > 0 && <Chip on={showOther} onClick={() => setShowOther(!showOther)}>📣 Other campaigns ({nOther})</Chip>}
     </>
   );
 }
-const shownMoments = (moments, showPosts, showCampaigns) =>
-  (moments || []).filter((m) => (m.type === 'post' ? showPosts : m.type === 'campaign' ? showCampaigns : false)).slice(0, 60);
+// App-relevant campaigns (tagged 'app' in the composer, or auto-detected via an
+// app link in the content) show by default; other campaigns are opt-in. Posts
+// hide individually via the picker.
+const shownMoments = (moments, hiddenPosts, showCampaigns, showOther) =>
+  (moments || []).filter((m) => (m.type === 'post' ? !hiddenPosts.has(momentKey(m)) : m.type === 'campaign' ? (m.appLinked ? showCampaigns : showOther) : false)).slice(0, 60);
 
 // One recessive line chart; chips pick WHICH single series shows (one axis, no
 // dual scales). `series` rows are the rollup rows keyed by `date`.
 function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }) {
   const [metric, setMetric] = useState(metrics[0][0]);
-  const [showPosts, setShowPosts] = useState(true);
+  const [hiddenPosts, setHiddenPosts] = useState(() => new Set());
   const [showCampaigns, setShowCampaigns] = useState(true);
+  const [showOther, setShowOther] = useState(false);
   const [showClicks, setShowClicks] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [detail, setDetail] = useState(null);
   const totalClicks = linkClicks.reduce((a, r) => a + (r.clicks || 0), 0);
+  const marks = shownMoments(moments, hiddenPosts, showCampaigns, showOther);
   const option = useMemo(() => {
     const brand = brandPrimary();
-    const marks = shownMoments(moments, showPosts, showCampaigns);
     const metricLabel = (metrics.find(([k]) => k === metric) || [])[1] || metric;
     const withClicks = showClicks && linkClicks.length > 0;
     return {
@@ -392,7 +484,7 @@ function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }
         lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
         data: series.map((r) => [r.date, r[metric] == null ? 0 : r[metric]]),
-        markLine: momentMarkLine(marks, (m) => String(m.at).replace('T', ' ').slice(0, 19)),
+        markLine: momentMarkLine(marks, (m) => String(m.at).replace('T', ' ').slice(0, 19), Math.max(0, ...series.map((r) => r[metric] || 0))),
       },
       // ChottuLink clicks ride the SAME count axis (both are event counts) as a
       // thin dashed companion line — never a second y-axis.
@@ -403,17 +495,19 @@ function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }
         data: linkClicks.map((r) => [r.date, r.clicks]),
       }] : [])],
     };
-  }, [series, metric, metrics, moments, showPosts, showCampaigns, showClicks, linkClicks]);
+  }, [series, metric, metrics, moments, hiddenPosts, showCampaigns, showOther, showClicks, linkClicks]); // eslint-disable-line react-hooks/exhaustive-deps -- marks derives from these
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
-        <MomentToggles moments={moments} showPosts={showPosts} setShowPosts={setShowPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} />
+        <MomentToggles moments={moments} hiddenPosts={hiddenPosts} setHiddenPosts={setHiddenPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} showOther={showOther} setShowOther={setShowOther} openPicker={() => setPickerOpen(true)} />
         {linkClicks.length > 0 && <Chip on={showClicks} onClick={() => setShowClicks(!showClicks)}>🔗 Link clicks ({fmt(totalClicks)})</Chip>}
       </div>
       {series.length === 0
         ? <p style={sub}>No rollup data yet — run a sync (or wait for tonight's).</p>
-        : <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />}
+        : <ReactECharts echarts={echarts} option={option} notMerge onEvents={{ click: momentClick(marks, setDetail) }} style={{ height: isMobile ? 200 : 260, width: '100%' }} opts={{ renderer: 'canvas' }} />}
+      {pickerOpen && <PostPicker posts={moments.filter((m) => m.type === 'post')} hidden={hiddenPosts} setHidden={setHiddenPosts} onClose={() => setPickerOpen(false)} />}
+      <MomentDetail m={detail} onClose={() => setDetail(null)} />
     </div>
   );
 }
@@ -438,6 +532,7 @@ function TodayChart({ loader, moments = [] }) {
   for (const h of hours) { totals.interactions += h.interactions; totals.views += h.views; totals.ctaTaps += h.ctaTaps; totals.purchases += h.purchases; totals.uniques = Math.max(totals.uniques, h.uniques); }
   const metrics = [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
     ...[['views', 'Views', totals.views], ['ctaTaps', 'CTA taps', totals.ctaTaps], ['purchases', 'Purchases', totals.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])];
+  const marks = shownMoments(moments, hiddenPosts, showCampaigns, showOther);
   const option = useMemo(() => {
     const brand = brandPrimary();
     // Category axis carries the FULL hour bucket (label shows HH:MM) so moment
@@ -449,7 +544,6 @@ function TodayChart({ loader, moments = [] }) {
       const b = `${at.slice(0, 13)}:00:00`;
       return bucketSet.has(b) ? b : null;
     };
-    const marks = shownMoments(moments, showPosts, showCampaigns);
     return {
       animationDuration: 300,
       grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
@@ -461,16 +555,18 @@ function TodayChart({ loader, moments = [] }) {
         lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
         data: hours.map((h) => h[metric] == null ? 0 : h[metric]),
-        markLine: momentMarkLine(marks, toBucket),
+        markLine: momentMarkLine(marks, toBucket, Math.max(0, ...hours.map((h) => h[metric] || 0))),
       }],
     };
-  }, [out, metric, moments, showPosts, showCampaigns]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [out, metric, moments, hiddenPosts, showCampaigns, showOther]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
-        <MomentToggles moments={moments} showPosts={showPosts} setShowPosts={setShowPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} />
+        <MomentToggles moments={moments} hiddenPosts={hiddenPosts} setHiddenPosts={setHiddenPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} showOther={showOther} setShowOther={setShowOther} openPicker={() => setPickerOpen(true)} />
       </div>
+      {pickerOpen && <PostPicker posts={moments.filter((m) => m.type === 'post')} hidden={hiddenPosts} setHidden={setHiddenPosts} onClose={() => setPickerOpen(false)} />}
+      <MomentDetail m={detail} onClose={() => setDetail(null)} />
       {error && <div style={errBox}>{error}</div>}
       {!out && !error && <p style={mutedTxt}>Loading…</p>}
       {out && hours.length === 0 && <p style={sub}>Nothing recorded yet today.</p>}
