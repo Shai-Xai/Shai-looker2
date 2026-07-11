@@ -39,7 +39,9 @@ function mount(app, { db, auth, posthog, resolveAudience, queryEngine, catalogue
     for (let page = 0; page < APP_PAGES; page++) {
       const r = await posthog.people({ ids, days: APP_WINDOW_DAYS, limit: 500, offset: page * 500, orderBy: 'active' });
       people.push(...(r.people || []));
-      if (!r.hasMore) return { scoped: true, people, capped: false };
+      // hasMore can't see past posthog's own 2000-row fetch ceiling, so a full
+      // final page still means "capped" — never present the cap as the total.
+      if (!r.hasMore && people.length < APP_PAGES * 500) return { scoped: true, people, capped: false };
     }
     return { scoped: true, people, capped: true };
   }
