@@ -342,7 +342,8 @@ export function AppAnalyticsAdmin() {
       {perClient && <AudienceMatchCard entityId={entityId} scope="admin-client" isMobile={isMobile} />}
       <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })}
-        ticketsLoader={perClient ? (emails) => api.appTickets(entityId, 'admin-client', emails) : null} />
+        ticketsLoader={perClient ? (emails) => api.appTickets(entityId, 'admin-client', emails) : null}
+        exportUrl={(q) => `/api/admin/app-analytics/people.csv?from=${range.from}&to=${range.to}&entityId=${encodeURIComponent(entityId)}&q=${encodeURIComponent(q || '')}`} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
       {!perClient && <CommerceScanCard />}
@@ -437,7 +438,10 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))}
-        ticketsLoader={(emails) => api.appTickets(entityId, scope, emails)} />
+        ticketsLoader={(emails) => api.appTickets(entityId, scope, emails)}
+        exportUrl={(q) => (scope === 'admin-client'
+          ? `/api/admin/app-analytics/people.csv?from=${range.from}&to=${range.to}&entityId=${encodeURIComponent(entityId)}&q=${encodeURIComponent(q || '')}`
+          : `/api/my/app-analytics/${entityId}/people.csv?from=${range.from}&to=${range.to}&q=${encodeURIComponent(q || '')}`)} />
     </div>
   );
 }
@@ -1113,7 +1117,8 @@ function AudienceMatchCard({ entityId, scope, isMobile }) {
   );
 }
 
-function PeopleSection({ loader, win, ticketsLoader }) {
+function PeopleSection({ loader, win, ticketsLoader, exportUrl }) {
+  const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
@@ -1150,22 +1155,26 @@ function PeopleSection({ loader, win, ticketsLoader }) {
     } catch (e) { setError(e.message); }
     setBusy(false);
   };
-  const exportCsv = () => {
-    const head = ['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events', ...(ticketsLoader ? ['Tickets'] : [])];
-    const csv = [head, ...(rows || []).map((p) => [p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; '),
-      ...(ticketsLoader ? [(tickets[String(p.email || '').toLowerCase()] || []).map((t) => `${t.event} x${t.tickets}`).join('; ')] : [])])]
-      .map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'app-users.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
+  // The export downloads EVERY user from the server in one file — the on-screen
+  // list pages (PostHog forbids OFFSET past 2000), the export does not.
+  const exportCsv = async () => {
+    setExporting(true); setError('');
+    try {
+      const r = await fetch(exportUrl(q));
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Export failed.');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(await r.blob());
+      a.download = 'app-users.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { setError(e.message); }
+    setExporting(false);
   };
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ ...title, flex: 1, marginBottom: 0 }}>👤 App users</div>
-        {rows && rows.length > 0 && <button type="button" style={ghostBtn} onClick={exportCsv}>Export CSV</button>}
+        {exportUrl && <button type="button" style={ghostBtn} disabled={exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export all (CSV)'}</button>}
       </div>
       <p style={sub}>Who's actually in the app {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : ''} — profile details (email, name, mobile) from PostHog, most recent first.</p>
       {!open ? (

@@ -100,8 +100,11 @@ function makeHarness({ responder, suites = [], locks = {}, dashboards = [], look
     const handlers = routes[key];
     assert.ok(handlers, `route ${key} exists`);
     const req = { params, body, query, user };
-    const out = { status: 200, body: null };
-    const res = { status(c) { out.status = c; return this; }, json(b) { out.body = b; return this; } };
+    const out = { status: 200, body: null, headers: {} };
+    const res = {
+      status(c) { out.status = c; return this; }, json(b) { out.body = b; return this; },
+      setHeader(k, v) { out.headers[k.toLowerCase()] = v; }, send(b) { out.body = b; return this; },
+    };
     for (const h of handlers) {
       let nexted = false;
       await h(req, res, (e) => { nexted = !e; if (e) { out.status = e.status || 500; out.body = { error: e.message }; } });
@@ -694,6 +697,26 @@ test('history search sweeps event names AND breakdown values over a year, escape
   assert.equal(noQ.status, 400);
   const denied = await h.invoke('GET /api/admin/posthog/search-events', { query: { q: 'x' }, user: { role: 'member' } });
   assert.equal(denied.status, 403);
+});
+
+test('people.csv exports EVERY user in one file — page caps lifted, still scoped', async () => {
+  const mkRows = (n) => Array.from({ length: n }, (_, i) => [`u${i}@x.com`, 'A', 'B', '+27', '2026-07-10 10:00:00', 5, ['E']]);
+  let captured = '';
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => { captured = q; return HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'], mkRows(2500)); },
+  });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/people.csv', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.match(captured, /LIMIT 50001/, 'the export lifts the 2000-row page cap');
+  assert.ok(captured.includes("IN ('101')"), 'still scoped to their events');
+  const lines = String(out.body).split('\n');
+  assert.equal(lines.length, 1 + 2500, 'every row lands in the file (the UI list would have stopped at 2000)');
+  assert.ok(lines[0].includes('"Email"'));
+  assert.ok(lines[1].startsWith('"A","B","u0@x.com"'), 'row cells are quoted/escaped');
+  assert.equal(out.headers['content-disposition'], 'attachment; filename="app-users.csv"');
+  assert.match(out.headers['content-type'], /text\/csv/);
 });
 
 test('moments overlay merges posts + campaign sends, scoped and windowed; graceful without those modules', async () => {

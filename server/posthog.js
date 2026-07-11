@@ -816,9 +816,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // Paged (offset + hasMore) and orderable: 'recent' (last seen) or 'active'
   // (most interactions — the "Super fans" view). excludeStaff drops @howler.*
   // email addresses so staff testing doesn't rank as a fan.
-  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent', excludeStaff = false } = {}) {
+  // exportAll lifts the page caps for the CSV download — one big bounded query
+  // (PostHog accepts large LIMITs; OFFSET stays forbidden either way).
+  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent', excludeStaff = false, exportAll = false } = {}) {
     const w = win({ days, from, to });
-    const L = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const L = Math.min(Math.max(Number(limit) || 200, 1), exportAll ? 50000 : 500);
     const off = Math.min(Math.max(Number(offset) || 0, 0), 1800);
     const order = orderBy === 'active' ? 'interactions DESC' : 'lastSeen DESC';
     const m = metricMap();
@@ -832,7 +834,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const staff = excludeStaff ? ` AND NOT (toString(${personProp(p.email)}) ILIKE '%@howler.%')` : '';
     // Personal API keys forbid OFFSET (PostHog HTTP 400) — fetch up to the end of
     // the requested page in one bounded query and slice the page out locally.
-    const fetchN = Math.min(off + L + 1, 2000);
+    const fetchN = Math.min(off + L + 1, exportAll ? 50001 : 2000);
     const rows = await hogql(`
       SELECT any(toString(${personProp(p.email)})) AS email, any(toString(${personProp(p.firstName)})) AS firstName,
              any(toString(${personProp(p.lastName)})) AS lastName, any(toString(${personProp(p.phone)})) AS phone,
@@ -1191,6 +1193,12 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (!refs.length) return res.json({ days: win(winQ(req)).days, events: [], series: [] });
     res.json(await eventSeries(refs.slice(0, 12), winQ(req)));
   }));
+  app.get('/api/admin/app-analytics/people.csv', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) throw new HttpError(400, 'No app data is scoped to this client yet.');
+    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1' });
+  }));
   app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
     const eid = String(req.query.entityId || '') || null;
     res.json({ moments: moments(eid, winQ(req)), linkClicks: linkClicks(eid, winQ(req)) });
@@ -1274,6 +1282,23 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const refs = want.length ? want.filter((r) => ids.includes(r)) : ids; // never beyond their own events
     if (!refs.length) return res.json({ days: win(winQ(req)).days, events: [], series: [] });
     res.json(await eventSeries(refs.slice(0, 12), winQ(req)));
+  }));
+  // 📄 Full CSV export — EVERY app user in the window (the on-screen list pages
+  // at 2000 because PostHog forbids OFFSET; the export runs ONE big bounded
+  // query instead). BOM so Excel opens UTF-8 correctly.
+  const csvEsc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  async function sendPeopleCsv(res, opts) {
+    const out = await people({ ...opts, limit: 50000, offset: 0, orderBy: 'recent', exportAll: true });
+    const lines = [['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events'].map(csvEsc).join(',')];
+    for (const p of out.people) lines.push([p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; ')].map(csvEsc).join(','));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="app-users.csv"');
+    res.send(`\ufeff${lines.join('\n')}`);
+  }
+  app.get('/api/my/app-analytics/:entityId/people.csv', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) throw new HttpError(400, 'No app data is scoped to this client yet.');
+    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1' });
   }));
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
