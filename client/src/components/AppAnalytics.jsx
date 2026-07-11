@@ -212,10 +212,10 @@ export function AppAnalyticsAdmin() {
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
+        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <OwlBtn onClick={() => (entityId
           ? setOwlSel({ ids: [entityId], label: clients.find((c) => c.id === entityId)?.name || 'This client' })
           : setOwlPick(true))} />
-        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
         <button type="button" style={ghostBtn} disabled={syncing} onClick={async () => {
           setSyncing(true); setError(''); setSyncMsg('');
           try {
@@ -313,8 +313,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         {/* The intro sentence squeezes the control chips into ragged wrapping on
             phones — the page is titled "App", so the copy is desktop-only. */}
         {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">How your events perform inside the Howler app.</span>}
-        <OwlBtn onClick={() => setOwlOpen(true)} />
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
+        <OwlBtn onClick={() => setOwlOpen(true)} />
       </div>
       {owlOpen && (
         <DashboardInsightModal
