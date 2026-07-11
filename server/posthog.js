@@ -46,7 +46,7 @@ Write the page's story for a non-technical organiser:
 Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
 
 // Compact fact sheet the model reads — one section per page panel, numbers only.
-function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [] }) {
+function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [], ctaLabels = null }) {
   const L = [];
   if (scopeLabel) L.push(`Scope: ${scopeLabel}.`);
   L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
@@ -72,6 +72,10 @@ function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], li
     if (!b.values.length) continue;
     L.push('', `Breakdown by ${b.key} (value · count · unique people):`);
     for (const v of b.values.slice(0, 8)) L.push(`${v.value} · ${v.count} · ${v.uniques}`);
+  }
+  if (ctaLabels && (ctaLabels.labels || []).length) {
+    L.push('', `CTA clicks by label (label · clicks · unique people)${ctaLabels.otherCount ? ` — plus ${ctaLabels.otherCount} smaller labels totalling ${ctaLabels.otherClicks} clicks` : ''}:`);
+    for (const v of ctaLabels.labels.slice(0, 12)) L.push(`${v.label} · ${v.clicks} · ${v.uniques}`);
   }
   const posts = mom.filter((m) => m.type === 'post');
   if (posts.length) {
@@ -150,6 +154,7 @@ function nameList(v) {
 const DEFAULT_MAP = {
   screenEvents: ['$screen', '$pageview'],
   ctaEvents: [],
+  ctaLabelProp: 'CTA_Label',
   purchaseEvents: [],
   purchaseValueProp: '',
   notificationEvents: [],
@@ -215,6 +220,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     return {
       screenEvents: nameList(stored.screenEvents ?? DEFAULT_MAP.screenEvents),
       ctaEvents: nameList(stored.ctaEvents ?? DEFAULT_MAP.ctaEvents),
+      ctaLabelProp: String(stored.ctaLabelProp ?? DEFAULT_MAP.ctaLabelProp).trim(),
       purchaseEvents: nameList(stored.purchaseEvents ?? DEFAULT_MAP.purchaseEvents),
       purchaseValueProp: String(stored.purchaseValueProp ?? DEFAULT_MAP.purchaseValueProp).trim(),
       notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
@@ -532,6 +538,25 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const rows = await hogql(`SELECT ${bucket} AS day, toString(${prop(key)}) AS v, count() AS n, uniq(person_id) AS u FROM events WHERE ${tsWin(w)} AND toString(${prop(key)}) IN (${hqlList(vals)})${scope} GROUP BY day, v ORDER BY day LIMIT 5000`, { ttl: LIVE_TTL });
     return { key, days: w.days, granularity: hourly ? 'hour' : 'day', values: vals, series: rows.map((r) => ({ day: String(r.day), value: String(r.v), count: Number(r.n) || 0, uniques: Number(r.u) || 0 })) };
   }
+  // "CTA clicks by label" — which buttons people actually tap: CTA taps (the
+  // ctaEvents mapping) grouped by the mapped label property, top N with the
+  // long tail rolled into one "other" bucket. Recreates the Looker CTA tile,
+  // live and scoped. Unmapped (no ctaEvents / no label prop) → mapped:false.
+  async function ctaLabels({ ids = null, days, from, to, limit = 12 } = {}) {
+    const w = win({ days, from, to });
+    const m = metricMap();
+    const base = { days: w.days, from: w.from, to: w.to, labelProp: m.ctaLabelProp, mapped: !!(m.ctaEvents.length && m.ctaLabelProp), total: 0, labels: [], otherClicks: 0, otherCount: 0 };
+    if (!base.mapped) return base;
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const lp = `toString(${prop(m.ctaLabelProp)})`;
+    const rows = await hogql(`SELECT ${lp} AS label, count() AS clicks, uniq(person_id) AS uniques FROM events WHERE ${tsWin(w)} AND (${mapCond(m.ctaEvents)}) AND notEmpty(${lp})${scope} GROUP BY label ORDER BY clicks DESC LIMIT 300`, { ttl: LIVE_TTL });
+    const all = rows.map((r) => ({ label: String(r.label), clicks: Number(r.clicks) || 0, uniques: Number(r.uniques) || 0 }));
+    const L = Math.min(Math.max(Number(limit) || 12, 3), 40);
+    const rest = all.slice(L);
+    return { ...base, total: all.reduce((s, r) => s + r.clicks, 0), labels: all.slice(0, L), otherClicks: rest.reduce((s, r) => s + r.clicks, 0), otherCount: rest.length };
+  }
+
   // Clients may only group by the admin-configured keys (no property probing).
   function breakdownKeyOrThrow(req) {
     const key = String(req.query.key || '').trim();
@@ -677,6 +702,8 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     }
     let topUsers = [];
     try { topUsers = (await people({ ids, from: w.from, to: w.to, orderBy: 'active', limit: 10 })).people; } catch { /* optional */ }
+    let cta = null;
+    try { const r = await ctaLabels({ ids, from: w.from, to: w.to }); if (r.labels.length) cta = r; } catch { /* optional */ }
     const mom = [];
     const clk = [];
     for (const eid of (list || [null])) { mom.push(...moments(eid, w)); clk.push(...linkClicks(eid, w).map((r) => r)); }
@@ -684,7 +711,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const byDay = new Map();
     for (const r of clk) byDay.set(r.date, (byDay.get(r.date) || 0) + r.clicks);
     return {
-      scopeLabel, report, live, breakdowns: bds, topUsers,
+      scopeLabel, report, live, breakdowns: bds, topUsers, ctaLabels: cta,
       moments: mom.sort((a, b) => (a.at < b.at ? -1 : 1)).slice(0, 120),
       linkClicks: [...byDay.entries()].sort().map(([date, clicks]) => ({ date, clicks })),
     };
@@ -739,6 +766,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       const nx = {
         screenEvents: nameList(b.metricMap.screenEvents ?? cur.screenEvents),
         ctaEvents: nameList(b.metricMap.ctaEvents ?? cur.ctaEvents),
+        ctaLabelProp: String(b.metricMap.ctaLabelProp ?? cur.ctaLabelProp).trim().slice(0, 80),
         purchaseEvents: nameList(b.metricMap.purchaseEvents ?? cur.purchaseEvents),
         purchaseValueProp: String(b.metricMap.purchaseValueProp ?? cur.purchaseValueProp).trim().slice(0, 80),
         notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
@@ -856,6 +884,12 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (eid && !ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
     res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
+  app.get('/api/admin/app-analytics/cta-labels', auth.requireAdmin, asyncHandler(async (req, res) => {
+    const eid = String(req.query.entityId || '');
+    const ids = eid ? await eventIdsForEntity(eid) : null;
+    if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, mapped: false, total: 0, labels: [], otherClicks: 0, otherCount: 0 });
+    res.json(await ctaLabels({ ids, ...winQ(req), limit: req.query.limit }));
+  }));
   app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
     const eid = String(req.query.entityId || '') || null;
     res.json({ moments: moments(eid, winQ(req)), linkClicks: linkClicks(eid, winQ(req)) });
@@ -923,6 +957,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     await insightHandler(list.length ? list : null, req, res);
   }));
 
+  app.get('/api/my/app-analytics/:entityId/cta-labels', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
+    const ids = await eventIdsForEntity(req.params.entityId);
+    if (!ids.length) return res.json({ days: win(winQ(req)).days, mapped: false, total: 0, labels: [], otherClicks: 0, otherCount: 0 });
+    res.json(await ctaLabels({ ids, ...winQ(req), limit: req.query.limit }));
+  }));
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
   });
@@ -939,7 +978,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

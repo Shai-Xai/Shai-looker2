@@ -263,6 +263,7 @@ export function AppAnalyticsAdmin() {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId })}
         seriesLoader={(key) => api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran })} />
+      <CtaLabelsCard key={`cta-${winKey}`} admin loader={() => api.adminAppCtaLabels({ from: range.from, to: range.to, entityId })} />
       <TopUsersCard key={`top-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       {!perClient && <MappingEditor />}
@@ -343,6 +344,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <BreakdownsCard key={`bd-${winKey}-${gran}`} keys={data.breakdowns || []}
         loader={(key) => (scope === 'admin-client' ? api.adminAppBreakdown({ key, from: range.from, to: range.to, entityId }) : api.myAppBreakdown(entityId, { key, from: range.from, to: range.to }))}
         seriesLoader={(key) => (scope === 'admin-client' ? api.adminAppBreakdownSeries({ key, from: range.from, to: range.to, entityId, granularity: gran }) : api.myAppBreakdownSeries(entityId, { key, from: range.from, to: range.to, granularity: gran }))} />
+      <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
+        loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
       <TopUsersCard key={`top-${winKey}`} win={range}
         loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
       <PeopleSection key={`ppl-${winKey}`} win={range}
@@ -734,6 +737,61 @@ function BreakdownSeriesChart({ data }) {
   );
 }
 
+// 🎯 CTA clicks by label — which buttons people actually tap (recreates the
+// Looker "CTA clicks by label" tile, live + scoped to this view's window and
+// client). Horizontal bars, one hue — it's ONE measure across categories; the
+// long tail past the top N is a single muted "Other" bar. Clients see the card
+// only once it has data; admins get the mapping pointer instead of silence.
+function CtaLabelsCard({ loader, admin = false }) {
+  const isMobile = useIsMobile();
+  const [out, setOut] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let dead = false;
+    loader().then((r) => { if (!dead) setOut(r); }).catch((e) => { if (!dead) setError(e.message); });
+    return () => { dead = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- loader is stable per mount (card is keyed by scope+window)
+  const items = [
+    ...(out?.labels || []).map((r) => ({ ...r })),
+    ...(out?.otherCount ? [{ label: `Other (${out.otherCount} more label${out.otherCount === 1 ? '' : 's'})`, clicks: out.otherClicks, uniques: null, other: true }] : []),
+  ];
+  if (!admin && (!items.length || error)) return null; // clients: no signal, no card
+  if (admin && !error && (!out || (!items.length && !out.mapped))) return null; // pre-mapping the stat tiles already say CTA is unmapped
+  const option = {
+    animationDuration: 300,
+    grid: { left: 8, right: 54, top: 8, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' }, extraCssText: 'z-index: 40;',
+      formatter: (ps) => { const it = items[ps[0]?.dataIndex]; return it ? `${it.label}<br/>${fmt(it.clicks)} clicks${it.uniques != null ? ` · ${fmt(it.uniques)} people` : ''}` : ''; },
+    },
+    xAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
+    yAxis: { type: 'category', inverse: true, data: items.map((r) => r.label), axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisTick: { show: false }, axisLabel: { color: 'var(--muted, #888)', fontSize: 11, width: isMobile ? 96 : 170, overflow: 'truncate' } },
+    series: [{
+      type: 'bar', barMaxWidth: 16,
+      data: items.map((r) => ({ value: r.clicks, itemStyle: { color: r.other ? 'rgba(128,128,128,0.45)' : '#ff385c', borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 11, fontWeight: 600, color: 'var(--muted, #888)', formatter: (p) => fmt(p.value) },
+    }],
+  };
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🎯 CTA clicks by label</div>
+      <p style={sub}>{out?.total
+        ? `${fmt(out.total)} labelled CTA taps in this window — which buttons people actually press.`
+        : 'Total CTA taps in this window, broken down by button label.'}</p>
+      {error && <div style={errBox}>{error}</div>}
+      {!error && !out && <p style={mutedTxt}>Loading…</p>}
+      {!error && out && !items.length && (
+        <p style={sub}>The mapped CTA taps carry no values on <code>{out.labelProp || '(no label property set)'}</code> in this window — find where the labels live with 🔬 Diagnose's property explorer (List keys on the CTA slice), then set <b>CTA label property</b> in 🧭 Event mapping.</p>
+      )}
+      {!error && items.length > 0 && (
+        <div style={{ width: '100%', overflow: 'hidden' }}>
+          <ReactECharts echarts={echarts} option={option} notMerge style={{ height: Math.max(120, 24 + items.length * (isMobile ? 30 : 34)), width: '100%' }} opts={{ renderer: 'canvas' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 🏆 Top users — the 10 most active people in the window, its own card (moved
 // out of the App-users list per Shai). Auto-loads: it's a headline metric, and
 // the server caches the query.
@@ -889,6 +947,9 @@ function MappingEditor() {
       <div style={grid2}>
         <label style={lbl}>Purchase value property
           <input style={input} value={m.purchaseValueProp || ''} onChange={(e) => setM({ ...m, purchaseValueProp: e.target.value })} placeholder="e.g. value" autoComplete="off" />
+        </label>
+        <label style={lbl}>CTA label property (the 🎯 "CTA clicks by label" chart)
+          <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. CTA_Label" autoComplete="off" />
         </label>
         <label style={lbl}>Breakdown properties (the "What's driving it" chips)
           <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\nCTA_Label\nsurface'} />

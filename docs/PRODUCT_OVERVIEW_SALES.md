@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-10 (👥 Social+ in-app community analytics pulled into the Social page · 📲 App analytics via direct PostHog integration · previously: 🌐 Sales site v2 · 🚦 Queue-it live stats) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-11 (🎯 CTA clicks by label on App analytics · previously: 👥 Social+ in-app community analytics · 📲 App analytics via direct PostHog integration · 🌐 Sales site v2) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -576,6 +576,10 @@ numbers they're about to become."
 - **"What's driving it" breakdowns** — the busiest values behind the numbers
   (interaction type, CTA label, surface — configurable), as a ranked table AND
   per-value daily trend lines with a click-to-filter legend.
+- **🎯 CTA clicks by label** — which buttons people actually press
+  (`view_tickets`, `buy_tickets`, `pay_now`, …) as a ranked bar chart, live,
+  window-filtered and scoped per client — the Looker CTA tile, now self-serve
+  inside Pulse.
 - **Ask the Owl** — "how is my event doing in the Howler app?" is a native Owl
   question (`getAppAnalytics`): live + windowed engagement, per event, with
   breakdowns — scoped exactly like the client's App page.
@@ -1013,6 +1017,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-11** — **🎯 CTA clicks by label** on App analytics 🧪: the Looker
+  "CTA clicks by label" tile recreated inside Pulse — live ranked bar chart of
+  which buttons people press in the app (`view_tickets`, `buy_tickets`, …),
+  window-filtered, scoped per client, on both the client App page and the
+  admin management view; label property configurable in the event mapping.
 - **2026-07-10** — **👥 Social+ in-app community analytics** 🧪 (new): direct
   integration with **Social+** (social.plus) — Pulse pulls a client's app
   **communities, chat channels, posts, comments & reactions** in daily (or on-tap

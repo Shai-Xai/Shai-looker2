@@ -298,6 +298,51 @@ test('breakdowns are scoped, and clients can only use the configured keys', asyn
   assert.equal(probe.status, 400, 'unconfigured keys are rejected — no property probing');
 });
 
+test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup', async () => {
+  const queries = [];
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => {
+      queries.push(q);
+      // 15 labels, descending — the default top-12 leaves 3 for the Other bucket
+      return HOGQL(['label', 'clicks', 'uniques'], Array.from({ length: 15 }, (_, i) => [`cta_${i}`, 150 - i * 10, 40 - i]));
+    },
+  });
+  // Unmapped (no ctaEvents) → mapped:false and NO PostHog query burned.
+  const cold = await h.invoke('GET /api/my/app-analytics/:entityId/cta-labels', { params: { entityId: 'e1' } });
+  assert.equal(cold.status, 200);
+  assert.equal(cold.body.mapped, false);
+  assert.deepEqual(cold.body.labels, []);
+  assert.equal(queries.length, 0, 'unmapped short-circuits before PostHog');
+  h.settings.posthog_metric_map = JSON.stringify({ ctaEvents: ['interaction : interaction_type=cta_click'], ctaLabelProp: 'CTA_Label' });
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId/cta-labels', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.mapped, true);
+  assert.equal(out.body.labelProp, 'CTA_Label');
+  assert.equal(out.body.labels.length, 12, 'top N');
+  assert.deepEqual(out.body.labels[0], { label: 'cta_0', clicks: 150, uniques: 40 });
+  assert.equal(out.body.otherCount, 3);
+  assert.equal(out.body.otherClicks, (150 - 120) + (150 - 130) + (150 - 140), 'the tail rolls into one bucket');
+  assert.equal(out.body.total, out.body.labels.reduce((s, r) => s + r.clicks, 0) + out.body.otherClicks);
+  const q = queries[0];
+  assert.ok(q.includes("event = 'interaction' AND toString(properties['interaction_type']) = 'cta_click'"), 'counts only the mapped CTA taps');
+  assert.ok(q.includes("notEmpty(toString(properties['CTA_Label']))"), 'unlabelled taps are excluded');
+  assert.ok(q.includes("IN ('101')"), 'scoped to the client\'s events');
+  // No event locks → fail closed with an empty, unmapped shape.
+  const h2 = makeHarness({ suites: [{ id: 's2', entityId: 'e2' }], locks: {} });
+  h2.settings.posthog_metric_map = JSON.stringify({ ctaEvents: ['interaction : interaction_type=cta_click'] });
+  const closed = await h2.invoke('GET /api/my/app-analytics/:entityId/cta-labels', { params: { entityId: 'e2' }, user: { id: 'u2', role: 'member', entityIds: ['e2'] } });
+  assert.equal(closed.status, 200);
+  assert.deepEqual(closed.body.labels, []);
+  assert.equal(h2.queries.length, 0, 'no ids, no query');
+  // The label property round-trips through the mapping settings.
+  const put = await h.invoke('PUT /api/admin/posthog/settings', { user: { id: 'a', role: 'admin' }, body: { metricMap: { ctaLabelProp: '  cta_label  ' } } });
+  assert.equal(put.status, 200);
+  const got = await h.invoke('GET /api/admin/posthog/settings', { user: { id: 'a', role: 'admin' } });
+  assert.equal(got.body.metricMap.ctaLabelProp, 'cta_label');
+});
+
 test('reports carry the configured breakdown keys and live window uniques', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
@@ -498,8 +543,9 @@ test('Owl page-summary prompt: registered in the AI audit, fact sheet covers eve
     linkClicks: [{ date: '2026-07-10', clicks: 60 }],
     breakdowns: [{ key: 'interaction_type', values: [{ value: 'cta_click', count: 107, uniques: 45 }] }],
     topUsers: [{ firstName: 'Thandi', lastName: 'Nkosi', email: 't@x.com', interactions: 31, lastSeen: '2026-07-10 23:33:00' }],
+    ctaLabels: { labels: [{ label: 'view_tickets', clicks: 1326, uniques: 402 }], otherCount: 5, otherClicks: 587 },
   });
-  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31']) {
+  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31', 'view_tickets · 1326 · 402', '5 smaller labels totalling 587']) {
     assert.ok(txt.includes(must), `fact sheet includes: ${must}`);
   }
 });
