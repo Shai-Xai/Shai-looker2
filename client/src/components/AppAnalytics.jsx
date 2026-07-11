@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { vtNavigate } from '../lib/viewTransition.js';
 import ReactECharts from 'echarts-for-react/lib/core';
 import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
@@ -1092,6 +1094,26 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
     } catch (e) { setSegErr(e.message); }
     setSegBusy('');
   };
+  // "Engage them": save the never-ticket group as a segment and jump straight
+  // into a new campaign with it preselected (the ?goal&segment deep link the
+  // briefing suggestions already use). Admin view stays put — the campaign
+  // lives in the CLIENT's Engage, so we confirm instead of navigating away.
+  const navigate = useNavigate();
+  const eventName = event ? (events.find((ev) => String(ev.eventRef) === String(event))?.eventName || '') : '';
+  const engageThem = async () => {
+    setSegBusy('engage'); setSegMsg(null); setSegErr('');
+    try {
+      const r = await api.appAudienceSegment(entityId, scope, { group: 'never_ticket', event });
+      if (scope === 'admin-client') {
+        setSegMsg({ name: r.segment?.name, count: r.count, truncated: r.truncated });
+      } else {
+        const goal = `Convert app fans who never got a ticket${eventName ? ` for ${eventName}` : ''} into buyers — send them a reason to grab one.`;
+        vtNavigate(navigate, `/engage/campaigns?goal=${encodeURIComponent(goal)}&segment=${encodeURIComponent(r.segment?.name || '')}`);
+        return; // navigating — no local state left to settle
+      }
+    } catch (e) { setSegErr(e.message); }
+    setSegBusy('');
+  };
   if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your fans</div><div style={errBox}>{err}</div></div>;
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
@@ -1100,15 +1122,17 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   const hasAtt = d.attendees != null;
   // Two distinct segments on purpose: ATTENDEES (held a ticket — core_users) is
   // the wide "our fans" set; BUYERS (paid — core_purchasers) is the spenders.
-  // The match tiles carry BOTH readings: the inline % is "of app users"; the
-  // flip line is the money one — how much of the holder/buyer base uses the app.
+  // The LEADING % on every match tile is the ticketing-base reading ("38% of
+  // your holders use the app") — the flip line carries the app-side reading.
+  const holderPct = hasAtt ? pctPlain(d.matchedAttendees, d.attendees) : null;
+  const neverCount = hasAtt ? d.appNotAttendees : d.appNotBuyers;
   const tiles = [
     [`App users (${d.windowDays}d)`, d.appUsers, ''],
-    ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.appUsersWithEmail),
-      pctPlain(d.matchedAttendees, d.attendees) && `📲 ${pctPlain(d.matchedAttendees, d.attendees)} of your ${fmt(d.attendees)} holders use the app`]] : []),
-    ['Also buyers (paid)', d.matched, pctOf(d.matched, d.appUsersWithEmail),
-      pctPlain(d.matched, d.buyers) && `📲 ${pctPlain(d.matched, d.buyers)} of your ${fmt(d.buyers)} buyers use the app`],
-    [hasAtt ? 'Never held a ticket' : 'Not bought yet', hasAtt ? d.appNotAttendees : d.appNotBuyers, pctOf(hasAtt ? d.appNotAttendees : d.appNotBuyers, d.appUsersWithEmail),
+    ...(hasAtt ? [['Also ticket holders', d.matchedAttendees, pctOf(d.matchedAttendees, d.attendees),
+      `📲 of your ${fmt(d.attendees)} holders${pctPlain(d.matchedAttendees, d.appUsersWithEmail) ? ` · ${pctPlain(d.matchedAttendees, d.appUsersWithEmail)} of app users` : ''}`]] : []),
+    ['Also buyers (paid)', d.matched, pctOf(d.matched, d.buyers),
+      `📲 of your ${fmt(d.buyers)} buyers${pctPlain(d.matched, d.appUsersWithEmail) ? ` · ${pctPlain(d.matched, d.appUsersWithEmail)} of app users` : ''}`],
+    [hasAtt ? 'Never held a ticket' : 'Not bought yet', neverCount, pctOf(neverCount, d.appUsersWithEmail),
       '🎯 your warm retargeting audience'],
     ...(hasAtt ? [['Ticket holders not on the app', d.attendeesNotOnApp, pctOf(d.attendeesNotOnApp, d.attendees)]] : []),
     ['Buyers not on the app', d.buyersNotOnApp, pctOf(d.buyersNotOnApp, d.buyers)],
@@ -1125,6 +1149,20 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
         )}
       </div>
       <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders).</p>
+      {/* The headline insight — the sentence a client repeats in a meeting —
+          with the action right next to it. */}
+      <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'color-mix(in srgb, var(--brand) 6%, transparent)' }}>
+        <div style={{ flex: 1, minWidth: 220, fontSize: 13.5, lineHeight: 1.55 }}>
+          💡 <b>{fmt(d.appUsers)}</b> people engaged with {event ? 'this event' : 'your events'} in the app
+          {holderPct ? <> · <b>{holderPct}</b> of {event ? 'its' : 'your'} ticket holders are app users</> : null}
+          {neverCount > 0 ? <> · <b>{fmt(neverCount)}</b> engaged fans never got a ticket</> : null}.
+        </div>
+        {neverCount > 0 && (
+          <button style={{ ...btn, whiteSpace: 'nowrap' }} disabled={!!segBusy} onClick={engageThem}>
+            {segBusy === 'engage' ? 'Preparing…' : '📣 Engage them'}
+          </button>
+        )}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 160}px, 1fr))`, gap: 8 }}>
         {tiles.map(([label, v, pct, flip]) => (
           <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
