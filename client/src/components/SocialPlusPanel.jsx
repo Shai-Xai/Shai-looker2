@@ -45,7 +45,10 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const hourly = days === 'today';
   // A single community only has per-community truth for these (joins + posts).
   const filtered = !!community;
-  const metricChoices = hourly || filtered ? TODAY_METRICS : METRICS;
+  const hasPresence = !!(data?.presence?.matched > 0);
+  const metricChoices = hourly || filtered
+    ? TODAY_METRICS
+    : [...METRICS, ...(hasPresence ? [['app_actives', 'In app']] : [])];
 
   const load = useCallback(() => {
     api.socialplusData(entityId, scope, { metric, days: hourly ? 30 : days, community }).then(setData).catch((e) => { setData(null); setErr(e.message); });
@@ -175,6 +178,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
             ]} />
           )}
           <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
+          <PresenceCard presence={data.presence} isMobile={isMobile} />
           <EngagementCard engagement={data.engagement} isMobile={isMobile} />
           {hourly
             ? <SeriesCard
@@ -228,6 +232,42 @@ function ActivityRow({ activity, isMobile }) {
         ))}
       </div>
     </>
+  );
+}
+
+// WHEN the members were on the app — Social+ member ids joined against PostHog
+// app sessions (the app identifies fans by the same Howler user id). This is
+// real presence: opened the app, whether or not they touched the community.
+function PresenceCard({ presence, isMobile }) {
+  const p = presence || {};
+  if (!p.members) return null;
+  if (!p.matched) return null; // no member ↔ app-profile overlap (yet) — stay quiet rather than show zeros
+  const pct = (n) => (p.members > 0 ? `${Math.min(100, Math.round((n / p.members) * 1000) / 10)}%` : '—');
+  const tiles = [
+    ['On the app today', p.today],
+    ['Last 7 days', p.d7],
+    ['Last 30 days', p.d30],
+  ];
+  return (
+    <div style={{ ...card, marginTop: 0, marginBottom: 12 }}>
+      <div style={title}>📲 Members in the app</div>
+      <p style={sub}>Of {fmt(p.members)} community members, how many actually opened the Howler app — matched to app sessions by user ID.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 150}px, 1fr))`, gap: 8 }}>
+        {tiles.map(([label, v]) => (
+          <div key={label} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+              {fmt(v)} <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)' }}>· {pct(v)}</span>
+            </div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+      <p style={{ ...sub, fontSize: 11, margin: '10px 0 0' }}>
+        {fmt(p.matched)} of {fmt(p.members)} members seen in the app in the last 90 days · refreshed on the daily sync
+        {p.at ? ` · as of ${new Date(p.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}.
+        Flip the trend to <b>In app</b> for the day-by-day curve.
+      </p>
+    </div>
   );
 }
 

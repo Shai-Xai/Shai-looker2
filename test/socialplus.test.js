@@ -248,6 +248,38 @@ test('engagement counts DISTINCT contributing fans (staff excluded) against memb
   assert.equal(sp.engagement(e.id, 'c1').ever, 2);
 });
 
+test('computePresence joins member ids against the app (PostHog) in chunks', async () => {
+  const e = makeEntity('Presence', 'OrgSPZ');
+  const insM = db.db.prepare('INSERT INTO socialplus_members (entity_id, community_id, user_id) VALUES (?,?,?)');
+  insM.run(e.id, 'c1', '111'); insM.run(e.id, 'c1', '222'); insM.run(e.id, 'c2', '333');
+  const day = new Date().toISOString().slice(0, 10);
+  const queries = [];
+  sp.setAppQuery({
+    isConfigured: () => true,
+    hogql: async (q) => {
+      queries.push(q);
+      if (q.includes('GROUP BY d')) return [{ d: day, n: 2 }, { d: '2026-07-01', n: 1 }];
+      return [{ d7: 2, d30: 2, d90: 3 }];
+    },
+  });
+  try {
+    await sp.computePresence(e.id);
+    const p = JSON.parse(db.getSetting(`socialplus_presence:${e.id}`, ''));
+    assert.equal(p.members, 3);
+    assert.equal(p.today, 2);
+    assert.equal(p.d30, 2);
+    assert.equal(p.matched, 3);
+    assert.equal(db.db.prepare('SELECT active_members FROM socialplus_presence WHERE entity_id=? AND date=?').get(e.id, day).active_members, 2);
+    // The trend metric reads the stored series.
+    const series = sp.series(e.id, { metric: 'app_actives', days: 30 });
+    assert.ok(series.some((r) => r.date === day && r.value === 2));
+    // All member ids ride in the IN-list (one chunk here).
+    assert.ok(queries[0].includes("'111'") && queries[0].includes("'333'"));
+  } finally { sp.setAppQuery(null); }
+  // Without a PostHog wire-up, presence is silently skipped.
+  await sp.computePresence(e.id); // no throw, no queries
+});
+
 test('buildMembersCurve reconstructs the growth curve from join dates', () => {
   // 100 members today; 5 joined today, 10 yesterday, 0 the day before, 20 before that.
   const joins = { '2026-07-11': 5, '2026-07-10': 10, '2026-07-08': 20 };

@@ -41,8 +41,11 @@ const REFRESH_MAX_AGE_MIN = 30;        // page-open refresh: skip when synced th
 const QUICK_JOIN_DAYS = 7;             // page-open refresh only re-walks recent joins
 
 let db = null;
+let appQuery = null; // { hogql, isConfigured } from server/posthog.js — the presence join
+function setAppQuery(q) { appQuery = q || null; }
 function init(deps) {
   db = deps.db;
+  if (deps.appQuery) setAppQuery(deps.appQuery);
   db.db.exec(`
     -- Snapshot: one row per community (restated each sync; vanished ones pruned).
     CREATE TABLE IF NOT EXISTS socialplus_communities (
@@ -110,6 +113,23 @@ function init(deps) {
       date         TEXT NOT NULL,               -- YYYY-MM-DD (join day)
       joins        INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (entity_id, community_id, date)
+    );
+    -- The member LISTS (user ids) of the linked communities — refreshed on full
+    -- syncs, capped at MEMBER_PAGES per community. Social+ user ids are Howler
+    -- user ids, which is what the app reports to PostHog — so these are the
+    -- join keys for real "were they on the app" presence.
+    CREATE TABLE IF NOT EXISTS socialplus_members (
+      entity_id    TEXT NOT NULL,
+      community_id TEXT NOT NULL,
+      user_id      TEXT NOT NULL,
+      PRIMARY KEY (entity_id, community_id, user_id)
+    );
+    -- Members seen IN THE APP per day (uniq of member ids against PostHog).
+    CREATE TABLE IF NOT EXISTS socialplus_presence (
+      entity_id      TEXT NOT NULL,
+      date           TEXT NOT NULL,
+      active_members INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (entity_id, date)
     );
     -- Who actually DID something (posted / reacted / chatted) and when last —
     -- the engagement measure. One row per (community-or-chat-group, user, kind);
@@ -327,25 +347,31 @@ function setSyncState(entityId, status, error = '') {
 }
 
 // Walk a community's membership list newest-first, counting joins per day back
-// to windowStart. Returns { joinsByDate, coveredFrom }: coveredFrom is the
-// earliest day with COMPLETE data — when the page cap truncates a big community
-// the half-fetched earliest day is dropped so the curve never lies.
-async function fetchJoins(s, communityId, windowStart) {
+// to windowStart. Returns { joinsByDate, coveredFrom, memberIds }: coveredFrom
+// is the earliest day with COMPLETE data — when the page cap truncates a big
+// community the half-fetched earliest day is dropped so the curve never lies.
+// With collectIds the walk continues past the join window (to the cap) so the
+// member LIST comes back too — that list is the app-presence join key.
+async function fetchJoins(s, communityId, windowStart, { collectIds = false } = {}) {
   const joinsByDate = {};
+  const memberIds = new Set();
   let token = '';
   let capped = true; // stays true unless we walk past the window (or run out of members)
-  outer: for (let page = 0; page < MEMBER_PAGES; page++) {
+  let pastWindow = false;
+  for (let page = 0; page < MEMBER_PAGES; page++) {
     const url = `/api/v3/communities/${encodeURIComponent(communityId)}/users?memberships%5B%5D=member&options%5BsortBy%5D=lastCreated&options%5Blimit%5D=${PAGE_LIMIT}${token ? `&options%5Btoken%5D=${encodeURIComponent(token)}` : ''}`;
     const data = await apiGet(s, url);
     for (const u of (data.communityUsers || [])) {
+      if (collectIds && u.userId) memberIds.add(String(u.userId));
       const day = String(u.createdAt || '').slice(0, 10);
-      if (!day) continue;
-      if (day < windowStart) { capped = false; break outer; }
+      if (!day || day < windowStart) { pastWindow = pastWindow || !!day; continue; }
       joinsByDate[day] = (joinsByDate[day] || 0) + 1;
     }
     token = data.paging?.next || '';
-    if (!token) { capped = false; break; } // reached the very first member
+    if (!token) { capped = false; break; }              // reached the very first member
+    if (pastWindow && !collectIds) { capped = false; break; } // joins done; no ids wanted
   }
+  if (pastWindow) capped = false;
   let coveredFrom = windowStart;
   if (capped) {
     const days = Object.keys(joinsByDate).sort();
@@ -353,7 +379,40 @@ async function fetchJoins(s, communityId, windowStart) {
     if (partial) { delete joinsByDate[partial]; coveredFrom = addDays(partial, 1); }
     else coveredFrom = today();
   }
-  return { joinsByDate, coveredFrom };
+  return { joinsByDate, coveredFrom, memberIds: [...memberIds] };
+}
+
+// Real presence: which members were ON THE APP — Social+ member ids joined
+// against PostHog events (the app identifies fans by the same Howler user id).
+// Chunked IN-lists keep each HogQL bounded; disjoint chunks sum exactly.
+// Stores a per-day series + window numbers; called from full syncs only.
+async function computePresence(entityId) {
+  if (!appQuery || !(appQuery.isConfigured?.())) return;
+  const ids = db.db.prepare('SELECT DISTINCT user_id AS u FROM socialplus_members WHERE entity_id=?').all(entityId).map((r) => r.u);
+  if (!ids.length) return;
+  const { hqlList } = require('./posthog');
+  const byDate = {};
+  let d7 = 0, d30 = 0, matched90 = 0;
+  for (let i = 0; i < ids.length; i += 2000) {
+    const inList = hqlList(ids.slice(i, i + 2000));
+    const [w] = await appQuery.hogql(`
+      SELECT uniqIf(distinct_id, timestamp >= now() - INTERVAL 7 DAY) AS d7,
+             uniqIf(distinct_id, timestamp >= now() - INTERVAL 30 DAY) AS d30,
+             uniq(distinct_id) AS d90
+      FROM events WHERE timestamp >= now() - INTERVAL 90 DAY AND distinct_id IN (${inList})`);
+    d7 += Number(w?.d7) || 0; d30 += Number(w?.d30) || 0; matched90 += Number(w?.d90) || 0;
+    const rows = await appQuery.hogql(`
+      SELECT toString(toDate(timestamp)) AS d, uniq(distinct_id) AS n
+      FROM events WHERE timestamp >= now() - INTERVAL 30 DAY AND distinct_id IN (${inList}) GROUP BY d`);
+    for (const r of rows) { if (r.d) byDate[r.d] = (byDate[r.d] || 0) + (Number(r.n) || 0); }
+  }
+  const up = db.db.prepare(`INSERT INTO socialplus_presence (entity_id, date, active_members) VALUES (?,?,?)
+    ON CONFLICT(entity_id, date) DO UPDATE SET active_members=excluded.active_members`);
+  for (const [date, n] of Object.entries(byDate)) up.run(entityId, date, n);
+  db.setSetting(`socialplus_presence:${entityId}`, JSON.stringify({
+    at: new Date().toISOString(), members: ids.length,
+    today: byDate[today()] || 0, d7, d30, matched: matched90,
+  }));
 }
 
 // Members on day d = members now − everyone who joined after d. Leavers make
@@ -408,7 +467,7 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
   // Shared platform key with nothing linked yet: sync NOTHING (and clear any
   // rows from a previous, wider assignment) — never leak other clients' data.
   if (!scope.all && !scope.ids.length) {
-    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily', 'socialplus_joins', 'socialplus_actors']) {
+    for (const t of ['socialplus_communities', 'socialplus_channels', 'socialplus_posts', 'socialplus_daily', 'socialplus_joins', 'socialplus_actors', 'socialplus_members', 'socialplus_presence']) {
       db.db.prepare(`DELETE FROM ${t} WHERE entity_id=?`).run(entityId);
     }
     setSyncState(entityId, 'ok');
@@ -420,9 +479,10 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
   // from join dates, the snapshot metrics restart honestly from today.
   const scopeSig = scope.ids.slice().sort().join(',');
   if (db.getSetting(`socialplus_scope_sig:${entityId}`, null) !== scopeSig) {
-    db.db.prepare('DELETE FROM socialplus_daily WHERE entity_id=?').run(entityId);
-    db.db.prepare('DELETE FROM socialplus_joins WHERE entity_id=?').run(entityId);
-    db.db.prepare('DELETE FROM socialplus_actors WHERE entity_id=?').run(entityId);
+    for (const t of ['socialplus_daily', 'socialplus_joins', 'socialplus_actors', 'socialplus_members', 'socialplus_presence']) {
+      db.db.prepare(`DELETE FROM ${t} WHERE entity_id=?`).run(entityId);
+    }
+    db.setSetting(`socialplus_presence:${entityId}`, '');
     db.setSetting(`socialplus_scope_sig:${entityId}`, scopeSig);
   }
   try {
@@ -521,7 +581,7 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
     for (const c of comms) {
       const cid = String(c.communityId || c._id);
       try {
-        const { joinsByDate, coveredFrom: cf } = await fetchJoins(s, cid, windowStart);
+        const { joinsByDate, coveredFrom: cf, memberIds } = await fetchJoins(s, cid, windowStart, { collectIds: full });
         if (cf > coveredFrom) coveredFrom = cf;
         db.db.prepare('DELETE FROM socialplus_joins WHERE entity_id=? AND community_id=? AND date>=?').run(entityId, cid, cf);
         const ins = db.db.prepare('INSERT INTO socialplus_joins (entity_id, community_id, date, joins) VALUES (?,?,?,?) ON CONFLICT(entity_id, community_id, date) DO UPDATE SET joins=excluded.joins');
@@ -529,8 +589,16 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
           if (d >= cf) ins.run(entityId, cid, d, n);
           allJoins[d] = (allJoins[d] || 0) + n;
         }
+        if (full && memberIds.length) {
+          // Refresh the member list (the app-presence join keys) for this community.
+          db.db.prepare('DELETE FROM socialplus_members WHERE entity_id=? AND community_id=?').run(entityId, cid);
+          const insM = db.db.prepare('INSERT OR IGNORE INTO socialplus_members (entity_id, community_id, user_id) VALUES (?,?,?)');
+          for (const uid of memberIds) insM.run(entityId, cid, uid);
+        }
       } catch { /* joins are an enrichment — a failure never breaks the sync */ }
     }
+    // Presence: which members were on the app (PostHog join) — full syncs only.
+    if (full) { try { await computePresence(entityId); } catch { /* enrichment */ } }
 
     // Restate today's totals from the fresh snapshots, then overwrite the
     // members column across the covered window with the reconstructed curve.
@@ -584,6 +652,11 @@ function totals(entityId) {
 // show as zero, not as a gap the line glides over).
 function series(entityId, { metric = 'members', days = 30 } = {}) {
   const limit = Math.min(Math.max(Number(days) || 30, 1), 365);
+  if (metric === 'app_actives') {
+    const from = addDays(today(), -(limit - 1));
+    const rows = db.db.prepare('SELECT date, active_members AS value FROM socialplus_presence WHERE entity_id=? AND date>=? ORDER BY date ASC').all(entityId, from);
+    return rows;
+  }
   if (metric === 'new_members') {
     const from = addDays(today(), -(limit - 1));
     const byDate = Object.fromEntries(
@@ -782,8 +855,8 @@ async function verify(entityId) {
 }
 
 // ── routes (dual-surface, mounted here so index.js stays one line) ──
-function mount(app, { db: database, auth }) {
-  init({ db: database });
+function mount(app, { db: database, auth, appQuery: aq }) {
+  init({ db: database, appQuery: aq });
   const { asyncHandler } = require('./http');
   const ownsEntity = (req, id) => req.user.role === 'admin' || (req.user.entityIds || []).includes(id);
   const payload = (id, q = {}) => {
@@ -793,9 +866,12 @@ function mount(app, { db: database, auth }) {
     const metric = q.metric ? String(q.metric) : undefined;
     const days = Number(q.days) || 30;
     const all = communities(id);
+    let presence = null;
+    try { presence = JSON.parse(db.getSetting(`socialplus_presence:${id}`, '') || 'null'); } catch { /* absent */ }
     return {
       summary: { ...summary(id), todayActivity: todayActivity(id, cid) },
       engagement: engagement(id, cid),
+      presence: cid ? null : presence, // presence is entity-level (member↔app join)
       community: cid,
       allCommunities: all.map((c) => ({ communityId: c.communityId, displayName: c.displayName })),
       communities: cid ? all.filter((c) => c.communityId === cid) : all,
@@ -940,7 +1016,7 @@ function stopDailySync() { if (timer) { clearInterval(timer); timer = null; } }
 
 module.exports = {
   init, mount, connection, isConfigured, status, applyPatch, view,
-  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve, communitySeries, todayActivity, engagement,
+  idList, assignedIds, scopeFor, communityInScope, channelInScope, buildMembersCurve, communitySeries, todayActivity, engagement, computePresence, setAppQuery,
   syncEntity, syncIfStale, totals, communities, channels, series, topPosts, todayHourly, summary, verify,
   startDailySync, stopDailySync,
 };
