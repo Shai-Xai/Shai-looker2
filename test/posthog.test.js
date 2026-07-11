@@ -46,9 +46,9 @@ test('zipRows aligns array rows to columns', () => {
 // ── harness ─────────────────────────────────────────────────────────────────────
 const HOGQL = (columns, results) => ({ columns, results });
 
-function makeHarness({ responder, suites = [], locks = {}, dashboards = [], lookerRows = [], configured = true } = {}) {
+function makeHarness({ responder, suites = [], locks = {}, dashboards = [], lookerRows = [], configured = true, presetSettings = {} } = {}) {
   const sqlite = new Database(':memory:');
-  const settings = configured ? { posthog_project_id: '42', posthog_api_key: 'phx_test' } : {};
+  const settings = { ...(configured ? { posthog_project_id: '42', posthog_api_key: 'phx_test' } : {}), ...presetSettings };
   const db = {
     db: sqlite,
     getSetting: (k, d = '') => (k in settings ? settings[k] : d),
@@ -342,6 +342,26 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
   assert.equal(put.status, 200);
   const got = await h.invoke('GET /api/admin/posthog/settings', { user: { id: 'a', role: 'admin' } });
   assert.equal(got.body.metricMap.ctaLabelProp, 'cta_label');
+});
+
+test('a legacy stored mapping heals itself on mount — once, keeping custom values', () => {
+  const legacy = JSON.stringify({
+    screenEvents: ['$screen', '$pageview'], ctaEvents: ['Interaction'],
+    breakdownProps: ['interaction_type', 'CTA_Label', 'surface'], ctaLabelProp: 'CTA_Label',
+    personProps: { email: 'custom_email' },
+  });
+  const h = makeHarness({ presetSettings: { posthog_metric_map: legacy } });
+  const m = JSON.parse(h.settings.posthog_metric_map);
+  assert.deepEqual(m.screenEvents, ['interaction : interaction_type=content_view'], 'dead $screen mapping → confirmed views slice');
+  assert.deepEqual(m.ctaEvents, ['interaction : interaction_type=cta_click'], 'bare mis-cased Interaction → confirmed CTA slice');
+  assert.deepEqual(m.breakdownProps, ['interaction_type', 'cta_label', 'surface'], 'CTA_Label chip swapped for the real cta_label key');
+  assert.equal(m.ctaLabelProp, 'cta_label');
+  assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
+  assert.equal(h.settings.posthog_map_healed, '1');
+  // Once healed, later deliberate edits are never fought — flag short-circuits.
+  const custom = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
+  const h2 = makeHarness({ presetSettings: { posthog_metric_map: custom, posthog_map_healed: '1' } });
+  assert.equal(h2.settings.posthog_metric_map, custom, 'healed flag makes the migration a no-op');
 });
 
 test('reports carry the configured breakdown keys and live window uniques', async () => {

@@ -339,7 +339,42 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     catch (e) { console.error('[posthog] tick failed:', e.message); }
     ticking = false;
   }
-  if (startTimer) { const timer = setInterval(() => tick().catch(() => {}), 60 * 60_000); timer.unref?.(); }
+  // One-time mapping heal (2026-07-11): a metric map saved during early
+  // experimentation — $screen/$pageview screens, a bare mis-cased `Interaction`
+  // CTA entry, the CTA_Label key that doesn't exist — counts NOTHING and
+  // silently zeroes Views/CTA taps, while overriding the (now correct)
+  // defaults. Rewrite exactly those legacy values to the confirmed taxonomy
+  // once; anything else the admin saved is kept, and the flag stops this from
+  // ever fighting a deliberate later edit.
+  let healed = false;
+  try {
+    if (db.getSetting('posthog_map_healed', '') !== '1') {
+      const raw = db.getSetting('posthog_metric_map', '');
+      if (raw) {
+        const m = JSON.parse(raw) || {};
+        const scr = nameList(m.screenEvents ?? []);
+        if (!scr.length || scr.every((e) => e === '$screen' || e === '$pageview')) m.screenEvents = DEFAULT_MAP.screenEvents;
+        const cta = nameList(m.ctaEvents ?? []).filter((e) => e.toLowerCase() !== 'interaction');
+        m.ctaEvents = cta.length ? cta : DEFAULT_MAP.ctaEvents;
+        let bd = nameList(m.breakdownProps ?? []).filter((k) => k !== 'CTA_Label');
+        if (!bd.length) bd = [...DEFAULT_MAP.breakdownProps];
+        else if (!bd.includes('cta_label')) bd.splice(1, 0, 'cta_label');
+        m.breakdownProps = bd;
+        if (String(m.ctaLabelProp || '') === 'CTA_Label') m.ctaLabelProp = DEFAULT_MAP.ctaLabelProp;
+        db.setSetting('posthog_metric_map', JSON.stringify(m));
+        healed = true;
+      }
+      db.setSetting('posthog_map_healed', '1');
+    }
+  } catch { /* an unparseable stored map already falls back to the defaults */ }
+  if (startTimer) {
+    const timer = setInterval(() => tick().catch(() => {}), 60 * 60_000);
+    timer.unref?.();
+    // The heal changes what Views/CTA taps COUNT — restate the whole rollup
+    // history once, unprompted, so the fixed numbers appear without anyone
+    // pressing Sync. Delayed so boot finishes first.
+    if (healed && isConfigured()) setTimeout(() => syncDaily(BACKFILL_DAYS).catch((e) => console.error('[posthog] heal resync failed:', e.message)), 5_000).unref?.();
+  }
 
   // ── client scoping: entity → Howler event ids (fail closed) ────────────────────
   // From the entity's suites' locked filters: core_events.id values directly;
