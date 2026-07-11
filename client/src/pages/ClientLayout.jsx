@@ -842,6 +842,17 @@ export default function ClientLayout() {
                     <span style={ellip}>Your journey</span>
                   </button>
                   )}
+                  {/* App — same item as the desktop sidebar; the drawer keeps its own copy. */}
+                  {!opsOnly && fl('appanalytics') && (
+                  <button
+                    className={`nav-row${onAppAnalytics ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onAppAnalytics ? 700 : 500 }}
+                    onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📲</span>
+                    <span style={ellip}>App</span>
+                  </button>
+                  )}
                   {fl('report') && (<>
                   <button
                     className={`nav-row${onProduct ? ' active' : ''}`}
