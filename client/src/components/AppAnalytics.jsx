@@ -1011,7 +1011,7 @@ function CtaLabelsCard({ loader, admin = false }) {
   );
 }
 
-// 🏆 Top users — the 10 most active people in the window, its own card (moved
+// 🏆 Super fans — the 10 most active people in the window, its own card (moved
 // out of the App-users list per Shai). Auto-loads: it's a headline metric, and
 // the server caches the query.
 function TopUsersCard({ loader, win }) {
@@ -1029,8 +1029,8 @@ function TopUsersCard({ loader, win }) {
   const max = Math.max(1, ...(rows || []).map((p) => p.interactions || 0));
   return (
     <div style={{ ...card, marginTop: 12 }}>
-      <div style={title}>🏆 Top users</div>
-      <p style={sub}>The 10 most active app users {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'}, by interactions.</p>
+      <div style={title}>🏆 Super fans</div>
+      <p style={sub}>Your 10 biggest super fans {win ? `between ${fmtDay(win.from)} and ${fmtDay(win.to)}` : 'in this window'} — the most active people in the app, by interactions.</p>
       {error && <div style={errBox}>{error}</div>}
       {!rows && !error && <p style={mutedTxt}>Loading…</p>}
       {rows && rows.length > 0 && (

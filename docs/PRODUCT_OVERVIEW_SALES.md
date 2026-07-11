@@ -571,7 +571,7 @@ numbers they're about to become."
   the `App analytics` feature flag, default off while in beta).
 - **App users, by name** — the actual people in the app (email, first name,
   surname, mobile from PostHog profiles), searchable, pageable, orderable by
-  most-recent or most-active (top users), and exportable to CSV — per client
+  most-recent or most-active (🏆 Super fans), and exportable to CSV — per client
   (only people who touched THEIR events) or app-wide for Howler.
 - **"What's driving it" breakdowns** — the busiest values behind the numbers
   (interaction type, CTA label, surface — configurable), as a ranked table AND

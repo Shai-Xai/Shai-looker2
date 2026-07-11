@@ -40,7 +40,7 @@ You are given everything shown on one client's App analytics page for a date win
 
 Write the page's story for a non-technical organiser:
 - Open with 1-2 sentences on the headline: how their events are doing inside the app this window, and the direction of travel.
-- Then 3-6 bullets with the most important specific findings, always with numbers: trend turns and spikes (tie them to the posts / campaign sends / link-click surges that plausibly drove them — they carry timestamps), what people actually do in the app (interaction types, surfaces, CTA taps vs views), the standout posts by views, and anything notable about the top users.
+- Then 3-6 bullets with the most important specific findings, always with numbers: trend turns and spikes (tie them to the posts / campaign sends / link-click surges that plausibly drove them — they carry timestamps), what people actually do in the app (interaction types, surfaces, CTA taps vs views), the standout posts by views, and anything notable about the super fans (the most active app users).
 - End with "Try next:" and 2-3 concrete suggestions grounded in THIS data — e.g. repeat the format/timing of the post that outperformed, tag campaigns to the app, place CTAs on the busiest surface, re-engage a quiet stretch. No generic advice.
 
 Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
@@ -94,7 +94,7 @@ function buildAppInsightPrompt({ scopeLabel, report, live, time = null, moments:
   }
   if (clicks.length) L.push('', `App-link clicks by day: ${clicks.map((r) => `${r.date}:${r.clicks}`).join(' · ')} (total ${clicks.reduce((a, r) => a + r.clicks, 0)}).`);
   if (topUsers.length) {
-    L.push('', 'Most active app users (name/email · interactions · last seen):');
+    L.push('', 'Super fans — the most active app users (name/email · interactions · last seen):');
     for (const u of topUsers) L.push(`${[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || 'unknown'} · ${u.interactions} · ${String(u.lastSeen).slice(0, 16)}`);
   }
   return L.join('\n');
