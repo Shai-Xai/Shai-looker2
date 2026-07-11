@@ -309,7 +309,8 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
       return HOGQL(['label', 'clicks', 'uniques'], Array.from({ length: 15 }, (_, i) => [`cta_${i}`, 150 - i * 10, 40 - i]));
     },
   });
-  // Unmapped (no ctaEvents) → mapped:false and NO PostHog query burned.
+  // Unmapped (ctaEvents emptied by the admin) → mapped:false, NO PostHog query burned.
+  h.settings.posthog_metric_map = JSON.stringify({ ctaEvents: [] });
   const cold = await h.invoke('GET /api/my/app-analytics/:entityId/cta-labels', { params: { entityId: 'e1' } });
   assert.equal(cold.status, 200);
   assert.equal(cold.body.mapped, false);
@@ -346,7 +347,7 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
 test('reports carry the configured breakdown keys and live window uniques', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
-  assert.deepEqual(h.api.appReport(7).breakdowns, ['interaction_type', 'CTA_Label', 'surface']);
+  assert.deepEqual(h.api.appReport(7).breakdowns, ['interaction_type', 'cta_label', 'surface']);
   const u = await h.api.windowUniques(['101'], 28);
   assert.equal(typeof u, 'number');
 });

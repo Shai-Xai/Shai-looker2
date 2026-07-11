@@ -54,13 +54,13 @@ whole app" selector active):
 
 | Box | Meaning | What we use today |
 |---|---|---|
-| **Screen / page views** | what counts as a "view" | `interaction : interaction_type=<the view value>` — find it in the breakdown (below) |
-| **CTA taps** | ticket-button and other CTA taps | `interaction : interaction_type=cta_click` ✅ confirmed |
+| **Screen / page views** | what counts as a "view" | `interaction : interaction_type=content_view` ✅ confirmed — now the built-in default |
+| **CTA taps** | ticket-button and other CTA taps | `interaction : interaction_type=cta_click` ✅ confirmed — now the built-in default |
 | **Purchases** | in-app purchase events | only if a purchase-ish value exists; otherwise **leave empty** — real ticket revenue lives in the Looker dashboards |
 | **Notifications** | notification opt-ins/opens | map when the app sends them |
 | **Purchase value property** | the property carrying an amount on purchase events | only if Purchases is mapped |
-| **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | default `CTA_Label`; if the chart stays empty, find the real key with 🔬 Diagnose → property explorer → **List keys** on `interaction : interaction_type=cta_click` |
-| **Breakdown properties** | which property chips show in "What's driving it" | `interaction_type`, `CTA_Label`, `surface` (already set) |
+| **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | `cta_label` ✅ confirmed (lowercase — NOT `CTA_Label`) — now the built-in default |
+| **Breakdown properties** | which property chips show in "What's driving it" | `interaction_type`, `cta_label`, `surface` — now the built-in default |
 | **Person profile properties** | where names/emails/mobiles live on PostHog person profiles | run 🔬 Diagnose and copy the real keys (email is `$email`; the name/surname/mobile keys likely differ from the defaults) |
 
 ---

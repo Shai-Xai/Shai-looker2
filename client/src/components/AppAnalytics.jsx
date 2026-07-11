@@ -652,7 +652,7 @@ function EventsTable({ rows, title: heading, days }) {
 const SERIES_COLORS = ['#ff385c', '#3b82f6', '#d97706', '#0d9488', '#8b5cf6', '#0891b2'];
 
 // What's driving the numbers — top values of the configured breakdown properties
-// (interaction_type / CTA_Label / surface), live-queried per chip with a short
+// (interaction_type / cta_label / surface), live-queried per chip with a short
 // server-side cache, PLUS a per-value daily line chart (the legend is the
 // filter — click a value to hide/show its line). Scoped exactly like the rest
 // of the surface.
@@ -949,10 +949,10 @@ function MappingEditor() {
           <input style={input} value={m.purchaseValueProp || ''} onChange={(e) => setM({ ...m, purchaseValueProp: e.target.value })} placeholder="e.g. value" autoComplete="off" />
         </label>
         <label style={lbl}>CTA label property (the 🎯 "CTA clicks by label" chart)
-          <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. CTA_Label" autoComplete="off" />
+          <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. cta_label" autoComplete="off" />
         </label>
         <label style={lbl}>Breakdown properties (the "What's driving it" chips)
-          <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\nCTA_Label\nsurface'} />
+          <textarea style={{ ...input, minHeight: 64, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} value={listVal('breakdownProps')} onChange={(e) => setList('breakdownProps', e.target.value)} placeholder={'interaction_type\ncta_label\nsurface'} />
         </label>
       </div>
       <div style={{ ...title, fontSize: 12.5, marginTop: 10 }}>Person profile properties</div>

@@ -148,18 +148,19 @@ function nameList(v) {
   return [...new Set(arr.map((s) => String(s || '').trim()).filter(Boolean))].slice(0, 40);
 }
 
-// Which PostHog events mean what. Defaults cover PostHog's autocapture names;
-// the real Howler taxonomy is mapped in Admin → App analytics (events catalog
-// alongside). Person-profile property names ride in the same setting.
+// Which PostHog events mean what. Defaults are the CONFIRMED Howler taxonomy
+// (one generic `interaction` event, meanings in `interaction_type`; the label
+// key is lowercase `cta_label` — verified via Diagnose, 2026-07-11), so a
+// blank mapping already counts right. Overridable in Admin → App analytics.
 const DEFAULT_MAP = {
-  screenEvents: ['$screen', '$pageview'],
-  ctaEvents: [],
-  ctaLabelProp: 'CTA_Label',
+  screenEvents: ['interaction : interaction_type=content_view'],
+  ctaEvents: ['interaction : interaction_type=cta_click'],
+  ctaLabelProp: 'cta_label',
   purchaseEvents: [],
   purchaseValueProp: '',
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
-  breakdownProps: ['interaction_type', 'CTA_Label', 'surface'],
+  breakdownProps: ['interaction_type', 'cta_label', 'surface'],
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
 };
 
@@ -512,7 +513,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     };
   }
 
-  // Top values of one breakdown property (interaction_type / CTA_Label / surface
+  // Top values of one breakdown property (interaction_type / cta_label / surface
   // …), counted + uniqued over the window, optionally scoped to event ids. Which
   // keys are offered comes from the mapping (metricMap().breakdownProps).
   async function breakdown({ ids = null, days, from, to, key }) {
@@ -1016,7 +1017,7 @@ function owlTool({ db, getApi }) {
   }
   const schema = {
     name: 'getAppAnalytics',
-    description: 'Howler CONSUMER APP engagement for this client\'s events, from PostHog: unique viewers (live + window), views, interactions, CTA taps and in-app purchase signals — per event, with optional breakdowns (e.g. interaction_type, CTA_Label, surface — the reply lists breakdownsAvailable). Use for "how is my event doing in the app", "what are people tapping", "app views this week". Read-only.',
+    description: 'Howler CONSUMER APP engagement for this client\'s events, from PostHog: unique viewers (live + window), views, interactions, CTA taps and in-app purchase signals — per event, with optional breakdowns (e.g. interaction_type, cta_label, surface — the reply lists breakdownsAvailable). Use for "how is my event doing in the app", "what are people tapping", "app views this week". Read-only.',
     input_schema: { type: 'object', properties: {
       days: { type: 'number', description: 'Window in days (default 28, max 90).' },
       breakdown: { type: 'string', description: 'Optional property to break down by — call without it first; the reply lists breakdownsAvailable.' },
