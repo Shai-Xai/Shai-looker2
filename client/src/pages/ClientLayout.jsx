@@ -524,6 +524,20 @@ export default function ClientLayout() {
                 arrow lives), so surface the collapse control here for them. */}
             {opsOnly && !isMobile && <button onClick={toggleCollapsed} title="Collapse sidebar" style={iconBtn}>⟨</button>}
           </div>
+          {/* App — the client's events inside the Howler consumer app (PostHog).
+              Sits directly below the suites: it's event insight, not an Engage
+              feature, so it must not depend on engage flags or permissions. */}
+          {!opsOnly && fl('appanalytics') && (
+          <button
+            ref={onAppAnalytics ? activeRef : null}
+            className={`nav-row${onAppAnalytics ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onAppAnalytics ? 600 : 500 }}
+            onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
+            <span style={ellip}>App</span>
+          </button>
+          )}
           {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
           <button
             ref={onGoals ? activeRef : null}
@@ -602,20 +616,6 @@ export default function ClientLayout() {
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>⚡</span>
             <span style={ellip}>Your journey</span>
-          </button>
-          )}
-          {/* App — the client's events inside the Howler consumer app (PostHog).
-              Top-level on purpose: it's insight, not an Engage feature, and must
-              not depend on the engage flag or campaign permissions. */}
-          {!opsOnly && fl('appanalytics') && (
-          <button
-            ref={onAppAnalytics ? activeRef : null}
-            className={`nav-row${onAppAnalytics ? ' active' : ''}`}
-            style={{ ...rowBtn, fontWeight: onAppAnalytics ? 600 : 500 }}
-            onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
-          >
-            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
-            <span style={ellip}>App</span>
           </button>
           )}
           {/* Product — report bugs/ideas and track them (everyone, incl. ops-only). */}
@@ -770,6 +770,17 @@ export default function ClientLayout() {
               {(
                 <>
                   <div style={{ borderTop: '1px solid var(--hairline)', margin: '10px 4px' }} />
+                  {/* App — same item as the desktop sidebar; the drawer keeps its own copy. */}
+                  {!opsOnly && fl('appanalytics') && (
+                  <button
+                    className={`nav-row${onAppAnalytics ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onAppAnalytics ? 700 : 500 }}
+                    onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📲</span>
+                    <span style={ellip}>App</span>
+                  </button>
+                  )}
                   {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
                   <button
                     className={`nav-row${onGoals ? ' active' : ''}`}
@@ -840,17 +851,6 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>⚡</span>
                     <span style={ellip}>Your journey</span>
-                  </button>
-                  )}
-                  {/* App — same item as the desktop sidebar; the drawer keeps its own copy. */}
-                  {!opsOnly && fl('appanalytics') && (
-                  <button
-                    className={`nav-row${onAppAnalytics ? ' active' : ''}`}
-                    style={{ ...mRowSuite, fontWeight: onAppAnalytics ? 700 : 500 }}
-                    onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); setNavOpen(false); }}
-                  >
-                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📲</span>
-                    <span style={ellip}>App</span>
                   </button>
                   )}
                   {fl('report') && (<>
