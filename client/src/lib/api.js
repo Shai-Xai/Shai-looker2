@@ -236,6 +236,8 @@ export const api = {
   adminAppBreakdownSeries: ({ key, days, from, to, entityId, granularity } = {}) => fetch(`/api/admin/app-analytics/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
   myAppBreakdownSeries: (entityId, { key, days, from, to, granularity } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}`).then(json),
   adminAppToday: ({ entityId, from, to } = {}) => fetch(`/api/admin/app-analytics/today?entityId=${encodeURIComponent(entityId || '')}&from=${from || ''}&to=${to || ''}`).then(json),
+  adminAppMoments: ({ entityId, from, to } = {}) => fetch(`/api/admin/app-analytics/moments?entityId=${encodeURIComponent(entityId || '')}&from=${from || ''}&to=${to || ''}`).then(json),
+  myAppMoments: (entityId, { from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/moments?from=${from || ''}&to=${to || ''}`).then(json),
   myAppToday: (entityId, { from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/today?from=${from || ''}&to=${to || ''}`).then(json),
   // Google Drive sources (the Owl reads the client's shared files) — dual-surface
   myDriveView: (entityId) => fetch(`/api/my/drive/${entityId}`).then(json),

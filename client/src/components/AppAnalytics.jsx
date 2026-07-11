@@ -156,9 +156,12 @@ export function AppAnalyticsAdmin() {
   const [syncMsg, setSyncMsg] = useState('');
   const winKey = `${entityId || 'all'}-${range.from}-${range.to}`;
   useEffect(() => { api.adminListEntities().then((e) => setClients((e || []).map((x) => ({ id: x.id, name: x.name })))).catch(() => {}); }, []);
+  const [moments, setMoments] = useState([]);
+  const [linkClicks, setLinkClicks] = useState([]);
   const load = useCallback(() => {
     setError('');
     api.adminAppAnalytics({ from: range.from, to: range.to, entityId }).then(setData).catch((e) => { setError(e.message); setData(null); });
+    api.adminAppMoments({ from: range.from, to: range.to, entityId }).then((r) => { setMoments(r.moments || []); setLinkClicks(r.linkClicks || []); }).catch(() => { setMoments([]); setLinkClicks([]); });
   }, [range.from, range.to, entityId]);
   useEffect(() => { load(); }, [load]);
 
@@ -224,10 +227,12 @@ export function AppAnalyticsAdmin() {
 
       <StatRow stats={stats} isMobile={isMobile} />
       {gran === 'hour' ? (
-        <TodayChart key={`hourly-${winKey}`} loader={() => api.adminAppToday({ entityId, from: range.from, to: range.to })} />
+        <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => api.adminAppToday({ entityId, from: range.from, to: range.to })} />
       ) : (
       <SeriesCard
         series={data.series || []}
+        moments={moments}
+        linkClicks={linkClicks}
         metrics={perClient
           ? [['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
               ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]
@@ -256,12 +261,16 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const winKey = `${entityId}-${range.from}-${range.to}`;
+  const [moments, setMoments] = useState([]);
+  const [linkClicks, setLinkClicks] = useState([]);
   useEffect(() => {
     if (!entityId) return;
     setError('');
     const w = { from: range.from, to: range.to };
     const req = scope === 'admin-client' ? api.adminAppAnalytics({ ...w, entityId }) : api.myAppAnalytics(entityId, w);
     req.then(setData).catch((e) => { setError(e.message); setData(null); });
+    (scope === 'admin-client' ? api.adminAppMoments({ ...w, entityId }) : api.myAppMoments(entityId, w))
+      .then((r) => { setMoments(r.moments || []); setLinkClicks(r.linkClicks || []); }).catch(() => { setMoments([]); setLinkClicks([]); });
   }, [entityId, scope, range.from, range.to]);
 
   if (error) return <div style={errBox}>{error}</div>;
@@ -295,9 +304,9 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases]].filter(([, v]) => v > 0),
       ]} />
       {gran === 'hour' ? (
-        <TodayChart key={`hourly-${winKey}`} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
+        <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
       ) : (
-      <SeriesCard series={data.series || []} isMobile={isMobile}
+      <SeriesCard series={data.series || []} moments={moments} linkClicks={linkClicks} isMobile={isMobile}
         metrics={[['uniques', 'Unique viewers'], ['interactions', 'Interactions'],
           ...[['views', 'Views', data.totals?.views], ['ctaTaps', 'CTA taps', data.totals?.ctaTaps], ['purchases', 'Purchases', data.totals?.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])]} />
       )}
@@ -329,30 +338,78 @@ function StatRow({ stats, isMobile }) {
   );
 }
 
+// Moments (community posts, campaign sends) drawn as dashed vertical markers so
+// spikes line up with their cause. Campaign #3b82f6 / post #0d9488 — validated
+// series palette members; hover a line for its name.
+const MOMENT_COLOR = { campaign: '#3b82f6', post: '#0d9488' };
+const momentMarkLine = (moments, toX) => ({
+  symbol: 'none', animation: false,
+  label: { show: false },
+  emphasis: { label: { show: true, formatter: (pp) => pp.name, fontSize: 10, color: 'var(--text, #333)' } },
+  data: moments.map((m) => ({
+    name: `${m.type === 'campaign' ? '📣' : '👥'} ${m.label}`,
+    xAxis: toX(m),
+    lineStyle: { color: MOMENT_COLOR[m.type] || '#888', width: 1.5, opacity: 0.75, type: 'dashed' },
+  })).filter((d) => d.xAxis != null),
+});
+function MomentToggles({ moments, showPosts, setShowPosts, showCampaigns, setShowCampaigns }) {
+  const nPosts = moments.filter((m) => m.type === 'post').length;
+  const nCampaigns = moments.filter((m) => m.type === 'campaign').length;
+  if (!nPosts && !nCampaigns) return null;
+  return (
+    <>
+      {nCampaigns > 0 && <Chip on={showCampaigns} onClick={() => setShowCampaigns(!showCampaigns)}>📣 Campaigns ({nCampaigns})</Chip>}
+      {nPosts > 0 && <Chip on={showPosts} onClick={() => setShowPosts(!showPosts)}>👥 Posts ({nPosts})</Chip>}
+    </>
+  );
+}
+const shownMoments = (moments, showPosts, showCampaigns) =>
+  (moments || []).filter((m) => (m.type === 'post' ? showPosts : m.type === 'campaign' ? showCampaigns : false)).slice(0, 60);
+
 // One recessive line chart; chips pick WHICH single series shows (one axis, no
 // dual scales). `series` rows are the rollup rows keyed by `date`.
-function SeriesCard({ series, metrics, isMobile }) {
+function SeriesCard({ series, metrics, moments = [], linkClicks = [], isMobile }) {
   const [metric, setMetric] = useState(metrics[0][0]);
+  const [showPosts, setShowPosts] = useState(true);
+  const [showCampaigns, setShowCampaigns] = useState(true);
+  const [showClicks, setShowClicks] = useState(false);
+  const totalClicks = linkClicks.reduce((a, r) => a + (r.clicks || 0), 0);
   const option = useMemo(() => {
     const brand = brandPrimary();
+    const marks = shownMoments(moments, showPosts, showCampaigns);
+    const metricLabel = (metrics.find(([k]) => k === metric) || [])[1] || metric;
+    const withClicks = showClicks && linkClicks.length > 0;
     return {
       animationDuration: 300,
-      grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
+      grid: { left: 8, right: 12, top: withClicks ? 30 : 12, bottom: 8, containLabel: true },
+      legend: withClicks ? { top: 0, left: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: 'var(--muted, #888)', fontSize: 11 } } : undefined,
       tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
       xAxis: { type: 'time', axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: [{
+        name: metricLabel,
         type: 'line', showSymbol: false, smooth: 0.15,
-        lineStyle: { width: 2, color: brand },
+        lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
         data: series.map((r) => [r.date, r[metric] == null ? 0 : r[metric]]),
-      }],
+        markLine: momentMarkLine(marks, (m) => String(m.at).replace('T', ' ').slice(0, 19)),
+      },
+      // ChottuLink clicks ride the SAME count axis (both are event counts) as a
+      // thin dashed companion line — never a second y-axis.
+      ...(withClicks ? [{
+        name: '🔗 Link clicks',
+        type: 'line', showSymbol: false, smooth: 0.15,
+        lineStyle: { width: 2, type: 'dashed', color: '#0891b2' }, itemStyle: { color: '#0891b2' },
+        data: linkClicks.map((r) => [r.date, r.clicks]),
+      }] : [])],
     };
-  }, [series, metric]);
+  }, [series, metric, metrics, moments, showPosts, showCampaigns, showClicks, linkClicks]);
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
+        <MomentToggles moments={moments} showPosts={showPosts} setShowPosts={setShowPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} />
+        {linkClicks.length > 0 && <Chip on={showClicks} onClick={() => setShowClicks(!showClicks)}>🔗 Link clicks ({fmt(totalClicks)})</Chip>}
       </div>
       {series.length === 0
         ? <p style={sub}>No rollup data yet — run a sync (or wait for tonight's).</p>
@@ -364,11 +421,13 @@ function SeriesCard({ series, metrics, isMobile }) {
 // Today, hour by hour — live from PostHog (same 4-min cache). Swaps in for the
 // daily SeriesCard when the "Today" chip is active; same one-metric-at-a-time
 // chips, zero/unmapped metrics hidden.
-function TodayChart({ loader }) {
+function TodayChart({ loader, moments = [] }) {
   const isMobile = useIsMobile();
   const [out, setOut] = useState(null);
   const [error, setError] = useState('');
   const [metric, setMetric] = useState('uniques');
+  const [showPosts, setShowPosts] = useState(true);
+  const [showCampaigns, setShowCampaigns] = useState(true);
   useEffect(() => {
     let dead = false;
     loader().then((r) => { if (!dead) setOut(r); }).catch((e) => { if (!dead) setError(e.message); });
@@ -381,24 +440,36 @@ function TodayChart({ loader }) {
     ...[['views', 'Views', totals.views], ['ctaTaps', 'CTA taps', totals.ctaTaps], ['purchases', 'Purchases', totals.purchases]].filter(([, , v]) => v > 0).map(([k, l]) => [k, l])];
   const option = useMemo(() => {
     const brand = brandPrimary();
+    // Category axis carries the FULL hour bucket (label shows HH:MM) so moment
+    // markers can address their exact hour, even across multi-day hourly ranges.
+    const buckets = hours.map((h) => String(h.hour));
+    const bucketSet = new Set(buckets);
+    const toBucket = (m) => {
+      const at = String(m.at).replace('T', ' ');
+      const b = `${at.slice(0, 13)}:00:00`;
+      return bucketSet.has(b) ? b : null;
+    };
+    const marks = shownMoments(moments, showPosts, showCampaigns);
     return {
       animationDuration: 300,
       grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
       tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '—' : Number(v).toLocaleString('en-ZA')) },
-      xAxis: { type: 'category', data: hours.map((h) => String(h.hour).slice(11, 16) || String(h.hour)), axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true }, splitLine: { show: false } },
+      xAxis: { type: 'category', data: buckets, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (v) => String(v).slice(11, 16) }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: [{
         type: 'line', showSymbol: hours.length < 3, smooth: 0.15,
         lineStyle: { width: 2, color: brand }, itemStyle: { color: brand },
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: `${brand}45` }, { offset: 1, color: `${brand}05` }]) },
         data: hours.map((h) => h[metric] == null ? 0 : h[metric]),
+        markLine: momentMarkLine(marks, toBucket),
       }],
     };
-  }, [out, metric]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [out, metric, moments, showPosts, showCampaigns]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         {metrics.map(([k, label]) => <Chip key={k} on={metric === k} onClick={() => setMetric(k)}>{label}</Chip>)}
+        <MomentToggles moments={moments} showPosts={showPosts} setShowPosts={setShowPosts} showCampaigns={showCampaigns} setShowCampaigns={setShowCampaigns} />
       </div>
       {error && <div style={errBox}>{error}</div>}
       {!out && !error && <p style={mutedTxt}>Loading…</p>}

@@ -413,6 +413,46 @@ test('history search sweeps event names AND breakdown values over a year, escape
   assert.equal(denied.status, 403);
 });
 
+test('moments overlay merges posts + campaign sends, scoped and windowed; graceful without those modules', async () => {
+  const h = makeHarness({});
+  // Fresh harness has neither sibling module's tables — must degrade, not throw.
+  assert.deepEqual(h.api.moments('e1', { days: 28 }), []);
+  h.sqlite.exec(`
+    CREATE TABLE socialplus_posts (entity_id TEXT, post_id TEXT, community_name TEXT, text TEXT, posted_at TEXT);
+    CREATE TABLE actions (entity_id TEXT, title TEXT, status TEXT, approved_at TEXT);
+  `);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e1', 'p1', 'Stella fans', 'Lineup drop! 🎉', `${today}T09:00:00.000Z`);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e2', 'p2', 'Other club', 'not yours', `${today}T10:00:00.000Z`);
+  h.sqlite.prepare('INSERT INTO socialplus_posts VALUES (?,?,?,?,?)').run('e1', 'p3', 'Stella fans', 'ancient post', '2020-01-01T09:00:00.000Z');
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?)').run('e1', 'VIP push', 'done', `${today}T12:00:00.000Z`);
+  h.sqlite.prepare('INSERT INTO actions VALUES (?,?,?,?)').run('e1', 'Unsent draft', 'draft', `${today}T13:00:00.000Z`);
+  const m = h.api.moments('e1', { days: 28 });
+  assert.deepEqual(m.map((x) => x.type), ['post', 'campaign'], 'their post + their sent campaign, in time order');
+  assert.match(m[0].label, /Stella fans: Lineup drop/);
+  assert.equal(m[1].label, 'VIP push');
+  assert.ok(!m.some((x) => /not yours|ancient|Unsent/.test(x.label)), 'other entities, out-of-window and unsent drafts excluded');
+  const denied = await h.invoke('GET /api/my/app-analytics/:entityId/moments', { params: { entityId: 'e2' }, user: { id: 'u1', role: 'member', entityIds: ['e1'] } });
+  assert.equal(denied.status, 403);
+});
+
+test('link clicks derive daily deltas from Chottu cumulative snapshots, scoped', () => {
+  const h = makeHarness({});
+  assert.deepEqual(h.api.linkClicks('e1', { days: 28 }), [], 'graceful when Chottu is not installed');
+  h.sqlite.exec(`
+    CREATE TABLE chottu_links (id TEXT PRIMARY KEY, entity_id TEXT);
+    CREATE TABLE chottu_link_stats (link_id TEXT, captured_on TEXT, total_clicks INTEGER, clicks_7d INTEGER, clicks_30d INTEGER);
+  `);
+  const d = (off) => new Date(Date.now() + off * 86400_000).toISOString().slice(0, 10);
+  h.sqlite.prepare('INSERT INTO chottu_links VALUES (?,?)').run('l1', 'e1');
+  h.sqlite.prepare('INSERT INTO chottu_links VALUES (?,?)').run('l2', 'e2');
+  h.sqlite.prepare('INSERT INTO chottu_link_stats VALUES (?,?,?,0,0)').run('l1', d(-2), 100);
+  h.sqlite.prepare('INSERT INTO chottu_link_stats VALUES (?,?,?,0,0)').run('l1', d(-1), 160);
+  h.sqlite.prepare('INSERT INTO chottu_link_stats VALUES (?,?,?,0,0)').run('l1', d(0), 190);
+  h.sqlite.prepare('INSERT INTO chottu_link_stats VALUES (?,?,?,0,0)').run('l2', d(-1), 9999);
+  const out = h.api.linkClicks('e1', { days: 28 });
+  assert.deepEqual(out, [{ date: d(-1), clicks: 60 }, { date: d(0), clicks: 30 }], 'daily deltas, other entities excluded');
+});
+
 test('tick syncs once per day and respects the kill switch', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.tick();

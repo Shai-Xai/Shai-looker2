@@ -501,6 +501,51 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     };
   }
 
+  // Moments — things WE did that could move the app numbers: community posts
+  // (Social+, server/socialplus.js) and campaign sends (Engage, server/actions.js),
+  // overlaid on the charts as markers so a DAU spike lines up with its cause.
+  // Reads sibling modules' tables read-only and degrades to [] when a module
+  // isn't installed. Timestamps are ISO strings; lexical compare against the
+  // window works ('~' sorts after 'T', so `to~` is an inclusive end-of-day cap).
+  function moments(entityId, o) {
+    const w = win(o);
+    const cap = `${w.to}~`;
+    const out = [];
+    try {
+      const rows = entityId
+        ? sql.prepare('SELECT community_name, text, posted_at FROM socialplus_posts WHERE entity_id=? AND posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100').all(entityId, w.from, cap)
+        : sql.prepare('SELECT community_name, text, posted_at FROM socialplus_posts WHERE posted_at>=? AND posted_at<=? ORDER BY posted_at DESC LIMIT 100').all(w.from, cap);
+      for (const r of rows) out.push({ at: String(r.posted_at), type: 'post', label: `${r.community_name ? `${r.community_name}: ` : ''}${String(r.text || '').replace(/\s+/g, ' ').slice(0, 60) || 'Community post'}` });
+    } catch { /* Social+ not installed — no post markers */ }
+    try {
+      const rows = entityId
+        ? sql.prepare("SELECT title, approved_at FROM actions WHERE entity_id=? AND approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(entityId, w.from, cap)
+        : sql.prepare("SELECT title, approved_at FROM actions WHERE approved_at>=? AND approved_at<=? AND status IN ('done','running') ORDER BY approved_at DESC LIMIT 100").all(w.from, cap);
+      for (const r of rows) out.push({ at: String(r.approved_at), type: 'campaign', label: String(r.title || 'Campaign').slice(0, 60) });
+    } catch { /* Engage not installed — no campaign markers */ }
+    return out.sort((a, b) => (a.at < b.at ? -1 : 1));
+  }
+  // Daily ChottuLink clicks as an overlay SERIES (not markers): Chottu snapshots
+  // each link's cumulative total once a day (chottu_link_stats), so clicks-on-day
+  // = today's total − yesterday's, summed over the entity's links. Needs two
+  // snapshots to produce a point — history deepens daily. [] when not installed.
+  function linkClicks(entityId, o) {
+    const w = win(o);
+    try {
+      const rows = entityId
+        ? sql.prepare(`SELECT s.captured_on AS date, SUM(s.total_clicks) AS total FROM chottu_link_stats s JOIN chottu_links l ON l.id = s.link_id
+            WHERE l.entity_id=? AND s.captured_on >= date(?, '-1 day') AND s.captured_on <= ? GROUP BY s.captured_on ORDER BY s.captured_on`).all(entityId, w.from, w.to)
+        : sql.prepare(`SELECT s.captured_on AS date, SUM(s.total_clicks) AS total FROM chottu_link_stats s
+            WHERE s.captured_on >= date(?, '-1 day') AND s.captured_on <= ? GROUP BY s.captured_on ORDER BY s.captured_on`).all(w.from, w.to)
+      const out = [];
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i].date < w.from) continue;
+        out.push({ date: String(rows[i].date), clicks: Math.max(0, (rows[i].total || 0) - (rows[i - 1].total || 0)) });
+      }
+      return out;
+    } catch { return []; /* Chottu links not installed */ }
+  }
+
   // ── routes ──────────────────────────────────────────────────────────────────────
   const myEntity = (req, res, next) => {
     const eid = req.params.entityId;
@@ -644,6 +689,10 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (eid && !ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
     res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
+  app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
+    const eid = String(req.query.entityId || '') || null;
+    res.json({ moments: moments(eid, winQ(req)), linkClicks: linkClicks(eid, winQ(req)) });
+  });
   app.get('/api/admin/app-analytics/today', auth.requireAdmin, asyncHandler(async (req, res) => {
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
@@ -680,6 +729,9 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
     if (!ids.length) return res.json({ key, days: win(winQ(req)).days, values: [] });
     res.json(await breakdown({ ids, ...winQ(req), key }));
   }));
+  app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
+    res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
+  });
   app.get('/api/my/app-analytics/:entityId/today', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ asOf: now(), hours: [] });
@@ -693,7 +745,7 @@ function mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer = true }) 
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, people, isConfigured, hogql };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, todayHourly, moments, linkClicks, people, isConfigured, hogql };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },
