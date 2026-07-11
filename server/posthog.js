@@ -46,11 +46,12 @@ Write the page's story for a non-technical organiser:
 Rules: only use the numbers given — never invent, recompute or extrapolate; skip sections with no data rather than mentioning their absence; attribute spikes cautiously ("lines up with", "likely helped") rather than claiming causation; be concise and skimmable; no headings other than the closing "Try next:".`;
 
 // Compact fact sheet the model reads — one section per page panel, numbers only.
-function buildAppInsightPrompt({ scopeLabel, report, live, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [], ctaLabels = null, funnel = null }) {
+function buildAppInsightPrompt({ scopeLabel, report, live, time = null, moments: mom = [], linkClicks: clicks = [], breakdowns = [], topUsers = [], ctaLabels = null, funnel = null }) {
   const L = [];
   if (scopeLabel) L.push(`Scope: ${scopeLabel}.`);
   L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
   if (live) L.push(`Live: ${live.actives} unique viewers today so far; ${live.windowUniques} unique viewers across the whole window.`);
+  if (time && time.sessions) L.push(`Time in app (window): average session ${time.avgSessionSec}s; average total per user ${time.avgUserSec}s, over ${time.sessions} sessions (floors — single-event sessions measure 0s).`);
   const t = report.totals || {};
   L.push(report.kind === 'app'
     ? `Window totals (whole app): interactions ${t.interactions || 0}; views ${t.views || 0}; new users ${t.newUsers || 0}; sessions ${t.sessions || 0}.`
@@ -627,8 +628,30 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const [row] = await hogql(`SELECT uniq(person_id) AS u FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
     return Number(row?.u) || 0;
   }
+  // ⏱ time in app — average session length (first→last event per $session_id)
+  // and average TOTAL time per user over the window, one query for both.
+  // Single-event sessions measure 0s, so treat these as floors, not truth.
+  async function timeMetrics(ids, o) {
+    const w = win(o);
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const sid = `toString(${prop('$session_id')})`;
+    const [row] = await hogql(`
+      SELECT count() AS sessions, uniq(person) AS users, sum(dur) AS totalSeconds
+      FROM (SELECT person_id AS person, ${sid} AS sid, dateDiff('second', min(timestamp), max(timestamp)) AS dur
+            FROM events WHERE ${tsWin(w)} AND notEmpty(${sid})${scope} GROUP BY person, sid)`, { ttl: LIVE_TTL });
+    const sessions = Number(row?.sessions) || 0;
+    const users = Number(row?.users) || 0;
+    const total = Number(row?.totalSeconds) || 0;
+    return { sessions, users, avgSessionSec: sessions ? Math.round(total / sessions) : 0, avgUserSec: users ? Math.round(total / users) : 0 };
+  }
   const withLive = async (report, ids) => {
-    try { return { ...report, live: { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, { from: report.from, to: report.to }) } }; }
+    try {
+      const live = { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, { from: report.from, to: report.to }) };
+      let time = null;
+      try { time = await timeMetrics(ids, { from: report.from, to: report.to }); } catch { /* tiles simply stay hidden */ }
+      return { ...report, live, time };
+    }
     catch (e) { return { ...report, live: null, liveError: e instanceof HttpError ? e.message : 'Live numbers are unavailable right now.' }; }
   };
 
@@ -871,6 +894,8 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     }
     let live = null;
     try { live = { ...(await liveToday(ids)), windowUniques: await windowUniques(ids, w) }; } catch { /* rollup still tells the story */ }
+    let time = null;
+    try { const t = await timeMetrics(ids, w); if (t.sessions) time = t; } catch { /* optional */ }
     const bds = [];
     for (const key of metricMap().breakdownProps.slice(0, 3)) {
       try { bds.push(await breakdown({ ids, from: w.from, to: w.to, key })); } catch { /* skip a failing key */ }
@@ -888,7 +913,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const byDay = new Map();
     for (const r of clk) byDay.set(r.date, (byDay.get(r.date) || 0) + r.clicks);
     return {
-      scopeLabel, report, live, breakdowns: bds, topUsers, ctaLabels: cta, funnel: fun,
+      scopeLabel, report, live, time, breakdowns: bds, topUsers, ctaLabels: cta, funnel: fun,
       moments: mom.sort((a, b) => (a.at < b.at ? -1 : 1)).slice(0, 120),
       linkClicks: [...byDay.entries()].sort().map(([date, clicks]) => ({ date, clicks })),
     };
@@ -1214,7 +1239,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, timeMetrics, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },

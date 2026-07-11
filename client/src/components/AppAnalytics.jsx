@@ -17,6 +17,12 @@ import AiMark from './AiMark.jsx';
 // Uninstall with server/posthog.js — see that file's header.
 
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
+// Seconds → "4m 32s" / "1h 12m" for the time-in-app tiles.
+const fmtDur = (s) => {
+  s = Math.max(0, Math.round(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}h ${m}m` : m ? (sec ? `${m}m ${sec}s` : `${m}m`) : `${sec}s`;
+};
 const DAY_CHOICES = [7, 28, 90];
 const HOURLY_MAX_DAYS = 14; // matches the server cap
 
@@ -193,6 +199,7 @@ export function AppAnalyticsAdmin() {
         ['Unique viewers', data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
+        ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]
     : [
         ['Active today', data.live?.actives, true],
@@ -202,6 +209,7 @@ export function AppAnalyticsAdmin() {
         ['Sessions', data.totals?.sessions],
         ['Interactions', data.totals?.interactions],
         ...[['Notifications', data.totals?.notifEvents]].filter(([, v]) => v > 0),
+        ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ];
 
   return (
@@ -337,6 +345,7 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
+        ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]} />
       {gran === 'hour' ? (
         <TodayChart key={`hourly-${winKey}`} moments={moments} loader={() => (scope === 'admin-client' ? api.adminAppToday({ entityId, from: range.from, to: range.to }) : api.myAppToday(entityId, { from: range.from, to: range.to }))} />
@@ -371,7 +380,7 @@ function StatRow({ stats, isMobile }) {
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? 130 : 150}px, 1fr))`, gap: 8, marginBottom: 12 }}>
       {stats.map(([label, v, live]) => (
         <div key={label} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '11px 13px' }}>
-          <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmt(v)}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'string' ? v : fmt(v)}</div>
           <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginTop: 2 }}>
             {label}{live && v != null && <span style={{ color: 'var(--success, #10b981)' }}> · live</span>}
           </div>

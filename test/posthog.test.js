@@ -391,6 +391,29 @@ test('blank event names fill in from Looker (id → name), persist, and survive 
   assert.equal(h.sqlite.prepare('SELECT event_name FROM posthog_daily_event WHERE event_ref=?').get('39450').event_name, 'G&G Winter Fest');
 });
 
+test('time-in-app: avg session + avg per-user time from one nested query, scoped, rides the report', async () => {
+  let captured = '';
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }],
+    locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => {
+      if (q.includes('AS totalSeconds')) { captured = q; return HOGQL(['sessions', 'users', 'totalSeconds'], [[40, 10, 12000]]); }
+      return syncResponder(q);
+    },
+  });
+  const t = await h.api.timeMetrics(['101'], { days: 28 });
+  assert.equal(t.avgSessionSec, 300, 'total ÷ sessions');
+  assert.equal(t.avgUserSec, 1200, 'total ÷ users');
+  assert.ok(captured.includes("dateDiff('second', min(timestamp), max(timestamp))"), 'duration = first→last event per session');
+  assert.ok(captured.includes('GROUP BY person, sid'));
+  assert.ok(captured.includes("IN ('101')"), 'scoped');
+  assert.ok(captured.includes("notEmpty(toString(properties['$session_id']))"), 'session-less events excluded');
+  await h.api.syncDaily(7);
+  const out = await h.invoke('GET /api/my/app-analytics/:entityId', { params: { entityId: 'e1' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.time.avgSessionSec, 300, 'the report carries the time metrics');
+});
+
 test('event-series: per-event daily rows from the rollup, scope is a hard wall', async () => {
   const twoEvents = (q) => {
     if (q.includes('GROUP BY day, event_ref')) {
@@ -713,8 +736,9 @@ test('Owl page-summary prompt: registered in the AI audit, fact sheet covers eve
     topUsers: [{ firstName: 'Thandi', lastName: 'Nkosi', email: 't@x.com', interactions: 31, lastSeen: '2026-07-10 23:33:00' }],
     ctaLabels: { labels: [{ label: 'view_tickets', clicks: 1326, uniques: 402 }], otherCount: 5, otherClicks: 587 },
     funnel: { steps: [{ label: 'Tickets viewed', people: 900 }, { label: 'Order confirmed', people: 65 }] },
+    time: { sessions: 40, avgSessionSec: 300, avgUserSec: 1200 },
   });
-  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31', 'view_tickets · 1326 · 402', '5 smaller labels totalling 587', 'Tickets viewed · 900', 'Order confirmed · 65']) {
+  for (const must of ['368 unique viewers today', '4568 unique viewers across', 'The Soirée · 1787', 'cta_click · 107 · 45', 'Think you know the drill?', 'VIP push · yes', '2026-07-10:60 (total 60)', 'Thandi Nkosi · 31', 'view_tickets · 1326 · 402', '5 smaller labels totalling 587', 'Tickets viewed · 900', 'Order confirmed · 65', 'average session 300s', 'average total per user 1200s']) {
     assert.ok(txt.includes(must), `fact sheet includes: ${must}`);
   }
 });
