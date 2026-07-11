@@ -848,6 +848,29 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     });
   }));
 
+  // 🛒 One-tap commerce scan — does the app track ORDERS at all? Sweeps a year
+  // of event names AND the configured breakdown/label property values for
+  // order/purchase/payment-ish terms in a handful of queries, so "is order
+  // success in PostHog?" gets a definitive yes/no without guessing mappings.
+  const COMMERCE_TERMS = ['order', 'purchase', 'pay', 'checkout', 'cart', 'transaction', 'refund', 'ticket', 'success'];
+  app.get('/api/admin/posthog/commerce-scan', auth.requireAdmin, asyncHandler(async (_req, res) => {
+    const likes = (col) => COMMERCE_TERMS.map((t) => `${col} ILIKE ${hqlStr(`%${t}%`)}`).join(' OR ');
+    const events = await hogql(`SELECT event, count() AS n, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND (${likes('event')}) GROUP BY event ORDER BY n DESC LIMIT 40`, { ttl: CATALOG_TTL });
+    const m = metricMap();
+    const keys = [...new Set([...m.breakdownProps, m.ctaLabelProp].filter(Boolean))];
+    const values = [];
+    for (const key of keys) {
+      const col = `toString(${prop(key)})`;
+      const rows = await hogql(`SELECT ${col} AS v, count() AS n, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND (${likes(col)}) GROUP BY v ORDER BY n DESC LIMIT 25`, { ttl: CATALOG_TTL });
+      for (const r of rows) values.push({ key, value: String(r.v), count: Number(r.n) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) });
+    }
+    res.json({
+      terms: COMMERCE_TERMS,
+      events: events.map((r) => ({ event: String(r.event), count: Number(r.n) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) })),
+      values,
+    });
+  }));
+
   // Top values of one property on one event — the tool for writing
   // `event : property=value` mapping entries (e.g. what does `interaction`'s
   // `action` property contain?). Everything escaped via hqlStr.

@@ -344,6 +344,27 @@ test('CTA labels: mapped slice + label prop, scoped, top-N with an Other rollup'
   assert.equal(got.body.metricMap.ctaLabelProp, 'cta_label');
 });
 
+test('commerce scan sweeps a year of event names + mapped property values for order terms', async () => {
+  const queries = [];
+  const h = makeHarness({
+    responder: (q) => {
+      queries.push(q);
+      if (q.includes('SELECT event')) return HOGQL(['event', 'n', 'firstSeen', 'lastSeen'], [['purchase_complete', 12, '2025-08-01 10:00:00', '2025-11-02 09:00:00']]);
+      return HOGQL(['v', 'n', 'firstSeen', 'lastSeen'], [['pay_now', 572, '2026-06-01 08:00:00', '2026-07-11 12:00:00']]);
+    },
+  });
+  const out = await h.invoke('GET /api/admin/posthog/commerce-scan', { user: { id: 'a', role: 'admin' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.events[0].event, 'purchase_complete');
+  assert.equal(out.body.values[0].value, 'pay_now');
+  assert.ok(out.body.values.some((v) => v.key === 'cta_label'), 'the label property is swept too');
+  assert.ok(queries[0].includes("event ILIKE '%order%'") && queries[0].includes("event ILIKE '%checkout%'"), 'terms reach the query');
+  assert.ok(queries[0].includes('INTERVAL 365 DAY'), 'a full year, not just recent data');
+  assert.equal(queries.length, 1 + 3, 'one event sweep + one per unique mapped property');
+  const denied = await h.invoke('GET /api/admin/posthog/commerce-scan', { user: { id: 'u1', role: 'member' } });
+  assert.equal(denied.status, 403, 'admin only');
+});
+
 test('a legacy stored mapping heals itself on mount — once, keeping custom values', () => {
   const legacy = JSON.stringify({
     screenEvents: ['$screen', '$pageview'], ctaEvents: ['Interaction'],

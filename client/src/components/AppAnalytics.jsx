@@ -268,6 +268,7 @@ export function AppAnalyticsAdmin() {
       <PeopleSection key={`ppl-${winKey}`} win={range} loader={(opts) => api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId })} />
       {!perClient && <MappingEditor />}
       {!perClient && <DiagnoseCard />}
+      {!perClient && <CommerceScanCard />}
       {data.lastSync && <p style={{ ...mutedTxt, fontSize: 11.5, marginTop: 10 }}>Rollup last synced {new Date(data.lastSync).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · live numbers refresh on load (≤5 min cache)</p>}
     </div>
   );
@@ -988,6 +989,62 @@ function MappingEditor() {
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>No event matches "{catQ.trim()}" — the app may track it as a property value instead; try the 🔬 Diagnose property explorer below (e.g. event <code>interaction</code>, key <code>interaction_type</code>).</span>
             )}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// 🛒 One-tap answer to "does the app track orders / payments?" — sweeps a year
+// of event names + mapped property values for commerce-ish terms server-side.
+// Findings land as ranked tables; an empty sweep gets an honest verdict (order
+// truth lives in Looker; the app only records intent taps).
+function CommerceScanCard() {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    setBusy(true); setError('');
+    try { setD(await api.posthogCommerceScan()); } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+  const Tbl = ({ head, rows }) => (
+    <div style={{ overflowX: 'auto', marginBottom: 10 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
+        <thead><tr>{head.map((h, i) => <th key={i} style={th}>{h}</th>)}</tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+  );
+  const seen = (r) => `${String(r.firstSeen).slice(0, 10)} → ${String(r.lastSeen).slice(0, 10)}`;
+  return (
+    <div style={{ ...card, marginTop: 12 }}>
+      <div style={title}>🛒 Order & payment signals</div>
+      <p style={sub}>Does the app send any order / purchase / payment / checkout data to PostHog? One tap sweeps a full year of event names and the mapped property values for commerce terms and shows everything it finds, with first/last-seen dates.</p>
+      {!d && <button type="button" style={btn} disabled={busy} onClick={run}>{busy ? 'Scanning…' : 'Scan for order data'}</button>}
+      {error && <div style={errBox}>{error}</div>}
+      {d && (
+        <>
+          {d.events.length > 0 && (
+            <>
+              <div style={{ ...title, fontSize: 12.5 }}>Matching events</div>
+              <Tbl head={['Event', 'Count (1y)', 'Seen']} rows={d.events.map((r) => (
+                <tr key={r.event}><td style={{ ...td, fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{r.event}</td><td style={td}>{fmt(r.count)}</td><td style={td}>{seen(r)}</td></tr>
+              ))} />
+            </>
+          )}
+          {d.values.length > 0 && (
+            <>
+              <div style={{ ...title, fontSize: 12.5 }}>Matching property values</div>
+              <Tbl head={['Property', 'Value', 'Count (1y)', 'Seen']} rows={d.values.map((r, i) => (
+                <tr key={i}><td style={{ ...td, color: 'var(--muted)' }}>{r.key}</td><td style={{ ...td, fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{r.value}</td><td style={td}>{fmt(r.count)}</td><td style={td}>{seen(r)}</td></tr>
+              ))} />
+            </>
+          )}
+          {d.events.length === 0 && d.values.length === 0 && (
+            <p style={sub}>Nothing order/payment-ish exists in the app's PostHog data (searched: {d.terms.join(', ')}). The app records purchase <i>intent</i> (CTA taps like <code>buy_tickets</code>, <code>pay_now</code>) but not completed orders — order, payment and revenue truth lives in the Looker-powered dashboards.</p>
+          )}
+          <button type="button" style={ghostBtn} disabled={busy} onClick={run}>{busy ? 'Scanning…' : 'Re-scan'}</button>
         </>
       )}
     </div>
