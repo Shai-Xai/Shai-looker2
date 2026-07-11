@@ -145,13 +145,12 @@ function assignedIds(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
   return idList(i.socialplusCommunityIds);
 }
-// What may THIS client sync/see? Assigned list → exactly that. No list: their
-// own key → everything; the shared platform key → NOTHING (never leak another
-// client's communities). Mirrors queueit.visibleRooms.
+// What may THIS client sync/see? EXACTLY the linked list — linking is always
+// explicit, whichever key the entity rides. (An earlier own-key-sees-everything
+// rule leaked the whole network whenever the shared key was pasted per client,
+// which in practice is what a pasted key always is.)
 function scopeFor(entityId) {
-  const ids = assignedIds(entityId);
-  if (ids.length) return { all: false, ids };
-  return { all: connection(entityId).source === 'client', ids: [] };
+  return { all: false, ids: assignedIds(entityId) };
 }
 const communityInScope = (scope, communityId) => scope.all || scope.ids.includes(String(communityId));
 // A channel is in scope when it IS an assigned id (community feed channels share
@@ -364,6 +363,11 @@ function syncEntity(entityId, opts = {}) {
   syncing.set(entityId, p);
   return p;
 }
+// A SCOPE CHANGE must not piggyback on an in-flight run (the dedup would hand
+// back a sync that started under the OLD scope): wait it out, then run fresh.
+function resyncAfterCurrent(entityId) {
+  return Promise.resolve(syncing.get(entityId)).catch(() => {}).then(() => syncEntity(entityId));
+}
 // Refresh-on-open: skip when fresh; otherwise KICK the sync in the background
 // and answer immediately (a first pull can outlive proxy timeouts — the UI
 // polls `summary.lastAt` past `started` instead of holding the request open).
@@ -482,23 +486,36 @@ async function doSyncEntity(entityId, { joinWindowDays = JOIN_WINDOW_DAYS } = {}
 }
 
 // ── query helpers (feed the Social page + summaries) ──
-function totals(entityId) {
-  const c = db.db.prepare('SELECT COUNT(*) AS n, SUM(members) AS members, SUM(posts) AS posts FROM socialplus_communities WHERE entity_id=?').get(entityId) || {};
-  const ch = db.db.prepare('SELECT COUNT(*) AS n, SUM(members) AS members, SUM(messages) AS messages FROM socialplus_channels WHERE entity_id=?').get(entityId) || {};
-  const p = db.db.prepare('SELECT SUM(comments) AS comments, SUM(reactions) AS reactions FROM socialplus_posts WHERE entity_id=?').get(entityId) || {};
-  return {
-    communities: num(c.n) || 0, members: num(c.members) || 0, posts: num(c.posts) || 0,
-    channels: num(ch.n) || 0, chat_members: num(ch.members) || 0, messages: num(ch.messages) || 0,
-    comments: num(p.comments) || 0, reactions: num(p.reactions) || 0,
-  };
-}
+// EVERY read re-applies the scope. The sync prunes out-of-scope rows too, but a
+// scope narrowed between syncs (or a sync killed mid-run by a deploy) must never
+// leak the stale rows it left behind — G&G once saw the whole network this way.
 function communities(entityId, { limit = 50 } = {}) {
+  const scope = scopeFor(entityId);
   return db.db.prepare(`SELECT community_id AS communityId, display_name AS displayName, is_public AS isPublic, members, posts, created_at AS createdAt, last_synced AS lastSynced
-    FROM socialplus_communities WHERE entity_id=? ORDER BY members DESC NULLS LAST LIMIT ?`).all(entityId, limit);
+    FROM socialplus_communities WHERE entity_id=? ORDER BY members DESC NULLS LAST`).all(entityId)
+    .filter((r) => communityInScope(scope, r.communityId)).slice(0, limit);
 }
 function channels(entityId, { limit = 50 } = {}) {
+  const scope = scopeFor(entityId);
   return db.db.prepare(`SELECT channel_id AS channelId, display_name AS displayName, type, members, messages, last_activity AS lastActivity
-    FROM socialplus_channels WHERE entity_id=? ORDER BY messages DESC NULLS LAST, members DESC NULLS LAST LIMIT ?`).all(entityId, limit);
+    FROM socialplus_channels WHERE entity_id=? ORDER BY messages DESC NULLS LAST, members DESC NULLS LAST`).all(entityId)
+    .filter((r) => channelInScope(scope, r.channelId)).slice(0, limit);
+}
+function totals(entityId) {
+  const comms = communities(entityId, { limit: 100000 });
+  const chans = channels(entityId, { limit: 100000 });
+  const scope = scopeFor(entityId);
+  let comments = 0, reactions = 0;
+  for (const r of db.db.prepare('SELECT community_id AS cid, comments, reactions FROM socialplus_posts WHERE entity_id=?').all(entityId)) {
+    if (!communityInScope(scope, r.cid)) continue;
+    comments += num(r.comments) || 0; reactions += num(r.reactions) || 0;
+  }
+  const sum = (rows, k) => rows.reduce((a, r) => a + (num(r[k]) || 0), 0);
+  return {
+    communities: comms.length, members: sum(comms, 'members'), posts: sum(comms, 'posts'),
+    channels: chans.length, chat_members: sum(chans, 'members'), messages: sum(chans, 'messages'),
+    comments, reactions,
+  };
 }
 // Daily totals series for one metric, oldest→newest, last `days`.
 // 'new_members' reads the reconstructed join dates (zero-filled so quiet days
@@ -525,8 +542,10 @@ function series(entityId, { metric = 'members', days = 30 } = {}) {
 function topPosts(entityId, { sort = 'reactions', limit = 10 } = {}) {
   const order = sort === 'recent' ? 'posted_at DESC'
     : `${['reactions', 'comments', 'impressions', 'reach', 'shares'].includes(sort) ? sort : 'reactions'} DESC NULLS LAST`;
+  const scope = scopeFor(entityId);
   return db.db.prepare(`SELECT post_id AS postId, community_id AS communityId, community_name AS communityName, data_type AS dataType, text, reactions, comments, shares, flags, impressions, reach, posted_at AS postedAt
-    FROM socialplus_posts WHERE entity_id=? ORDER BY ${order} LIMIT ?`).all(entityId, Math.min(Number(limit) || 10, 50));
+    FROM socialplus_posts WHERE entity_id=? ORDER BY ${order}`).all(entityId)
+    .filter((r) => communityInScope(scope, r.communityId)).slice(0, Math.min(Number(limit) || 10, 50));
 }
 
 // ── Today, hour by hour ──
@@ -590,8 +609,8 @@ function summary(entityId) {
   return {
     channel: 'socialplus', configured: st.configured, source: st.source, region: st.region,
     communityIds: st.communityIds,
-    // On the shared platform key a client only has data once communities are linked.
-    assigned: st.source === 'client' || st.communityIds.length > 0,
+    // Data flows only once communities are explicitly linked — whichever key.
+    assigned: st.communityIds.length > 0,
     totals: totals(entityId),
     lastStatus: sync.lastStatus || '', lastError: sync.lastError || '', lastAt: sync.lastSynced || '',
   };
@@ -730,7 +749,7 @@ function mount(app, { db: database, auth }) {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     database.setEntityIntegrations(req.params.id, { socialplusCommunityIds: idList((req.body || {}).ids).join(',') });
     const started = new Date().toISOString();
-    syncEntity(req.params.id).catch(() => { /* recorded on the sync row */ }); // re-scope in the background
+    resyncAfterCurrent(req.params.id).catch(() => { /* recorded on the sync row */ }); // re-scope in the background
     res.json({ ...status(req.params.id), started });
   });
   return module.exports;

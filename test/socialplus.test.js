@@ -60,10 +60,11 @@ test('blank client fields inherit the platform key (and scope rules follow the s
     assert.equal(sp.channelInScope(scope, 'c1'), true);                 // community feed chat
     assert.equal(sp.channelInScope(scope, 'event_35120_main'), true);   // event chat group
     assert.equal(sp.channelInScope(scope, 'event_99999_main'), false);  // someone else's event
-    // A client on their OWN key with no list sees everything.
+    // Even a client's OWN key sees NOTHING until communities are linked —
+    // pasted keys are the shared network key in practice (the G&G leak).
     const own = makeEntity('OwnKey', 'OrgSPQ');
     db.setEntityIntegrations(own.id, { socialplusApiKey: 'own-key' });
-    assert.deepEqual(sp.scopeFor(own.id), { all: true, ids: [] });
+    assert.deepEqual(sp.scopeFor(own.id), { all: false, ids: [] });
   } finally {
     db.setSetting('socialplus_api_key', '');
     db.setSetting('socialplus_region', '');
@@ -95,6 +96,7 @@ test('applyPatch writes key/region write-only; view never leaks the key', () => 
 
 test('community/channel/daily upserts restate idempotently and feed the helpers', () => {
   const e = makeEntity('Metrics', 'OrgSPC');
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1,c2,ch1' }); // reads are scope-filtered
   const insC = db.db.prepare(`INSERT INTO socialplus_communities (entity_id, community_id, display_name, members, posts)
     VALUES (?,?,?,?,?) ON CONFLICT(entity_id, community_id) DO UPDATE SET members=excluded.members, posts=excluded.posts`);
   insC.run(e.id, 'c1', 'Ultra JHB', 10000, 20);
@@ -127,11 +129,12 @@ test('community/channel/daily upserts restate idempotently and feed the helpers'
 
 test('posts upsert on post id and rank via topPosts', () => {
   const e = makeEntity('Posts', 'OrgSPD');
-  const ins = db.db.prepare(`INSERT INTO socialplus_posts (entity_id, post_id, community_name, text, reactions, comments, reach)
-    VALUES (?,?,?,?,?,?,?) ON CONFLICT(entity_id, post_id) DO UPDATE SET reactions=excluded.reactions`);
-  ins.run(e.id, 'p1', 'Ultra', 'favorite memory?', 2, 1, 358);
-  ins.run(e.id, 'p2', 'Ultra', 'afterglow tickets', 8, 0, 471);
-  ins.run(e.id, 'p2', 'Ultra', 'afterglow tickets', 9, 0, 471); // restate → no dup
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'ultra' }); // reads are scope-filtered
+  const ins = db.db.prepare(`INSERT INTO socialplus_posts (entity_id, post_id, community_id, community_name, text, reactions, comments, reach)
+    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(entity_id, post_id) DO UPDATE SET reactions=excluded.reactions`);
+  ins.run(e.id, 'p1', 'ultra', 'Ultra', 'favorite memory?', 2, 1, 358);
+  ins.run(e.id, 'p2', 'ultra', 'Ultra', 'afterglow tickets', 8, 0, 471);
+  ins.run(e.id, 'p2', 'ultra', 'Ultra', 'afterglow tickets', 9, 0, 471); // restate → no dup
   const top = sp.topPosts(e.id, { sort: 'reactions', limit: 10 });
   assert.equal(top.length, 2);
   assert.equal(top[0].postId, 'p2');                       // highest reactions first
@@ -141,6 +144,37 @@ test('posts upsert on post id and rank via topPosts', () => {
   db.db.prepare('UPDATE socialplus_posts SET posted_at=? WHERE entity_id=? AND post_id=?').run('2026-07-01T08:00:00Z', e.id, 'p2');
   const recent = sp.topPosts(e.id, { sort: 'recent', limit: 10 });
   assert.equal(recent[0].postId, 'p1');                    // newer wins despite fewer reactions
+});
+
+test('reads re-apply the scope — stale rows from a wider sync never leak', () => {
+  const e = makeEntity('StaleScope', 'OrgSPS');
+  db.setEntityIntegrations(e.id, { socialplusApiKey: 'k-stale' });
+  // A previous (wider) sync left the WHOLE network in this entity's tables.
+  const insC = db.db.prepare('INSERT INTO socialplus_communities (entity_id, community_id, display_name, members, posts) VALUES (?,?,?,?,?)');
+  insC.run(e.id, 'mine', 'Their event', 500, 3);
+  insC.run(e.id, 'other', 'Someone else\'s festival', 61000, 50);
+  db.db.prepare('INSERT INTO socialplus_channels (entity_id, channel_id, display_name, members, messages) VALUES (?,?,?,?,?)')
+    .run(e.id, 'event_111_main', 'Their chat', 100, 10);
+  db.db.prepare('INSERT INTO socialplus_channels (entity_id, channel_id, display_name, members, messages) VALUES (?,?,?,?,?)')
+    .run(e.id, 'event_999_main', 'Someone else\'s chat', 4000, 300);
+  db.db.prepare('INSERT INTO socialplus_posts (entity_id, post_id, community_id, reactions, comments) VALUES (?,?,?,?,?)')
+    .run(e.id, 'p-mine', 'mine', 5, 1);
+  db.db.prepare('INSERT INTO socialplus_posts (entity_id, post_id, community_id, reactions, comments) VALUES (?,?,?,?,?)')
+    .run(e.id, 'p-other', 'other', 900, 40);
+  // Now the admin links ONLY their community + event chat group.
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'mine,event_111' });
+  assert.deepEqual(sp.communities(e.id).map((c) => c.communityId), ['mine']);
+  assert.deepEqual(sp.channels(e.id).map((c) => c.channelId), ['event_111_main']);
+  assert.deepEqual(sp.topPosts(e.id).map((p) => p.postId), ['p-mine']);
+  const t = sp.totals(e.id);
+  assert.equal(t.members, 500);
+  assert.equal(t.messages, 10);
+  assert.equal(t.reactions, 5);
+  // Nothing linked at all → nothing visible, whatever the tables hold.
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: '' });
+  assert.deepEqual(sp.communities(e.id), []);
+  assert.equal(sp.totals(e.id).members, 0);
+  assert.equal(sp.summary(e.id).assigned, false);
 });
 
 test('buildMembersCurve reconstructs the growth curve from join dates', () => {
@@ -162,7 +196,7 @@ test('syncIfStale skips when fresh, syncs when stale, no-ops unconfigured', asyn
   const e = makeEntity('AutoRefresh', 'OrgSPR');
   // Unconfigured → explicit no-op.
   assert.deepEqual(await sp.syncIfStale(e.id), { ok: false, error: 'not_configured', refreshed: false });
-  db.setEntityIntegrations(e.id, { socialplusApiKey: 'k-refresh' });
+  db.setEntityIntegrations(e.id, { socialplusApiKey: 'k-refresh', socialplusCommunityIds: 'c1' }); // linked, so a sync attempts the network
   // Freshly synced → skipped, and the network is never touched.
   db.db.prepare(`INSERT INTO socialplus_sync (entity_id, last_status, last_synced) VALUES (?,?,?)
     ON CONFLICT(entity_id) DO UPDATE SET last_synced=excluded.last_synced`).run(e.id, 'ok', new Date().toISOString());
@@ -187,7 +221,7 @@ test('syncIfStale skips when fresh, syncs when stale, no-ops unconfigured', asyn
 
 test('summary rolls up totals + sync health; failed syncs surface their error', async () => {
   const e = makeEntity('Summary', 'OrgSPE');
-  db.setEntityIntegrations(e.id, { socialplusApiKey: 'bad-key', socialplusRegion: 'eu' });
+  db.setEntityIntegrations(e.id, { socialplusApiKey: 'bad-key', socialplusRegion: 'eu', socialplusCommunityIds: 'c1' });
   // syncEntity never throws — a bad key records an error on the sync row. Stub
   // fetch so the test makes no live network call.
   const realFetch = global.fetch;
