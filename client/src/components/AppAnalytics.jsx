@@ -17,8 +17,6 @@ import AiMark from './AiMark.jsx';
 // Uninstall with server/posthog.js — see that file's header.
 
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
-// Rand amounts (ticket revenue from Looker) — compact above 100k.
-const fmtR = (v) => (v == null ? '—' : `R${Intl.NumberFormat('en-ZA', { notation: v >= 100000 ? 'compact' : 'standard', maximumFractionDigits: v >= 100000 ? 1 : 0 }).format(v)}`);
 // Seconds → "4m 32s" / "1h 12m" for the time-in-app tiles.
 const fmtDur = (s) => {
   s = Math.max(0, Math.round(s || 0));
@@ -201,7 +199,6 @@ export function AppAnalyticsAdmin() {
         ['Unique viewers', data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
-        ...(data.revenueTotal > 0 ? [['Ticket revenue', fmtR(data.revenueTotal)]] : []),
         ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]
     : [
@@ -212,7 +209,6 @@ export function AppAnalyticsAdmin() {
         ['Sessions', data.totals?.sessions],
         ['Interactions', data.totals?.interactions],
         ...[['Notifications', data.totals?.notifEvents]].filter(([, v]) => v > 0),
-        ...(data.revenueTotal > 0 ? [['Ticket revenue', fmtR(data.revenueTotal)]] : []),
         ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ];
 
@@ -349,7 +345,6 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
-        ...(data.revenueTotal > 0 ? [['Ticket revenue', fmtR(data.revenueTotal)]] : []),
         ...(data.time?.sessions > 0 ? [['Avg session', fmtDur(data.time.avgSessionSec)], ['Time / user', fmtDur(data.time.avgUserSec)]] : []),
       ]} />
       {gran === 'hour' ? (
@@ -724,13 +719,11 @@ function EventsTable({ rows, title: heading, days }) {
     ['interactions', 'Interactions', true],
     ['ctaTaps', 'CTA taps', rows.some((r) => r.ctaTaps > 0)],
     ['purchases', 'Purchases', rows.some((r) => r.purchases > 0)],
-    ['revenue', 'Ticket revenue', rows.some((r) => r.revenue > 0)],
   ].filter(([, , show]) => show);
-  const withRev = rows.some((r) => r.revenue > 0);
   return (
     <div style={{ ...card, marginTop: 12, overflowX: 'auto' }}>
       <div style={title}>{heading}</div>
-      <p style={sub}>Last {days} days · sorted by unique viewers{withRev ? ' · revenue is ticketing truth (all sales channels), for the same window' : ''}</p>
+      <p style={sub}>Last {days} days · sorted by unique viewers</p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 420 }}>
         <thead><tr><th style={th}>Event</th>{cols.map(([k, h]) => <th key={k} style={th}>{h}</th>)}</tr></thead>
         <tbody>
@@ -738,7 +731,7 @@ function EventsTable({ rows, title: heading, days }) {
             <tr key={r.eventRef}>
               <td style={{ ...td, fontWeight: 600 }}>{r.eventName || `Event ${r.eventRef}`}<span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.eventRef}</span></td>
               {cols.map(([k]) => (
-                <td key={k} style={td}>{k === 'revenue' ? (r.revenue > 0 ? fmtR(r.revenue) : '—') : fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmt(r.purchaseValue)}</span>}</td>
+                <td key={k} style={td}>{fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmt(r.purchaseValue)}</span>}</td>
               ))}
             </tr>
           ))}

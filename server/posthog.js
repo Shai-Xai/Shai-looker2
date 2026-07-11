@@ -52,7 +52,6 @@ function buildAppInsightPrompt({ scopeLabel, report, live, time = null, moments:
   L.push(`Window: ${report.from} to ${report.to} (${report.days} days, inclusive).`);
   if (live) L.push(`Live: ${live.actives} unique viewers today so far; ${live.windowUniques} unique viewers across the whole window.`);
   if (time && time.sessions) L.push(`Time in app (window): average session ${time.avgSessionSec}s; average total per user ${time.avgUserSec}s, over ${time.sessions} sessions (floors — single-event sessions measure 0s).`);
-  if (report.revenueTotal > 0) L.push(`Ticket revenue for these events this window: R${report.revenueTotal} (from ticketing — ALL sales channels, not only in-app orders).`);
   const t = report.totals || {};
   L.push(report.kind === 'app'
     ? `Window totals (whole app): interactions ${t.interactions || 0}; views ${t.views || 0}; new users ${t.newUsers || 0}; sessions ${t.sessions || 0}.`
@@ -556,54 +555,6 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     return report;
   }
 
-  // 💰 ticket revenue for a set of events over the window — from LOOKER (the
-  // revenue truth). PostHog knows an order HAPPENED (order_success), never the
-  // rand amount, so amounts come from ticketing and cover ALL sales channels —
-  // labelled that way in the UI. Cached per (window, events); degrades to
-  // nothing when Looker or the lookup home is unavailable.
-  const _revCache = new Map(); // key -> { at, map }
-  async function revenueForEvents(refs, o) {
-    if (!refs.length || !runLookerQuery) return new Map();
-    const home = lookupHome();
-    if (!home) return new Map();
-    const w = win(o);
-    const key = `${w.from}|${w.to}|${[...refs].sort().join(',')}`;
-    const hit = _revCache.get(key);
-    if (hit && Date.now() - hit.at < CATALOG_TTL) return hit.map;
-    // Looker's `A to B` date range EXCLUDES B — bump the end by a day to keep
-    // the window inclusive like everywhere else on this surface.
-    const end = new Date(`${w.to}T00:00:00Z`); end.setUTCDate(end.getUTCDate() + 1);
-    try {
-      const rows = await runLookerQuery('/queries/run/json', {
-        model: home.model, view: home.explore,
-        fields: ['core_events.id', 'core_tickets.sum_revenue_decimal'],
-        filters: { 'core_events.id': refs.join(','), 'core_tickets.purchased_date': `${w.from} to ${end.toISOString().slice(0, 10)}` },
-        limit: 500,
-      });
-      const map = new Map();
-      for (const r of rows || []) {
-        const id = String(r['core_events.id'] ?? '');
-        if (id) map.set(id, (map.get(id) || 0) + (Number(r['core_tickets.sum_revenue_decimal']) || 0));
-      }
-      _revCache.set(key, { at: Date.now(), map });
-      return map;
-    } catch (e) { console.error('[posthog] revenue lookup failed:', e.message); return new Map(); }
-  }
-  // Attach per-event `revenue` + a window `revenueTotal` to a report. Cosmetic
-  // enrichment — never throws, absent when Looker can't answer.
-  async function withRevenue(report) {
-    try {
-      const rows = [...(report.events || []), ...(report.topEvents || [])];
-      const refs = [...new Set(rows.map((r) => String(r.eventRef)))].slice(0, 100);
-      if (!refs.length) return report;
-      const rev = await revenueForEvents(refs, { from: report.from, to: report.to });
-      if (!rev.size) return report;
-      for (const r of rows) { const v = rev.get(String(r.eventRef)); if (v != null) r.revenue = v; }
-      report.revenueTotal = [...rev.values()].reduce((a, v) => a + v, 0);
-    } catch { /* revenue is nice-to-have here */ }
-    return report;
-  }
-
   async function eventIdsForEntity(entityId) {
     const ids = new Set(), names = new Set(), orgs = new Set();
     for (const su of db.listSuitesForEntity ? db.listSuitesForEntity(entityId) : []) {
@@ -953,14 +904,14 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const list = entities == null ? null : [].concat(entities);
     let report, ids = null, scopeLabel;
     if (list == null) {
-      const rep = await withRevenue(await withNames(appReport({ from: w.from, to: w.to })));
+      const rep = await withNames(appReport({ from: w.from, to: w.to }));
       report = { ...rep, kind: 'app', events: rep.topEvents };
       scopeLabel = 'the whole Howler app — every client';
     } else {
       const sets = [];
       for (const eid of list) sets.push(await eventIdsForEntity(eid));
       ids = [...new Set(sets.flat())];
-      report = await withRevenue(await withNames(entityReport(list[0], w, ids))); // the report SQL keys off ids only
+      report = await withNames(entityReport(list[0], w, ids)); // the report SQL keys off ids only
       if (!report.scoped) throw new HttpError(400, 'No app data is scoped to the selected client(s) yet — their suites need an event lock first.');
       scopeLabel = list.map((eid) => db.getEntity?.(eid)?.name || eid).join(', ');
     }
@@ -1168,9 +1119,9 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const eid = String(req.query.entityId || '');
     if (eid) {
       const ids = await eventIdsForEntity(eid);
-      return res.json(await withRevenue(await withNames(await withLive(entityReport(eid, winQ(req), ids), ids.length ? ids : null))));
+      return res.json(await withNames(await withLive(entityReport(eid, winQ(req), ids), ids.length ? ids : null)));
     }
-    res.json(await withRevenue(await withNames(await withLive(appReport(winQ(req)), null))));
+    res.json(await withNames(await withLive(appReport(winQ(req)), null)));
   }));
   app.get('/api/admin/app-analytics/people', auth.requireAdmin, asyncHandler(async (req, res) => {
     const eid = String(req.query.entityId || '');
@@ -1238,7 +1189,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/my/app-analytics/:entityId', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     const report = entityReport(req.params.entityId, winQ(req), ids);
-    res.json(ids.length ? await withRevenue(await withNames(await withLive(report, ids))) : { ...report, live: null });
+    res.json(ids.length ? await withNames(await withLive(report, ids)) : { ...report, live: null });
   }));
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
