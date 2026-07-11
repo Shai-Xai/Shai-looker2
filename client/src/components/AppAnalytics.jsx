@@ -26,9 +26,13 @@ const clampHourly = (r) => (rangeDays(r) > HOURLY_MAX_DAYS
   ? { from: new Date(Date.parse(r.to) - (HOURLY_MAX_DAYS - 1) * 86400_000).toISOString().slice(0, 10), to: r.to }
   : r);
 
-// Daily/Hourly toggle + from/to date pickers + quick presets. Hourly ranges are
-// clamped to the server's 14-day cap (hour-points beyond that are noise).
+// Daily/Hourly toggle + ONE compact date-range chip (opens a small modal with
+// both pickers — two naked date inputs wrapped messily on phones) + quick
+// presets. Hourly ranges are clamped to the server's 14-day cap.
+const fmtDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 function WindowControls({ gran, setGran, range, setRange }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(range);
   const apply = (next, g = gran) => {
     if (next.from > next.to) next = { from: next.to, to: next.from };
     setRange(g === 'hour' ? clampHourly(next) : next);
@@ -38,14 +42,32 @@ function WindowControls({ gran, setGran, range, setRange }) {
     <>
       <Chip on={gran === 'day'} onClick={() => pick('day')}>Daily</Chip>
       <Chip on={gran === 'hour'} onClick={() => pick('hour')}>Hourly</Chip>
-      <input type="date" style={dateInput} value={range.from} max={isoDay(0)} onChange={(e) => e.target.value && apply({ ...range, from: e.target.value })} aria-label="From date" />
-      <span style={{ color: 'var(--muted)', fontSize: 12 }}>→</span>
-      <input type="date" style={dateInput} value={range.to} max={isoDay(0)} onChange={(e) => e.target.value && apply({ ...range, to: e.target.value })} aria-label="To date" />
+      <Chip onClick={() => { setDraft(range); setOpen(true); }}>
+        📅 {range.from === range.to ? fmtDay(range.from) : `${fmtDay(range.from)} – ${fmtDay(range.to)}`}
+      </Chip>
       <Chip on={range.from === isoDay(0) && range.to === isoDay(0)} onClick={() => { setGran('hour'); apply({ from: isoDay(0), to: isoDay(0) }, 'hour'); }}>Today</Chip>
       {DAY_CHOICES.map((d) => (
         <Chip key={d} on={range.from === presetRange(d).from && range.to === isoDay(0)}
           onClick={() => { if (d > HOURLY_MAX_DAYS && gran === 'hour') setGran('day'); apply(presetRange(d), d > HOURLY_MAX_DAYS ? 'day' : gran); }}>{d}d</Chip>
       ))}
+      {open && (
+        <div style={overlay} onClick={() => setOpen(false)}>
+          <div style={modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ ...title, marginBottom: 2 }}>📅 Date range</div>
+            <p style={{ ...sub, marginBottom: 10 }}>Both dates inclusive{gran === 'hour' ? ` · hourly view covers at most ${HOURLY_MAX_DAYS} days` : ''}.</p>
+            <label style={lbl}>From
+              <input type="date" style={{ ...input, colorScheme: 'inherit' }} value={draft.from} max={isoDay(0)} onChange={(e) => e.target.value && setDraft({ ...draft, from: e.target.value })} />
+            </label>
+            <label style={lbl}>To
+              <input type="date" style={{ ...input, colorScheme: 'inherit' }} value={draft.to} max={isoDay(0)} onChange={(e) => e.target.value && setDraft({ ...draft, to: e.target.value })} />
+            </label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+              <button type="button" style={ghostBtn} onClick={() => setOpen(false)}>Cancel</button>
+              <button type="button" style={btn} onClick={() => { apply(draft); setOpen(false); }}>Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -825,5 +847,6 @@ const input = { display: 'block', width: '100%', marginTop: 4, padding: '9px 11p
 const lbl = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted-2, var(--muted))', marginBottom: 8 };
 const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 };
 const th = { textAlign: 'left', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700, padding: '6px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
-const dateInput = { minHeight: 32, padding: '4px 8px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit' };
+const overlay = { position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 };
+const modal = { background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 16, padding: 18, width: '100%', maxWidth: 340, boxShadow: '0 24px 60px -24px rgba(0,0,0,0.45)' };
 const td = { padding: '8px', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
