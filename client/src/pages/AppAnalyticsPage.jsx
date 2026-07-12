@@ -6,10 +6,11 @@ import { AppAnalyticsPanel } from '../components/AppAnalytics.jsx';
 import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
 
 // 📲 App — how the client's events perform inside the Howler consumer app.
-// Two tabs: Analytics (PostHog — views, unique viewers, CTA taps, purchases,
-// app users; server/posthog.js) and Community (Social+ — the client's linked
-// in-app communities & chats; server/socialplus.js, flag appanalytics.socialplus).
-// Both scoped server-side to the client's own events/communities. Mobile-first.
+// Three tabs: Analytics (PostHog engagement — views, CTA taps, funnel, revenue),
+// Audience (WHO the app users are — audience match, super fans, the user
+// directory), and Community (Social+ — linked in-app communities & chats; flag
+// appanalytics.socialplus). All scoped server-side to the client's own
+// events/communities. Mobile-first.
 
 export default function AppAnalyticsPage() {
   const { activeEntityId } = useProfile();
@@ -17,23 +18,25 @@ export default function AppAnalyticsPage() {
   const myFlags = useMyFlags(activeEntityId);
   const showCommunity = flagOn(myFlags, 'appanalytics.socialplus');
   const [tab, setTab] = useState('analytics');
-  const active = showCommunity ? tab : 'analytics';
+  const active = !showCommunity && tab === 'community' ? 'analytics' : tab;
   return (
     <div style={{ maxWidth: 880, margin: '0 auto', padding: isMobile ? '16px 14px 40px' : '24px 24px 56px', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
         <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 800, margin: 0, flex: 1 }}>App</h1>
       </div>
-      {showCommunity && (
-        <SubTabs
-          tabs={[{ id: 'analytics', title: '📊 Analytics' }, { id: 'community', title: '👥 Community' }]}
-          activeId={active} onSelect={setTab}
-        />
-      )}
+      <SubTabs
+        tabs={[
+          { id: 'analytics', title: '📊 Analytics' },
+          { id: 'audience', title: '🎟 Audience' },
+          ...(showCommunity ? [{ id: 'community', title: '👥 Community' }] : []),
+        ]}
+        activeId={active} onSelect={setTab}
+      />
       {!activeEntityId
         ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>Pick a client (top-left) to see their events in the Howler app.</div>
         : active === 'community'
           ? <SocialPlusPanel entityId={activeEntityId} scope="my" />
-          : <AppAnalyticsPanel entityId={activeEntityId} scope="my" />}
+          : <AppAnalyticsPanel key={active} entityId={activeEntityId} scope="my" section={active} />}
     </div>
   );
 }

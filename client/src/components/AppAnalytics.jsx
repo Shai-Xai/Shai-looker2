@@ -44,7 +44,7 @@ const clampHourly = (r) => (rangeDays(r) > HOURLY_MAX_DAYS
 // both pickers — two naked date inputs wrapped messily on phones) + quick
 // presets. Hourly ranges are clamped to the server's 14-day cap.
 const fmtDay = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-function WindowControls({ gran, setGran, range, setRange }) {
+function WindowControls({ gran, setGran, range, setRange, hideGran = false }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(range);
   const apply = (next, g = gran) => {
@@ -54,8 +54,8 @@ function WindowControls({ gran, setGran, range, setRange }) {
   const pick = (g) => { setGran(g); if (g === 'hour') setRange(clampHourly(range)); };
   return (
     <>
-      <Chip on={gran === 'day'} onClick={() => pick('day')}>Daily</Chip>
-      <Chip on={gran === 'hour'} onClick={() => pick('hour')}>Hourly</Chip>
+      {!hideGran && <Chip on={gran === 'day'} onClick={() => pick('day')}>Daily</Chip>}
+      {!hideGran && <Chip on={gran === 'hour'} onClick={() => pick('hour')}>Hourly</Chip>}
       <Chip onClick={() => { setDraft(range); setOpen(true); }}>
         📅 {range.from === range.to ? fmtDay(range.from) : `${fmtDay(range.from)} – ${fmtDay(range.to)}`}
       </Chip>
@@ -357,7 +357,8 @@ export function AppAnalyticsAdmin() {
 }
 
 // ── Client-scoped panel (their events only; also the admin per-client lens) ─────
-export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
+export function AppAnalyticsPanel({ entityId, scope = 'my', section = 'analytics' }) {
+  const audience = section === 'audience'; // 🎟 Audience tab: who the users ARE (match, super fans, directory)
   const isMobile = useIsMobile();
   const [gran, setGran] = useState('day');
   const [range, setRange] = useState(() => presetRange(28));
@@ -396,8 +397,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {/* The intro sentence squeezes the control chips into ragged wrapping on
             phones — the page is titled "App", so the copy is desktop-only. */}
-        {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">How your events perform inside the Howler app.</span>}
-        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
+        {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">{audience ? 'Who your app users are — matched to your ticketing data.' : 'How your events perform inside the Howler app.'}</span>}
+        <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} hideGran={audience} />
         <OwlBtn onClick={() => setOwlOpen(true)} />
       </div>
       {owlOpen && (
@@ -409,6 +410,20 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
           payload={{}} onClose={() => setOwlOpen(false)} />
       )}
       {data.liveError && <p style={{ ...mutedTxt, fontSize: 12 }}>{data.liveError}</p>}
+      {audience ? (
+        <>
+          <AudienceMatchCard entityId={entityId} scope={scope} events={data.events || []} isMobile={isMobile} />
+          <TopUsersCard key={`top-${winKey}`} win={range} entityId={entityId} scope={scope}
+            loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
+          <PeopleSection key={`ppl-${winKey}`} win={range}
+            loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))}
+            ticketsLoader={(emails) => api.appTickets(entityId, scope, emails)}
+            exportUrl={(q) => (scope === 'admin-client'
+              ? `/api/admin/app-analytics/people.csv?from=${range.from}&to=${range.to}&entityId=${encodeURIComponent(entityId)}&q=${encodeURIComponent(q || '')}`
+              : `/api/my/app-analytics/${entityId}/people.csv?from=${range.from}&to=${range.to}&q=${encodeURIComponent(q || '')}`)} />
+        </>
+      ) : (
+      <>
       <StatRow isMobile={isMobile} stats={[
         ['Viewers today', data.live?.actives, true],
         ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
@@ -437,15 +452,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my' }) {
         loader={() => (scope === 'admin-client' ? api.adminAppFunnel({ from: range.from, to: range.to, entityId }) : api.myAppFunnel(entityId, { from: range.from, to: range.to }))} />
       <CtaLabelsCard key={`cta-${winKey}`} admin={scope === 'admin-client'}
         loader={() => (scope === 'admin-client' ? api.adminAppCtaLabels({ from: range.from, to: range.to, entityId }) : api.myAppCtaLabels(entityId, { from: range.from, to: range.to }))} />
-      <AudienceMatchCard entityId={entityId} scope={scope} events={data.events || []} isMobile={isMobile} />
-      <TopUsersCard key={`top-${winKey}`} win={range} entityId={entityId} scope={scope}
-        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))} />
-      <PeopleSection key={`ppl-${winKey}`} win={range}
-        loader={(opts) => (scope === 'admin-client' ? api.adminAppPeople({ ...opts, from: range.from, to: range.to, entityId }) : api.myAppPeople(entityId, { ...opts, from: range.from, to: range.to }))}
-        ticketsLoader={(emails) => api.appTickets(entityId, scope, emails)}
-        exportUrl={(q) => (scope === 'admin-client'
-          ? `/api/admin/app-analytics/people.csv?from=${range.from}&to=${range.to}&entityId=${encodeURIComponent(entityId)}&q=${encodeURIComponent(q || '')}`
-          : `/api/my/app-analytics/${entityId}/people.csv?from=${range.from}&to=${range.to}&q=${encodeURIComponent(q || '')}`)} />
+      </>
+      )}
     </div>
   );
 }
