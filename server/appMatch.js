@@ -94,6 +94,14 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     return {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
       event: s.event, eventCount: s.eventIds.length,
+      // The FULL scoped event list (all editions) for the picker — the window'd
+      // By-event rows miss past editions with no recent app activity. Names
+      // resolve via the rollup/Looker (cached); ids alone still work.
+      events: await (async () => {
+        const evs = [...s.eventIds].sort((a, b) => Number(b) - Number(a)).slice(0, 200).map((id) => ({ eventRef: String(id), eventName: '' }));
+        try { if (posthog.withNames) await posthog.withNames({ events: evs }); } catch { /* ids still usable */ }
+        return evs;
+      })(),
       appUsers: s.appTotal, appUsersWithEmail: s.appEmails.length, appCapped: s.appCapped,
       // Who PAID for THESE events (purchaser contact on the order) …
       buyers: s.buyers.size, matched,

@@ -1133,7 +1133,7 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   // briefing suggestions already use). Admin view stays put — the campaign
   // lives in the CLIENT's Engage, so we confirm instead of navigating away.
   const navigate = useNavigate();
-  const eventName = event ? (events.find((ev) => String(ev.eventRef) === String(event))?.eventName || '') : '';
+  const eventName = event ? ((d?.events?.length ? d.events : events).find((ev) => String(ev.eventRef) === String(event))?.eventName || '') : '';
   const engageThem = async () => {
     setSegBusy('engage'); setSegMsg(null); setSegErr('');
     try {
@@ -1151,6 +1151,9 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
   if (err) return <div style={{ ...card, marginTop: 12 }}><div style={title}>🎟 App audience vs your fans</div><div style={errBox}>{err}</div></div>;
   if (!d) return null;
   if (!d.configured || !d.scoped) return null;
+  // the picker lists the FULL scope (all editions) — the windowed By-event
+  // rows would hide past editions with no recent app activity
+  const evList = d.events?.length ? d.events : events;
   const pctOf = (n, base) => (base > 0 ? ` · ${Math.round((n / base) * 100)}%` : '');
   const pctPlain = (n, base) => (base > 0 ? `${Math.round((n / base) * 100)}%` : null);
   const hasAtt = d.attendees != null;
@@ -1183,14 +1186,14 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
     <div style={{ ...card, marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>🎟 App audience vs your fans</div>
-        {events.length > 1 && (
+        {evList.length > 1 && (
           <select value={event} onChange={(e) => setEvent(e.target.value)} style={{ ...input, width: 'auto', minWidth: 150, marginTop: 0 }}>
-            <option value="">All your events</option>
-            {events.map((ev) => <option key={ev.eventRef} value={ev.eventRef}>{ev.eventName || `Event ${ev.eventRef}`}</option>)}
+            <option value="">All your events ({evList.length})</option>
+            {evList.map((ev) => <option key={ev.eventRef} value={ev.eventRef}>{ev.eventName || `Event ${ev.eventRef}`}</option>)}
           </select>
         )}
       </div>
-      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event only</b> : <b>across ALL {d.eventCount > 1 ? `${fmt(d.eventCount)} of ` : ''}your events — every edition, past ones included</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders). {!event && events.length > 1 && <>Pick an event above for a single edition. </>}<b>Tap any tile</b> to save that group as a live segment.</p>
+      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event only</b> : <b>across ALL {d.eventCount > 1 ? `${fmt(d.eventCount)} of ` : ''}your events — every edition, past ones included</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders). {!event && evList.length > 1 && <>Pick an event above for a single edition. </>}<b>Tap any tile</b> to save that group as a live segment.</p>
       {/* The headline insight — the sentence a client repeats in a meeting —
           with the action right next to it. */}
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'color-mix(in srgb, var(--brand) 6%, transparent)' }}>
