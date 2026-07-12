@@ -11,6 +11,7 @@ statuses change materially.
 | `Pulse-Sales-Deck.pptx` | 13-slide pitch deck (16:9). **To get the Google Slides version:** upload to [Google Drive](https://drive.google.com) → double-click → it opens/converts as Google Slides. |
 | `Pulse-Sales-Deck-Generic.pptx` | The 13-slide deck with no client data: no prepared-for line, and the dashboard mockup uses fictional "Aurora Fest" numbers (dash-generic.png). Safe for any prospect or cold outreach. |
 | `Pulse-Sales-Deck-Lite.pptx` | 7-slide lite deck matching the lite PDF (outcomes only, no mechanics). Same Google Slides route: upload to Drive and double-click. |
+| `Pulse-Sales-Deck-Lite-Generic.pptx` | The 7-slide lite deck with no client data (Aurora Fest mockups, generic CTA). The safest default for cold outreach. |
 | `pulse-pitch-mc-v{1,2,3}.src.html` + `build-pulse-pitch-mc-v{1,2,3}.sh` | Source + build script, one pair per version. **Never edit a version in place** — copy it to the next number. Build a version with its script, e.g. `./build-pulse-pitch-mc-v3.sh` → `Pulse-Sales-Pitch-mc-v3.pdf`. |
 | `make-deck.src.js` | Source for the deck. Edit, then: `npm i pptxgenjs && node make-deck.src.js (needs sitemap-mockup.png as sitemap.png alongside)` |
 
