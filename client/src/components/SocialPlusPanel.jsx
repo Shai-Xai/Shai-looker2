@@ -36,7 +36,8 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
   const [days, setDays] = useState(30);   // 'today' | 7 | 30 | 90
   const [metric, setMetric] = useState('members');
-  const [community, setCommunity] = useState(''); // '' = all linked communities
+  const [selected, setSelected] = useState([]); // community ids; [] = all linked communities
+  const community = selected.join(','); // the API takes a comma list
   const [data, setData] = useState(null);
   const [todayData, setTodayData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -131,13 +132,19 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
       {(data.allCommunities || []).length > 1 && (
-        <select
-          value={community}
-          onChange={(e) => { setCommunity(e.target.value); if (e.target.value && !TODAY_METRICS.some(([k]) => k === metric)) setMetric('members'); }}
-          style={{ width: '100%', boxSizing: 'border-box', marginBottom: 12, padding: '9px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 13, minHeight: 40 }}>
-          <option value="">🏟 All communities</option>
-          {data.allCommunities.map((c) => <option key={c.communityId} value={c.communityId}>{c.displayName || c.communityId}</option>)}
-        </select>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          <Chip on={!selected.length} onClick={() => setSelected([])}>🏟 All communities</Chip>
+          {data.allCommunities.map((c) => {
+            const on = selected.includes(c.communityId);
+            return (
+              <Chip key={c.communityId} on={on} onClick={() => {
+                const next = on ? selected.filter((x) => x !== c.communityId) : [...selected, c.communityId];
+                setSelected(next);
+                if (next.length && !TODAY_METRICS.some(([k]) => k === metric)) setMetric('members');
+              }}>{c.displayName || c.communityId}</Chip>
+            );
+          })}
+        </div>
       )}
       {err && <div style={errBox}>{err}</div>}
       {s.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {s.lastError}</div>}

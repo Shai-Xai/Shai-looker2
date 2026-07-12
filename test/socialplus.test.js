@@ -226,6 +226,36 @@ test('communitySeries + todayActivity derive per-community numbers from joins/po
   assert.equal(a.reactions, 0); // counters can restate down — never negative
 });
 
+test('a community SELECTION narrows totals + activity + series — and sums across many', () => {
+  const e = makeEntity('MultiSel', 'OrgSPM');
+  db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1,c2,c3' });
+  const day = new Date().toISOString().slice(0, 10);
+  const insC = db.db.prepare('INSERT INTO socialplus_communities (entity_id, community_id, display_name, members, posts) VALUES (?,?,?,?,?)');
+  insC.run(e.id, 'c1', 'One', 100, 4); insC.run(e.id, 'c2', 'Two', 50, 1); insC.run(e.id, 'c3', 'Three', 9, 0);
+  const insP = db.db.prepare('INSERT INTO socialplus_posts (entity_id, post_id, community_id, comments, reactions, posted_at) VALUES (?,?,?,?,?,?)');
+  insP.run(e.id, 'p1', 'c1', 2, 10, `${day}T09:00:00Z`);
+  insP.run(e.id, 'p2', 'c2', 1, 5, `${day}T10:00:00Z`);
+  insP.run(e.id, 'p3', 'c3', 7, 70, `${day}T11:00:00Z`);
+  const insJ = db.db.prepare('INSERT INTO socialplus_joins (entity_id, community_id, date, joins) VALUES (?,?,?,?)');
+  insJ.run(e.id, 'c1', day, 3); insJ.run(e.id, 'c2', day, 2); insJ.run(e.id, 'c3', day, 90);
+  // THE regression the screenshot caught: totals must follow the selection.
+  assert.equal(sp.totals(e.id).members, 159, 'unfiltered = everything in scope');
+  assert.equal(sp.totals(e.id, ['c1']).members, 100);
+  assert.deepEqual([sp.totals(e.id, ['c1', 'c2']).members, sp.totals(e.id, ['c1', 'c2']).posts], [150, 5], 'multi-select sums the selection');
+  assert.equal(sp.totals(e.id, ['c1', 'c2']).reactions, 15);
+  assert.equal(sp.totals(e.id, ['c1', 'c2']).comments, 3);
+  // A bare-string selection must EXACT-match, never substring-match.
+  assert.equal(sp.totals(e.id, 'c1').members, 100);
+  // Today's activity + the trend sum across the selection the same way.
+  const a = sp.todayActivity(e.id, ['c1', 'c2']);
+  assert.equal(a.newMembers, 5);
+  assert.equal(a.posts, 2);
+  const nm = sp.communitySeries(e.id, ['c1', 'c2'], { metric: 'new_members', days: 30 });
+  assert.deepEqual(nm.map((p) => p.value), [5]);
+  const curve = sp.communitySeries(e.id, ['c1', 'c2'], { metric: 'members', days: 30 });
+  assert.equal(curve.at(-1).value, 150, 'members curve ends at the selection total');
+});
+
 test('engagement counts DISTINCT contributing fans (staff excluded) against members', () => {
   const e = makeEntity('Engaged', 'OrgSPY');
   db.setEntityIntegrations(e.id, { socialplusCommunityIds: 'c1,event_42' });

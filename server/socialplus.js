@@ -631,13 +631,19 @@ function channels(entityId, { limit = 50 } = {}) {
     FROM socialplus_channels WHERE entity_id=? ORDER BY messages DESC NULLS LAST, members DESC NULLS LAST`).all(entityId)
     .filter((r) => channelInScope(scope, r.channelId)).slice(0, limit);
 }
-function totals(entityId) {
-  const comms = communities(entityId, { limit: 100000 });
-  const chans = channels(entityId, { limit: 100000 });
+// Community-selection filters accept one id or an array of ids (multi-select);
+// normalise once so `.includes` never substring-matches on a bare string.
+const asSelection = (cids) => (cids ? (Array.isArray(cids) ? cids : [cids]) : null);
+// `cids` (array of community ids) narrows totals to a SELECTION of communities —
+// null = everything in scope. The selection is validated against scope upstream.
+function totals(entityId, cids = null) {
+  cids = asSelection(cids);
+  const comms = communities(entityId, { limit: 100000 }).filter((c) => !cids || cids.includes(c.communityId));
+  const chans = channels(entityId, { limit: 100000 }).filter((c) => !cids || cids.includes(c.channelId));
   const scope = scopeFor(entityId);
   let comments = 0, reactions = 0;
   for (const r of db.db.prepare('SELECT community_id AS cid, comments, reactions FROM socialplus_posts WHERE entity_id=?').all(entityId)) {
-    if (!communityInScope(scope, r.cid)) continue;
+    if (cids ? !cids.includes(r.cid) : !communityInScope(scope, r.cid)) continue;
     comments += num(r.comments) || 0; reactions += num(r.reactions) || 0;
   }
   const sum = (rows, k) => rows.reduce((a, r) => a + (num(r[k]) || 0), 0);
@@ -678,16 +684,20 @@ function topPosts(entityId, { sort = 'reactions', limit = 10, community = null }
   const order = sort === 'recent' ? 'posted_at DESC'
     : `${['reactions', 'comments', 'impressions', 'reach', 'shares'].includes(sort) ? sort : 'reactions'} DESC NULLS LAST`;
   const scope = scopeFor(entityId);
+  const cids = Array.isArray(community) ? community : community ? [community] : null;
   return db.db.prepare(`SELECT post_id AS postId, community_id AS communityId, community_name AS communityName, data_type AS dataType, text, reactions, comments, shares, flags, impressions, reach, posted_at AS postedAt
     FROM socialplus_posts WHERE entity_id=? ORDER BY ${order}`).all(entityId)
-    .filter((r) => (community ? r.communityId === community : communityInScope(scope, r.communityId)))
+    .filter((r) => (cids ? cids.includes(r.communityId) : communityInScope(scope, r.communityId)))
     .slice(0, Math.min(Number(limit) || 10, 50));
 }
 
-// Per-community trend — derived from the tables that carry a community id
+// Per-selection trend — derived from the tables that carry a community id
 // (joins + posts), since the daily rollup is entity-level. Members/new-members/
-// posts only; the snapshot metrics have no per-community history.
-function communitySeries(entityId, cid, { metric = 'members', days = 30 } = {}) {
+// posts only; the snapshot metrics have no per-community history. `cids` is an
+// array of community ids (one or many — the sums add cleanly across them).
+function communitySeries(entityId, cids, { metric = 'members', days = 30 } = {}) {
+  const sel = asSelection(cids);
+  const marks = sel.map(() => '?').join(',');
   const limit = Math.min(Math.max(Number(days) || 30, 1), 365);
   const from = addDays(today(), -(limit - 1));
   const zeroFill = (byDate) => {
@@ -699,20 +709,20 @@ function communitySeries(entityId, cid, { metric = 'members', days = 30 } = {}) 
   };
   if (metric === 'posts') {
     const byDate = {};
-    for (const r of db.db.prepare('SELECT posted_at AS ts FROM socialplus_posts WHERE entity_id=? AND community_id=? AND posted_at>=?').all(entityId, cid, `${from}T00:00:00.000Z`)) {
+    for (const r of db.db.prepare(`SELECT posted_at AS ts FROM socialplus_posts WHERE entity_id=? AND community_id IN (${marks}) AND posted_at>=?`).all(entityId, ...sel, `${from}T00:00:00.000Z`)) {
       const d = String(r.ts).slice(0, 10);
       byDate[d] = (byDate[d] || 0) + 1;
     }
     return zeroFill(byDate);
   }
-  const joins = Object.fromEntries(
-    db.db.prepare('SELECT date, joins FROM socialplus_joins WHERE entity_id=? AND community_id=? AND date>=?').all(entityId, cid, from)
-      .map((r) => [r.date, num(r.joins) || 0]),
-  );
+  const joins = {};
+  for (const r of db.db.prepare(`SELECT date, SUM(joins) AS joins FROM socialplus_joins WHERE entity_id=? AND community_id IN (${marks}) AND date>=? GROUP BY date`).all(entityId, ...sel, from)) {
+    joins[r.date] = num(r.joins) || 0;
+  }
   if (metric === 'new_members') return zeroFill(joins);
-  const c = db.db.prepare('SELECT members FROM socialplus_communities WHERE entity_id=? AND community_id=?').get(entityId, cid);
+  const members = db.db.prepare(`SELECT SUM(members) AS m FROM socialplus_communities WHERE entity_id=? AND community_id IN (${marks})`).get(entityId, ...sel);
   const covered = Object.keys(joins).sort()[0] || today();
-  return buildMembersCurve(num(c?.members) || 0, joins, covered > from ? covered : from, today())
+  return buildMembersCurve(num(members?.m) || 0, joins, covered > from ? covered : from, today())
     .map((p) => ({ date: p.date, value: p.members }));
 }
 
@@ -720,23 +730,22 @@ function communitySeries(entityId, cid, { metric = 'members', days = 30 } = {}) 
 // reacted / chatted), lately and ever, against the member count. This is the
 // "how active is this community really" number; Social+ exposes no DAU, so
 // contribution is the truth we can stand behind.
-function engagement(entityId, cid = null) {
+function engagement(entityId, cids = null) {
+  cids = asSelection(cids);
   const scope = scopeFor(entityId);
   const cut7 = addDays(today(), -7);
   const cut30 = addDays(today(), -30);
   const ever = new Set(), a7 = new Set(), a30 = new Set();
   const kinds = { post: new Set(), reaction: new Set(), message: new Set() };
   for (const r of db.db.prepare('SELECT community_id AS c, user_id AS u, kind, last_at AS at FROM socialplus_actors WHERE entity_id=?').all(entityId)) {
-    const ok = cid ? r.c === cid : (communityInScope(scope, r.c) || channelInScope(scope, r.c));
+    const ok = cids ? cids.includes(r.c) : (communityInScope(scope, r.c) || channelInScope(scope, r.c));
     if (!ok) continue;
     ever.add(r.u);
     const d = String(r.at).slice(0, 10);
     if (d >= cut7) a7.add(r.u);
     if (d >= cut30) { a30.add(r.u); kinds[r.kind]?.add(r.u); }
   }
-  const members = cid
-    ? num(db.db.prepare('SELECT members FROM socialplus_communities WHERE entity_id=? AND community_id=?').get(entityId, cid)?.members) || 0
-    : totals(entityId).members;
+  const members = totals(entityId, cids).members;
   return {
     members, active7d: a7.size, active30d: a30.size, ever: ever.size,
     breakdown: { posters: kinds.post.size, reactors: kinds.reaction.size, chatters: kinds.message.size },
@@ -747,19 +756,20 @@ function engagement(entityId, cid = null) {
 // no per-community DAU endpoint): fans who JOINED today, POSTS made today, and
 // the day-over-day movement of the snapshot counters. Entity-wide deltas only —
 // per community the daily rollup has no history, so those come back null.
-function todayActivity(entityId, cid = null) {
+function todayActivity(entityId, cids = null) {
+  cids = asSelection(cids);
   const day = today();
   const scope = scopeFor(entityId);
   let newMembers = 0;
   for (const r of db.db.prepare('SELECT community_id AS c, joins FROM socialplus_joins WHERE entity_id=? AND date=?').all(entityId, day)) {
-    if (cid ? r.c === cid : communityInScope(scope, r.c)) newMembers += num(r.joins) || 0;
+    if (cids ? cids.includes(r.c) : communityInScope(scope, r.c)) newMembers += num(r.joins) || 0;
   }
   let posts = 0;
   for (const r of db.db.prepare('SELECT community_id AS c FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, `${day}T00:00:00.000Z`)) {
-    if (cid ? r.c === cid : communityInScope(scope, r.c)) posts += 1;
+    if (cids ? cids.includes(r.c) : communityInScope(scope, r.c)) posts += 1;
   }
   let messages = null, comments = null, reactions = null;
-  if (!cid) {
+  if (!cids) {
     const rows = db.db.prepare('SELECT date, messages, comments, reactions FROM socialplus_daily WHERE entity_id=? AND date>=? ORDER BY date').all(entityId, addDays(day, -1));
     const yd = rows.find((r) => r.date === addDays(day, -1));
     const td = rows.find((r) => r.date === day);
@@ -774,16 +784,17 @@ function todayActivity(entityId, cid = null) {
 // (walking each community's newest members back to midnight — cheap) and the
 // MEMBERS curve derives from them; POSTS bucket from the synced posted_at.
 // Messages/comments/reactions only exist as daily snapshots — no hourly truth.
-const todayCache = new Map(); // `${entityId}:${cid}` → { at, data } (viewers share one walk)
-async function todayHourly(entityId, cid = null) {
-  const cacheKey = `${entityId}:${cid || ''}`;
+const todayCache = new Map(); // `${entityId}:${cids}` → { at, data } (viewers share one walk)
+async function todayHourly(entityId, cids = null) {
+  cids = asSelection(cids);
+  const cacheKey = `${entityId}:${(cids || []).join(',')}`;
   const hit = todayCache.get(cacheKey);
   if (hit && Date.now() - hit.at < 4 * 60_000) return hit.data;
   const day = today();
   const dayStart = `${day}T00:00:00.000Z`;
   const joinsByHour = {};
   const scope = scopeFor(entityId);
-  const comms = communities(entityId, { limit: 100 }).filter((c) => !cid || c.communityId === cid);
+  const comms = communities(entityId, { limit: 100 }).filter((c) => !cids || cids.includes(c.communityId));
   if (isConfigured(entityId) && (scope.all || scope.ids.length)) {
     const s = await session(entityId);
     for (const c of comms) {
@@ -805,13 +816,13 @@ async function todayHourly(entityId, cid = null) {
   }
   const postsByHour = {};
   for (const r of db.db.prepare('SELECT posted_at AS ts, community_id AS c FROM socialplus_posts WHERE entity_id=? AND posted_at>=?').all(entityId, dayStart)) {
-    if (cid && r.c !== cid) continue;
+    if (cids && !cids.includes(r.c)) continue;
     const h = String(r.ts).slice(11, 13);
     postsByHour[h] = (postsByHour[h] || 0) + 1;
   }
   // Members at the end of hour h = members now − joins after h (same derivation
   // as buildMembersCurve, on hour grain).
-  const totalMembers = cid ? comms.reduce((a, c) => a + (num(c.members) || 0), 0) : totals(entityId).members;
+  const totalMembers = cids ? comms.reduce((a, c) => a + (num(c.members) || 0), 0) : totals(entityId).members;
   const nowHour = Number(new Date().toISOString().slice(11, 13));
   const hours = [];
   let after = 0;
@@ -859,26 +870,31 @@ function mount(app, { db: database, auth, appQuery: aq }) {
   init({ db: database, appQuery: aq });
   const { asyncHandler } = require('./http');
   const ownsEntity = (req, id) => req.user.role === 'admin' || (req.user.entityIds || []).includes(id);
-  const payload = (id, q = {}) => {
+  // The community filter (?community=id1,id2,…) narrows EVERY block — totals
+  // tiles included. Each id must itself be in scope; out-of-scope ids drop.
+  const cidsFrom = (id, q) => {
     const scope = scopeFor(id);
-    // The community filter narrows every block; it must itself be in scope.
-    const cid = q.community && communityInScope(scope, String(q.community)) ? String(q.community) : null;
+    const sel = String(q.community || '').split(',').map((x) => x.trim()).filter(Boolean).filter((c) => communityInScope(scope, c));
+    return sel.length ? sel : null;
+  };
+  const payload = (id, q = {}) => {
+    const cids = cidsFrom(id, q);
     const metric = q.metric ? String(q.metric) : undefined;
     const days = Number(q.days) || 30;
     const all = communities(id);
     let presence = null;
     try { presence = JSON.parse(db.getSetting(`socialplus_presence:${id}`, '') || 'null'); } catch { /* absent */ }
     return {
-      summary: { ...summary(id), todayActivity: todayActivity(id, cid) },
-      engagement: engagement(id, cid),
-      presence: cid ? null : presence, // presence is entity-level (member↔app join)
-      community: cid,
+      summary: { ...summary(id), totals: totals(id, cids), todayActivity: todayActivity(id, cids) },
+      engagement: engagement(id, cids),
+      presence: cids ? null : presence, // presence is entity-level (member↔app join)
+      community: cids ? cids.join(',') : null,
       allCommunities: all.map((c) => ({ communityId: c.communityId, displayName: c.displayName })),
-      communities: cid ? all.filter((c) => c.communityId === cid) : all,
-      channels: cid ? channels(id).filter((c) => c.channelId === cid) : channels(id),
-      series: cid ? communitySeries(id, cid, { metric, days }) : series(id, { metric, days }),
-      topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12, community: cid }),
-      recentPosts: topPosts(id, { sort: 'recent', limit: 12, community: cid }),
+      communities: cids ? all.filter((c) => cids.includes(c.communityId)) : all,
+      channels: cids ? channels(id).filter((c) => cids.includes(c.channelId)) : channels(id),
+      series: cids ? communitySeries(id, cids, { metric, days }) : series(id, { metric, days }),
+      topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12, community: cids }),
+      recentPosts: topPosts(id, { sort: 'recent', limit: 12, community: cids }),
     };
   };
   // Admin: any client.
@@ -919,16 +935,15 @@ function mount(app, { db: database, auth, appQuery: aq }) {
     res.json(await verify(id));
   }));
   // Today by hour — live joins + synced posts, briefly cached per entity.
-  const todayCid = (id, q) => (q.community && communityInScope(scopeFor(id), String(q.community)) ? String(q.community) : null);
   app.get('/api/admin/entities/:id/socialplus/today', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!database.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-    res.json(await todayHourly(req.params.id, todayCid(req.params.id, req.query)));
+    res.json(await todayHourly(req.params.id, cidsFrom(req.params.id, req.query)));
   }));
   app.get('/api/my/socialplus/:entityId/today', auth.requireAuth, asyncHandler(async (req, res) => {
     const id = req.params.entityId;
     if (!ownsEntity(req, id)) return res.status(403).json({ error: 'Not allowed' });
     if (!database.getEntity(id)) return res.status(404).json({ error: 'Not found' });
-    res.json(await todayHourly(id, todayCid(id, req.query)));
+    res.json(await todayHourly(id, cidsFrom(id, req.query)));
   }));
   // Refresh-on-open: any viewer of the page may trigger it (no integrations.manage
   // — it's a read-side top-up, throttled by REFRESH_MAX_AGE_MIN and deduped so
