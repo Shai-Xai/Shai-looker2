@@ -144,6 +144,12 @@ test('posts upsert on post id and rank via topPosts', () => {
   db.db.prepare('UPDATE socialplus_posts SET posted_at=? WHERE entity_id=? AND post_id=?').run('2026-07-01T08:00:00Z', e.id, 'p2');
   const recent = sp.topPosts(e.id, { sort: 'recent', limit: 10 });
   assert.equal(recent[0].postId, 'p1');                    // newer wins despite fewer reactions
+  // 'impressions' (views — the Top-posts default): most-seen first, posts
+  // without view data sink to the bottom instead of vanishing.
+  db.db.prepare('UPDATE socialplus_posts SET impressions=? WHERE entity_id=? AND post_id=?').run(837, e.id, 'p1');
+  const byViews = sp.topPosts(e.id, { sort: 'impressions', limit: 10 });
+  assert.equal(byViews[0].postId, 'p1');                   // 837 views beats 9 reactions
+  assert.equal(byViews[1].postId, 'p2');                   // NULL impressions ranks last, still listed
 });
 
 test('reads re-apply the scope — stale rows from a wider sync never leak', () => {

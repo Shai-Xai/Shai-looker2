@@ -893,7 +893,9 @@ function mount(app, { db: database, auth, appQuery: aq }) {
       communities: cids ? all.filter((c) => cids.includes(c.communityId)) : all,
       channels: cids ? channels(id).filter((c) => cids.includes(c.channelId)) : channels(id),
       series: cids ? communitySeries(id, cids, { metric, days }) : series(id, { metric, days }),
-      topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : undefined, limit: 12, community: cids }),
+      // Top posts rank by VIEWS (impressions); posts without view data sink to
+      // the bottom rather than vanishing (NULLS LAST). ?sort= still overrides.
+      topPosts: topPosts(id, { sort: q.sort ? String(q.sort) : 'impressions', limit: 12, community: cids }),
       recentPosts: topPosts(id, { sort: 'recent', limit: 12, community: cids }),
     };
   };

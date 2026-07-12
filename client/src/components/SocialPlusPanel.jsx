@@ -439,7 +439,7 @@ function PostsCard({ top, recent }) {
         <Chip on={tab === 'top'} onClick={() => setTab('top')}>🔥 Top</Chip>
         <Chip on={tab === 'recent'} onClick={() => setTab('recent')}>🕐 Recent</Chip>
       </div>
-      <p style={{ ...sub, marginTop: 6 }}>{tab === 'top' ? 'Ranked by reactions over all synced posts' : 'Newest first'}</p>
+      <p style={{ ...sub, marginTop: 6 }}>{tab === 'top' ? 'Ranked by views over all synced posts' : 'Newest first'}</p>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {rows.slice(0, tab === 'top' ? 6 : 10).map((p, i) => (
           <div key={p.postId} style={{ display: 'flex', gap: 12, padding: '10px 0', borderTop: i ? '1px solid var(--hairline)' : 'none' }}>
