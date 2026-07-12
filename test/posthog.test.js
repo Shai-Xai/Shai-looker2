@@ -554,7 +554,7 @@ test('commerce scan sweeps a year of event names + mapped property values for or
   assert.ok(out.body.values.some((v) => v.key === 'cta_label'), 'the label property is swept too');
   assert.ok(queries[0].includes("event ILIKE '%order%'") && queries[0].includes("event ILIKE '%checkout%'"), 'terms reach the query');
   assert.ok(queries[0].includes('INTERVAL 365 DAY'), 'a full year, not just recent data');
-  assert.equal(queries.length, 1 + 3, 'one event sweep + one per unique mapped property');
+  assert.equal(queries.length, 1 + 5, 'one event sweep + one per unique mapped property (incl. OS + device)');
   const denied = await h.invoke('GET /api/admin/posthog/commerce-scan', { user: { id: 'u1', role: 'member' } });
   assert.equal(denied.status, 403, 'admin only');
 });
@@ -569,13 +569,13 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   const m = JSON.parse(h.settings.posthog_metric_map);
   assert.deepEqual(m.screenEvents, ['interaction : interaction_type=content_view'], 'dead $screen mapping → confirmed views slice');
   assert.deepEqual(m.ctaEvents, ['interaction : interaction_type=cta_click'], 'bare mis-cased Interaction → confirmed CTA slice');
-  assert.deepEqual(m.breakdownProps, ['surface', 'cta_label', 'interaction_type'], 'CTA_Label chip swapped for cta_label, standard set reordered surface-first (v3)');
+  assert.deepEqual(m.breakdownProps, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type'], 'CTA_Label swapped for cta_label, surface-first order, OS + device appended (v3+v7)');
   assert.equal(m.ctaLabelProp, 'cta_label');
   assert.deepEqual(m.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'blank Purchases → confirmed order-confirmation slice (v2)');
   assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
   assert.equal(m.purchaseValueProp, 'order_amount_cents', 'blank value box → PostHog revenue tracker (v4)');
   assert.equal(m.purchaseValueCents, true);
-  assert.equal(h.settings.posthog_map_healed, '6');
+  assert.equal(h.settings.posthog_map_healed, '7');
   // A v1-healed install upgrades to v2 (purchases fill) WITHOUT re-running the
   // v1 rewrites — deliberate edits stay.
   const v1 = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
@@ -584,7 +584,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.deepEqual(m2.ctaEvents, ['my_custom_cta'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.screenEvents, ['$screen'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'v2 fills the blank Purchases box');
-  assert.equal(h2.settings.posthog_map_healed, '6');
+  assert.equal(h2.settings.posthog_map_healed, '7');
   // A customised chip set is never reordered by v3.
   const h2b = makeHarness({ presetSettings: { posthog_metric_map: JSON.stringify({ breakdownProps: ['interaction_type', 'my_prop'] }), posthog_map_healed: '2' } });
   assert.deepEqual(JSON.parse(h2b.settings.posthog_metric_map).breakdownProps, ['interaction_type', 'my_prop'], 'custom chips keep their order');
@@ -593,7 +593,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(JSON.parse(h2c.settings.posthog_metric_map).purchaseValueProp, 'my_amount', 'deliberate value props are never overwritten');
   // Fully healed → the migration is a no-op, deliberate purchase mappings kept.
   const done = JSON.stringify({ purchaseEvents: ['my_purchase'] });
-  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '6' } });
+  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '7' } });
   assert.equal(h3.settings.posthog_metric_map, done, 'healed flag makes the migration a no-op');
 });
 
@@ -618,7 +618,7 @@ test('purchase value: ONE amount per order_reference — grouped, zero-proof, ce
 test('reports carry the configured breakdown keys and live window uniques', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
-  assert.deepEqual(h.api.appReport(7).breakdowns, ['surface', 'cta_label', 'interaction_type']);
+  assert.deepEqual(h.api.appReport(7).breakdowns, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type']);
   const u = await h.api.windowUniques(['101'], 28);
   assert.equal(typeof u, 'number');
 });
@@ -734,7 +734,7 @@ test('history search sweeps event names AND breakdown values over a year, escape
   assert.equal(out.body.events[0].firstSeen.slice(0, 10), '2025-09-01', 'first/last seen ride along');
   assert.ok(queries[0].includes('INTERVAL 365 DAY'), 'searches the full year');
   assert.ok(queries[0].includes("%not\\'if%"), 'term is escaped');
-  assert.equal(queries.length, 4, 'one event-name sweep + one per configured breakdown property');
+  assert.equal(queries.length, 6, 'one event-name sweep + one per configured breakdown property (incl. OS + device)');
   const noQ = await h.invoke('GET /api/admin/posthog/search-events', { query: {}, user: { role: 'admin' } });
   assert.equal(noQ.status, 400);
   const denied = await h.invoke('GET /api/admin/posthog/search-events', { query: { q: 'x' }, user: { role: 'member' } });

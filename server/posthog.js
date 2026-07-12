@@ -193,7 +193,7 @@ const DEFAULT_MAP = {
   orderRefProp: 'order_reference',
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
-  breakdownProps: ['surface', 'cta_label', 'interaction_type'], // chip order = display order (surface first per Shai)
+  breakdownProps: ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type'], // chip order = display order (surface first per Shai; OS + device added 2026-07-12)
   personProps: { email: '$email', firstName: 'name', lastName: 'surname', phone: 'mobile' },
   // The 🛒→✅ checkout funnel stages (label + mapping lines, OR'd within a
   // step). Confirmed surfaces/taps from the commerce scan; cart is skipped —
@@ -420,7 +420,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   let healed = false;
   try {
     const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
-    if (ver < 6) {
+    if (ver < 7) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
@@ -447,13 +447,18 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         // v4 (2026-07-11): PostHog's revenue tracker is order_amount_cents —
         // a blank Purchase value box gets it (cents ÷100). Deliberate values kept.
         if (!String(m.purchaseValueProp || '').trim()) { m.purchaseValueProp = DEFAULT_MAP.purchaseValueProp; m.purchaseValueCents = true; }
-        db.setSetting('posthog_metric_map', JSON.stringify(m));
-        healed = true;
+        // v7 (2026-07-12): OS + device chips join the standard breakdown set —
+        // only the un-customised standard trio is upgraded.
+        const bd7 = nameList(m.breakdownProps ?? []);
+        const OLD3 = ['surface', 'cta_label', 'interaction_type'];
+        if (bd7.length === OLD3.length && OLD3.every((k) => bd7.includes(k))) m.breakdownProps = [...DEFAULT_MAP.breakdownProps];
+        // v5/v6 re-armed the resync for the order-level revenue restatement;
+        // from v7 on, only a REAL map change warrants burning a 90-day resync.
+        const next = JSON.stringify(m);
+        healed = ver < 6 || next !== raw;
+        db.setSetting('posthog_metric_map', next);
       }
-      // v5/v6 (2026-07-12): no map change — each bump re-arms the one-shot
-      // resync below; v6 restates revenue as order-level (one amount per
-      // order_reference), replacing the slice-sum that read 0.
-      db.setSetting('posthog_map_healed', '6');
+      db.setSetting('posthog_map_healed', '7');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {
