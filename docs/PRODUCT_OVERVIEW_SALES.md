@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-09 (🌐 Sales site v2 live: new story page at /sales + grouped features page with Coming Soon roadmap at /sales/features · 🚦 Queue-it live waiting-room stats) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-11 (🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join · previously: 👥 Social+ in-app community analytics · 📲 App analytics via direct PostHog integration) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -423,6 +423,32 @@ each platform without leaving Pulse."
 followers, reach and the posts that landed — next to their ticketing numbers, all
 in one place that updates itself."
 
+### 5e-bis. Social+ — in-app community analytics  🟡 (needs setup) · 🧪
+- Pulls the client's **Social+** (social.plus, formerly Amity) **in-app community
+  analytics into Pulse** — the fan communities and chats living inside the Howler
+  app, next to their app engagement and ticketing numbers.
+- **What you see** (📲 App page → **Community** tab, next to the PostHog
+  Analytics tab): total **members, communities, posts, comments, reactions and
+  chat messages**; a **30-day trend** with a metric switcher; the biggest
+  **communities**, the **busiest chats** and **top posts** ranked by reactions —
+  each with comments, impressions and reach.
+- **Chat coverage:** every channel (announcements, line-up, FAQ, event chat) with
+  member and message counts — spot which event conversations are alive.
+- **Linked per client:** Howler's ONE Social+ network holds every organiser's
+  communities, so an admin **links the right communities & event chats to each
+  client** (Admin → client → Integrations → Social+ card) — a client only ever
+  syncs and sees their own. Linking (and the full network directory behind it)
+  is strictly admin-only; the client just sees what's ticked for them.
+- **Setup 🟡:** platform key in Admin → Integrations (once), then tick the
+  client's communities and save — the save re-syncs immediately; daily
+  auto-refresh after that. Read-only: Pulse never posts or moderates. Gated by
+  the `App analytics → Community (Social+)` feature flag.
+- 🔜 **Next:** feed community engagement into the Owl/digests and dashboard tiles.
+
+**Pitch:** "Your app community isn't a black box any more — see which event
+communities are growing, which chats are buzzing, and which posts land, right next
+to the ticket sales they drive."
+
 ### 5f. Paid ads performance — Meta  🟡 (needs connection)
 Your Meta (Facebook/Instagram) **ad spend and results, inside Pulse** — pulled
 daily from the same ad account you already connected for audience sync (nothing
@@ -532,6 +558,49 @@ Meta and TikTok accounts in one click. Change pixels any time without a develope
 **Pitch:** "Your on-sale queue, live inside Pulse — how many are waiting, how fast
 they're getting through, and the whole curve of the sale — next to the sales
 numbers they're about to become."
+
+### 5j. App analytics — the Howler app, live from PostHog  🟡 (needs setup) · 🧪 (new)
+- **How your events perform inside the Howler consumer app** — straight from
+  PostHog (the app's analytics platform), no warehouse detour: views, unique
+  viewers, interactions, **CTA taps** and **in-app purchases** per event, with
+  **live "today so far"** numbers and daily trends (7/28/90 days).
+- **A client sees only their own events** — every app event carries the Howler
+  event ID, and Pulse forces the client's event scope server-side (fail-closed,
+  same guarantee as dashboards). Zero per-client setup: once the platform
+  connection is in, every client's 📲 App page lights up automatically (behind
+  the `App analytics` feature flag, default off while in beta).
+- **App users, by name** — the actual people in the app (email, first name,
+  surname, mobile from PostHog profiles), searchable, pageable, orderable by
+  most-recent or most-active (🏆 Super fans), and exportable to CSV — per client
+  (only people who touched THEIR events) or app-wide for Howler.
+- **"What's driving it" breakdowns** — the busiest values behind the numbers
+  (interaction type, CTA label, surface — configurable), as a ranked table AND
+  per-value daily trend lines with a click-to-filter legend.
+- **🎯 CTA clicks by label** — which buttons people actually press
+  (`view_tickets`, `buy_tickets`, `pay_now`, …) as a ranked bar chart, live,
+  window-filtered and scoped per client — the Looker CTA tile, now self-serve
+  inside Pulse.
+- **🛒 Checkout funnel** — ticket browsing → checkout → payment tap → order
+  confirmed, with step-over-step conversion % and the end-to-end rate, live
+  and per client. Shows exactly where fans drop out of buying in the app
+  (stages configurable in the event mapping).
+- **Ask the Owl** — "how is my event doing in the Howler app?" is a native Owl
+  question (`getAppAnalytics`): live + windowed engagement, per event, with
+  breakdowns — scoped exactly like the client's App page.
+- **Management view** (Admin → 📲 App analytics): the whole app across every
+  client — active users today (live), weekly/monthly actives, new users,
+  sessions, top events by in-app attention, with a per-client lens — plus the
+  event-mapping editor (which PostHog events count as screens / CTAs /
+  purchases / notifications, with a live catalog of what the app sends).
+- **One platform connection** (Admin → Integrations → PostHog): host, project
+  ID and a write-only personal API key. Nightly rollup + short-cached live
+  queries, so a briefly unreachable PostHog degrades to yesterday's data —
+  never a broken page. Anything that joins app data to ticketing/revenue stays
+  on the Looker path.
+
+**Pitch:** "Not just how many tickets sold — how your event is performing inside
+the Howler app right now: who's looking, what they tap, and who those fans
+actually are."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -952,6 +1021,49 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-11** — **🎯 App-audience groups → LIVE Engage segments** 🧪 (new):
+  **tap any tile** on the App-audience card (app users, holders/buyers on or
+  off the app, never-ticketed fans, group-buy upgraders) to save that group as
+  a **live Engage segment** — members re-compute from PostHog + ticketing at
+  every count and send, per event or across the client's Pulse. The card also
+  gains a **headline insight banner** ("5,142 engaged · 38% of holders are app
+  users · 3,981 never got a ticket") with an **📣 Engage them** button that
+  saves the segment and opens a pre-filled campaign; a **🎫 tickets-in-app-hands**
+  summary (share of all tickets sold held by app users, by ticket type); and
+  the **🏆 Super fans** leaderboard gets a Top 10–250 range + save-as-live-segment.
+  Emails stay server-side; requires campaign-approve permission.
+- **2026-07-11** — **🎟 App audience ↔ buyers (email join)** 🧪 (new): the App
+  page's Analytics tab gains an **"App audience vs your buyers"** card — the
+  client's app users (PostHog) matched by email against their ticket buyers
+  (Looker, hard-scoped): who converts, the **"not bought yet"** warm audience,
+  and buyers who skip the app. The **App-users table** gains a 🎟 **Tickets**
+  column (which events each app user holds tickets for) incl. CSV export.
+  Counts stay server-side; only emails already on screen are enriched.
+- **2026-07-11** — **🛒 Checkout funnel + in-app order tracking** on App
+  analytics 🧪: Purchases now counts real order confirmations (the app's
+  order-success screen), and a live funnel card shows tickets viewed →
+  checkout → payment tapped → order confirmed with conversion % per step —
+  per client, any date window.
+- **2026-07-11** — **🎯 CTA clicks by label** on App analytics 🧪: the Looker
+  "CTA clicks by label" tile recreated inside Pulse — live ranked bar chart of
+  which buttons people press in the app (`view_tickets`, `buy_tickets`, …),
+  window-filtered, scoped per client, on both the client App page and the
+  admin management view; label property configurable in the event mapping.
+- **2026-07-10** — **👥 Social+ in-app community analytics** 🧪 (new): direct
+  integration with **Social+** (social.plus) — Pulse pulls a client's app
+  **communities, chat channels, posts, comments & reactions** in daily (or on-tap
+  sync) and shows them on the **📲 App page → Community tab**: totals, a 30-day
+  trend, biggest communities, busiest chats and top posts. One platform key
+  (Admin → Integrations) covers the whole Howler network; admins **link each
+  client's communities & event chats** to them so clients only ever see their
+  own. Read-only; flag `appanalytics.socialplus`.
+- **2026-07-10** — **📲 App analytics (PostHog) ships in beta** — direct PostHog
+  integration for Howler-app engagement: per-event views/uniques/CTA
+  taps/purchases with live today-so-far numbers, an app-user directory
+  (email/name/mobile, CSV export), a management view of the whole app with a
+  per-client lens + event-mapping editor, and a client 📲 App page scoped
+  server-side to their events (feature flag `App analytics`, default off).
+  Looker keeps powering all cross-domain (app × ticketing) reporting.
 - **2026-07-09** — **🌐 Sales site v2 is live** — /sales now serves the new
   story page (interactive light-mode product demo that tours real screens, the
   Owl with real channel logos, See/Ask/Act rows with a medium carousel and an

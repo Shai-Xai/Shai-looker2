@@ -28,7 +28,7 @@ const emailTheme = require('./emailTheme'); // the campaign's visual "look" (Tie
 // AI-drafted) campaign copy on save, so what sends reads professionally.
 const { deEmDash } = require('./textStyle');
 
-function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents, appAudience }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -272,9 +272,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
   function shapeAudience(aud = {}, depth = 0) {
     const out = {
-      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
+      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query', 'appmatch'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      // when mode = 'appmatch' (a LIVE App-analytics group — the app↔ticketing join, re-computed server-side at every resolve via appMatch.groupEmails).
+      group: String(aud.group || ''), appEvent: String(aud.appEvent || '').slice(0, 64), appSize: Math.min(Math.max(Number(aud.appSize) || 0, 0), 500),
       // when mode = 'query' (an Owl-built cohort) — curated explore + dim filters, resolved by audienceFor's query branch (identity columns fixed server-side).
       model: String(aud.model || ''),
       view: String(aud.view || ''),
@@ -330,6 +332,9 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // each recipient gets an email (if they have an address) and an SMS (if
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
+      // What the campaign DRIVES (app/ticketing/cashless/…) — set in the composer;
+      // powers the App analytics moments overlay and channel reporting. '' = untagged.
+      channelTag: ['app', 'ticketing', 'cashless', 'web', 'other'].includes(body.channelTag) ? body.channelTag : '',
       audience: shapeAudience(aud),
       // Delivery mode: 'once' = single send; 'sequence' = automated drip (enroll, timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
@@ -541,7 +546,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     let filterFields = [];
     let columns = []; // header columns of a delimited list (paste/gsheet) — for column-mapping
     let filteredOut = 0;
-    if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
+    if (cfg.audience.mode === 'appmatch') {
+      // LIVE app↔ticketing group (App analytics): appMatch.groupEmails re-computes
+      // from PostHog + Looker on every resolve — the segment refreshes at send time.
+      const am = appAudience && appAudience();
+      if (!am) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
+      const { emails } = await am.groupEmails(entityId, user, { group: cfg.audience.group, event: cfg.audience.appEvent || '', size: cfg.audience.appSize || 0 });
+      raw = emails.map((email) => ({ email, phone: '', name: '', emailOk: true, smsOk: false })); // same contactable shape as a pasted list
+    } else if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
       // Pasted text / uploaded CSV-Excel (parsed to text client-side), or a linked
       // Google Sheet fetched LIVE each resolve so the segment tracks the sheet.
       const text = cfg.audience.mode === 'gsheet'

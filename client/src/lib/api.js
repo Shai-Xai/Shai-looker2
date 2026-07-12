@@ -216,6 +216,40 @@ export const api = {
   syncMyMetaAds: (entityId) => fetch(`/api/my/meta-ads/${entityId}/sync`, { method: 'POST' }).then(json),
   adminMetaAds: (entityId, days) => fetch(`/api/admin/entities/${entityId}/meta-ads${days ? `?days=${days}` : ''}`).then(json),
   syncAdminMetaAds: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-ads/sync`, { method: 'POST' }).then(json),
+  // 📱 App analytics — direct PostHog integration (platform connection + dual-surface reports)
+  posthogSettings: () => fetch('/api/admin/posthog/settings').then(json),
+  savePosthogSettings: (p) => fetch('/api/admin/posthog/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
+  testPosthog: () => fetch('/api/admin/posthog/test', { method: 'POST' }).then(json),
+  posthogEventsCatalog: () => fetch('/api/admin/posthog/events-catalog').then(json),
+  posthogDiagnose: () => fetch('/api/admin/posthog/diagnose').then(json),
+  posthogPropertyValues: (event, key) => fetch(`/api/admin/posthog/property-values?event=${encodeURIComponent(event)}&key=${encodeURIComponent(key)}`).then(json),
+  posthogSearchEvents: (q) => fetch(`/api/admin/posthog/search-events?q=${encodeURIComponent(q)}`).then(json),
+  posthogCommerceScan: () => fetch('/api/admin/posthog/commerce-scan').then(json),
+  feedsSettings: () => fetch('/api/admin/feeds/settings').then(json),
+  saveFeedsSettings: (body) => fetch('/api/admin/feeds/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  generateFeedToken: () => fetch('/api/admin/feeds/token', { method: 'POST' }).then(json),
+  previewFeed: () => fetch('/api/admin/feeds/preview').then(json),
+  adminAppAnalytics: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  adminAppPeople: ({ days, from, to, q, entityId, offset, orderBy, limit, excludeStaff } = {}) => fetch(`/api/admin/app-analytics/people?days=${days || ''}&from=${from || ''}&to=${to || ''}&q=${encodeURIComponent(q || '')}&entityId=${encodeURIComponent(entityId || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}&limit=${limit || ''}&excludeStaff=${excludeStaff ? 1 : ''}`).then(json),
+  // Manual sync recounts the FULL window (the nightly tick only restates 7 days) —
+  // so a mapping/property fix backfills history in one click.
+  syncAppAnalytics: () => fetch('/api/admin/app-analytics/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 90 }) }).then(json),
+  myAppAnalytics: (entityId, o = {}) => { const q = typeof o === 'object' ? o : { days: o }; return fetch(`/api/my/app-analytics/${entityId}?days=${q.days || ''}&from=${q.from || ''}&to=${q.to || ''}`).then(json); },
+  myAppPeople: (entityId, { days, from, to, q, offset, orderBy, limit, excludeStaff } = {}) => fetch(`/api/my/app-analytics/${entityId}/people?days=${days || ''}&from=${from || ''}&to=${to || ''}&q=${encodeURIComponent(q || '')}&offset=${offset || 0}&orderBy=${orderBy || ''}&limit=${limit || ''}&excludeStaff=${excludeStaff ? 1 : ''}`).then(json),
+  adminAppBreakdown: ({ key, days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  myAppBreakdown: (entityId, { key, days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
+  adminAppBreakdownSeries: ({ key, days, from, to, entityId, granularity } = {}) => fetch(`/api/admin/app-analytics/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  myAppBreakdownSeries: (entityId, { key, days, from, to, granularity } = {}) => fetch(`/api/my/app-analytics/${entityId}/breakdown-series?key=${encodeURIComponent(key)}&days=${days || ''}&from=${from || ''}&to=${to || ''}&granularity=${granularity || ''}`).then(json),
+  adminAppFunnel: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics/funnel?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  adminAppEventSeries: ({ days, from, to, entityId, events } = {}) => fetch(`/api/admin/app-analytics/event-series?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}&events=${encodeURIComponent(events || '')}`).then(json),
+  myAppEventSeries: (entityId, { days, from, to, events } = {}) => fetch(`/api/my/app-analytics/${entityId}/event-series?days=${days || ''}&from=${from || ''}&to=${to || ''}&events=${encodeURIComponent(events || '')}`).then(json),
+  myAppFunnel: (entityId, { days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/funnel?days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
+  adminAppCtaLabels: ({ days, from, to, entityId } = {}) => fetch(`/api/admin/app-analytics/cta-labels?days=${days || ''}&from=${from || ''}&to=${to || ''}&entityId=${encodeURIComponent(entityId || '')}`).then(json),
+  myAppCtaLabels: (entityId, { days, from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/cta-labels?days=${days || ''}&from=${from || ''}&to=${to || ''}`).then(json),
+  adminAppToday: ({ entityId, from, to } = {}) => fetch(`/api/admin/app-analytics/today?entityId=${encodeURIComponent(entityId || '')}&from=${from || ''}&to=${to || ''}`).then(json),
+  adminAppMoments: ({ entityId, from, to } = {}) => fetch(`/api/admin/app-analytics/moments?entityId=${encodeURIComponent(entityId || '')}&from=${from || ''}&to=${to || ''}`).then(json),
+  myAppMoments: (entityId, { from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/moments?from=${from || ''}&to=${to || ''}`).then(json),
+  myAppToday: (entityId, { from, to } = {}) => fetch(`/api/my/app-analytics/${entityId}/today?from=${from || ''}&to=${to || ''}`).then(json),
   // Google Drive sources (the Owl reads the client's shared files) — dual-surface
   myDriveView: (entityId) => fetch(`/api/my/drive/${entityId}`).then(json),
   myDriveSetKey: (entityId, body) => fetch(`/api/my/drive/${entityId}/key`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
@@ -530,6 +564,30 @@ export const api = {
   },
   syncSocial: (entityId) => fetch(`/api/my/social/${entityId}/sync`, { method: 'POST' }).then(json),
   verifySocial: (entityId) => fetch(`/api/my/social/${entityId}/verify`, { method: 'POST' }).then(json),
+
+  // Social+ (social.plus) in-app community analytics (inbound). Dual-surface
+  // like queueit: 'admin-client' hits /api/admin (ungated), 'my' the flag-gated
+  // client routes. Directory/assign power the community → client linking.
+  socialplusData: (entityId, scope, { metric = 'members', days = 30, sort, community } = {}) => {
+    const q = new URLSearchParams({ metric, days: String(days) });
+    if (sort) q.set('sort', sort);
+    if (community) q.set('community', community);
+    return fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus` : `/api/my/socialplus/${entityId}`}?${q}`).then(json);
+  },
+  socialplusSync: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/sync` : `/api/my/socialplus/${entityId}/sync`, { method: 'POST' }).then(json),
+  // App audience ↔ buyers (email join) + per-app-user ticket holdings.
+  appAudience: (entityId, scope, { event } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-audience` : `/api/my/app-audience/${entityId}`}${event ? `?event=${encodeURIComponent(event)}` : ''}`).then(json),
+  appTickets: (entityId, scope, emails) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-tickets` : `/api/my/app-tickets/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emails }) }).then(json),
+  appAudienceSegment: (entityId, scope, { group, event, size } = {}) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-audience/segment` : `/api/my/app-audience/${entityId}/segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group, event: event || '', size: size || 0 }) }).then(json),
+  appTicketSummary: (entityId, scope, { event } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/app-audience/tickets-summary` : `/api/my/app-audience/${entityId}/tickets-summary`}${event ? `?event=${encodeURIComponent(event)}` : ''}`).then(json),
+  // Fired on page open — the server skips it when data is fresh (<30 min).
+  socialplusRefresh: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/refresh` : `/api/my/socialplus/${entityId}/refresh`, { method: 'POST' }).then(json),
+  socialplusToday: (entityId, scope, { community } = {}) => fetch(`${scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/today` : `/api/my/socialplus/${entityId}/today`}${community ? `?community=${encodeURIComponent(community)}` : ''}`).then(json),
+  socialplusVerify: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/socialplus/verify` : `/api/my/socialplus/${entityId}/verify`, { method: 'POST' }).then(json),
+  // Directory + assign are admin-only — the directory spans every organiser's
+  // communities, so there is deliberately no client-surface twin.
+  socialplusDirectory: (entityId) => fetch(`/api/admin/entities/${entityId}/socialplus/directory`).then(json),
+  socialplusAssign: (entityId, ids) => fetch(`/api/admin/entities/${entityId}/socialplus/assign`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).then(json),
 
   // Inventive embedded AI analyst (server-proxied; key stays server-side).
   inventiveStatus: () => fetch('/api/inventive/status').then(json),

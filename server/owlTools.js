@@ -23,7 +23,7 @@ const { OPERATORS: ALERT_OPERATORS, CHANNELS: ALERT_CHANNELS, PRIORITIES: ALERT_
 const { CHANNELS: LP_CHANNELS, MAX_BLOCKS: LP_MAX_BLOCKS } = require('./livepulse');
 const reportingTz = require('./timezone');
 
-module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, getSignalFlow, getChottuApi, catalogue = defaultCatalogue }) {
+module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAlertsApi, getCampaignsApi, getUploadsApi, getDriveApi, getMetaAdsApi, getPosthogApi, resolveTileValue, getExploreFields, getFieldOverrides, draftCampaignCopy, designEmailFn, getSegmentsApi, getEventOpsApi, getDataHealthApi, getSignalFlow, getChottuApi, catalogue = defaultCatalogue }) {
   if (!query || !query.applyScope || !query.runLookerQuery) {
     throw new Error('owlTools requires the query engine (applyScope + runLookerQuery).');
   }
@@ -718,6 +718,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     description: 'Meta (Facebook/Instagram) PAID ads performance for this client: spend, impressions, clicks, purchases, purchase value, CPC, cost-per-purchase and ROAS — totals, per-campaign and last-sync time. Use for "how are my ads doing", "what did we spend", "which campaign converts best". Read-only.',
     input_schema: { type: 'object', properties: { days: { type: 'number', description: 'Window in days (default 28, max 90).' } } },
   };
+
 
   // ── createAlert (ACT) ─────────────────────────────────────────────────────────
   // The FIRST act-tool. It DRAFTS a metric alert for the user to confirm — it does
@@ -1471,6 +1472,7 @@ module.exports = function createOwlTools({ query, auth, db, getGoalsApi, getAler
     searchDriveDocs: { schema: searchDriveDocsSchema, run: runSearchDriveDocs, menu: { cmd: 'drive', label: 'Drive documents', icon: '📁', example: 'What does the marketing plan say about launch week?' } },
     readDriveDoc: { schema: readDriveDocSchema, run: runReadDriveDoc },
     getPaidPerformance: { schema: getPaidPerformanceSchema, run: runGetPaidPerformance, menu: { cmd: 'ads', label: 'Paid ads (Meta)', icon: '💸', example: 'How are my Meta ads performing — spend and ROAS?' } },
+    getAppAnalytics: { ...require('./posthog').owlTool({ db, getApi: getPosthogApi }), menu: { cmd: 'app', label: 'App analytics', icon: '📲', example: 'How is my event doing in the Howler app?' } },
     createAlert: { schema: createAlertSchema, run: runCreateAlert },
     createLiveUpdate: { schema: createLiveUpdateSchema, run: runCreateLiveUpdate },
     createSegment: { schema: createSegmentSchema, run: runCreateSegment, menu: { cmd: 'segment', label: 'Build an audience', icon: '👥', example: 'Build a segment of my top customers' } },

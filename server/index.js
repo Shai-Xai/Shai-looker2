@@ -160,7 +160,7 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor, staffInboundFn = null; // waDigestFor set when digests mount; staffInboundFn set when staffAlerts mounts (lets the WhatsApp Owl intercept staff numbers before they reach it)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, getPosthogApi: () => posthogApi, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getChottuApi: () => chottuApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); // 🚩 per-client feature flags + 👁 view-as-user — mounts EARLY so its route gates register before the feature modules → server/flags.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); // 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -1090,8 +1090,8 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
   if (locks.chottu !== false) delete body.chottu;
-  if (locks.queueit !== false) delete body.queueit;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key' };
+  if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
   applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
@@ -1366,9 +1366,9 @@ app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, re
 app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   const clients = [];
   for (const e of db.listEntities()) {
-    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id);
-    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount)) continue;
-    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s } });
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id); const sp = socialplus.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount || sp.configured)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s, socialplus: sp } });
   }
   // Most recently active (or failing) clients first.
   clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
@@ -2530,7 +2530,7 @@ const billing = require('./billing').mount(app, { db, auth });
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os, billing,
+  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {
@@ -2932,8 +2932,8 @@ const PORT = process.env.PORT || 3045;
 const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
-  // Pull organic social stats once a day for every connected client (best-effort).
-  socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+  // Pull organic social stats + Social+ community analytics once a day (best-effort).
+  socialMetrics.startDailySync({ listEntities: () => db.listEntities() }); socialplus.startDailySync({ listEntities: () => db.listEntities() });
 });
 
 // Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new

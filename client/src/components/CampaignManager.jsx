@@ -345,6 +345,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
     goal: cfg.goal || tp.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
     recurring: action?.recurring || false,
     channel: cfg.channel || 'email', // email | sms
+    channelTag: cfg.channelTag || '', // what it drives: app | ticketing | cashless | web | other ('' = untagged)
     phoneField: cfg.audience?.phoneField || '',
     audienceMode: cfg.audience?.mode || ta.mode || 'tile',
     segmentId: cfg.audience?.segmentId || '', // when audienceMode = 'segment'
@@ -483,7 +484,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml, blocks: f.blocks, theme: f.theme,
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
-    channel: f.channel,
+    channel: f.channel, channelTag: f.channelTag,
     campaignMode: f.campaignMode, steps: f.steps,
     journey: f.journey || undefined, // journey campaigns: keep the full branching tree through editor saves
     dripStart: f.dripStart, freshHours: f.freshHours,
@@ -857,6 +858,18 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Accordion title="Setup" {...acc('setup')}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
+
+          <Field label="What does it drive? (optional · tags the campaign for channel reporting)">
+            <select style={input} value={f.channelTag} onChange={(e) => set('channelTag', e.target.value)}>
+              <option value="">Untagged (auto-detect from content)</option>
+              <option value="app">📲 App — drives people into the Howler app</option>
+              <option value="ticketing">🎟️ Ticketing</option>
+              <option value="cashless">💳 Cashless</option>
+              <option value="web">🌐 Web</option>
+              <option value="other">📦 Other</option>
+            </select>
+            <div style={hintS}>App-tagged campaigns show as markers on the App analytics charts. Untagged campaigns count as App when their content carries an app link.</div>
+          </Field>
 
           <Field label="Master campaign (optional · groups & reports segments together)">
             <input style={input} value={f.master} onChange={(e) => set('master', e.target.value)} placeholder="e.g. Bushfire — abandoned cart" list="master-campaign-list" />

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, showSocialPlus = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -45,6 +45,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [ttToken, setTtToken] = useState('');
   const [clearTtToken, setClearTtToken] = useState(false);
   const [ttAdvertiser, setTtAdvertiser] = useState(value?.tiktok?.advertiserId || '');
+  const [spKey, setSpKey] = useState('');
+  const [clearSpKey, setClearSpKey] = useState(false);
+  const [spRegion, setSpRegion] = useState(value?.socialplus?.region || 'eu');
   const [slackWebhook, setSlackWebhook] = useState('');
   const [clearSlackWebhook, setClearSlackWebhook] = useState(false);
   const [slackBotToken, setSlackBotToken] = useState('');
@@ -114,6 +117,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
     if (showPixel && want('pixel')) {
       p.pixel = { metaPixelId: pxMeta, googleTagId: pxGoogle, tiktokPixelId: pxTiktok, consentMode: pxConsent };
     }
+    if (showSocialPlus && want('socialplus')) {
+      p.socialplus = { region: spRegion };
+      if (spKey) p.socialplus.apiKey = spKey;
+      if (clearSpKey) p.socialplus.clearApiKey = true;
+    }
     if (showSlack && want('slack')) {
       p.slack = { channel: slackChannel };
       if (slackWebhook) p.slack.webhookUrl = slackWebhook;
@@ -148,6 +156,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
       if (!only || only === 'queueit') { setQitKey(''); setClearQitKey(false); }
+      if (!only || only === 'socialplus') { setSpKey(''); setClearSpKey(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
     finally { setBusyKey(''); }
@@ -278,6 +287,40 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           pxPack={pxPack} setPxPack={setPxPack} onPixelStatus={onPixelStatus} onCreatePixelAudiences={onCreatePixelAudiences}
           SaveRow={SaveRow}
         />
+      )}
+
+      {/* Social+ (social.plus) — per-client in-app community analytics (inbound) */}
+      {showSocialPlus && (
+        <Section title="👥 Social+ (app communities)" collapsible={collapsible} {...lockProps('socialplus')} guide={<>
+          <div style={note}>
+            Pull <b>in-app community analytics</b> from <b>Social+</b> (social.plus, formerly Amity) into Pulse — community members, chat activity, posts, comments &amp; reactions per event, shown on the <b>App → Community</b> tab. <b>Read-only:</b> Pulse never posts or moderates. A client left blank rides Howler's shared network — then an admin just <b>links their communities</b> to them (Admin → client → Integrations → Social+ card).
+          </div>
+          <HowTo title="How to get a Social+ API key" steps={[
+            <>Open the <b>Social+ console</b> (portal) and pick the application the app communities live in.</>,
+            <>Go to <b>Settings → Security</b> (or <b>Settings → Integrations</b> on newer consoles) and copy the application's <b>API key</b>.</>,
+            <>Paste it into <b>API key</b> above and pick the <b>region</b> the Social+ network is hosted in (shown in the console URL / settings).</>,
+            <>Save, then <b>link the client's communities</b> in their Social+ card (Admin → client → Integrations) — stats land on their <b>App → Community</b> tab and refresh daily.</>,
+          ]} />
+        </>}>
+          <Lbl>API key</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={spKey} onChange={(e) => setSpKey(e.target.value)}
+            placeholder={value?.socialplus?.keySet ? `Set (${value.socialplus.keyHint || '••••'}) — leave blank to keep` : 'Social+ application API key'}
+            style={input} disabled={clearSpKey}
+          />
+          {value?.socialplus?.keySet && (
+            <label style={clearRow}><input type="checkbox" checked={clearSpKey} onChange={(e) => setClearSpKey(e.target.checked)} /> Remove this key</label>
+          )}
+          <Lbl>Region</Lbl>
+          <select value={spRegion} onChange={(e) => setSpRegion(e.target.value)} style={input}>
+            <option value="eu">Europe (eu)</option>
+            <option value="us">US East (us)</option>
+            <option value="sg">Singapore (sg)</option>
+          </select>
+          {value?.socialplus?.configured && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — link communities to clients and the stats appear on their <b>App → Community</b> tab.</div>}
+          <SaveRow k="socialplus" />
+        </Section>
       )}
 
       {/* Slack — per-client outbound notifications */}

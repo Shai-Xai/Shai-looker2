@@ -15,6 +15,8 @@ import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import QueueItCard from '../components/QueueItCard.jsx';
+import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
+import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -153,6 +155,7 @@ const ADMIN_NAV = [
   ['settlements', 'Settlements', '💰'],
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
+  ['appanalytics', 'App analytics', '📲'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['datahealth', 'Data health', '📡'],
@@ -178,6 +181,7 @@ export default function AdminPage() {
       {tab === 'settlements' && <Settlements />}
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
+      {tab === 'appanalytics' && <AppAnalyticsAdmin />}
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
       {tab === 'datahealth' && <DataHealthAdmin />}
@@ -5177,7 +5181,12 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit showSocialPlus clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit', 'socialplus']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="📱 PostHog — app analytics">
+        <p style={hint}>One platform connection to Howler's PostHog project. Powers the 📲 App analytics tab and every client's App page (scoped to their events by the <code>eventID</code> property). Event/metric mapping lives on the App analytics tab.</p>
+        <PosthogSettingsCard />
+        <PosthogFeedCard />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5487,8 +5496,9 @@ function ClientIntegrations({ entity }) {
         pixelEntityId={entity.id}
         onPixelStatus={() => api.getPixelStatus(entity.id)}
         onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
+        showSocialPlus
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
@@ -5497,6 +5507,7 @@ function ClientIntegrations({ entity }) {
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
       <MetaConnectCard entityId={entity.id} scope="admin-client" />
       <QueueItCard entityId={entity.id} scope="admin-client" />
+      <SocialPlusPanel entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );
