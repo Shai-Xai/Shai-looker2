@@ -533,7 +533,7 @@ function goalsFactLines(goals) {
   return out;
 }
 
-async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
+async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today, app }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -556,7 +556,7 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
     // GOALS: the event targets, with progress ALREADY COMPUTED. Facts — phrase, never recompute.
     lines.push(...goalsFactLines(goals));
   }
-  lines.push('CATALOGUE:');
+  if (app?.actives) lines.push('', `APP AUDIENCE (their fans INSIDE the Howler consumer app — include ONE short point on this audience and ONE suggestion encouraging a post to their in-app community to reach these fans): active app users last 28 days: ${app.actives}${app.communities ? `; in-app communities: ${app.communities}${app.members ? ` with ${app.members} members` : ''}` : ''}.`, ''); lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: MODEL,
@@ -607,7 +607,7 @@ Rules:
 - GA4/analytics metrics (sessions, page views, "conversions") measure TRAFFIC, NOT finalised ticket sales. dashboardId values MUST come from a given CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE/EVENT, or that you are an AI.`;
 
-async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today }) {
+async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instructions, apiKey, actions, capabilities, goals, today, app }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -623,7 +623,7 @@ async function digestBriefMulti({ groups, roleLabel, roleFocus, catalogue, instr
     lines.push('');
   }
   if ((goals || []).length) lines.push(...goalsFactLines(goals), '');
-  lines.push('CATALOGUE (all dashboards, dashboardId: title [set, event]):');
+  if (app?.actives) lines.push(`APP AUDIENCE (their fans INSIDE the Howler consumer app — include ONE short point on this audience and ONE suggestion encouraging a post to their in-app community): active app users last 28 days: ${app.actives}${app.communities ? `; in-app communities: ${app.communities}${app.members ? ` with ${app.members} members` : ''}` : ''}.`, ''); lines.push('CATALOGUE (all dashboards, dashboardId: title [set, event]):');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: MODEL,

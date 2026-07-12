@@ -193,7 +193,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); // 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); const appAudienceFor = async (eid) => { try { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(eid).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } }; // 📲 app-audience fact for briefing + digest (flag-gated, fail-soft) · 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -1907,7 +1907,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const appAud = await (async () => { try { if (!require('./flags').enabled(entityId, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(entityId); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(entityId).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } })(); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: appAud }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
@@ -2146,7 +2146,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // The single-pass (flat) digest over all the facts — used for single-event
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
-    const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const digestApp = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: digestApp }));
     // A single-event digest scopes all its links/actions to that one event; the
     // multi-event fallback (flat over several) has no single event to assert.
     const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
@@ -2179,7 +2179,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
       for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
       const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
       const today = todayLabel();
-      const acts = actionsSummaryFor(entityId);
+      const acts = actionsSummaryFor(entityId); const digestApp = await appAudienceFor(entityId); // 📲 one app-audience block for the portfolio overview
       // Followed-tile visuals, grouped into the event each tile belongs to.
       const visualsBySuite = {};
       if (followedVisual && followedFacts.length) {
@@ -2187,7 +2187,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
       const [ovRaw, evRaws] = await aiUsage.run({ entityId, kind: 'digest' }, () => Promise.all([
-        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
+        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today, app: digestApp }),
         Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
           .then((r) => ({ g, r }))
           .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
