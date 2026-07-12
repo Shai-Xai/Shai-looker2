@@ -299,6 +299,8 @@ test('reverse property lookup: which events carry a key, and are they event-id t
         return HOGQL(['event', 'n', 'tagged', 'firstSeen', 'lastSeen'],
           [['order_completed', 550, 0, '2025-08-01 10:00:00', '2026-07-12 09:00:00'], ['interaction', 22, 22, '2026-06-01 10:00:00', '2026-07-11 09:00:00']]);
       }
+      if (q.includes('GROUP BY k0, k1')) return HOGQL(['k0', 'k1', 'n'], [['checkout', 'impression', 300], ['order_success', 'content_view', 22]]);
+      if (q.includes('JSONExtractKeys')) return HOGQL(['k', 'n'], [['order_id', 540], ['order_amount_cents', 550]]);
       return HOGQL(['v', 'n'], [['85000', 12], ['12000', 9]]);
     },
   });
@@ -308,6 +310,9 @@ test('reverse property lookup: which events carry a key, and are they event-id t
   assert.equal(out.body.carriers[0].tagged, 0, 'untagged rows are called out — they never reach a client');
   assert.equal(out.body.carriers[1].tagged, 22);
   assert.equal(out.body.values[0].value, '85000');
+  assert.equal(out.body.slices[0].slice, 'surface=checkout  ·  cta_label=impression', 'non-zero rows sliced by the first two mapped breakdown props');
+  assert.equal(out.body.siblingKeys[0].key, 'order_id', 'sibling keys surface the dedup candidates');
+  assert.ok(h.queries.some((q) => q.includes("NOT IN ('0', '0.0', 'null')")), 'zero amounts are excluded from the slice map');
   const q = h.queries[0];
   assert.ok(q.includes("notEmpty(toString(properties['order_amount_cents']))"), 'filters to rows carrying the key');
   assert.ok(q.includes('INTERVAL 365 DAY'), 'a full year, not just recent data');

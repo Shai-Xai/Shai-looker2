@@ -1125,10 +1125,30 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       const has = `notEmpty(toString(${prop(key)}))`;
       const carriers = await hogql(`SELECT event, count() AS n, countIf(notEmpty(toString(${prop(c.eventIdProp)}))) AS tagged, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${has} GROUP BY event ORDER BY n DESC LIMIT 20`, { ttl: CATALOG_TTL });
       const values = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${has} GROUP BY v ORDER BY n DESC LIMIT 10`, { ttl: CATALOG_TTL });
+      // WHERE do the meaningful (non-zero) values ride, in mapping terms? The
+      // slice table is what turns "the key exists" into a usable mapping line.
+      const nz = `${has} AND toString(${prop(key)}) NOT IN ('0', '0.0', 'null')`;
+      const bd = metricMap().breakdownProps.slice(0, 2);
+      let slices = [];
+      if (bd.length) {
+        try {
+          const cols = bd.map((k, i) => `toString(${prop(k)}) AS k${i}`).join(', ');
+          const rows = await hogql(`SELECT ${cols}, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${nz} GROUP BY ${bd.map((_, i) => `k${i}`).join(', ')} ORDER BY n DESC LIMIT 15`, { ttl: CATALOG_TTL });
+          slices = rows.map((r) => ({ slice: bd.map((k, i) => `${k}=${String(r[`k${i}`] || '') || '(blank)'}`).join('  ·  '), count: Number(r.n) || 0 }));
+        } catch { /* older HogQL — the carriers table still answers most of it */ }
+      }
+      // sibling keys on non-zero rows — an order-id-ish key here unlocks exact
+      // once-per-order dedup regardless of which screens carry the amount
+      let siblingKeys = null;
+      try {
+        const rows = await hogql(`SELECT arrayJoin(JSONExtractKeys(properties)) AS k, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${nz} GROUP BY k ORDER BY n DESC LIMIT 40`, { ttl: CATALOG_TTL });
+        siblingKeys = rows.map((r) => ({ key: String(r.k), count: Number(r.n) || 0 }));
+      } catch { siblingKeys = null; }
       return res.json({
         key,
         carriers: carriers.map((r) => ({ event: String(r.event), count: Number(r.n) || 0, tagged: Number(r.tagged) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) })),
         values: values.map((r) => ({ value: String(r.v), count: Number(r.n) || 0 })),
+        slices, siblingKeys,
       });
     }
     if (!event) throw new HttpError(400, 'Pass ?event= (a name, or `event : property=value` for a slice) — or just a key to find which events carry it.');
