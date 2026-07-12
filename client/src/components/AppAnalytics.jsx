@@ -1567,12 +1567,14 @@ function DiagnoseCard() {
       {d && (
         <>
           {d.revenueProbe && (
-            <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.revenueProbe.error ? 'var(--danger, #dc2626)' : d.revenueProbe.revenue > 0 ? 'var(--success, #10b981)' : '#d97706' }}>
+            <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.revenueProbe.error ? 'var(--danger, #dc2626)' : (d.revenueProbe.revenue > 0 || d.revenueProbe.yearRevenue > 0) ? 'var(--success, #10b981)' : '#d97706' }}>
               {d.revenueProbe.error
                 ? `✗ Revenue query failed: ${d.revenueProbe.error}`
                 : d.revenueProbe.revenue > 0
                   ? `✓ Revenue pipeline works — whole app, 90 days: ${fmt(d.revenueProbe.orders)} orders · ${fmtR(d.revenueProbe.revenue)}. A client showing no revenue simply had none (free orders count as purchases but R0).`
-                  : `⚠ The revenue query runs but finds R0 in 90 days — every order_amount_cents in the window is zero or the mapped properties are off.`}
+                  : d.revenueProbe.yearRevenue > 0
+                    ? `✓ Revenue pipeline works, but the paid orders are OLDER than 90 days — full year: ${fmt(d.revenueProbe.yearOrders)} orders · ${fmtR(d.revenueProbe.yearRevenue)}${d.revenueProbe.paidSeen?.lastSeen ? ` (last paid amount seen ${String(d.revenueProbe.paidSeen.lastSeen).slice(0, 10)})` : ''}. Widen a page's date range past that date and the revenue shows.`
+                    : `⚠ The revenue query runs but finds R0 even over a full year — every order_amount_cents is zero${d.revenueProbe.paidSeen ? ` (rows with amounts: ${fmt(d.revenueProbe.paidSeen.rows)})` : ''}, or the mapped properties are off.`}
             </p>
           )}
           <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.taggedEvents7d > 0 ? 'var(--success, #10b981)' : 'var(--danger, #dc2626)' }}>
