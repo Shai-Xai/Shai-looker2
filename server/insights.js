@@ -803,7 +803,7 @@ async function summariseReleaseNotes({ days, apiKey, instructions, featureMap })
   return Array.isArray(parsed?.days) ? parsed.days : [];
 }
 
-async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, goals, today }) {
+async function briefHome({ tiles, profile, catalogue, instructions, apiKey, actions, messages, capabilities, goals, today, app }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (the current date — anchor all "today/yesterday/this month/day N" references to this).`, '');
@@ -829,7 +829,7 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
     lines.push('', 'MESSAGES (from the Howler team):');
     for (const m of fromHowler) lines.push(`- [id:${m.id}] ${m.unread ? '[UNREAD] ' : ''}${m.priority === 'must_ack' && !m.acked ? '[NEEDS ACK] ' : ''}"${m.title}": ${m.preview}`);
   }
-  if ((goals || []).length) lines.push(...goalsFactLines(goals));
+  if ((goals || []).length) lines.push(...goalsFactLines(goals)); if (app?.actives) lines.push('', `APP AUDIENCE (their fans INSIDE the Howler consumer app — include ONE dedicated bullet on this, a 5th bullet is allowed for it, reminding the reader of this in-app audience; and ONE suggestion encouraging them to post to their in-app community to reach these fans): active app users last 28 days: ${app.actives}${app.communities ? `; in-app communities: ${app.communities}${app.members ? ` with ${app.members} members` : ''}` : ''}.`);
   lines.push('');
   lines.push('CATALOGUE:');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);

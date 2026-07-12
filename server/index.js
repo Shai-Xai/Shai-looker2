@@ -1908,7 +1908,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const appAud = await (async () => { try { if (!require('./flags').enabled(entityId, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(entityId); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(entityId).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } })(); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
@@ -1919,7 +1919,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       available: true,
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4)
+      bullets: (raw.bullets || []).slice(0, 5) // 5th slot = the app-audience point when the flag is on
         .map((b) => ({ text: clipWords(b.text, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
