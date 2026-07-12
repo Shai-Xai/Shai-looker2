@@ -339,11 +339,12 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         FROM persons WHERE created_at >= toStartOfDay(now()) - INTERVAL ${N} DAY GROUP BY day ORDER BY day`);
       for (const r of newRows) if (r.day) upNew.run(r.day, Number(r.new_users) || 0, ts);
       const evId = prop(c.eventIdProp);
-      // The value property may not ride the purchase-mapping slice itself (the
-      // amount can sit on a sibling event) — sum it wherever it appears on the
-      // event's traffic; cents-denominated props land ÷100 so reports read rand.
+      // The amount property rides MANY events per order (the running total on
+      // every checkout screen — 342 identical rows for one order, verified
+      // 2026-07-12), so it is summed ONLY on the purchase slice: one
+      // confirmation view = one order counted once. Cents land ÷100 → rand.
       const value = m.purchaseValueProp
-        ? `sum(toFloat(${prop(m.purchaseValueProp)}))${m.purchaseValueCents ? ' / 100' : ''} AS purchase_value`
+        ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), ${m.purchaseEvents.length ? mapCond(m.purchaseEvents) : `notEmpty(toString(${prop(m.purchaseValueProp)}))`})${m.purchaseValueCents ? ' / 100' : ''} AS purchase_value`
         : '0 AS purchase_value';
       const evRows = await hogql(`
         SELECT toString(toDate(timestamp)) AS day, toString(${evId}) AS event_ref,
@@ -395,7 +396,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   let healed = false;
   try {
     const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
-    if (ver < 4) {
+    if (ver < 5) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
@@ -425,7 +426,10 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         db.setSetting('posthog_metric_map', JSON.stringify(m));
         healed = true;
       }
-      db.setSetting('posthog_map_healed', '4');
+      // v5 (2026-07-12): no map change — the bump re-arms the one-shot resync
+      // below (the v4 backfill was killed by back-to-back deploys) and the
+      // corrected purchase-slice sum restates revenue.
+      db.setSetting('posthog_map_healed', '5');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {
@@ -798,9 +802,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     const sel = steps.map((s, i) => `uniqIf(person_id, ${mapCond(s.events)}) AS u${i}, countIf(${mapCond(s.events)}) AS n${i}`).join(', ');
-    // in-app revenue over the same window/scope rides the same query — shown
-    // on the funnel's final (order) stage
-    const val = m.purchaseValueProp ? `, sum(toFloat(${prop(m.purchaseValueProp)}))${m.purchaseValueCents ? ' / 100' : ''} AS revenue` : '';
+    // in-app revenue over the same window/scope rides the same query — summed
+    // ONLY on the purchase slice (the amount is stamped on every checkout
+    // screen; anywhere-summing counts one order hundreds of times)
+    const val = m.purchaseValueProp && m.purchaseEvents.length
+      ? `, sumIf(toFloat(${prop(m.purchaseValueProp)}), ${mapCond(m.purchaseEvents)})${m.purchaseValueCents ? ' / 100' : ''} AS revenue` : '';
     const [row] = await hogql(`SELECT ${sel}${val} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
     return {
       days: w.days, from: w.from, to: w.to,

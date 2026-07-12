@@ -505,7 +505,7 @@ test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; ste
   assert.equal(out.body.steps[0].events, 4000);
   assert.equal(out.body.revenue, 12400.5, 'in-app revenue rides the same query');
   assert.equal(queries.length, 1, 'all stages ride ONE HogQL query');
-  assert.ok(queries[0].includes("sum(toFloat(properties['order_amount_cents'])) / 100 AS revenue"), 'revenue sums the mapped value prop, cents converted');
+  assert.ok(queries[0].includes("sumIf(toFloat(properties['order_amount_cents']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) / 100 AS revenue"), 'revenue counted once per order (the confirmation view), cents converted');
   const q = queries[0];
   assert.ok(q.includes("uniqIf(person_id, (event = 'interaction' AND toString(properties['surface']) = 'ticket_categories'))"), 'stage condition compiles from the mapping grammar');
   assert.ok(q.includes("toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success'"), 'the & chain reaches the query');
@@ -564,7 +564,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
   assert.equal(m.purchaseValueProp, 'order_amount_cents', 'blank value box → PostHog revenue tracker (v4)');
   assert.equal(m.purchaseValueCents, true);
-  assert.equal(h.settings.posthog_map_healed, '4');
+  assert.equal(h.settings.posthog_map_healed, '5');
   // A v1-healed install upgrades to v2 (purchases fill) WITHOUT re-running the
   // v1 rewrites — deliberate edits stay.
   const v1 = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
@@ -573,7 +573,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.deepEqual(m2.ctaEvents, ['my_custom_cta'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.screenEvents, ['$screen'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'v2 fills the blank Purchases box');
-  assert.equal(h2.settings.posthog_map_healed, '4');
+  assert.equal(h2.settings.posthog_map_healed, '5');
   // A customised chip set is never reordered by v3.
   const h2b = makeHarness({ presetSettings: { posthog_metric_map: JSON.stringify({ breakdownProps: ['interaction_type', 'my_prop'] }), posthog_map_healed: '2' } });
   assert.deepEqual(JSON.parse(h2b.settings.posthog_metric_map).breakdownProps, ['interaction_type', 'my_prop'], 'custom chips keep their order');
@@ -582,7 +582,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(JSON.parse(h2c.settings.posthog_metric_map).purchaseValueProp, 'my_amount', 'deliberate value props are never overwritten');
   // Fully healed → the migration is a no-op, deliberate purchase mappings kept.
   const done = JSON.stringify({ purchaseEvents: ['my_purchase'] });
-  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '4' } });
+  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '5' } });
   assert.equal(h3.settings.posthog_metric_map, done, 'healed flag makes the migration a no-op');
 });
 
@@ -590,12 +590,12 @@ test('purchase value: cents-denominated PostHog revenue lands ÷100 in the rollu
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
   const q1 = h.queries.find((q) => q.includes('GROUP BY day, event_ref'));
-  assert.ok(q1.includes("sum(toFloat(properties['order_amount_cents'])) / 100 AS purchase_value"), 'default = PostHog revenue tracker, converted to rand');
+  assert.ok(q1.includes("sumIf(toFloat(properties['order_amount_cents']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) / 100 AS purchase_value"), 'amount counted ONCE per order — only on the confirmation view, converted to rand');
   // a rand-denominated custom prop skips the conversion
   h.settings.posthog_metric_map = JSON.stringify({ purchaseValueProp: 'amount_rand', purchaseValueCents: false });
   await h.api.syncDaily(7);
   const q2 = h.queries.filter((q) => q.includes('GROUP BY day, event_ref')).pop();
-  assert.ok(q2.includes("sum(toFloat(properties['amount_rand'])) AS purchase_value"));
+  assert.ok(q2.includes("sumIf(toFloat(properties['amount_rand']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) AS purchase_value"));
   assert.ok(!q2.includes('/ 100'));
 });
 
