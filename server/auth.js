@@ -66,14 +66,25 @@ function seedAdmin() {
   // Break-glass: with ADMIN_RESET=1 (+ ADMIN_EMAIL + ADMIN_PASSWORD), on boot
   // CREATE that admin if missing, or RESET its password if it already exists —
   // even when other users exist. Recovers a locked-out admin (or a fresh staging
-  // box) without needing the email reset flow (which staging disables). Runs only
-  // when explicitly asked; REMOVE ADMIN_RESET after you're back in so it doesn't
-  // reset the password on every deploy.
+  // box) without needing the email reset flow (which staging disables).
+  //
+  // Self-disabling: we fingerprint (email+password) and record it. If the env
+  // vars are left set after recovery (easy to forget), we DON'T re-pin the
+  // password on every deploy — a boot whose fingerprint matches the last applied
+  // one is a no-op. Only a *changed* password (a deliberate new reset) acts
+  // again. This removes the "static known credential re-pinned every restart"
+  // risk while keeping the recovery lever. Still: REMOVE ADMIN_RESET once back in.
   if (process.env.ADMIN_RESET === '1' && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
     const email = process.env.ADMIN_EMAIL.trim().toLowerCase();
-    const existing = db.getUserByEmail(email);
-    if (existing) { db.updateUser(existing.id, { password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ADMIN_RESET: reset password for ${email}`); }
-    else { db.createUser({ email, password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ADMIN_RESET: created admin ${email}`); }
+    const fp = crypto.createHash('sha256').update(`${email}\n${process.env.ADMIN_PASSWORD}`).digest('hex');
+    if (db.getSetting('admin_reset_fingerprint') === fp) {
+      console.log('[auth] ADMIN_RESET set but already applied for these credentials — skipping (remove ADMIN_RESET to silence).');
+    } else {
+      const existing = db.getUserByEmail(email);
+      if (existing) { db.updateUser(existing.id, { password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ⚠ ADMIN_RESET: reset password for ${email}`); }
+      else { db.createUser({ email, password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ⚠ ADMIN_RESET: created admin ${email}`); }
+      db.setSetting('admin_reset_fingerprint', fp);
+    }
     return;
   }
   if (db.listUsers().length > 0) return;
@@ -121,7 +132,8 @@ function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 // attachUser accepts it below and marks the request `req.embedAuth`.
 const EMBED_TOKEN_TTL_S = 2 * 60 * 60; // one working session; the portal mints a fresh one per open
 function issueEmbedToken(user, ttlSeconds = EMBED_TOKEN_TTL_S) {
-  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { expiresIn: ttlSeconds });
+  // Carry the password epoch (tv) so a reset revokes outstanding embed tokens too.
+  return jwt.sign({ sub: user.id, emb: 1, tv: user.tokenVersion || 0 }, getSecret(), { expiresIn: ttlSeconds });
 }
 
 // Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
@@ -163,8 +175,13 @@ function attachUser(req, _res, next) {
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers?.authorization || '');
     if (m && m[1].split('.').length === 3) {
       try {
-        const p = jwt.verify(m[1], getSecret());
-        if (p.emb) { req.user = cachedUser(p.sub) || null; req.embedAuth = !!req.user; }
+        const p = jwt.verify(m[1], getSecret(), { algorithms: ['HS256'] });
+        if (p.emb) {
+          const user = cachedUser(p.sub) || null;
+          // Honour the password epoch: an embed token minted before the user's
+          // current tokenVersion (e.g. after a password reset) no longer authenticates.
+          if (user && (p.tv || 0) === (user.tokenVersion || 0)) { req.user = user; req.embedAuth = true; }
+        }
       } catch { /* not an embed token — ignore */ }
     }
   }

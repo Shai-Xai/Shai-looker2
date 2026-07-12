@@ -255,18 +255,18 @@ app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="pulse-backup-${new Date().toISOString().slice(0, 10)}.json"`);
   res.send(JSON.stringify(db.exportAll()));
 });
-// Large limit: a full export (with logo/icon data-URLs + dashboard defs) can be big.
-app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => {
+app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => { // large limit: a full export (logos/defs) is big
   const data = req.body;
   if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
     return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
   }
   try {
     const counts = db.importAll(data);
+    try { db.recordAction({ userId: req.user.id, action: 'admin.import', label: `Imported backup (${Object.keys(counts).length} tables)`, method: 'POST', path: req.path }); } catch { /* audit best-effort: a full import can inject users/roles, so record WHO did it */ }
     res.json({ ok: true, counts });
   } catch (err) {
-    console.error('[POST /api/admin/import]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[POST /api/admin/import]', err.message); // log detail server-side; never leak raw error text to the browser
+    res.status(500).json({ error: 'Import failed — the backup file could not be restored. Check the server logs.' });
   }
 });
 
