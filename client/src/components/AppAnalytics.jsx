@@ -1190,13 +1190,13 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
           </select>
         )}
       </div>
-      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event</b> : <b>for the events in your Pulse</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders). <b>Tap any tile</b> to save that group as a live segment.</p>
+      <p style={{ ...sub, marginTop: 6 }}>Your app users matched by email against two segments {event ? <b>for this event only</b> : <b>across ALL {d.eventCount > 1 ? `${fmt(d.eventCount)} of ` : ''}your events — every edition, past ones included</b>}: <b>ticket holders</b> (anyone who's held a ticket) and <b>buyers</b> (who actually paid — a group buy is one buyer, many holders). {!event && events.length > 1 && <>Pick an event above for a single edition. </>}<b>Tap any tile</b> to save that group as a live segment.</p>
       {/* The headline insight — the sentence a client repeats in a meeting —
           with the action right next to it. */}
       <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: 'color-mix(in srgb, var(--brand) 6%, transparent)' }}>
         <div style={{ flex: 1, minWidth: 220, fontSize: 13.5, lineHeight: 1.55 }}>
-          💡 <b>{fmt(d.appUsers)}</b> people engaged with {event ? 'this event' : 'your events'} in the app
-          {holderPct ? <> · <b>{holderPct}</b> of {event ? 'its' : 'your'} ticket holders are app users</> : null}
+          💡 <b>{fmt(d.appUsers)}</b> people engaged with {event ? 'this event' : `your ${d.eventCount > 1 ? `${fmt(d.eventCount)} events` : 'events'} (all editions)`} in the app
+          {holderPct ? <> · <b>{holderPct}</b> of {event ? 'its' : 'your all-time'} ticket holders are app users</> : null}
           {neverCount > 0 ? <> · <b>{fmt(neverCount)}</b> engaged fans never got a ticket</> : null}.
         </div>
         {neverCount > 0 && (

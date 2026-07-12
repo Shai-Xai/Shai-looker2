@@ -93,7 +93,7 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     const matchedAttendees = s.attendees ? s.appEmails.filter((e) => s.attendees.has(e)).length : null;
     return {
       configured: true, scoped: true, asOf: new Date().toISOString(), windowDays: APP_WINDOW_DAYS,
-      event: s.event,
+      event: s.event, eventCount: s.eventIds.length,
       appUsers: s.appTotal, appUsersWithEmail: s.appEmails.length, appCapped: s.appCapped,
       // Who PAID for THESE events (purchaser contact on the order) …
       buyers: s.buyers.size, matched,
