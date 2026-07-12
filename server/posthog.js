@@ -1217,10 +1217,23 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       } catch { return null; }
     };
     // 💰 revenue probe — run the order-level revenue query verbatim (whole
-    // app, 90 days) and report the result OR the raw error, so "revenue tile
-    // missing" is diagnosable in one tap instead of guesswork.
+    // app, 90 days AND a full year) and report results OR the raw error, plus
+    // WHEN paid amounts last occurred — so "revenue tile missing" separates
+    // into query-broken vs no-recent-paid-orders vs genuinely-zero.
     let revenueProbe;
-    try { revenueProbe = { ...(await orderRevenue({ days: 90 })), error: '' }; }
+    try {
+      const m90 = await orderRevenue({ days: 90 });
+      const y = win({ from: new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
+      const yr = await orderRevenue({ from: y.from, to: y.to });
+      let paidSeen = null;
+      try {
+        const mm = metricMap();
+        const amt = `toFloat(${prop(mm.purchaseValueProp)})`;
+        const [row] = await hogql(`SELECT count() AS n, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${amt} > 0`, { ttl: CATALOG_TTL });
+        paidSeen = { rows: Number(row?.n) || 0, firstSeen: String(row?.firstSeen || ''), lastSeen: String(row?.lastSeen || '') };
+      } catch { /* optional */ }
+      revenueProbe = { orders: m90.orders, revenue: m90.revenue, yearOrders: yr.orders, yearRevenue: yr.revenue, paidSeen, error: '' };
+    }
     catch (e) { revenueProbe = { orders: 0, revenue: 0, error: String(e.message || e).slice(0, 300) }; }
     res.json({
       revenueProbe,
