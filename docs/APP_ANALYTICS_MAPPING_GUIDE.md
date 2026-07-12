@@ -60,9 +60,10 @@ whole app" selector active):
 |---|---|---|
 | **Screen / page views** | what counts as a "view" | `interaction : interaction_type=content_view` ✅ confirmed — now the built-in default |
 | **CTA taps** | ticket-button and other CTA taps | `interaction : interaction_type=cta_click` ✅ confirmed — now the built-in default |
-| **Purchases** | orders completed in the app | `interaction : interaction_type=content_view & surface=order_success` ✅ confirmed (a view of the order-confirmation screen) — now the built-in default. Revenue amounts still live in the Looker dashboards |
+| **Purchases** | orders completed in the app | `interaction : interaction_type=content_view & surface=order_success` ✅ confirmed (a view of the order-confirmation screen) — now the built-in default |
 | **Notifications** | notification opt-ins/opens | map when the app sends them |
-| **Purchase value property** | the property carrying the order amount — powers the **In-app revenue** tile and the value beside Purchases | `order_amount_cents` ✅ confirmed (PostHog's revenue tracker; it's in CENTS — keep the "÷100 → rand" checkbox ticked) — now the built-in default |
+| **Purchase value property** | the property carrying the order amount — powers the **In-app revenue** tile, the By-event column and the funnel figure | `order_amount_cents` ✅ confirmed (CENTS — keep the "÷100 → rand" checkbox ticked) — now the built-in default |
+| **Order reference property** | dedupes revenue to ONE amount per order — the amount is stamped on every checkout screen, so without this an order would count hundreds of times | `order_reference` ✅ confirmed — now the built-in default |
 | **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | `cta_label` ✅ confirmed (lowercase — NOT `CTA_Label`) — now the built-in default |
 | **Breakdown properties** | which property chips show in "What's driving it" — line order = chip order | `surface`, `cta_label`, `interaction_type` — now the built-in default |
 | **Funnel steps** | the stages of the 🛒 **Checkout funnel** card, one per line as `Label :: mapping entry` | Tickets viewed → Checkout → Payment tapped → Order confirmed (confirmed surfaces/taps) — now the built-in default |

@@ -187,6 +187,10 @@ const DEFAULT_MAP = {
   // controlled by purchaseValueCents so a rand-denominated prop stays exact).
   purchaseValueProp: 'order_amount_cents',
   purchaseValueCents: true,
+  // Every row carrying an amount also carries the order reference (verified
+  // 2026-07-12) — grouping by it counts each order's amount exactly ONCE,
+  // no matter how many checkout screens echo the running total.
+  orderRefProp: 'order_reference',
   notificationEvents: [],
   // Property keys the breakdown panels group by (Howler app taxonomy).
   breakdownProps: ['surface', 'cta_label', 'interaction_type'], // chip order = display order (surface first per Shai)
@@ -236,6 +240,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       views=excluded.views, notif_events=excluded.notif_events, synced_at=excluded.synced_at`);
   const upNew = sql.prepare(`INSERT INTO posthog_daily_app (date,new_users,synced_at) VALUES (?,?,?)
     ON CONFLICT(date) DO UPDATE SET new_users=excluded.new_users`);
+  const upValue = sql.prepare("UPDATE posthog_daily_event SET purchase_value=?, synced_at=? WHERE date=? AND event_ref=?");
   const upEvent = sql.prepare(`INSERT INTO posthog_daily_event (date,event_ref,event_name,uniques,interactions,views,cta_taps,purchases,purchase_value,notif_events,synced_at)
     VALUES (@date,@event_ref,@event_name,@uniques,@interactions,@views,@cta_taps,@purchases,@purchase_value,@notif_events,@synced_at)
     ON CONFLICT(date,event_ref) DO UPDATE SET event_name=CASE WHEN excluded.event_name='' THEN posthog_daily_event.event_name ELSE excluded.event_name END, uniques=excluded.uniques,
@@ -263,6 +268,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
       purchaseEvents: nameList(stored.purchaseEvents ?? DEFAULT_MAP.purchaseEvents),
       purchaseValueProp: String(stored.purchaseValueProp ?? DEFAULT_MAP.purchaseValueProp).trim(),
       purchaseValueCents: stored.purchaseValueCents === undefined ? DEFAULT_MAP.purchaseValueCents : !!stored.purchaseValueCents,
+      orderRefProp: String(stored.orderRefProp ?? DEFAULT_MAP.orderRefProp).trim(),
       notificationEvents: nameList(stored.notificationEvents ?? DEFAULT_MAP.notificationEvents),
       breakdownProps: nameList(stored.breakdownProps ?? DEFAULT_MAP.breakdownProps),
       personProps: { ...DEFAULT_MAP.personProps, ...(stored.personProps && typeof stored.personProps === 'object' ? stored.personProps : {}) },
@@ -339,11 +345,11 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         FROM persons WHERE created_at >= toStartOfDay(now()) - INTERVAL ${N} DAY GROUP BY day ORDER BY day`);
       for (const r of newRows) if (r.day) upNew.run(r.day, Number(r.new_users) || 0, ts);
       const evId = prop(c.eventIdProp);
-      // The amount property rides MANY events per order (the running total on
-      // every checkout screen — 342 identical rows for one order, verified
-      // 2026-07-12), so it is summed ONLY on the purchase slice: one
-      // confirmation view = one order counted once. Cents land ÷100 → rand.
-      const value = m.purchaseValueProp
+      // Revenue is owned by the ORDER-LEVEL pass below when an order-reference
+      // property is mapped (the amount rides every checkout screen — hundreds
+      // of rows per order); the slice-sum only remains as the fallback for a
+      // mapping without an order reference.
+      const value = m.purchaseValueProp && !m.orderRefProp
         ? `sumIf(toFloat(${prop(m.purchaseValueProp)}), ${m.purchaseEvents.length ? mapCond(m.purchaseEvents) : `notEmpty(toString(${prop(m.purchaseValueProp)}))`})${m.purchaseValueCents ? ' / 100' : ''} AS purchase_value`
         : '0 AS purchase_value';
       const evRows = await hogql(`
@@ -359,6 +365,24 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         if (!r.day || !r.event_ref) continue;
         upEvent.run({ date: r.day, event_ref: String(r.event_ref), event_name: String(r.event_name || ''), uniques: Number(r.uniques) || 0, interactions: Number(r.interactions) || 0, views: Number(r.views) || 0, cta_taps: Number(r.cta_taps) || 0, purchases: Number(r.purchases) || 0, purchase_value: Number(r.purchase_value) || 0, notif_events: Number(r.notif_events) || 0, synced_at: ts });
         rows++;
+      }
+      // 💰 order-level revenue: one amount per order_reference, attributed to
+      // the order's (first) day + event, cents ÷100 → rand. Overwrites the
+      // zeroed purchase_value from the per-event pass above.
+      if (m.purchaseValueProp && m.orderRefProp) {
+        const amt = `toFloat(${prop(m.purchaseValueProp)})`;
+        const ref = `toString(${prop(m.orderRefProp)})`;
+        const ordRows = await hogql(`
+          SELECT day, event_ref, count() AS orders, sum(amt) AS total FROM (
+            SELECT ${ref} AS r, toString(min(toDate(timestamp))) AS day, any(toString(${evId})) AS event_ref, max(${amt}) AS amt
+            FROM events WHERE ${win} AND notEmpty(${ref}) AND ${amt} > 0 AND notEmpty(toString(${evId}))
+            GROUP BY r)
+          GROUP BY day, event_ref ORDER BY day DESC LIMIT 50000`);
+        const div = m.purchaseValueCents ? 100 : 1;
+        for (const r of ordRows) {
+          if (!r.day || !r.event_ref) continue;
+          upValue.run((Number(r.total) || 0) / div, ts, String(r.day), String(r.event_ref));
+        }
       }
       // True window-uniques for the headline (daily uniques don't sum).
       const [wk] = await hogql('SELECT uniq(person_id) AS n FROM events WHERE timestamp >= now() - INTERVAL 7 DAY');
@@ -396,7 +420,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   let healed = false;
   try {
     const ver = Number(db.getSetting('posthog_map_healed', '0')) || 0;
-    if (ver < 5) {
+    if (ver < 6) {
       const raw = db.getSetting('posthog_metric_map', '');
       if (raw) {
         const m = JSON.parse(raw) || {};
@@ -426,10 +450,10 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         db.setSetting('posthog_metric_map', JSON.stringify(m));
         healed = true;
       }
-      // v5 (2026-07-12): no map change — the bump re-arms the one-shot resync
-      // below (the v4 backfill was killed by back-to-back deploys) and the
-      // corrected purchase-slice sum restates revenue.
-      db.setSetting('posthog_map_healed', '5');
+      // v5/v6 (2026-07-12): no map change — each bump re-arms the one-shot
+      // resync below; v6 restates revenue as order-level (one amount per
+      // order_reference), replacing the slice-sum that read 0.
+      db.setSetting('posthog_map_healed', '6');
     }
   } catch { /* an unparseable stored map already falls back to the defaults */ }
   if (startTimer) {
@@ -802,17 +826,32 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     const sel = steps.map((s, i) => `uniqIf(person_id, ${mapCond(s.events)}) AS u${i}, countIf(${mapCond(s.events)}) AS n${i}`).join(', ');
-    // in-app revenue over the same window/scope rides the same query — summed
-    // ONLY on the purchase slice (the amount is stamped on every checkout
-    // screen; anywhere-summing counts one order hundreds of times)
-    const val = m.purchaseValueProp && m.purchaseEvents.length
-      ? `, sumIf(toFloat(${prop(m.purchaseValueProp)}), ${mapCond(m.purchaseEvents)})${m.purchaseValueCents ? ' / 100' : ''} AS revenue` : '';
-    const [row] = await hogql(`SELECT ${sel}${val} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
+    const [row] = await hogql(`SELECT ${sel} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
+    let revenue = 0;
+    try { revenue = (await orderRevenue({ ids, from: w.from, to: w.to })).revenue; } catch { /* stages still stand */ }
     return {
       days: w.days, from: w.from, to: w.to,
       steps: steps.map((s, i) => ({ label: s.label, people: Number(row?.[`u${i}`]) || 0, events: Number(row?.[`n${i}`]) || 0 })),
-      revenue: Number(row?.revenue) || 0,
+      revenue,
     };
+  }
+
+  // 💰 live order-level revenue — one amount per order reference over the
+  // window/scope, immune to the amount being stamped on every checkout screen.
+  async function orderRevenue({ ids = null, days, from, to } = {}) {
+    const w = win({ days, from, to });
+    const m = metricMap();
+    if (!m.purchaseValueProp || !m.orderRefProp) return { orders: 0, revenue: 0 };
+    const c = conn();
+    const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
+    const amt = `toFloat(${prop(m.purchaseValueProp)})`;
+    const ref = `toString(${prop(m.orderRefProp)})`;
+    const [row] = await hogql(`
+      SELECT count() AS orders, sum(amt) AS total FROM (
+        SELECT ${ref} AS r, max(${amt}) AS amt FROM events
+        WHERE ${tsWin(w)} AND notEmpty(${ref}) AND ${amt} > 0${scope}
+        GROUP BY r)`, { ttl: LIVE_TTL });
+    return { orders: Number(row?.orders) || 0, revenue: (Number(row?.total) || 0) / (m.purchaseValueCents ? 100 : 1) };
   }
 
   // Clients may only group by the admin-configured keys (no property probing).
@@ -1036,6 +1075,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         purchaseEvents: nameList(b.metricMap.purchaseEvents ?? cur.purchaseEvents),
         purchaseValueProp: String(b.metricMap.purchaseValueProp ?? cur.purchaseValueProp).trim().slice(0, 80),
         purchaseValueCents: b.metricMap.purchaseValueCents === undefined ? cur.purchaseValueCents : !!b.metricMap.purchaseValueCents,
+        orderRefProp: String(b.metricMap.orderRefProp ?? cur.orderRefProp).trim().slice(0, 80),
         notificationEvents: nameList(b.metricMap.notificationEvents ?? cur.notificationEvents),
         breakdownProps: nameList(b.metricMap.breakdownProps ?? cur.breakdownProps),
         personProps: { ...cur.personProps },
@@ -1362,7 +1402,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   }));
 
   console.log('[posthog] app-analytics connector mounted');
-  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, appEmails, breakdown, breakdownSeries, ctaLabels, funnel, eventSeries, timeMetrics, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
+  return { syncDaily, tick, appReport, entityReport, eventIdsForEntity, suiteEventScope, liveToday, windowUniques, appEmails, breakdown, breakdownSeries, ctaLabels, funnel, orderRevenue, eventSeries, timeMetrics, todayHourly, moments, linkClicks, appInsightFacts, people, isConfigured, hogql, withNames };
 }
 
 // ── getAppAnalytics — the Owl's read tool over this module ({ schema, run },
