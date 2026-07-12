@@ -14,7 +14,7 @@
 
 const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
 
-module.exports = function createQueryEngine({ looker, auth }) {
+module.exports = function createQueryEngine({ looker, auth, folderDaysSync }) {
   // Cache windows (ms). fresh: serve from cache; stale: serve cached + refresh
   // behind; beyond stale: wait for live Looker data.
   const QCACHE_TTL = (Number(process.env.QUERY_CACHE_TTL) || 300) * 1000;
@@ -30,8 +30,9 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // instance. Track approximate bytes per entry (first row's JSON × row count)
   // and evict oldest until under budget.
   const QCACHE_MAX_BYTES = (Number(process.env.QUERY_CACHE_MAX_MB) || 48) * 1024 * 1024;
-  const qCache = new Map();    // key -> { at, data, bytes }
-  const qInflight = new Map(); // key -> Promise
+  const qCache = new Map();    // key -> { at, runStart, data, bytes }
+  const qInflight = new Map(); // key -> { promise, live, start }
+  let qSeq = 0; // monotonic run counter — Date.now() can tie within a millisecond
   let qBytes = 0;
   const qEvict = (key) => { const e = qCache.get(key); if (e) { qBytes -= e.bytes; qCache.delete(key); } };
 
@@ -40,26 +41,40 @@ module.exports = function createQueryEngine({ looker, auth }) {
     if (obj && typeof obj === 'object') return '{' + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ':' + stableKey(obj[k])).join(',') + '}';
     return JSON.stringify(obj);
   }
-  function refreshQuery(key, path, body) {
-    if (qInflight.has(key)) return qInflight.get(key);
-    const p = looker.lookerRequest('POST', path, body)
+  function refreshQuery(key, path, body, live = false) {
+    // In-flight dedupe — BUT a user-forced LIVE run must never join an in-flight
+    // CACHED run (background serve-stale refresh, briefing warmer): that run will
+    // hand back Looker's own cached result (up to ~1h old) and "refresh" silently
+    // changes nothing. Live joins live; cached joins anything.
+    const cur = qInflight.get(key);
+    if (cur && (cur.live || !live)) return cur.promise;
+    // `live` (a user-forced refresh) also busts LOOKER's own result cache —
+    // without it "refresh" could still return Looker's cached run (up to ~1h
+    // old), which is how a live event-day capacity tile sat hours behind.
+    // The cache KEY stays the plain path, so the truly-live result updates the
+    // same entry every other reader shares.
+    const runPath = live ? `${path}${path.includes('?') ? '&' : '?'}cache=false` : path;
+    const start = ++qSeq;
+    const p = looker.lookerRequest('POST', runPath, body)
       .then((data) => {
-        qInflight.delete(key);
+        if (qInflight.get(key)?.promise === p) qInflight.delete(key);
         // Row list: json_detail wraps rows in .data; the compact /json format IS the array.
         const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : null);
         const rows = list ? list.length : 0;
-        if (rows <= QCACHE_MAX_ROWS) {
+        // Never let an earlier-started run (a superseded cached one) clobber the
+        // cache entry a later live run already wrote.
+        if (rows <= QCACHE_MAX_ROWS && (qCache.get(key)?.runStart || 0) <= start) {
           let bytes = 4096;
           try { bytes += rows ? JSON.stringify(list[0]).length * rows : 0; } catch { /* keep the floor */ }
           qEvict(key); // replacing: release the old entry's bytes first
-          qCache.set(key, { at: Date.now(), data, bytes });
+          qCache.set(key, { at: Date.now(), runStart: start, data, bytes });
           qBytes += bytes;
           while ((qCache.size > QCACHE_MAX || qBytes > QCACHE_MAX_BYTES) && qCache.size > 1) qEvict(qCache.keys().next().value);
         }
         return data;
       })
-      .catch((e) => { qInflight.delete(key); throw e; });
-    qInflight.set(key, p);
+      .catch((e) => { if (qInflight.get(key)?.promise === p) qInflight.delete(key); throw e; });
+    qInflight.set(key, { promise: p, live, start });
     return p;
   }
   // `ttl` optionally overrides the fresh window for this query (ms).
@@ -68,7 +83,7 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // hand back up-to-10-minute-old rows instantly and "refresh" changes nothing).
   async function runLookerQuery(path, body, ttl = QCACHE_TTL, force = false) {
     const key = path + '|' + stableKey(body);
-    if (force) return refreshQuery(key, path, body);
+    if (force) return refreshQuery(key, path, body, true); // user asked for LIVE — bust Looker's cache too
     const hit = qCache.get(key);
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age < ttl) return hit.data;                       // fresh
@@ -253,7 +268,11 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // matching what the dashboard shows. Returns null when there's no sync to apply
   // (or the number can't be read), leaving the tile queries untouched.
   async function daysBeforeOverlayFor(def, user, suiteId, lockMap) {
-    const sync = def.daysBeforeSync;
+    // A dashboard's own sync wins; otherwise inherit the folder-level cascade
+    // (resolved to a concrete sync for THIS dashboard by tile title).
+    const sync = (def.daysBeforeSync && def.daysBeforeSync.mode && def.daysBeforeSync.mode !== 'off')
+      ? def.daysBeforeSync
+      : (folderDaysSync ? folderDaysSync.effectiveFor(def) : null);
     if (!sync || sync.mode !== 'apply' || !sync.sourceTileId || !sync.filterName) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
     const src = tiles.find((t) => t.id === sync.sourceTileId);
@@ -305,9 +324,14 @@ module.exports = function createQueryEngine({ looker, auth }) {
     return numFromCell(resolvePivotCellSrv(rows[0][primary.name], data.pivots || [], preferKey));
   }
 
+  // Wipe every cached query result (admin "Clear cache" — e.g. a live event day
+  // where even background-refreshed entries must be recomputed from scratch).
+  function clearCache() { const n = qCache.size; qCache.clear(); qBytes = 0; qInflight.clear(); return n; }
+
   return {
     runLookerQuery,
     applyScope,
+    clearCache,
     primaryTileValue,
     stripAnyValue,
     ANY_VALUE,

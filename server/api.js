@@ -221,7 +221,9 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     if (suiteId && !auth.canAccessSuite(user, suiteId)) throw new HttpError(403, 'No access to that suite');
     const out = await t.runner.run(args, { user, suiteId: suiteId || '', entityId: entityOf(user) });
     if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'That query couldn’t be run.');
-    return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, asOf: asOf() };
+    // Pass the runner's advisory note through (zero-rows case-sensitivity hint,
+    // fan-out warning) — without it the MCP/API caller presents bad data as fact.
+    return { source: t.cat?.key || 'primary', measure: out.measure, dimensions: out.dimensions, count: out.count, rows: out.rows, ...(out.note ? { note: out.note } : {}), asOf: asOf() };
   }
 
   // ── Event Ops (per event: devices, stations, staff, issues, checkpoints) ──
@@ -382,7 +384,19 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
     throw new HttpError(404, 'Unknown document id');
   }
 
-  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData, eventOps, createSegment, draftCampaign };
+  // ── Data health (per station: stream lag, device roster, day timeline) ──
+  // Delegates to the Owl's dataHealth runner, which scopes to the caller's
+  // entity and refuses cleanly. suiteId optional (narrows to one event).
+  async function dataHealth(user, { suiteId, ...args } = {}) {
+    const t = getOwlTools().dataHealth;
+    if (!t) throw new HttpError(404, 'Data health isn’t available');
+    const out = await t.run(args, { user, suiteId: suiteId || null, entityId: entityOf(user) });
+    if (!out || out.ok !== true) throw new HttpError(400, (out && out.message) || 'Data health couldn’t answer that.');
+    const { ok, ...data } = out;
+    return { ...data, asOf: asOf() };
+  }
+
+  const core = { me, listDashboards, getDashboard, metric, listSegments, getSegment, segmentReach, listCampaigns, getCampaign, listGoals, tileRows, search, fetchDoc, listDataSources, queryData, eventOps, dataHealth, createSegment, draftCampaign };
 
   // ── REST routes — thin wrappers, key-authed, rate-limited, audited ──
   const perKey = (max, scope) => rateLimit({ windowMs: 60_000, max, by: (req) => `key:${req.apiKey?.id}`, scope });
@@ -421,6 +435,12 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   app.get('/api/v1/event-ops', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
     const { suiteId, query, code, state, station, status } = req.query;
     res.json(await eventOps(req.user, { suiteId, query, code, state, station, status }));
+  }));
+  // Data health — is the venue's data pipe flowing? (device ids/operators are
+  // operational row-level data → same read_rows scope as Event Ops).
+  app.get('/api/v1/data-health', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
+    const { suiteId, query, monitor, hours, intervalMin, station, zone, limit } = req.query;
+    res.json(await dataHealth(req.user, { suiteId, query, monitor, hours, intervalMin, station, zone, limit }));
   }));
   // Row-level tile data — requires the `read_rows` scope (explicit opt-in per
   // key; rows can carry customer/ticketing personal data).

@@ -17,6 +17,7 @@ import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
+import { owlNativeChatEnabled } from '../lib/features.js';
 import { fmtR } from '../lib/money.js';
 
 // Personalised landing page (briefing-led): the Owl opens with what changed
@@ -42,6 +43,7 @@ export default function ClientHome() {
   const [openEvents, setOpenEvents] = useState({}); // which event sections are expanded
   const [savingSuites, setSavingSuites] = useState(false);
   const [diag, setDiag] = useState(null); // admin: resolved filters per event ('loading' | [])
+  const [focusDiagOpen, setFocusDiagOpen] = useState(false); // admin: single-event focus-pick diagnose
   const [refreshing, setRefreshing] = useState(false);
   const [refreshErr, setRefreshErr] = useState(false);
   const [tuneOpen, setTuneOpen] = useState(false);
@@ -210,6 +212,35 @@ export default function ClientHome() {
               )}
               </div>
               <FeedbackRow brief={brief} entityId={homeEntityId} />
+              {/* Admin diagnose (single-event): why each Tune focus pick did or didn't
+                  feed this briefing (out of phase, budget, not found…) + tiles that ran
+                  but were dropped (no rows / scope blocked). Data rides on the briefing
+                  payload for admins only (_focus/_dropped) — no extra fetch. */}
+              {isAdmin && !brief.multi && ((brief._focus || []).length > 0 || (brief._dropped || []).length > 0) && (
+                <div style={{ marginTop: 10 }}>
+                  <button onClick={() => setFocusDiagOpen((v) => !v)} style={{ border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--muted)', borderRadius: 980, padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }} title="Admin: why each tuned focus tile did / didn't feed this briefing">🔍 Diagnose focus tiles</button>
+                  {focusDiagOpen && (
+                    <div style={{ marginTop: 8, border: '1px solid var(--hairline)', borderRadius: 8, padding: '8px 10px', fontSize: 11.5, background: 'var(--elevated, rgba(128,128,128,0.06))' }}>
+                      {(brief._focus || []).length > 0 && (
+                        <>
+                          <div style={{ fontWeight: 800 }}>Focus picks (Tune)</div>
+                          {(brief._focus || []).map((f, i) => (
+                            <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
+                              <b>{f.tile}</b> <span style={{ color: 'var(--muted)' }}>{f.dashboard}{f.phase ? ` · ${f.phase}` : ''}</span> — <span style={{ color: /feeding/.test(f.status) ? '#2da44e' : '#b45309' }}>{f.status}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {(brief._dropped || []).length > 0 && (
+                        <div style={{ marginTop: (brief._focus || []).length ? 6 : 0, paddingTop: (brief._focus || []).length ? 6 : 0, borderTop: (brief._focus || []).length ? '1px solid var(--hairline)' : 'none' }}>
+                          <div style={{ fontWeight: 800, color: '#b45309' }}>Dropped at query time ({brief._dropped.length})</div>
+                          {brief._dropped.map((d, i) => <div key={i} style={{ color: 'var(--muted)', marginTop: 2 }}>{d}</div>)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {brief.multi && (
                 <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--hairline)' }}>
                   {/* Which events the briefing covers — toggle to include/exclude. */}
@@ -353,12 +384,25 @@ export default function ClientHome() {
                       title="Turn this suggestion into a campaign"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Carry the dashboard + event the suggestion pointed at, so the
-                        // campaign editor pre-fills the audience from THAT tile/event.
-                        const q = new URLSearchParams({ goal: `${s.title}${s.reason ? ` — ${s.reason}` : ''}`, type: s.action });
-                        if (s.link?.dashboardId) q.set('dashboard', s.link.dashboardId);
-                        if (s.link?.suiteId) q.set('suite', s.link.suiteId);
-                        vtNavigate(navigate, `/actions?${q.toString()}`);
+                        const goal = `${s.title}${s.reason ? ` — ${s.reason}` : ''}`;
+                        const suite = s.link?.suiteId || '';
+                        // Prefer the Owl builder: it READS the suggestion and builds the
+                        // right audience (segment) for it via draftCampaign — so an
+                        // "over-35 past buyers" idea doesn't get forced into the abandoned-
+                        // cart recipe. Hand it the goal + event; the Owl drafts for review.
+                        if (owlNativeChatEnabled(user)) {
+                          window.dispatchEvent(new CustomEvent('howler:owl-build', { detail: {
+                            prompt: `Build an email campaign for this suggestion and draft the audience it needs (create the segment if there isn't one), then show me the draft to review: "${goal}".${suite ? ` This is for event ${suite}.` : ''}`,
+                            suiteId: suite,
+                          } }));
+                          return;
+                        }
+                        // Fallback (no native Owl): open the campaign editor with the goal
+                        // pre-filled and a BLANK audience — never a wrong recipe. We omit
+                        // ?type on purpose so no recipe (abandoned cart) is auto-selected.
+                        const q = new URLSearchParams({ goal });
+                        if (suite) q.set('suite', suite);
+                        vtNavigate(navigate, `/engage/campaigns?${q.toString()}`);
                       }}
                       style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
                     >⚡ Make it happen</span>

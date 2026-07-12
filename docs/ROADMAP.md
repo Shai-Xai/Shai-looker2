@@ -4,7 +4,7 @@
 > commitments or final specs. Each item keeps the original note verbatim
 > (*italic*) plus a first-pass description and how it ties to the
 > [Experience OS vision](EXPERIENCE_OS_BRIEF.md) and what's already built.
-> Last updated 2026-07-02.
+> Last updated 2026-07-07.
 
 Legend: **Effort** S/M/L/XL · **Status** 💡 idea · 🏗️ in progress ·
 ✅ shipped · ⏸️ parked · **Ties to** = existing module or vision layer.
@@ -291,6 +291,12 @@ Dual-surface UI: `DriveSourcesCard` in Settings → Integrations and Admin →
 client → Integrations. 12 tests (`test/googleDrive.test.js`); full suite 421 green.
 **Remaining:** live verification with a real Google service account + key
 (GOOGLE_SERVICE_ACCOUNT_KEY env or per client), then it's self-service.
+**Upgrade (same day):** **one-click "Connect with Google"** shipped — OAuth
+with the non-sensitive `drive.file` scope + the **Google Picker** (the app
+only ever sees files the user picks; no Google verification needed). Refresh
+tokens sealed per entity; `invalid_grant` surfaces a Reconnect state. Needs a
+one-time platform OAuth client + API key (see `docs/DRIVE_META_SETUP.md` §0a).
+The service-account path stays as the fallback.
 
 ### 4.9 🏗️ Deep Meta integration (paid performance, OAuth, CAPI, lookalikes)
 *"Deep Meta integration."* (Shai, 2026-07-02)
@@ -309,9 +315,16 @@ value order:
   **`getPaidPerformance`** ("how are my ads doing / what's my ROAS"). 6 tests
   (`test/metaAds.test.js`); suite green. *Still open from P1's wider scope:*
   goals `social_paid` adapter + dashboard tiles (join the social-tiles item).
-- **P2 — Meta OAuth connect** (M): a proper app-login flow replacing pasted
-  tokens (token refresh, clearer client self-service); natural moment to do
-  **4.6 multi ad-accounts** (`ad_connections`) so multi-brand clients work.
+- **🏗️ P2 — Meta OAuth connect (interim shipped 2026-07-02):**
+  `server/metaConnect.js` + `MetaConnectCard` — "Continue with Facebook" →
+  approve `ads_read`/`ads_management` → ad-account picker (auto-picked when
+  there's one) → stores into the SAME `metaAccessToken`/`metaAdAccountId`
+  fields, so audience-sync + paid-ads work unchanged. Long-lived (~60-day)
+  tokens with expiry surfaced + a Reconnect flag at ≤7 days. **Remaining:**
+  Meta **Business Verification + App Review** (Howler-side, one-time) for
+  Advanced Access → durable tokens for any client; then **4.6 multi
+  ad-accounts** (`ad_connections`) — the picker already lists all accounts,
+  the data model still stores one.
 - **P3 — Lookalike audiences** (S–M): spawn lookalikes from synced Custom
   Audiences in the Ad audiences hub.
 - **P4 — Conversions API** (M): send purchase/click events back (promo-code +
@@ -327,6 +340,25 @@ Integrate Chotu Links (link shortening / tracking) so campaign + share links are
 shortened and click-tracked through it. **Confirm scope:** which product, API
 available, and whether it replaces or augments the current tracked-link/`/c/`
 redirect. Effort: S–M (pending confirmation).
+
+### 4.10 💡 Spotify channel — tracked links + purchase attribution
+*"We enabled buying tickets from a Spotify artist page — can Pulse show clicks
+and purchases from it?"* (Shai, 2026-07-07)
+Spotify gives partners **no** click/conversion reporting, and the curated
+Looker catalogue has **no UTM/referrer dimension** (checked 2026-07-07) — so
+Spotify-driven sales are invisible today. Three parts: **A** — standalone
+tracked channel links (`/x/:code` mint-per-event×channel, clicks + UTM stamp;
+new `server/channelLinks.js`, dual admin + `/api/my` surfaces) — Pulse-only,
+buildable now, useful for every channel (bios, posters, QRs). **B** — the real
+unlock, a Howler-core ask: capture `utm_source` at checkout → expose on
+`core_orders` in the explore → tick into the catalogue (Pulse side ~zero
+code). **C** — a Channels report (clicks × orders × revenue × conversion, the
+`metaAds.js` pattern) + Owl tool `getChannelPerformance`. Stopgap today:
+Spotify-only promo code (promo code IS already queryable). Overlaps 4.4
+(Chotu) on shortening — decide build-vs-Chotu when 4.4's scope is confirmed.
+**Spec:** `docs/specs/SPOTIFY_CHANNEL_SPEC.md` (incl. Spotify platform
+research + why fan-taste segmentation is off the table). Effort: M (A) +
+S–M (C); B is external.
 
 ---
 

@@ -148,6 +148,7 @@ addColumn('entities', 'inventive_ref_id', "TEXT NOT NULL DEFAULT ''"); // option
 addColumn('entities', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-client email branding (logo/colour/sender/wording)
 addColumn('entities', 'inbox_token', "TEXT NOT NULL DEFAULT ''"); // unique token for the client's CC-the-Owl inbound address
 addColumn('entities', 'all_organisers', "INTEGER NOT NULL DEFAULT 0"); // internal/management client: sees ALL organisers' data (deliberately unscoped)
+addColumn('entities', 'reporting_timezone', "TEXT NOT NULL DEFAULT ''"); // IANA zone relative date filters ("today") resolve in ('' = inherit platform default)
 // Per-user notification channel preferences (1 = receive on that channel).
 addColumn('users', 'notify_email', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('users', 'notify_push', 'INTEGER NOT NULL DEFAULT 1');
@@ -198,7 +199,7 @@ addColumn('set_dashboards', 'display_name', "TEXT NOT NULL DEFAULT ''");
 // instructions, phaseOverrides: {phaseKey: text} } — drives the home briefing.
 addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('suites', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-event branding override (logo/colour/sender/wording); blank inherits the client
-addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's ticket/checkout link — default CTA for campaigns
+addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); addColumn('suites', 'howler_event_id', "TEXT NOT NULL DEFAULT ''"); // ticket/checkout link (default campaign CTA) + the event's howler.co.za id (deep links; manual until the Howler integration fills it)
 // Per-suite dashboard tweaks layered over the bundled sets:
 //   excluded_dashboards — dashboard ids hidden from THIS suite even though their
 //     set includes them (so an admin can pick a subset of a set per client).
@@ -206,10 +207,9 @@ addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); // the event's tic
 //     applied to one dashboard within this suite, on top of the suite-wide locks.
 addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
-// Per-tile lock overrides for THIS suite (one client): { tileId: { filterName:
-// value } } — forces a single tile's filter to a value for this client, on top
-// of the dashboard/suite locks. Applied to that tile's query only.
+// Per-tile lock overrides for THIS suite: { tileId: { filterName: value } } forces one tile's filter, atop the dashboard/suite locks.
 addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('suites', 'live_dashboard_id', "TEXT NOT NULL DEFAULT ''"); // sidebar LIVE button → live-ticketing dashboard
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
   addColumn('settlements', 'notes', "TEXT NOT NULL DEFAULT '[]'");
@@ -620,7 +620,7 @@ function rowToEntity(r) {
   // owner — so existing clients keep their creator as support until edited.
   const support = J(r.howler_support_ids, []);
   const howlerSupportIds = support.length ? support : (r.howler_owner_user_id ? [r.howler_owner_user_id] : []);
-  return { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, createdAt: r.created_at };
+  return { id: r.id, name: r.name, logo: r.logo || '', aiContext: r.ai_context || '', inventiveName: r.inventive_name || '', inventiveRefId: r.inventive_ref_id || '', howlerOwnerUserId: r.howler_owner_user_id || '', howlerSupportIds, lockedFilters: J(r.locked_filters, {}), scopeFields: J(r.scope_fields, {}), allOrganisers: !!r.all_organisers, reportingTimezone: r.reporting_timezone || '', createdAt: r.created_at };
 }
 function listEntities() { return db.prepare('SELECT * FROM entities ORDER BY name').all().map(rowToEntity); }
 function getEntity(id) { return rowToEntity(db.prepare('SELECT * FROM entities WHERE id=?').get(id)); }
@@ -650,7 +650,11 @@ function updateEntity(id, patch) {
   const sf = patch.scopeFields !== undefined ? JSON.stringify(patch.scopeFields) : cur.scope_fields;
   const allOrg = patch.allOrganisers !== undefined ? (patch.allOrganisers ? 1 : 0) : cur.all_organisers;
   const owner = patch.howlerOwnerUserId !== undefined ? String(patch.howlerOwnerUserId || '') : (cur.howler_owner_user_id || '');
-  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=?, howler_owner_user_id=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, owner, id);
+  // Blank/invalid reporting timezone → '' (inherit the platform default in timezone.js).
+  const rtz = patch.reportingTimezone !== undefined
+    ? (require('./timezone').isValidTimezone(patch.reportingTimezone) ? String(patch.reportingTimezone) : '')
+    : (cur.reporting_timezone || '');
+  db.prepare('UPDATE entities SET name=?, logo=?, ai_context=?, inventive_name=?, inventive_ref_id=?, locked_filters=?, scope_fields=?, all_organisers=?, reporting_timezone=?, howler_owner_user_id=? WHERE id=?').run(name, logo, aiContext, invName, invRef, lf, sf, allOrg, rtz, owner, id);
   return getEntity(id);
 }
 function deleteEntity(id) { db.prepare('DELETE FROM entities WHERE id=?').run(id); }
@@ -964,14 +968,23 @@ function removeMembership(userId, entityId) {
 function bumpTokenVersion(id) {
   db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?').run(id);
 }
+// One password policy for EVERY creation/change path (admin console, client
+// team invites, resets) — enforcing it only in the reset flow left admin-made
+// accounts free to be "a". Bump BCRYPT_COST here and logins rehash lazily.
+const MIN_PASSWORD = 8;
+const BCRYPT_COST = 12;
+function assertPasswordOk(password) {
+  if (String(password || '').length < MIN_PASSWORD) throw new Error(`Password must be at least ${MIN_PASSWORD} characters`);
+}
 function createUser({ email, password, role = 'client', entityIds = [], firstName = '', lastName = '', mobile = '', howlerRole = '', roles = [] }) {
   const e = (email || '').trim().toLowerCase();
   if (!e || !password) throw new Error('email and password are required');
+  assertPasswordOk(password);
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(e)) throw new Error('A user with that email already exists');
   const id = uuid();
   const r = role === 'admin' ? 'admin' : 'client';
   db.prepare('INSERT INTO users (id,email,password_hash,role,first_name,last_name,mobile,howler_role,roles,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .run(id, e, bcrypt.hashSync(password, 10), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', normRoles(roles), now());
+    .run(id, e, bcrypt.hashSync(password, BCRYPT_COST), r, String(firstName || '').trim(), String(lastName || '').trim(), String(mobile || '').trim(), r === 'admin' ? String(howlerRole || '').trim() : '', normRoles(roles), now());
   setUserEntities(id, entityIds); // admins may carry entity links too (team surface)
   return publicUser(getUser(id));
 }
@@ -985,7 +998,8 @@ function updateUser(id, patch) {
     const clash = db.prepare('SELECT id FROM users WHERE email=? AND id!=?').get(email, id);
     if (clash) throw new Error('That email is already used by another login.');
   }
-  const hash = patch.password ? bcrypt.hashSync(patch.password, 10) : cur.password_hash;
+  if (patch.password) assertPasswordOk(patch.password);
+  const hash = patch.password ? bcrypt.hashSync(patch.password, BCRYPT_COST) : cur.password_hash;
   const tokenVersion = (cur.token_version || 0) + (patch.password ? 1 : 0); // password change → old session JWTs die
   const role = patch.role ? (patch.role === 'admin' ? 'admin' : 'client') : cur.role;
   const firstName = patch.firstName !== undefined ? String(patch.firstName || '').trim() : cur.first_name;
@@ -1007,10 +1021,26 @@ function touchLastLogin(userId) {
 // Async so the bcrypt hash comparison (~60-100ms of CPU) doesn't block the single
 // event loop on every login — bcryptjs's async path yields between rounds, so
 // concurrent requests aren't stalled waiting on a sign-in.
+// A pre-computed hash keeps unknown-email logins the same duration as
+// known-email ones — a fast return would let an attacker enumerate accounts
+// by response timing. Lazily computed so module load stays cheap.
+let DUMMY_HASH = '';
 async function verifyCredentials(email, password) {
   const u = getUserByEmail(email);
-  if (!u) return null;
-  return (await bcrypt.compare(password || '', u.passwordHash)) ? u : null;
+  if (!u) {
+    if (!DUMMY_HASH) DUMMY_HASH = bcrypt.hashSync('timing-equalizer', BCRYPT_COST);
+    await bcrypt.compare(password || '', DUMMY_HASH); // burn the same work, then fail
+    return null;
+  }
+  if (!(await bcrypt.compare(password || '', u.passwordHash))) return null;
+  // Lazy cost upgrade: hashes minted before BCRYPT_COST went up re-hash on the
+  // next successful login (we only hold the plaintext here). No token bump —
+  // the password didn't change.
+  const rounds = Number((u.passwordHash.match(/^\$2[aby]\$(\d\d)\$/) || [])[1] || 0);
+  if (rounds && rounds < BCRYPT_COST) {
+    try { db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await bcrypt.hash(password, BCRYPT_COST), u.id); } catch { /* upgrade is best-effort */ }
+  }
+  return u;
 }
 
 // ─── Dashboards (content kept as JSON blob) ───────────────────────────────────
@@ -1196,7 +1226,7 @@ function setIdsForSuites(suiteIds) {
   return map;
 }
 function rowToSuite(r, setIds) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', howlerEventId: r.howler_event_id || '', liveDashboardId: r.live_dashboard_id || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() {
   const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
@@ -1231,10 +1261,12 @@ function updateSuite(id, patch) {
   const pos = patch.position ?? cur.position;
   const ent = patch.entityId ?? cur.entity_id;
   const eventUrl = patch.eventUrl !== undefined ? String(patch.eventUrl || '') : (cur.event_url || '');
+  const howlerId = patch.howlerEventId !== undefined ? ((String(patch.howlerEventId || '').match(/event\/(\d+)/) || [])[1] || (String(patch.howlerEventId || '').match(/(\d+)/) || [])[1] || '') : (cur.howler_event_id || ''); // digits only — accepts "40848" or a pasted event URL
   const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
   const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
   const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, excluded, dashLocks, tileLocks, id);
+  const liveDash = patch.liveDashboardId !== undefined ? String(patch.liveDashboardId || '') : (cur.live_dashboard_id || ''); // sidebar LIVE button target
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, howler_event_id=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=?, live_dashboard_id=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, howlerId, excluded, dashLocks, tileLocks, liveDash, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
@@ -1367,110 +1399,8 @@ function revertForkToTemplate(suiteId, forkId) {
   return templateId;
 }
 
-// ─── Tile library ─────────────────────────────────────────────────────────────
-// A stable signature for a tile's underlying query + visualization, used to
-// dedupe the same tile imported from many dashboards.
-function tileSignature(tile) {
-  const q = tile.query || {};
-  const parts = [
-    q.model || '', q.view || '',
-    (q.fields || []).slice().sort().join(','),
-    (q.pivots || []).join(','),
-    tile.vis?.type || '',
-  ];
-  return crypto.createHash('sha1').update(parts.join('|')).digest('hex');
-}
-
-// Friendly defaults derived from the query, used until a human/AI improves them.
-const VIS_LABELS = {
-  looker_column: 'Column chart', looker_bar: 'Bar chart', looker_line: 'Line chart',
-  looker_area: 'Area chart', looker_scatter: 'Scatter chart', looker_pie: 'Pie chart',
-  looker_donut_multiples: 'Donut chart', looker_grid: 'Table', table: 'Table',
-  looker_single_record: 'Record', single_value: 'Single value', looker_funnel: 'Funnel',
-  looker_map: 'Map', looker_geo_choropleth: 'Map', looker_timeline: 'Timeline', text: 'Text',
-};
-function shortField(f) { const i = f.indexOf('.'); return i >= 0 ? f.slice(i + 1).replace(/_/g, ' ') : f; }
-function deriveFieldsSummary(tile) {
-  const fields = (tile.query?.fields || []).map(shortField);
-  return fields.join(', ');
-}
-function deriveName(tile) {
-  if (tile.title && tile.title.trim()) return tile.title.trim();
-  const vis = VIS_LABELS[tile.vis?.type] || 'Visualization';
-  const fs = deriveFieldsSummary(tile);
-  return fs ? `${vis}: ${fs}` : vis;
-}
-function deriveDescription(tile) {
-  const vis = VIS_LABELS[tile.vis?.type] || 'Visualization';
-  const fs = deriveFieldsSummary(tile);
-  return fs ? `${vis} showing ${fs}.` : `${vis}.`;
-}
-
-function rowToLibraryTile(r) {
-  if (!r) return null;
-  return {
-    id: r.id, signature: r.signature, name: r.name, description: r.description,
-    category: r.category, visType: r.vis_type, fieldsSummary: r.fields_summary,
-    model: r.model, explore: r.explore, def: J(r.def, {}),
-    sourceDashboardId: r.source_dashboard_id, sourceTitle: r.source_title,
-    usageCount: r.usage_count, createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-function listLibraryTiles({ search, category } = {}) {
-  let rows = db.prepare('SELECT * FROM tile_library ORDER BY usage_count DESC, name').all();
-  if (category) rows = rows.filter((r) => r.category === category);
-  if (search) {
-    const q = search.toLowerCase();
-    rows = rows.filter((r) => `${r.name} ${r.description} ${r.fields_summary} ${r.category}`.toLowerCase().includes(q));
-  }
-  return rows.map(rowToLibraryTile);
-}
-function listLibraryCategories() {
-  return db.prepare("SELECT DISTINCT category FROM tile_library WHERE category != '' ORDER BY category").all().map((r) => r.category);
-}
-function getLibraryTile(id) { return rowToLibraryTile(db.prepare('SELECT * FROM tile_library WHERE id=?').get(id)); }
-
-// Harvest a single tile into the library. Skips non-query tiles. Returns the
-// library row (existing or newly created); never overwrites a curated label.
-function harvestTile(tile, { sourceDashboardId, sourceTitle } = {}) {
-  if (!tile || tile.type === 'text' || !tile.query?.model) return null;
-  const signature = tileSignature(tile);
-  const existing = db.prepare('SELECT * FROM tile_library WHERE signature=?').get(signature);
-  if (existing) return rowToLibraryTile(existing);
-  const ts = now();
-  const id = uuid();
-  // Store a clean, position-free copy of the tile to stamp into new dashboards.
-  const { id: _i, layout: _l, ...tileDef } = tile;
-  db.prepare(`INSERT INTO tile_library
-    (id,signature,name,description,category,vis_type,fields_summary,model,explore,def,source_dashboard_id,source_title,usage_count,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`).run(
-    id, signature, deriveName(tile), deriveDescription(tile), '', tile.vis?.type || '',
-    deriveFieldsSummary(tile), tile.query?.model || null, tile.query?.view || null,
-    JSON.stringify(tileDef), sourceDashboardId || null, sourceTitle || null, ts, ts,
-  );
-  return getLibraryTile(id);
-}
-// Harvest all tiles of a dashboard definition. Returns how many were newly added.
-function harvestDashboardTiles(def, { sourceDashboardId } = {}) {
-  let added = 0;
-  const all = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
-  const before = db.prepare('SELECT COUNT(*) c FROM tile_library').get().c;
-  for (const t of all) harvestTile(t, { sourceDashboardId, sourceTitle: def.title });
-  added = db.prepare('SELECT COUNT(*) c FROM tile_library').get().c - before;
-  return added;
-}
-function updateLibraryTile(id, patch) {
-  const cur = db.prepare('SELECT * FROM tile_library WHERE id=?').get(id);
-  if (!cur) return null;
-  const name = patch.name ?? cur.name;
-  const description = patch.description ?? cur.description;
-  const category = patch.category ?? cur.category;
-  db.prepare('UPDATE tile_library SET name=?, description=?, category=?, updated_at=? WHERE id=?')
-    .run(name, description, category, now(), id);
-  return getLibraryTile(id);
-}
-function deleteLibraryTile(id) { return db.prepare('DELETE FROM tile_library WHERE id=?').run(id).changes > 0; }
-function bumpLibraryUsage(id) { db.prepare('UPDATE tile_library SET usage_count = usage_count + 1 WHERE id=?').run(id); }
+// ─── Tile library — harvest + curation lives in server/tileLibrary.js ─────────
+const { tileSignature, listLibraryTiles, listLibraryCategories, getLibraryTile, harvestTile, harvestDashboardTiles, updateLibraryTile, deleteLibraryTile, bumpLibraryUsage } = require('./tileLibrary')(db, { uuid, now, J });
 
 // ─── Settlements ──────────────────────────────────────────────────────────────
 // Lightweight summary for lists: pull the headline numbers out of the JSON so
@@ -1612,6 +1542,8 @@ function deleteDocument(id) { return db.prepare('DELETE FROM event_documents WHE
 
 // Full backup / restore (export whole DB to JSON, import to replace) lives in
 // its own module — a factory over this db handle. See server/transfer.js.
+// (Kept over main's inline table list: transfer.js enumerates every table from
+// sqlite_master, so the backup stays complete as new feature tables are added.)
 const { exportAll, importAll } = require('./transfer')(db, now);
 
 module.exports = {

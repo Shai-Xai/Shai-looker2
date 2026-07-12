@@ -19,4 +19,7 @@ st.mjs
 *.cookies
 cookies.txt
 *.cookie
+# Single-letter scratch files (c.txt was a committed curl cookie jar once —
+# a real session JWT reached the repo; never again).
+[a-z].txt
 

@@ -2,7 +2,8 @@ import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import BarGaugeTile from './tiles/BarGaugeTile.jsx';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
@@ -19,6 +20,7 @@ import CreateSegmentModal from './CreateSegmentModal.jsx';
 import ShareMenu from './ShareMenu.jsx';
 import TileLockModal from './TileLockModal.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
@@ -36,9 +38,19 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
+  // Per-user chart zoom ("last N points") — loaded from the user's prefs and
+  // saved back on change; a personal lens, never a dashboard edit.
+  const [zoom, setZoom] = useState(0);
+  useEffect(() => { let alive = true; if (dashboardId) loadTileZoom(dashboardId).then((m) => { if (alive) setZoom(m[tile.id] || 0); }); return () => { alive = false; }; }, [dashboardId, tile.id]);
+  const changeZoom = (n) => { setZoom(n); if (dashboardId) setTileZoom(dashboardId, tile.id, n); };
   // On phones the per-tile owl/pin/segment buttons clutter every card, so they
   // stay hidden until you tap the tile (desktop shows them on hover as before).
   const [tapped, setTapped] = useState(false);
+  // Double-tap a chart/table on the phone → expand it fullscreen (portaled, so
+  // the grid item's transform can't trap the fixed overlay). Single tap keeps
+  // its reveal-the-buttons job.
+  const [expanded, setExpanded] = useState(false);
+  const lastTapAt = useRef(0);
   // Open the Owl on this tile, recording it as a feature-usage signal (Admin → Onboarding).
   const openInsight = () => { if (entityId) api.trackUsage(entityId, { kind: 'feature', name: 'insight', event: 'use' }); setShowInsight(true); };
 
@@ -82,14 +94,30 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   // big number stays fully visible; their edit controls float in the corners instead.
   const showHeader = !isMetric && (editable || !!tile.title);
 
+  // What double-tap fullscreen applies to: real data tiles (charts + tables) —
+  // not text tiles, and not KPI numbers (nothing to see bigger).
+  const canExpand = isMobile && !editable && tile.type !== 'text' && !isMetric && !!data && !error;
+  const onCardTap = (e) => {
+    // Taps on the tile's own controls (owl, pin, zoom select…) are theirs alone.
+    if (e.target.closest && e.target.closest('button, select, a, input')) return;
+    const t = Date.now();
+    if (canExpand && t - lastTapAt.current < 350) { lastTapAt.current = 0; setExpanded(true); return; }
+    lastTapAt.current = t;
+    setTapped((v) => !v);
+  };
+
   return (
     <div
       // Hover-lift in view mode (matches the home cards). Not while editing — it
       // would fight the drag-to-rearrange transform.
       className={`howler-tile${editable ? '' : ' lift'}`}
-      // Mobile: tap the card to reveal/hide its owl + controls.
-      onClick={isMobile && !editable ? () => setTapped((v) => !v) : undefined}
+      // Mobile: tap the card to reveal/hide its owl + controls; double-tap a
+      // chart/table to expand it fullscreen.
+      onClick={isMobile && !editable ? onCardTap : undefined}
       style={{
+        // Kill iOS Safari's double-tap page zoom on tiles so the double-tap
+        // lands here (pan/scroll unaffected).
+        ...(isMobile && !editable ? { touchAction: 'manipulation' } : null),
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
@@ -168,6 +196,23 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {/* Chart zoom: show only the last N points of a long axis (e.g. a
+            days-before-event countdown where all the action is the final two
+            weeks). Personal + persisted; stays visible while active. */}
+        {!editable && (visType || '').match(/column|bar|line|area|scatter/) && (data?.data?.length || 0) > 24 && (!isMobile || tapped || zoom > 0) && (
+          <select
+            value={zoom}
+            onChange={(e) => changeZoom(Number(e.target.value))}
+            onMouseDown={(e) => e.stopPropagation()}
+            className={zoom > 0 || isMobile ? undefined : 'insight-btn'}
+            title="Zoom — show only the most recent part of the axis (saved for you)"
+            aria-label="Chart zoom"
+            style={{ position: 'absolute', right: 8, bottom: 6, zIndex: 6, fontSize: 10.5, padding: '2px 5px', borderRadius: 7, border: '1px solid var(--hairline)', background: 'var(--card)', color: zoom > 0 ? 'var(--brand)' : 'var(--muted)', fontWeight: zoom > 0 ? 700 : 500, cursor: 'pointer' }}
+          >
+            <option value={0}>🔍 All</option>
+            {[90, 60, 30, 14, 7].map((n) => <option key={n} value={n}>🔍 Last {n}</option>)}
+          </select>
+        )}
         {/* Editable metric tile (no header): the move handle + edit controls float
             in the top-RIGHT corner, so the value below stays fully visible. The
             move handle reorders within a carousel (⠿) or moves on the grid (✥). */}
@@ -207,12 +252,19 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             style={{ height: '100%', animationDelay: `${enterDelay(tile)}ms` }}
           >
             <ErrorBoundary resetKey={data}>
-              <TileContent tile={tile} data={data} />
+              <TileContent tile={tile} data={data} zoom={zoom} />
             </ErrorBoundary>
           </div>
         ) : null}
       </div>
 
+      {expanded && (
+        <TileFullscreen title={tile.title || 'Chart'} onClose={() => setExpanded(false)}>
+          <ErrorBoundary resetKey={data}>
+            <TileContent tile={tile} data={data} zoom={zoom} />
+          </ErrorBoundary>
+        </TileFullscreen>
+      )}
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
       )}
@@ -238,6 +290,37 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         />
       )}
     </div>
+  );
+}
+
+// Fullscreen view of one tile (mobile double-tap). Portaled to <body> so the
+// grid item's transform can't trap the fixed overlay. Close via ✕, another
+// double-tap, or the Escape key; body scroll is locked while open.
+function TileFullscreen({ title, onClose, children }) {
+  const lastTapAt = useRef(0);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey); };
+  }, [onClose]);
+  const tap = (e) => {
+    if (e.target.closest && e.target.closest('button, select, a, input')) return;
+    const t = Date.now();
+    if (t - lastTapAt.current < 350) { onClose(); return; }
+    lastTapAt.current = t;
+  };
+  return createPortal(
+    <div onClick={tap} style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg, #fff)', color: 'var(--text)', display: 'flex', flexDirection: 'column', touchAction: 'manipulation' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', paddingTop: 'calc(10px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>double-tap to close</span>
+        <button onClick={onClose} aria-label="Close" style={{ border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 30, height: 30, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, padding: '10px 6px calc(10px + env(safe-area-inset-bottom))' }}>{children}</div>
+    </div>,
+    document.body
   );
 }
 
@@ -319,7 +402,7 @@ function Skeleton({ metric, chart }) {
   );
 }
 
-function TileContent({ tile, data }) {
+function TileContent({ tile, data, zoom = 0 }) {
   const visType = tile.vis?.type;
 
   if (visType === 'single_value' || visType === 'single_value_period_over_period') {
@@ -336,7 +419,7 @@ function TileContent({ tile, data }) {
     visType === 'looker_area' || visType === 'looker_scatter' || visType === 'looker_pie' ||
     visType === 'looker_donut_multiples'
   ) {
-    return <ChartTile data={data} visConfig={tile.vis} />;
+    return <ChartTile data={data} visConfig={tile.vis} zoom={zoom} />;
   }
   // Fallback: always show the data.
   return <TableTile data={data} visConfig={tile.vis} />;

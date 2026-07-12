@@ -1,20 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import IntegrationsForm from '../components/IntegrationsForm.jsx';
 import MailTemplateEditor from '../components/MailTemplateEditor.jsx';
+import SendingDomainCard from '../components/SendingDomainCard.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import MyOwlMemory from '../components/MyOwlMemory.jsx';
 import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
+import MetaConnectCard from '../components/MetaConnectCard.jsx';
+import QueueItCard from '../components/QueueItCard.jsx';
 import MailLogView from '../components/MailLogView.jsx';
 import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
 import TeamManager from '../components/TeamManager.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useMyFlags, flagOn } from '../lib/flags.js';
 import { useProfile } from '../lib/profile.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -57,7 +61,10 @@ export default function ClientIntegrationsPage() {
   const ent = active || (activeItem ? { id: activeItem.entityId, name: activeItem.name } : null);
   // Only the sections this role can use (Notifications is personal, always on).
   // Fan Owl is dogfood-gated to allowlisted accounts (server enforces the same).
-  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)));
+  // 🚩 selfservice.* flags decide which sections a CLIENT may manage themselves.
+  const myFlags = useMyFlags(scopeId);
+  const SECTION_FLAG = { team: 'selfservice.team', integrations: 'selfservice.integrations', email: 'selfservice.branding', fanowl: 'fanowl' };
+  const sections = SECTIONS.filter(([key, , , perm]) => (!perm || can(perm)) && (key !== 'fanowl' || fanOwlSettingsEnabled(authUser)) && flagOn(myFlags, SECTION_FLAG[key] || ''));
   // Deep link: /settings?section=integrations|team|notifications|email… opens that
   // section (used by the onboarding "Go" buttons). Falls back to the first allowed.
   const [params] = useSearchParams();
@@ -71,10 +78,7 @@ export default function ClientIntegrationsPage() {
 
   return (
     <main style={{ flex: 1, padding: isMobile ? '20px 14px' : '32px 24px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-        <HomeButton />
-        <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Settings</h1>
-      </div>
+      <PageHeader title="Settings" />
       <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Manage your integrations, branding and inbox address. Anything left blank falls back to Howler's defaults.</p>
 
       {/* Section nav */}
@@ -120,8 +124,15 @@ export default function ClientIntegrationsPage() {
                 showMeta
                 showTikTok
                 showSlack
+                showChottu
+                showQueueit
+                showPixel
+                pixelEntityId={activeItem.entityId}
+                onPixelStatus={() => api.myPixelStatus(activeItem.entityId)}
+                onCreatePixelAudiences={(channel) => api.myCreatePixelAudiences(activeItem.entityId, channel)}
+                showSocialPlus
                 canManageLock={isAdmin || role === 'owner'}
-                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
                 locks={activeItem.locks || {}}
                 onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {
@@ -134,6 +145,8 @@ export default function ClientIntegrationsPage() {
                 }}
               />
               <ApiKeysCard entityId={activeItem.entityId} scope="my" />
+              <MetaConnectCard entityId={activeItem.entityId} scope="my" />
+              <QueueItCard entityId={activeItem.entityId} scope="my" />
               <DriveSourcesCard entityId={activeItem.entityId} scope="my" />
             </div>
           )}
@@ -149,6 +162,10 @@ export default function ClientIntegrationsPage() {
               <BrandingSection title="Account &amp; portfolio" subtitle="your overall look · used on portfolio digests">
                 <p style={hint}>Your colours and logo — they style your whole Pulse platform (buttons, accents, charts) and your notification emails. Used everywhere by default, and on portfolio (multi-event) digests. Blank fields keep Howler's defaults.</p>
                 <MailTemplateEditor scope="my" entityId={activeItem.entityId} />
+              </BrandingSection>
+
+              <BrandingSection title="Your sending domain" subtitle="send from you@yourbrand.com">
+                <SendingDomainCard entityId={activeItem.entityId} scope="my" />
               </BrandingSection>
 
               <BrandingSection title="Events" subtitle="brand a specific event">

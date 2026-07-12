@@ -87,16 +87,33 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
       name: 'pulse_event_ops',
       title: 'Check Event Ops',
       scope: 'read_rows', // operational row-level data (staff names, device movements)
-      description: 'LIVE, per event. On-the-ground Event Ops: query=overview (device totals per station + open issues + recent checkpoints), locate (find ONE device by its code), or the devices / issues / staff / stations / checkpoints lists. Requires a suiteId (event) from pulse_get_me and a key with the read_rows scope.',
+      description: 'LIVE, per event. On-the-ground Event Ops: query=overview (device totals per station + open issues + recent checkpoints), locate (find ONE device by its code), or the devices / issues / staff / stations / checkpoints / calls lists (calls = operator support calls from the floor). Requires a suiteId (event) from pulse_get_me and a key with the read_rows scope.',
       input: {
         suiteId: z.string().describe('Event (suite) id from pulse_get_me'),
-        query: z.enum(['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints']).optional().describe('What to fetch (default overview)'),
+        query: z.enum(['overview', 'locate', 'devices', 'issues', 'staff', 'stations', 'checkpoints', 'calls']).optional().describe('What to fetch (default overview)'),
         code: z.string().optional().describe('For locate: the device QR code / serial / label (e.g. SL005)'),
         state: z.enum(['in_stock', 'deployed', 'returned', 'lost', 'damaged']).optional().describe('For devices: filter by state'),
-        station: z.string().optional().describe('Filter by station name (devices/staff/checkpoints)'),
-        status: z.enum(['open', 'resolved', 'all']).optional().describe('For issues: which ones (default open)'),
+        station: z.string().optional().describe('Filter by station name (devices/staff/checkpoints/calls)'),
+        status: z.enum(['open', 'acked', 'resolved', 'all']).optional().describe('For issues (open/resolved/all) or calls (open/acked/resolved/all); default open'),
       },
       run: (u, a) => core.eventOps(u, a),
+    },
+    {
+      name: 'pulse_data_health',
+      title: 'Check data-stream health',
+      scope: 'read_rows', // device ids + operator names are operational row-level data
+      description: 'LIVE data-pipe health per station — is data (check-ins, bar sales, vendors) flowing from the venue into the platform? query=overview (every monitor: status, per-station lag vs warn/stale thresholds, device roster counts), devices (ONE monitor\'s live roster incl. WHICH devices are offline and for how long), timeline (per-device activity + a coverage AND a throughput series per time block through the day — spot gaps/flappers and whether volume dips with connectivity), observed (the authoritative offline log), signal (signal-flow: share of devices on-air vs the event target, by zone/category/station), latest (newest raw records). Times are UTC — present them in the client\'s local time. Requires the read_rows scope.',
+      input: {
+        query: z.enum(['overview', 'devices', 'timeline', 'observed', 'signal', 'latest']).optional().describe('What to fetch (default overview)'),
+        monitor: z.string().optional().describe('For devices/timeline/latest: the monitor/station name (fuzzy, e.g. "Gate B")'),
+        suiteId: z.string().optional().describe('Event (suite) id — required for signal; narrows others to one event'),
+        hours: z.string().optional().describe('For timeline/observed: "start" (roster start), rolling hours like "12", or "day:YYYY-MM-DD" for one festival day'),
+        intervalMin: z.number().optional().describe('For timeline: block minutes (5/10/20/30/60; default 10)'),
+        station: z.string().optional().describe('For timeline/signal: narrow to ONE station'),
+        zone: z.string().optional().describe('For signal: narrow to one zone/category (bars, gates, vendors…)'),
+        limit: z.number().optional().describe('For latest: how many records (default 20)'),
+      },
+      run: (u, a) => core.dataHealth(u, a),
     },
     {
       name: 'pulse_get_tile_rows',
@@ -121,7 +138,7 @@ function mount(app, { apiKeys, core, rateLimit, clientContextFor }) {
     {
       name: 'pulse_query_data',
       title: 'Query event data',
-      description: 'LIVE query (~1-3s, cached after). THE MOST POWERFUL READ: compute any curated measure grouped by any curated dimensions with filters and a date range, straight from the client\'s data — use this when no dashboard tile matches the question (e.g. "revenue by ticket type last 30 days"). Field names must come from pulse_list_data_sources. Aggregate results only; personal fields are filter-only lookups, never listable.',
+      description: 'LIVE query (~1-3s, cached after). THE MOST POWERFUL READ: compute any curated measure grouped by any curated dimensions with filters and a date range, straight from the client\'s data — use this when no dashboard tile matches the question (e.g. "revenue by ticket type last 30 days"). Field names must come from pulse_list_data_sources. In a COMBINED source (several field-name prefixes), group a measure by dimensions of its OWN family (matching prefix, or shared core_events/date fields) — a cross-family group-by repeats one total on every row instead of a real breakdown (the result carries a `note` when that happens; heed it). For subset questions ("bars only", "food vendors") FILTER a category dimension (e.g. station_category) — group by it once to learn its exact case-sensitive values, then filter. For money totals prefer *sum_credit_amount / *sale_item_total_price measures over *sum_sale_item_unit_price (unit-price sums ignore quantities). Aggregate results only; personal fields are filter-only lookups, never listable.',
       input: {
         source: z.string().optional().describe('Data source key from pulse_list_data_sources (default: primary, the ticketing data)'),
         measure: z.string().describe('The number to compute — a measure name from the source'),

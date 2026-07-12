@@ -27,7 +27,12 @@ services:
     disk:
       name: pulse-data
       mountPath: /var/lib/pulse
-      sizeGB: 1
+      # 5GB: the DB grows with settlements/attachments/audit tables, and the
+      # nightly backup needs transient headroom (a raw DB copy + retained gzips)
+      # on the SAME disk. 1GB was marginal; server/diskGuard.js alerts ops at
+      # 80% and fails /health at 95% so a filling disk is loud, not silent.
+      # (Render disks grow in place but can never shrink.)
+      sizeGB: 5
     envVars:
       - key: NODE_ENV
         value: production

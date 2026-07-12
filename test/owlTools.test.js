@@ -192,6 +192,65 @@ test('a valid filter on a curated dimension is passed through under scope', asyn
   assert.deepEqual(res.queryBody.fields, ['core_ticket_types.name', M0]);
 });
 
+// ── Reporting timezone: relative date filters ("today") must resolve on the
+//    client's LOCAL calendar day, not Looker's server default — the cashless
+//    dateRange="today" = zero-rows bug. Fresh Owl query bodies now stamp
+//    query_timezone (platform default, or the entity's override).
+const reportingTz = require('../server/timezone');
+
+test('askData stamps the platform reporting timezone so "today" resolves locally', async () => {
+  const ent = h.makeEntity('TZ Co', 'TZ-org');
+  const user = h.makeClient('owl-tz1@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters[catalogue.dateDimension], 'today');
+  assert.equal(res.queryBody.query_timezone, reportingTz.PLATFORM_TIMEZONE); // no override → platform default
+});
+
+test('a per-entity reporting timezone override wins over the platform default', async () => {
+  const ent = h.makeEntity('Euro Co', 'Euro-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Europe/Rome' });
+  const user = h.makeClient('owl-tz2@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.query_timezone, 'Europe/Rome');
+});
+
+test('an invalid reporting timezone is ignored (falls back to the platform default)', async () => {
+  const ent = h.makeEntity('Bad TZ Co', 'BadTZ-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Not/AZone' });
+  assert.equal(h.db.getEntity(ent.id).reportingTimezone, ''); // rejected at write time
+  const user = h.makeClient('owl-tz3@client.test', [ent.id]);
+  const res = await tools().askData.run({ measure: M0, dateRange: 'today' }, ctx(user));
+  assert.equal(res.queryBody.query_timezone, reportingTz.PLATFORM_TIMEZONE);
+});
+
+test('an extra explore (e.g. cashless) also stamps the reporting timezone', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x.date', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const ent = h.makeEntity('Cashless TZ Co', 'CashlessTZ-org');
+  h.db.updateEntity(ent.id, { reportingTimezone: 'Europe/Paris' });
+  const user = h.makeClient('owl-tz4@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x.date'], 'today');
+  assert.equal(res.queryBody.query_timezone, 'Europe/Paris');
+});
+
+test('dateRange filters the MEASURED view\'s own date, not the catalogue default (issue #28 residual)', async () => {
+  // Combined explore: catalogue dateDimension is the check-in date, but the
+  // measured view (sales) has its own date_date — "today" must land THERE, or
+  // it doesn't constrain sales rows at all (the €34.50-instead-of-€12 bug).
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_checkins.date_date', measures: [{ name: 'cashless_x_sales.revenue', label: 'Sales Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.date_date', label: 'Sales Date', type: 'date' }, { name: 'cashless_x_checkins.date_date', label: 'Check-in Date', type: 'date' }], notes: [] }] };
+  const ent = h.makeEntity('Cashless DD Co', 'CashlessDD-org');
+  const user = h.makeClient('owl-dd@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x_sales.date_date'], 'today', 'filters the measured view\'s own date');
+  assert.equal(res.queryBody.filters['cashless_x_checkins.date_date'], undefined, 'catalogue default not used when the measure has its own date');
+});
+
 test('a registered extra explore gets its own scoped, validated read tool', async () => {
   const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
   const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
@@ -210,6 +269,88 @@ test('a registered extra explore gets its own scoped, validated read tool', asyn
   assert.equal(res.ok, true);
   assert.equal(res.queryBody.view, 'cashless_x');
   assert.equal(res.queryBody.filters[h.ORG_FIELD], 'Ultra Cashless');
+});
+
+test('extra explore: an explicit cross-edition event filter overrides the suite pin', async () => {
+  const ent = h.makeEntity('Ultra XE', 'Ultra Cross-Edition');
+  const suite = h.db.createSuite({ entityId: ent.id, name: 'KFF 26', lockedFilters: { 'core_events.name': 'Kappa FuturFestival 2026', 'cashless_x.name': 'Kappa FuturFestival 2026' } });
+  const user = h.makeClient('owl-xe@client.test', [ent.id]);
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Cashless Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.name', label: 'Event Name', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  // Default (no model filter): the suite pin applies — current edition only.
+  const pinned = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user, suite.id));
+  assert.equal(pinned.ok, true);
+  assert.equal(pinned.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2026');
+  assert.equal(pinned.queryBody.filters['core_events.name'], 'Kappa FuturFestival 2026');
+  // "vs last year": the model filters the explore's OWN event-name field → its filter
+  // wins AND the contradicting core_events auto-lock is skipped (else empty rows).
+  const compare = await t.ask_cashless_x.run(
+    { measure: 'cashless_x.revenue', filters: { 'cashless_x.name': 'Kappa FuturFestival 2025,Kappa FuturFestival 2026' } },
+    ctx(user, suite.id),
+  );
+  assert.equal(compare.ok, true);
+  assert.equal(compare.queryBody.filters['cashless_x.name'], 'Kappa FuturFestival 2025,Kappa FuturFestival 2026');
+  assert.equal(compare.queryBody.filters['core_events.name'], undefined, 'ticketing event auto-lock skipped');
+  assert.equal(compare.queryBody.filters[h.ORG_FIELD], 'Ultra Cross-Edition', 'organiser ceiling still forced');
+});
+
+test('exportRows (raw CSV): PII fields refused, scope forced, full row budget', async () => {
+  const ent = h.makeEntity('Ultra EX', 'Ultra Exports');
+  const user = h.makeClient('owl-ex@client.test', [ent.id]);
+  const t = tools();
+  // A round-tripped queryBody is untrusted: a PII field must refuse BEFORE Looker.
+  lookerCalls = 0;
+  const pii = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_purchasers.email', M0] }, ctx(user));
+  assert.equal(pii.ok, false);
+  assert.equal(lookerCalls, 0, 'refused before any query ran');
+  // A valid export re-applies the organiser scope and lifts the row budget to 5000.
+  const res = await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: ['core_ticket_types.name', M0], filters: { [h.ORG_FIELD]: 'Someone Else' } }, ctx(user));
+  assert.equal(res.ok, true);
+  // The smuggled foreign organiser filter is clamped back inside the user's own scope.
+  assert.equal((await t.exportRows({ model: catalogue.model, view: catalogue.explore, fields: [M0] }, ctx(user))).ok, true);
+});
+
+// ── fan-out guard: a grouped result repeating one identical value is flagged ──
+
+test('a grouped result where every row repeats the same value carries a fan-out warning note', async () => {
+  // Reproduces the KFF 26 check-ins bug: grouping cashless_check_ins.count by
+  // cashless_stations.name (an unrelated view) returned 185 rows all showing "4"
+  // — the ungrouped total repeated per station. The Owl must be told it's not real.
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 4 }));
+  const ent = h.makeEntity('Fanout Co', 'Fanout-org');
+  const user = h.makeClient('owl-fo1@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.match(res.note || '', /SUSPECT RESULT/, 'the fan-out is flagged');
+  assert.match(res.note || '', /cashless_x_checkins/, 'points at the measure\'s own family');
+});
+
+test('a genuinely varied breakdown carries NO fan-out note', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_stations.name', label: 'Station', type: 'string' }], notes: [] }] };
+  looker.lookerRequest = async () => Array.from({ length: 20 }, (_, i) => ({ 'cashless_x_stations.name': `Station ${i}`, 'cashless_x_checkins.count': 100 - i }));
+  const ent = h.makeEntity('Varied Co', 'Varied-org');
+  const user = h.makeClient('owl-fo2@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dimensions: ['cashless_x_stations.name'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.note, undefined);
+});
+
+test('small uniform results and ungrouped totals are NOT flagged as fan-out', async () => {
+  // 3 stations all on the same count is plausible real data; a single-row total
+  // has no group-by to distrust. Neither should scare the Owl off.
+  const ent = h.makeEntity('Small Co', 'Small-org');
+  const user = h.makeClient('owl-fo3@client.test', [ent.id]);
+  looker.lookerRequest = async () => Array.from({ length: 3 }, (_, i) => ({ 'core_ticket_types.name': `T${i}`, [M0]: 4 }));
+  const small = await tools().askData.run({ measure: M0, dimensions: ['core_ticket_types.name'] }, ctx(user));
+  assert.equal(small.ok, true);
+  assert.equal(small.note, undefined, 'few rows → not flagged');
+  looker.lookerRequest = async () => [{ [M0]: 4 }];
+  const total = await tools().askData.run({ measure: M0 }, ctx(user));
+  assert.equal(total.ok, true);
+  assert.equal(total.note, undefined, 'ungrouped total → not flagged');
 });
 
 // ── createAlert (the first act-tool): DRAFTS only — never writes, never queries ──
@@ -451,4 +592,162 @@ test('createAlert carries channel + priority into the draft, defaulting sensibly
   );
   assert.deepEqual(set.action.draft.channels, ['email']);
   assert.equal(set.action.draft.priority, 'important');
+});
+
+test('a dateRange that falls back to ANOTHER view\'s date carries a CAUTION note (check-ins have no own date)', async () => {
+  // The Inventive-vs-Owl mismatch: check-ins have no date field of their own, so
+  // "today" rides the access-control date and may not constrain check-ins at all.
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_access.date_date', measures: [{ name: 'cashless_x_checkins.count', label: 'Check-Ins', type: 'number' }], dimensions: [{ name: 'cashless_x_access.date_date', label: 'AC Date', type: 'date' }], notes: [] }] };
+  looker.lookerRequest = async () => [{ 'cashless_x_checkins.count': 4 }];
+  const ent = h.makeEntity('XDate Co', 'XDate-org');
+  const user = h.makeClient('owl-xd@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_checkins.count', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.queryBody.filters['cashless_x_access.date_date'], 'today', 'still filters (best available)');
+  assert.match(res.note || '', /CAUTION/, 'but flags the cross-view date');
+  assert.match(res.note || '', /cashless_x_checkins/, 'names the dateless view');
+});
+
+test('a dateRange on the measured view\'s OWN date carries no caution note', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: 'cashless_x_access.date_date', measures: [{ name: 'cashless_x_sales.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.date_date', label: 'Sales Date', type: 'date' }, { name: 'cashless_x_access.date_date', label: 'AC Date', type: 'date' }], notes: [] }] };
+  looker.lookerRequest = async () => [{ 'cashless_x_sales.revenue': 120 }];
+  const ent = h.makeEntity('OwnDate Co', 'OwnDate-org');
+  const user = h.makeClient('owl-od@client.test', [ent.id]);
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dateRange: 'today' }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.equal(res.note, undefined);
+});
+
+test('an explore with a category dimension advertises subset-filtering in its tool description', () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_sales.sum_credit_amount', label: 'Sale Amount', type: 'number' }], dimensions: [{ name: 'cashless_x_sales.station_category', label: 'Station Category', type: 'string' }, { name: 'cashless_x_sales.station_name', label: 'Station', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  assert.match(t.ask_cashless_x.schema.description, /SUBSET QUESTIONS/, 'subset guidance present');
+  assert.match(t.ask_cashless_x.schema.description, /cashless_x_sales\.station_category/, 'names the category field');
+  // No category-style dimension → no subset hint.
+  const cat2 = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_y', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_y.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_y.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat2 });
+  assert.doesNotMatch(t2.ask_cashless_y.schema.description, /SUBSET QUESTIONS/);
+});
+
+test('big catalogue: enum dropped past the cap, loose names resolve, ambiguity suggests candidates', async () => {
+  // 80 filler dims push past the 60-dim enum cap; two country fields make "country" ambiguous.
+  const dims = Array.from({ length: 80 }, (_, i) => ({ name: `cashless_x.dim_${i}`, label: `Dim ${i}`, type: 'string' }));
+  dims.push({ name: 'cashless_x.country_of_birth', label: 'Country Of Birth', type: 'string' });
+  dims.push({ name: 'cashless_x.country_of_residence', label: 'Country Of Residence', type: 'string' });
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.avg_spend', label: 'Average Spend', type: 'number' }], dimensions: dims, notes: [] }] };
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, catalogue: cat });
+  const tool = t.ask_cashless_x;
+  assert.equal(tool.schema.input_schema.properties.dimensions.items.enum, undefined, 'no dimension enum past the cap');
+  assert.match(tool.schema.input_schema.properties.dimensions.description, /resolved server-side/i, 'schema teaches name resolution');
+  assert.ok(Array.isArray(tool.schema.input_schema.properties.measure.enum), 'small measure list keeps its enum');
+  const ent = h.makeEntity('Ultra Big', 'Ultra Big Cat');
+  const user = h.makeClient('owl-big@client.test', [ent.id]);
+  // Plain business names resolve to the real fields (label + name matching).
+  const res = await tool.run({ measure: 'average spend', dimensions: ['country of birth'] }, ctx(user));
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.dimensions, ['cashless_x.country_of_birth']);
+  assert.ok(res.queryBody.fields.includes('cashless_x.avg_spend'), 'loose measure resolved');
+  assert.match(res.note || '', /Resolved fields/, 'snapping surfaced in the note');
+  // Ambiguous name → refuse (before Looker) WITH the candidates so one retry fixes it.
+  lookerCalls = 0;
+  const bad = await tool.run({ measure: 'cashless_x.avg_spend', dimensions: ['country'] }, ctx(user));
+  assert.equal(bad.ok, false);
+  assert.match(bad.message, /Closest matches:.*country_of_birth/, 'suggests the real fields');
+  assert.equal(lookerCalls, 0, 'failed closed before querying');
+});
+
+test('a Looker timeout tells the model to change the query shape, not retry it', async () => {
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x.method', label: 'Method', type: 'string' }], notes: [] }] };
+  const failing = { ...queryEngine, runLookerQuery: async () => { throw new Error('Query timed out after 120s'); } };
+  const t = createOwlTools({ query: failing, auth: h.auth, db: h.db, catalogue: cat });
+  const ent = h.makeEntity('Ultra TO', 'Ultra Timeout');
+  const user = h.makeClient('owl-to@client.test', [ent.id]);
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x.revenue' }, ctx(user));
+  assert.equal(res.ok, false);
+  assert.match(res.message, /do NOT retry the same query/, 'anti-retry guidance on timeouts');
+});
+
+
+// ── ChottuLink act-tools: createLink + applyLinkTemplate (draft-only) ─────────
+// The tools must DRAFT (confirm:true, never touch ChottuLink) and mirror the
+// Links UI's validation. The upstream API is a stub — commits happen elsewhere.
+const chottuStub = () => ({
+  configFor: () => ({ key: 'k', domain: 'howler.chottu.link', source: 'platform' }),
+  listTemplates: () => [{ id: 'tpl-1', name: 'Standard event set', platform: true, items: [{ key: 'main' }] }],
+  resolveTemplate: (entityId, id, { base }) => ({
+    template: { id, name: 'Standard event set' },
+    items: [
+      { key: 'main', name: 'Fest', path: 'fest', destination: base ? `${base}` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+      { key: 'chat', name: 'Fest (chat)', path: 'fest-chat', destination: base ? `${base}?dest=my-chat` : '', warnings: base ? [] : ['Missing {{base}} — paste the event page URL'] },
+    ],
+  }),
+});
+
+test('createLink drafts (confirm, never creates) with normalised UTMs; refuses when unconnected', async () => {
+  const ent = h.makeEntity('LinkCo', 'LinkCo Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest' });
+  const user = h.makeClient('owl-link@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const res = await t.createLink.run(
+    { name: 'Tickets — IG bio', destinationUrl: 'https://howler.co.za/event/9', path: 'fest-ig', utmSource: 'Insta Gram' },
+    { user, suiteId: su.id },
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true, 'draft-only: the user must confirm');
+  assert.equal(res.action.kind, 'createChottuLink');
+  assert.equal(res.action.draft.utm.source, 'insta-gram', 'UTMs normalised lowercase/url-safe');
+  assert.equal(res.action.suiteId, su.id);
+  // Unconnected client → clear refusal, no draft.
+  const t2 = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: () => ({ configFor: () => ({ key: '', domain: '', source: null }) }) });
+  const no = await t2.createLink.run({ name: 'X', destinationUrl: 'https://h/x' }, { user, suiteId: su.id });
+  assert.equal(no.ok, false);
+  assert.equal(no.reason, 'not_connected');
+});
+
+test('applyLinkTemplate resolves the set for the current event and demands the base URL when needed', async () => {
+  const ent = h.makeEntity('LinkCo2', 'LinkCo2 Org');
+  const su = h.db.createSuite({ entityId: ent.id, name: 'LinkFest 2' });
+  const user = h.makeClient('owl-tpl@client.test', [ent.id], 'owner');
+  const t = createOwlTools({ query: queryEngine, auth: h.auth, db: h.db, getChottuApi: chottuStub });
+  const noBase = await t.applyLinkTemplate.run({}, { user, suiteId: su.id });
+  assert.equal(noBase.ok, false);
+  assert.equal(noBase.reason, 'no_base', 'must ask for the event page URL, not draft broken links');
+  const res = await t.applyLinkTemplate.run({ baseUrl: 'https://howler.co.za/event/9' }, { user, suiteId: su.id });
+  assert.equal(res.ok, true);
+  assert.equal(res.confirm, true);
+  assert.equal(res.action.kind, 'applyChottuTemplate');
+  assert.equal(res.action.items.length, 2);
+  const noSuite = await t.applyLinkTemplate.run({ baseUrl: 'https://h' }, { user });
+  assert.equal(noSuite.ok, false, 'a template run needs an event in context');
+});
+
+test('a heavy cross-view breakdown that times out is auto-CHUNKED and answered', async () => {
+  // The live failure: sales measure × buyer demographic joins every sale to every
+  // buyer and times out — but the SAME query filtered to a few values completes.
+  const calls = [];
+  const stub = { ...queryEngine, runLookerQuery: async (path, body) => {
+    calls.push(body);
+    if (body.fields.length === 1 && body.fields[0] === 'cashless_x_cust.country') return [{ 'cashless_x_cust.country': 'IT' }, { 'cashless_x_cust.country': 'FR' }, { 'cashless_x_cust.country': 'DE' }];
+    if (body.filters['cashless_x_cust.country']) return String(body.filters['cashless_x_cust.country']).split(',').map((v) => ({ 'cashless_x_cust.country': v, 'cashless_x_sales.revenue': v === 'FR' ? 900 : 100 }));
+    throw new Error('Query timed out after 120s');
+  } };
+  const cat = { ...catalogue, extras: [{ model: catalogue.model, explore: 'cashless_x', label: 'Cashless', dateDimension: '', measures: [{ name: 'cashless_x_sales.revenue', label: 'Revenue', type: 'number' }], dimensions: [{ name: 'cashless_x_cust.country', label: 'Country Of Birth', type: 'string' }], notes: [] }] };
+  const t = createOwlTools({ query: stub, auth: h.auth, db: h.db, catalogue: cat });
+  const ent = h.makeEntity('Ultra Shard', 'Ultra Shard Co');
+  const user = h.makeClient('owl-shard@client.test', [ent.id]);
+  const res = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dimensions: ['cashless_x_cust.country'] }, ctx(user));
+  assert.equal(res.ok, true, 'answered despite the timeout');
+  assert.equal(res.rows.length, 3);
+  assert.equal(res.rows[0]['cashless_x_cust.country'], 'FR', 'merged rows sorted by the measure');
+  assert.match(res.note, /CHUNKING/, 'the note says how it was computed');
+  const chunk = calls.find((b) => b.filters['cashless_x_cust.country']);
+  assert.equal(chunk.filters[h.ORG_FIELD], 'Ultra Shard Co', 'chunk queries keep the organiser scope lock');
+  // Re-ask: served from the warm cache — zero further Looker calls.
+  const n = calls.length;
+  const again = await t.ask_cashless_x.run({ measure: 'cashless_x_sales.revenue', dimensions: ['cashless_x_cust.country'] }, ctx(user));
+  assert.equal(again.ok, true);
+  assert.match(again.note, /warm cache/);
+  assert.equal(calls.length, n, 'no new Looker calls on the re-ask');
 });

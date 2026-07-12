@@ -17,10 +17,12 @@ import InboxPage from './os/InboxPage.jsx';
 import GoalsPage from './pages/GoalsPage.jsx';
 import AlertsPage from './pages/AlertsPage.jsx';
 import MyReportsPage from './pages/MyReportsPage.jsx';
+import JourneyPage from './pages/JourneyPage.jsx';
 // Code-split the heavy / admin-only / secondary screens out of the initial
 // bundle — they load on first navigation (and clients never download the admin +
 // editor surfaces at all). The common client path stays eager for instant paint.
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const SplitPage = lazy(() => import('./pages/SplitPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
 const ClonePage = lazy(() => import('./pages/ClonePage.jsx'));
 const EngagePage = lazy(() => import('./pages/EngagePage.jsx'));
@@ -28,11 +30,13 @@ const SettlementViewPage = lazy(() => import('./pages/SettlementViewPage.jsx'));
 const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
 const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
+const AppAnalyticsPage = lazy(() => import('./pages/AppAnalyticsPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
 const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
+const EventOpsCallPage = lazy(() => import('./pages/EventOpsCallPage.jsx'));
 import Logo from './components/Logo.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
@@ -104,10 +108,14 @@ function Header() {
           account actions live in the sidebar's bottom-left profile menu. */}
       {isAdmin && !inClientView ? (
         // On the desktop Admin console these controls live in the left rail's
-        // bottom profile menu, so drop them from the top bar there. Elsewhere
-        // (Dashboards, editor) and on mobile, keep them in the top bar.
-        (!isMobile && location.pathname === '/admin') ? null : (
+        // bottom profile menu, so drop them from the top bar there (keep Split —
+        // it has no rail equivalent). Elsewhere (Dashboards, editor) and on
+        // mobile, keep them in the top bar.
+        (!isMobile && location.pathname === '/admin') ? (
+          window.self === window.top && <button onClick={() => navigate('/split')} title="Admin + client portal side by side" style={navLink}>⿲ Split view</button>
+        ) : (
         <>
+          {!isMobile && window.self === window.top && <button onClick={() => navigate('/split')} title="Admin + client portal side by side" style={navLink}>⿲ Split</button>}
           <Link to="/admin" style={navLink}>Admin</Link>
           <button onClick={toggle} title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme" style={themeBtn}>{theme === 'dark' ? '☀️' : '🌙'}</button>
           {!isMobile && <UserBadge user={user} isAdmin={isAdmin} />}
@@ -116,6 +124,15 @@ function Header() {
         )
       ) : inClientView && (
         <>
+          {/* Admin in a client experience: one-click back doors to the backend —
+              no profile switching. Hidden inside split panes (window.top check)
+              where they'd nest views. */}
+          {isAdmin && window.self === window.top && (
+            <>
+              <button onClick={goConsole} title="Open the Howler admin console" style={navLink}>🛠 {isMobile ? '' : 'Howler Admin'}</button>
+              {!isMobile && <button onClick={() => { enterConsole(); navigate('/split'); }} title="Admin + client portal side by side" style={navLink}>⿲ Split</button>}
+            </>
+          )}
           <button onClick={() => navigate('/')} title="Powered by Howler Pulse" style={{ display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, opacity: 0.85 }}>
             <Logo size={22} radius={6} />
             {!isMobile && <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--muted)' }}>Howler&nbsp;:&nbsp;Pulse</span>}
@@ -240,6 +257,16 @@ function Shell() {
       </Suspense>
     );
   }
+  // PUBLIC device support-call page — pre-bound to one station + device (both in the
+  // URL). No login; works logged-in or out, and from any phone. Matched before the gate.
+  const callLink = window.location.pathname.match(/^\/eventops\/call\/([^/]+)\/([^/]+)\/([^/]+)/);
+  if (callLink) {
+    return (
+      <Suspense fallback={<div style={{ minHeight: '100dvh' }} />}>
+        <EventOpsCallPage suiteId={decodeURIComponent(callLink[1])} token={decodeURIComponent(callLink[2])} deviceId={decodeURIComponent(callLink[3])} />
+      </Suspense>
+    );
+  }
 
   if (loading) {
     return <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}>Loading…</div>;
@@ -280,6 +307,8 @@ function Shell() {
               <Route path="/suite/:suiteId/d/:id/edit" element={<EditorPage />} />
               <Route path="/clone" element={<ClonePage />} />
               <Route path="/admin" element={<AdminPage />} />
+              {/* Admin + client portal side by side (desktop). */}
+              <Route path="/split" element={<SplitPage />} />
               {/* Preview the client experience without logging in as them. */}
               <Route element={<ClientLayout />}>
                 <Route path="/preview" element={<ClientHome />} />
@@ -287,12 +316,14 @@ function Shell() {
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/social" element={<SocialPage />} />
+                <Route path="/app-analytics" element={<AppAnalyticsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/product" element={<MyReportsPage />} />
+                <Route path="/journey" element={<JourneyPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />
@@ -317,12 +348,14 @@ function Shell() {
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/social" element={<SocialPage />} />
+                <Route path="/app-analytics" element={<AppAnalyticsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
                 <Route path="/product" element={<MyReportsPage />} />
+                <Route path="/journey" element={<JourneyPage />} />
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />

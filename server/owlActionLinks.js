@@ -3,8 +3,12 @@
 // act-tool means adding one line here (and the link comes for free on both doors).
 const VIEW_PATHS = {
   createAlert: '/alerts',
+  createLiveUpdate: '/alerts?tab=live',
   createSegment: '/engage/segments',
   draftCampaign: '/engage/campaigns',
+  draftJourney: '/engage/campaigns',
+  createChottuLink: '/engage/links',
+  applyChottuTemplate: '/engage/links',
 };
 
 // The in-app path for an action kind (e.g. '/alerts'), or '' if unknown.

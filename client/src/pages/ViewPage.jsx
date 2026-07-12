@@ -16,6 +16,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { combinedBlocksFromLockMap } from '../lib/combinedFilters.js';
+import { setReportTiles } from '../lib/reportContext.js';
 
 // Read-only render of a saved dashboard. When opened inside a Suite
 // (/suite/:suiteId/d/:id) the suite's locked filters are pre-filled + locked and
@@ -52,6 +53,10 @@ export default function ViewPage() {
   const [daysToGo, setDaysToGo] = useState(null);           // live days-before-event (from the source tile)
   const [refreshKey, setRefreshKey] = useState(0);          // bump → all tiles re-fetch live (cache-bypassing)
   const refreshNow = () => setRefreshKey((k) => k + 1);
+  // One button does it all: admins also wipe the server's query cache first, so
+  // "Refresh" is always the clean-slate pull; clients refresh live (per-tile
+  // cache-busted) without the platform-wide wipe.
+  const hardRefresh = async () => { if (isAdmin) { try { await api.clearQueryCache(); } catch { /* refresh regardless */ } } refreshNow(); };
   const [softKey, setSoftKey] = useState(0);                // bump → silent, cache-friendly re-fetch (focus/interval)
 
   // Build filter values from the dashboard defaults + suite locks, with an
@@ -183,6 +188,19 @@ export default function ViewPage() {
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
   // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
   useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
+
+  // Publish this dashboard's tiles so the app-wide Report widget can offer a
+  // "which tile is this about?" picker. Cleared on unmount / tab switch so the
+  // picker only shows on a dashboard. Includes tiles inside carousels/sections.
+  useEffect(() => {
+    if (!def) { setReportTiles([]); return; }
+    const list = [];
+    const add = (t) => { if (t?.id && !t.hidden) list.push({ id: t.id, title: (t.title || t.name || '').trim() || 'Untitled tile' }); };
+    for (const t of def.tiles || []) add(t);
+    for (const c of def.carousels || []) for (const t of c.tiles || []) add(t);
+    setReportTiles(list);
+    return () => setReportTiles([]);
+  }, [def]);
 
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).
@@ -351,7 +369,7 @@ export default function ViewPage() {
               <h2 style={{ fontSize: isMobile ? 17 : 21, fontWeight: 600, letterSpacing: '-0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{headerTitle}</h2>
             </div>
             {hasTiles && !isMobile && (
-              <button className="btn-key no-print" style={summaryBtn} onClick={refreshNow} title="Refresh — pull the latest data now (bypasses cache)" aria-label="Refresh data">↻ Refresh</button>
+              <button className="btn-key no-print" style={summaryBtn} onClick={hardRefresh} title={isAdmin ? 'Refresh — clear the server cache and pull everything live' : 'Refresh — pull the latest data now (bypasses cache)'} aria-label="Refresh data">↻ Refresh</button>
             )}
             {canSummarize && !isMobile && (
               <button className="btn-key no-print" style={summaryBtn} onClick={() => setSummaryOpen(true)} title="AI summary of the whole dashboard"><AiMark size={20} /> Summary</button>
@@ -389,7 +407,7 @@ export default function ViewPage() {
               <button className="btn-key" style={iconAction} onClick={() => setSummaryOpen(true)} title="AI summary" aria-label="AI summary"><AiMark size={20} /></button>
             )}
             {/* Filters now live inside the ⋯ menu alongside Share / Download PDF. */}
-            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} onRefresh={refreshNow} />
+            <ActionsMenu suiteId={suiteId} dashboardId={id} filterValues={filterValues} hasFilters={hasFilters} activeCount={activeCount} onFilters={() => setFiltersOpen(true)} onRefresh={hardRefresh} />
           </>,
           actionsSlot
         )}

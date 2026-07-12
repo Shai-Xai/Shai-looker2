@@ -60,17 +60,36 @@ async function getAccessToken() {
 // Cap concurrent outbound Looker requests so a traffic spike (many clients
 // loading dashboards at once) can't exceed Looker's query concurrency — excess
 // requests queue here instead of failing. Tune with LOOKER_MAX_CONCURRENCY.
+//
+// The queue is BOUNDED and every waiter carries a DEADLINE: when Looker
+// degrades (each in-flight request can pin a slot for up to 120s), an unbounded
+// queue turns one bad Looker afternoon into minute-plus spinners and hundreds
+// of pending requests held in memory. Beyond the cap / past the deadline we
+// fail fast with a friendly retryable message instead.
 const LOOKER_MAX = Number(process.env.LOOKER_MAX_CONCURRENCY) || 8;
+const QUEUE_MAX = Number(process.env.LOOKER_QUEUE_MAX) || 100;
+const QUEUE_WAIT_MS = Number(process.env.LOOKER_QUEUE_WAIT_MS) || 20000;
 let activeRequests = 0;
 const requestQueue = [];
 function acquireSlot() {
   if (activeRequests < LOOKER_MAX) { activeRequests++; return Promise.resolve(); }
-  return new Promise((resolve) => requestQueue.push(resolve)).then(() => { activeRequests++; });
+  if (requestQueue.length >= QUEUE_MAX) {
+    return Promise.reject(new Error('The data engine is very busy right now — please try again in a moment.'));
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, timer: setTimeout(() => {
+      const i = requestQueue.indexOf(waiter);
+      if (i !== -1) requestQueue.splice(i, 1);
+      reject(new Error('The data engine is busy and this request waited too long — please try again in a moment.'));
+    }, QUEUE_WAIT_MS) };
+    if (waiter.timer.unref) waiter.timer.unref();
+    requestQueue.push(waiter);
+  }).then(() => { activeRequests++; });
 }
 function releaseSlot() {
   activeRequests = Math.max(0, activeRequests - 1);
   const next = requestQueue.shift();
-  if (next) next();
+  if (next) { clearTimeout(next.timer); next.resolve(); }
 }
 
 // Public entry point: gate one concurrency slot, then run (with 401-retry inside).
@@ -238,9 +257,14 @@ async function getExploreFields(model, explore) {
     `/lookml_models/${encodeURIComponent(model)}/explores/${encodeURIComponent(explore)}?fields=fields(dimensions(name,label,label_short,type,description,hidden,group_label),measures(name,label,label_short,type,description,hidden,group_label))`
   );
   const f = data.fields || {};
+  // Hidden fields are INCLUDED, flagged. "Hidden" in LookML is a UI nicety, not
+  // an API restriction — dashboard tiles and CSV exports use hidden fields all
+  // the time (the cashless check-in station/operator/device fields are a live
+  // example). Filtering them out here silently made those fields untickable in
+  // the Owl catalogue and invisible to the boot seeds. Consumers that want the
+  // old behaviour filter on `hidden` themselves.
   const pick = (arr) =>
     (arr || [])
-      .filter((x) => !x.hidden)
       .map((x) => ({
         name: x.name,
         label: x.label || x.name,
@@ -248,6 +272,7 @@ async function getExploreFields(model, explore) {
         type: x.type,
         description: x.description || '',
         group_label: x.group_label || '',
+        hidden: !!x.hidden,
       }));
   return { dimensions: pick(f.dimensions), measures: pick(f.measures) };
 }

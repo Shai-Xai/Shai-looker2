@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const { resolveGuidance: guidance } = require('./owlGuidance');
 const owlMemory = require('./owlMemory'); // durable per-client facts (memoryNote + rememberFact tool)
 const { actionViewPath } = require('./owlActionLinks'); // where a created action is viewed
+const { asyncHandler } = require('./http'); // act-commits that await upstream APIs (ChottuLink)
 
 // ── Live "thinking" status ───────────────────────────────────────────────────
 // The Owl can pause for seconds while it reasons or runs a Looker query, so we
@@ -35,16 +36,26 @@ const TOOL_STATUS = {
   searchDriveDocs: 'Searching your Drive files…',
   readDriveDoc: 'Reading that document…',
   getPaidPerformance: 'Checking your ad performance…',
+  productHelp: 'Checking the Pulse help notes…',
   createAlert: 'Setting up that alert…',
+  createSegment: 'Building that audience…',
+  draftCampaign: 'Drafting your campaign — audience, copy and design…',
+  draftJourney: 'Designing your journey — steps, timing and copy…',
+  createLiveUpdate: 'Drafting the live update…',
+  rememberFact: 'Noting that down…',
+  eventOps: 'Checking event ops…',
+  dataHealth: 'Checking data health…',
+  createLink: 'Minting your short link…',
+  applyLinkTemplate: 'Setting up your links…',
+  listAudiences: 'Checking your saved audiences…',
 };
+const toolLabel = (name) => TOOL_STATUS[name] || (name.startsWith('ask_') ? 'Reading that data source…' : 'Working on it…');
 function statusForTools(toolUses) {
   const names = [...new Set((toolUses || []).map((t) => t.name))];
-  if (names.length === 1) {
-    if (TOOL_STATUS[names[0]]) return TOOL_STATUS[names[0]];
-    if (names[0].startsWith('ask_')) return 'Reading that data source…'; // an extra explore (e.g. cashless)
-    return 'Working on it…';
-  }
-  return 'Gathering your data…';
+  if (names.length === 1) return toolLabel(names[0]);
+  // Several tools at once: name the first two so the user sees WHAT, not just "busy".
+  const labels = names.slice(0, 2).map((n) => toolLabel(n).replace(/…$/, ''));
+  return `${labels.join(' + ')}${names.length > 2 ? ` (+${names.length - 2} more)` : ''}…`;
 }
 
 // The chat Owl's system prompt. Unlike every other Owl surface (handed already-
@@ -73,6 +84,10 @@ WHICH TOOL TO USE (route every question to the right one — do not answer goal 
 - createAlert → when the user wants to be NOTIFIED / ALERTED / TOLD / REMINDED when a number reaches a level ("let me know when tickets hit 1000", "alert me if VIP sells out", "tell me when revenue passes R1m"). It DRAFTS the alert and the user confirms with a button — see ACTING below.
 - createSegment → when the user wants to BUILD or SAVE an AUDIENCE / cohort of people for later marketing ("make a segment of VIP buyers in Cape Town", "save these people as an audience", "build a guest list segment", "audience of 18-25 year olds"). The cohort is defined by curated dimensions (age, gender, buyer city/country, ticket type, ticket category, complimentary = guest list). It DRAFTS the segment + previews the size and reach; the user confirms with a button — see ACTING below. NEVER list or name individual people; only the count + reach. Contact fields (email/phone) cannot define a segment.
 - draftCampaign → when the user wants to MESSAGE or MARKET to a cohort ("draft a win-back email to lapsed VIP buyers", "send an offer to Cape Town 18-25s", "email my guest-list segment"). Give it the goal plus an audience that is EITHER a saved segment (pass segmentName when the user names one, or one was just created) OR a new cohort (pass filters). It drafts the email/SMS copy and previews the reach. It creates a DRAFT only — a human reviews, approves and SENDS it in Engage. You never send. See ACTING below.
+- createLink → when the user wants a SHORT / TRACKING / DEEP LINK into the Howler app for sharing ("make me a link for the Instagram bio", "short link to the tickets page tagged whatsapp", "QR link for the poster"). It DRAFTS one branded short link (with optional UTM tags + social share preview) tied to the current event; the user confirms with a button — see ACTING below. If ChottuLink isn't connected it will tell you — relay that.
+- applyLinkTemplate → when the user wants ALL the links / the STANDARD LINK SET for an event in one go ("set up the links for this event", "create the standard link set"). It resolves a saved template (e.g. "Standard event set": main + ticket wallet + lineup + map + event feed + chat) against the current event and DRAFTS the whole set; the user confirms with a button. It usually needs the event's public page URL (baseUrl) — ask for it if the tool says so.
+- productHelp → ANY question about PULSE ITSELF: how to do or set up something ("how do I set up an abandoned cart?", "where do I change my logo?"), what a feature does or where a screen lives, what the user can/can't do with their access, or "what's new / latest updates / recent releases". It returns curated help notes + PUBLISHED release notes tailored to this user — answer ONLY from that material, follow the grounding instructions it carries, and point the user to the screen it names. Never describe product features from your own knowledge — if productHelp doesn't cover it, say you don't have it in your help notes. This is for questions ABOUT the product; for reporting a problem or suggesting an improvement use draftReport instead.
+
 - draftReport → when the user reports a PROBLEM with the app/product or suggests a FEATURE/IMPROVEMENT ("there's a bug", "X is broken / not working", "this page is confusing", "it would be great if…", "can you add…", "I wish it could…"). This is about the PULSE APP ITSELF, not their ticketing data. It DRAFTS a bug/idea report the user confirms with a button — see ACTING below.
 
 - rememberFact → when the user tells you a DURABLE fact or preference about their business worth carrying into future chats (their priority tier, how they define revenue, naming conventions, what they focus on, their flagship event), OR you learn one. It DRAFTS a memory item the user confirms to save. Pick the scope: scope='event' for a fact true only of the CURRENT event (one festival sells add-ons heavily, another is single-day); scope='user' for THIS person's own answer-style preference ("keep it short", "always lead with revenue") — that shapes style, not data; scope='client' (default) for anything about the whole client/organiser. Use it sparingly and naturally — offer to remember the things that would make every future answer better; never store one-off question details, transient numbers, or any personal/contact data. Memory you already hold appears under "What you REMEMBER…" — don't re-offer what's already there.
@@ -83,6 +98,8 @@ ACTING (tools that DO something, not just read):
 - After calling createSegment, do NOT say it's saved. Say you've DRAFTED it, state the cohort and the previewed size + reach (e.g. "a segment of VIP buyers in Cape Town — about 1,240 people, 1,180 emailable"), and tell them to tap "Create segment" to save it. Never list individuals. If it returns ok:false, relay why (e.g. pick a client, or contact fields can't define a segment).
 - Work like a campaign manager: BEFORE calling draftCampaign, if the brief is thin, ask 1-3 SHORT setup questions to nail the essentials that are missing — the angle/offer (the hook), the channel (email / SMS / both), any promo or incentive, the destination link for the button, and which event it's for. Ask only what's missing and material; don't interrogate. Then call draftCampaign with a rich goal (fold in the offer/angle and any promo) and pass ctaUrl if they gave a link.
 - The audience can be an existing saved segment (pass segmentName) or a new cohort (pass filters). When you draft from a NEW cohort, that cohort is automatically SAVED as a reusable segment and the campaign is pointed at it — so tell the user the segment was saved too.
+- A multi-step automated flow with conditions over time ("email, then SMS if they don't open", "follow up non-buyers after 2 days") is a JOURNEY — call draftJourney (you author the whole branching tree, copy included), not draftCampaign (a single blast). AUDIENCE FIRST, always: the audience is the heart of a journey (it shapes tone, channels, timing and the branches), so before drafting, pin down WHO it's for. If the user didn't name an audience, ask ONE short question first — "Who should this go to — one of your saved segments, or a cohort (e.g. Spanish buyers, VIPs, lapsed customers)?" — and only author the tree once you know. Pass it as segmentName (saved segment) or filters (new cohort — auto-saved as a reusable segment on confirm, so say the segment gets saved too). In the SAME setup round (not extra rounds), also confirm what to CALL the campaign and whether it belongs to a MASTER campaign group (e.g. "part of your Bushfire 2026 launch?") — pass the name as name and the group as master; skip master silently if they say no. CONFIRM THE AUDIENCE OUT LOUD: after drafting with a new cohort, your reply MUST state the audience size from the tool's reach (e.g. "that's 87 people — 80 emailable"), say the cohort will be saved as a segment you'll find in Engage → Segments, and ask them to confirm it looks right — or offer the alternatives: a different saved segment, refined filters, or building the audience another way (the 🎯 Create segment button on any dashboard tile that lists people, or pasting/uploading a list in Engage → Segments) and then targeting that segment here by name. If reach comes back zero or missing, do NOT shrug — say the cohort matched nobody, check the field's real values (e.g. group by buyer country) and retry. The tree renders in the chat; the user taps "Create draft journey".
+- After calling createLink or applyLinkTemplate, do NOT say the link(s) exist yet. State what will be created (the short URL shape(s), tags, any warnings the tool returned) and tell the user to tap the button — the links only go live on ChottuLink when they confirm.
 - After calling draftCampaign, do NOT say it's sent or scheduled. Say you've DRAFTED the campaign, give the audience (size + reach) and the subject line, and tell them to tap "Create draft campaign" then review, approve and send it in Engage — you never send anything to customers. If it returns ok:false, relay why.
 - After calling createAlert, do NOT say the alert is on or active. Say you've DRAFTED it, state plainly what it will watch and the exact condition (e.g. "I've drafted an alert for when Tickets Sold reaches 1,000"), and tell them to tap "Create alert" below to switch it on. If no event is selected, the card has an event picker on it — tell them to pick the event there; NEVER tell them to go elsewhere to select an event first. If it returns ok:false, relay why and what to do.
 - An alert needs a measure, an operator (at/above, at/below, above, below) and a threshold. If the user's wish is missing one (e.g. they didn't give a number), ask one short clarifying question before drafting.
@@ -98,6 +115,11 @@ CHARTS: Whenever you return a BREAKDOWN from askData (a measure grouped by a dim
 TABLES: For comparisons or any multi-row breakdown, present the figures as a Markdown table (| col | col |, with a |---|---| separator row) — it renders as a real table. Use tables instead of long free-form lists of numbers.
 
 INSIGHT: When you present data, add a short one-line takeaway — what stands out or why it matters — not just the bare number.
+
+PEOPLE & CONTACT DETAILS (the segment handoff): You NEVER print lists of individuals or their contact details (names, surnames, emails, phones) in chat — answers are saved, exported and shared, so identity stays out of them by design. But do NOT dead-end the user. When they ask for the PEOPLE behind a number ("who are my top spenders", "list the customers who…", "give me their names/emails"):
+1) Answer the aggregate version (counts, spend, splits — customer UID and demographics are fine to group by).
+2) Then call createSegment for that exact cohort and tell them: the full list — names, emails, everything — lives in that segment in Pulse (Audience → Segments), under the platform's normal access controls, ready to export or message via Engage.
+An individual LOOKUP is different and allowed: "did jane@x.com buy a ticket" → filter by the contact field and answer about that one person, without echoing other people's details.
 
 FOLLOW-UPS: At the very END of your reply, on its own final line, output the marker <<<FOLLOWUPS>>> immediately followed by a JSON array of 2-3 SHORT (≤6 words) follow-up questions the user is likely to ask next, specific to what you just answered (e.g. ["Compare to last year","Break down by city","Add-ons only"]). The app turns these into tappable chips and hides this line — never mention it, and always put it last.
 
@@ -127,12 +149,19 @@ const OWL_OPERATOR_LAYER = `ACT — OPERATOR MODE: on top of the deep analysis a
 
 // Each persona is a bundle: reasoning effort + output budget + how many tool rounds it
 // may run + the prompt layer appended to the instructions.
+// Quick lookups run on a FAST model (Sonnet) — Opus per round makes a simple
+// "what's X" answer take many seconds each turn. The deep modes stay on Opus
+// (null → owlTurn falls back to insights.MODEL) where the reasoning is worth it.
+const QUICK_MODEL = 'claude-sonnet-4-6';
+// turnTimeoutMs / toolTimeoutMs are per-phase HARD budgets (raced in runOwlLoop) so
+// no persona can hang: Quick answers snappily or says so; the deep modes get room
+// for long Opus turns + heavy Looker queries but still always come back.
 const PERSONAS = {
-  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '' },
+  quick: { effort: 'low', maxTokens: 1500, maxRounds: 5, layer: '', model: QUICK_MODEL, turnTimeoutMs: 60000, toolTimeoutMs: 75000 },
   // Analyst/Operator run a multi-cut sweep, so they need a bigger round budget (each
   // round can batch several askData calls) and room for a structured, sectioned answer.
-  analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER },
-  operator: { effort: 'high', maxTokens: 4096, maxRounds: 16, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}` },
+  analyst: { effort: 'high', maxTokens: 4096, maxRounds: 14, layer: OWL_ANALYST_LAYER, turnTimeoutMs: 240000, toolTimeoutMs: 120000 },
+  operator: { effort: 'high', maxTokens: 4096, maxRounds: 16, layer: `${OWL_ANALYST_LAYER}\n\n${OWL_OPERATOR_LAYER}`, turnTimeoutMs: 240000, toolTimeoutMs: 120000 },
 };
 const personaKey = (m) => (PERSONAS[m] ? m : 'quick');
 const personaOf = (m) => PERSONAS[personaKey(m)];
@@ -141,17 +170,19 @@ const personaOf = (m) => PERSONAS[personaKey(m)];
 // instruction layering). Returns the final Message; its content blocks may include
 // tool_use the loop must run. Kept here so insights.js stays a prompt/AI library
 // and this disposable module owns its own conversational turn.
-async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500 }) {
+async function owlTurn(insights, { messages, tools, instructions, apiKey, onText, effort = 'low', maxTokens = 1500, model, signal }) {
   const c = insights.requireClient(apiKey);
+  // `signal` lets the loop CUT an in-flight stream (⏹ Stop / turn budget) — without
+  // it, an aborted turn kept generating server-side ("stop doesn't actually stop").
   const stream = c.messages.stream({
-    model: insights.MODEL,
+    model: model || insights.MODEL,
     max_tokens: maxTokens,
     thinking: { type: 'adaptive' },
     output_config: { effort },
     system: insights.systemWith(OWL_CHAT_SYSTEM, instructions),
     tools: tools || [],
     messages: messages || [],
-  });
+  }, signal ? { signal } : undefined);
   stream.on('text', (delta) => { if (onText) onText(delta); });
   return stream.finalMessage();
 }
@@ -163,33 +194,87 @@ async function owlTurn(insights, { messages, tools, instructions, apiKey, onText
 // `shouldStop` (optional) is polled between rounds/tools — when it returns true (the
 // user tapped Stop, or the socket closed) the loop bails with what it has instead of
 // burning more model/Looker time on an answer nobody is waiting for.
-async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5, shouldStop }) {
+// Every phase is HARD-BOUNDED so a query always gets a response: the model turn is
+// raced against `turnTimeoutMs` and a stop-poll (⏹ Stop cuts INTO an in-flight turn,
+// not just between phases), each tool call is raced against `toolTimeoutMs` and the
+// same stop-poll, a round's tool calls run in PARALLEL (they were sequential), a
+// tool that throws becomes an ok:false result instead of killing the turn, and an
+// identical call that already failed this turn short-circuits (no retry storms).
+// Returns { text, trail, rounds, stopped?, timedOut?, truncated? } — timedOut/
+// truncated with empty text mean the door should add its friendly fallback line.
+async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onStatus, maxRounds = 5, shouldStop, turnTimeoutMs = 120000, toolTimeoutMs = 90000 }) {
   const convo = [...messages];
   const trail = [];
   let rounds = 0;
   const stopped = () => { try { return !!(shouldStop && shouldStop()); } catch { return false; } };
+  const failed = new Map(); // `${name}:${inputJson}` of failed calls → result
   for (; rounds < maxRounds; rounds++) {
     if (stopped()) return { text: '', trail, rounds, stopped: true };
     // Tell the user we're working before each model turn (the silent pre-text gap).
     if (onStatus) onStatus(rounds === 0 ? 'Thinking…' : 'Working through it…');
-    const final = await llmTurn({ messages: convo, tools, onText });
+    // ── Model turn, raced against the budget + stop. The losing stream is aborted
+    // via `signal` and late tokens are suppressed so they never reach the user.
+    const _mt0 = Date.now();
+    const ac = new AbortController();
+    let cut = null; let gateTimer = null; let gatePoll = null;
+    const gate = new Promise((resolve) => {
+      gateTimer = setTimeout(() => { cut = 'timeout'; resolve({ __cut: 'timeout' }); }, turnTimeoutMs);
+      gatePoll = setInterval(() => { if (stopped()) { cut = 'stopped'; resolve({ __cut: 'stopped' }); } }, 300);
+    });
+    const attempt = Promise.resolve()
+      .then(() => llmTurn({ messages: convo, tools, onText: (t) => { if (!cut && onText) onText(t); }, signal: ac.signal }))
+      .catch((e) => ({ __err: e }));
+    const winner = await Promise.race([attempt, gate]);
+    clearTimeout(gateTimer); clearInterval(gatePoll);
+    if (winner && winner.__cut) {
+      try { ac.abort(); } catch { /* stream already finished */ }
+      if (winner.__cut === 'stopped') return { text: '', trail, rounds, stopped: true };
+      console.warn(`[owl-trace] round ${rounds}: model turn CUT after ${Date.now() - _mt0}ms (budget ${turnTimeoutMs}ms)`);
+      return { text: '', trail, rounds, timedOut: true };
+    }
+    if (winner && winner.__err) throw winner.__err;
+    const final = winner;
+    const _modelMs = Date.now() - _mt0;
     const blocks = final.content || [];
     convo.push({ role: 'assistant', content: blocks });
     const toolUses = blocks.filter((b) => b.type === 'tool_use');
     if (!toolUses.length) {
+      console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → final answer (no tool)`);
       return { text: textOf(blocks), trail, rounds: rounds + 1 };
     }
-    // About to run tool(s) — say which kind of thing we're fetching.
+    console.log(`[owl-trace] round ${rounds}: model ${_modelMs}ms → calling ${toolUses.map((t) => t.name).join(', ')}`);
+    // About to run tool(s) — say which kind of thing we're fetching. Tools can
+    // also narrate their own phases mid-run via ctx.status ("Sizing the audience…").
     if (onStatus) onStatus(statusForTools(toolUses));
-    const results = [];
-    for (const tu of toolUses) {
-      if (stopped()) return { text: '', trail, rounds, stopped: true };
+    const toolCtx = { ...ctx, status: (m) => { try { if (onStatus && m) onStatus(String(m).slice(0, 90)); } catch { /* stream gone */ } } };
+    const runOne = async (tu) => {
+      const key = `${tu.name}:${JSON.stringify(tu.input || {})}`;
+      const prior = failed.get(key);
+      if (prior) return { ...prior, message: `${prior.message || 'Failed.'} You already made this exact call this turn and it failed — do NOT repeat it; change the query or answer with what you have.` };
       const tool = toolMap[tu.name];
-      const result = tool ? await tool.run(tu.input || {}, ctx) : { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
-      trail.push({ name: tu.name, input: tu.input || {}, result });
-      // Feed the model a compact result. Pass through whatever the tool returned
-      // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
-      // silently dropped; just strip the bulky queryBody and cap any rows array.
+      if (!tool) return { ok: false, reason: 'unknown_tool', message: `No such tool: ${tu.name}` };
+      const _tt0 = Date.now();
+      const result = await new Promise((resolve) => {
+        let done = false; let tt = null; let sp = null;
+        const finish = (r) => { if (!done) { done = true; clearTimeout(tt); clearInterval(sp); resolve(r); } };
+        tt = setTimeout(() => finish({ ok: false, reason: 'tool_timeout', message: `${tu.name} took longer than ${Math.round(toolTimeoutMs / 1000)}s and was cut off — that cut is too heavy to compute live. Do NOT retry the identical call: narrow it (a filter, top-N, a shorter range) or answer with what you already have and say this cut timed out.` }), toolTimeoutMs);
+        sp = setInterval(() => { if (stopped()) finish({ ok: false, reason: 'stopped', message: 'The user stopped this turn.' }); }, 300);
+        Promise.resolve().then(() => tool.run(tu.input || {}, toolCtx)).then(
+          (r) => finish(r && typeof r === 'object' ? r : { ok: false, reason: 'tool_error', message: `${tu.name} returned nothing.` }),
+          (e) => finish({ ok: false, reason: 'tool_error', message: `${tu.name} failed internally: ${String((e && e.message) || e).slice(0, 160)}` }),
+        );
+      });
+      console.log(`[owl-trace]   ${tu.name} ${Date.now() - _tt0}ms ok=${!!result.ok}${result.ok ? ` rows=${Array.isArray(result.rows) ? result.rows.length : '-'}` : ` reason=${result.reason}`} input=${JSON.stringify(tu.input || {}).slice(0, 400)}`);
+      if (!result.ok && result.reason !== 'stopped') failed.set(key, result);
+      return result;
+    };
+    const outs = await Promise.all(toolUses.map((tu) => runOne(tu).then((result) => ({ tu, result }))));
+    for (const { tu, result } of outs) trail.push({ name: tu.name, input: tu.input || {}, result });
+    if (stopped()) return { text: '', trail, rounds, stopped: true };
+    // Feed the model compact results. Pass through whatever each tool returned
+    // (askData → rows/count, getGoals → goals/note, …) so no tool's payload is
+    // silently dropped; just strip the bulky queryBody and cap any rows array.
+    const results = outs.map(({ tu, result }) => {
       let forModel;
       if (result.ok) {
         const { queryBody, ...rest } = result; // eslint-disable-line no-unused-vars
@@ -198,12 +283,12 @@ async function runOwlLoop({ llmTurn, toolMap, tools, messages, ctx, onText, onSt
       } else {
         forModel = { ok: false, reason: result.reason, message: result.message };
       }
-      results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(forModel) });
-    }
+      return { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(forModel) };
+    });
     convo.push({ role: 'user', content: results });
   }
-  // Hit the round cap without a final text answer.
-  return { text: textOf((messages[messages.length - 1] || {}).content || []) || '', trail, rounds, truncated: true };
+  // Hit the round cap without a final text answer — the doors add the friendly line.
+  return { text: '', trail, rounds, truncated: true };
 }
 
 function textOf(blocks) {
@@ -240,7 +325,7 @@ function owlAllowed(user) {
   return false;
 }
 
-function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor }) {
+function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, getExploreFields, messaging, getAlertsApi, getSegmentsApi, getActionsApi, getTicketsApi, getChottuApi, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getStaffInbound = null }) {
   const sql = db.db;
   _accessDb = db; // let owlAllowed() read the owner-managed in-app allowlist
   sql.exec(`
@@ -284,9 +369,13 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   // tools carry an exploreKey and are dropped when that explore is switched OFF for the
   // client in context (per-client access, checked live so a flip applies immediately).
   const owlCatalogue = require('./owlCatalogue');
+  const flags = require('./flags');
   const currentTools = (entityId) => {
     const entries = [...Object.values(getOwlTools()).filter((t) => t && t.schema && t.run), owlMemory.tool]
-      .filter((t) => !t.exploreKey || owlCatalogue.exploreEnabledFor(db, t.exploreKey, entityId));
+      .filter((t) => !t.exploreKey || owlCatalogue.exploreEnabledFor(db, t.exploreKey, entityId))
+      // 🚩 Act-tools honour the client's feature flags: a switched-off action is
+      // simply NOT offered to the model, so it can't be prompted into it.
+      .filter((t) => { const fk = flags.OWL_TOOL_FLAGS[t.schema.name]; return !fk || !entityId || flags.enabled(entityId, fk); });
     return { toolMap: Object.fromEntries(entries.map((t) => [t.schema.name, t])), toolSchemas: entries.map((t) => t.schema) };
   };
 
@@ -410,6 +499,19 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     const qs = fmeta.filter((f) => (f.questions || []).length).map((f) => `${f.label} → ${f.questions.join(' / ')}`);
     if (qs.length) parts.push(`Typical questions by field: ${qs.join(' | ')}.`);
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // Route domain questions (cashless bar/vendor sales, check-ins, spend…) to the
+    // registered EXTRA-EXPLORE tools. Without this the model treats them as "read a
+    // dashboard" and answers off a tile — a dashboard source that can't chart or pin.
+    // Each ask_* breakdown auto-charts and is pinnable exactly like askData, so the
+    // model must run the tool for the breakdown, not reduce it to a plain text table.
+    try {
+      const exNorm = (v) => `ask_${String(v).replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 48)}`;
+      const extras = ((getOwlTools().catalogue || {}).extras || [])
+        .filter((x) => owlCatalogue.exploreEnabledFor(db, `${x.model}::${x.explore}`, scopeEntityId));
+      if (extras.length) {
+        parts.push(`EXTRA DATA EXPLORES (beyond ticketing) available for this client — for any raw figure or breakdown in that domain, use the named tool; it is the ONLY way to get real numbers from that dataset, so do NOT answer from a dashboard tile: ${extras.map((x) => `"${x.label}" → ${exNorm(x.explore)}`).join('; ')}. Their breakdowns AUTO-CHART and are pinnable exactly like askData — always run the tool for the breakdown (then add a one-line takeaway); never reduce it to a text-only table.`);
+      }
+    } catch { /* ignore */ }
     // Reporting currency: write money in the organiser's currency (blank for ZAR).
     try { const cn = currencyNote && currencyNote(scopeEntityId || undefined, suiteId || undefined); if (cn) parts.push(cn); } catch { /* ignore */ }
     // AI content language: write generated prose in the organiser's language (blank for English).
@@ -457,48 +559,84 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     res.setHeader('X-Owl-Persona', pKey);
     res.flushHeaders?.();
     const { toolMap, toolSchemas } = currentTools(scopeEntityId);
-    // The user tapping ⏹ Stop aborts the fetch → the socket closes → we bail between
-    // rounds/tools instead of finishing an answer nobody is waiting for.
-    // Listen on the RESPONSE socket, not the request: on modern Node, req 'close'
-    // fires as soon as the request body is consumed (milliseconds in, client still
-    // connected) — that read as "user left" and could silently abort multi-round
-    // (tool-using) answers. res 'close' with writableEnded false = truly gone.
+    // A closed socket NO LONGER kills the turn — navigating away / backgrounding
+    // the app (mobile) drops the stream, and bailing there lost the answer ("it
+    // says loading failed"). We keep working, PERSIST the answer to the thread,
+    // and the client recovers it by re-reading the thread. Only an explicit
+    // ⏹ Stop (POST /api/owl/stop, sent before the client aborts) ends the loop.
+    // clientGone still gates stream writes so we never write to a dead socket.
+    // (res 'close' with writableEnded false = truly gone; req 'close' fires way
+    // too early on modern Node.)
+    const turnStart = Date.now();
     let clientGone = false;
     res.on('close', () => { if (!res.writableEnded) clientGone = true; });
     // Heartbeat: a long Looker/model call can sit silent for minutes (Looker's own
     // timeout is 2 min), which reads as "stuck" and can trip idle-connection proxies.
     // Re-send the latest status every 10s so the stream stays alive + visibly working.
     let lastStatus = 'Thinking…';
-    const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
-    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
+    let phaseAt = Date.now(); // when the CURRENT phase (model turn / a tool) began
+    // After ~8s the heartbeat appends the elapsed seconds, so a long wait shows WHICH
+    // phase is slow ("Reading cashless data… · 52s" vs "Thinking… · 52s") — the fastest
+    // way to see if a stall is the model or a heavy Looker query, no log-diving needed.
+    const stamp = (label) => { const s = Math.round((Date.now() - phaseAt) / 1000); return s >= 8 ? `${label} · ${s}s` : label; };
+    const writeStatus = (label) => { lastStatus = String(label).replace(/[<>]/g, ''); phaseAt = Date.now(); try { res.write(STATUS_OPEN + lastStatus + STATUS_CLOSE); } catch { /* socket gone */ } };
+    const heartbeat = setInterval(() => { if (!clientGone && !res.writableEnded) { try { res.write(STATUS_OPEN + stamp(lastStatus) + STATUS_CLOSE); } catch { /* socket gone */ } } }, 10000);
     try {
-      const { text, trail, stopped } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
+      const { text, trail, stopped, timedOut, truncated } = await require('./aiUsage').run({ entityId: scopeEntityId, kind: 'owl_chat' }, () => runOwlLoop({
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model, signal }),
         toolMap,
         tools: toolSchemas,
         messages,
         ctx: { user: req.user, suiteId, entityId, dashboardId },
         maxRounds: persona.maxRounds,
-        shouldStop: () => clientGone,
-        onText: (t) => res.write(t),
+        shouldStop: () => (stopAsked.get(thread.id) || 0) >= turnStart,
+        turnTimeoutMs: Number(process.env.OWL_TURN_TIMEOUT_MS) || persona.turnTimeoutMs,
+        toolTimeoutMs: Number(process.env.OWL_TOOL_TIMEOUT_MS) || persona.toolTimeoutMs,
+        onText: (t) => { if (!clientGone) { try { res.write(t); } catch { /* socket gone */ } } },
         // Stream a status ping between turns; the client renders it as the thinking line.
         onStatus: writeStatus,
       }));
-      if (stopped) { logToolStop(thread.id, trail); res.end(); return; }
+      if (stopped) { logToolStop(thread.id, trail); try { res.end(); } catch { /* gone */ } return; }
       // Persist the answer WITHOUT the follow-ups marker (the client strips it live).
-      const cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      // ALWAYS — even to a dead socket — so a dropped stream can recover it.
+      let cleanText = String(text || '').split('<<<FOLLOWUPS>>>')[0].replace(/\s+$/, '');
+      // Every query gets a REAL response: when the loop came back empty (turn budget
+      // hit, or round cap without a final answer), stream + persist an honest line
+      // with a way forward instead of ending silently on "Thinking…".
+      if (!cleanText.trim()) {
+        cleanText = timedOut
+          ? '⏳ That was taking longer than it should, so I stopped this attempt rather than leave you hanging. A narrower version will usually fly — try a shorter date range, top values only, or one breakdown at a time.'
+          : truncated
+            ? 'I ran several queries but couldn\'t land a final answer within my working budget. Try narrowing the question (one breakdown at a time works best) — or ask again and I\'ll pick up from what I found.'
+            : 'I couldn\'t produce an answer for that one — try rephrasing or narrowing the question and I\'ll have another go.';
+        if (!clientGone) { try { res.write(`\n\n${cleanText}`); } catch { /* socket gone */ } }
+      }
       insMsg.run(crypto.randomUUID(), thread.id, 'owl', cleanText, JSON.stringify(trail), now());
-      // Citation chips: stream the sources as a trailing record the client splits off.
-      res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
-      // Proposed actions (e.g. a drafted alert) — the confirm card; live response only.
-      const actions = actionsFromTrail(trail);
-      if (actions.length) res.write(ACTIONS_MARK + JSON.stringify(actions));
-      res.end();
+      if (!clientGone) {
+        // Citation chips: stream the sources as a trailing record the client splits off.
+        try {
+          res.write(SOURCES_MARK + JSON.stringify(sourcesFromTrail(trail)));
+          // Proposed actions (e.g. a drafted alert) — the confirm card; live response only.
+          const actions = actionsFromTrail(trail);
+          if (actions.length) res.write(ACTIONS_MARK + JSON.stringify(actions));
+        } catch { /* socket died mid-trailer — the persisted answer covers it */ }
+      }
+      try { res.end(); } catch { /* gone */ }
     } catch (err) {
       console.error('[POST /api/owl/chat]', err.message);
       if (!res.headersSent) res.status(500).json({ error: 'The Owl hit a problem answering that.' });
-      else { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); }
-    } finally { clearInterval(heartbeat); }
+      else { try { res.write(`\n\n[error: the Owl hit a problem answering that.]`); res.end(); } catch { /* gone */ } }
+    } finally { clearInterval(heartbeat); stopAsked.delete(thread.id); }
+  });
+  // Explicit ⏹ Stop for the CURRENT turn of a thread. The client calls this just
+  // before aborting its fetch — a socket close alone no longer stops the loop
+  // (it can't tell "stopped" from "navigated away / phone locked").
+  const stopAsked = new Map(); // threadId -> ts of the stop request
+  app.post('/api/owl/stop', auth.requireAuth, (req, res) => {
+    const t = getThread.get(String((req.body || {}).threadId || ''));
+    if (!t || t.user_id !== req.user.id) return res.status(404).json({ error: 'Thread not found' });
+    stopAsked.set(t.id, Date.now());
+    res.json({ ok: true });
   });
   // A stopped turn still records what ran (audit) — with a marker so history shows it.
   function logToolStop(threadId, trail) {
@@ -532,6 +670,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
   // most-asked questions first (personalised quick pills), topped up with curated
   // defaults. Concrete prompts (tapping asks straight away), not tool names.
   const STARTER_DEFAULTS = [
+    { label: "What's new", icon: '✨', prompt: "What's new in Pulse?" }, // → productHelp (published release notes)
     { label: "Today's sales", icon: '📊', prompt: 'How are ticket sales going today?' },
     { label: 'Sales overview', icon: '📈', prompt: 'Give me a sales overview' },
     { label: 'Last 7 days', icon: '📅', prompt: 'How have sales gone over the last 7 days?' },
@@ -684,6 +823,42 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     res.status(201).json({ ok: true, segment: { id: r.segment.id, name: r.segment.name }, url: actionViewPath('createSegment') });
   });
 
+  // POST /api/owl/act/create-chottu-link — the user tapping "Create link" on the card
+  // the createLink tool produced. The tool only DRAFTS; this creates the real short
+  // link on ChottuLink. Permission re-checked here (campaigns.approve — the same gate
+  // as the Links UI), so the Owl can never mint a link the user couldn't make by hand.
+  app.post('/api/owl/act/create-chottu-link', auth.requireAuth, asyncHandler(async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, suiteId, draft } = req.body || {};
+    if (!entityId || !draft || typeof draft !== 'object') return res.status(400).json({ error: 'entityId and draft are required.' });
+    if (req.user.role !== 'admin' && (!(req.user.entityIds || []).includes(entityId) || !auth.hasPermission(req.user, entityId, 'campaigns.approve'))) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const chottuApi = typeof getChottuApi === 'function' ? getChottuApi() : null;
+    if (!chottuApi || !chottuApi.createLink) return res.status(503).json({ error: 'Links aren\'t available right now.' });
+    const link = await chottuApi.createLink(entityId, {
+      linkName: draft.linkName, destinationUrl: draft.destinationUrl, path: draft.path,
+      suiteId: suiteId || '', utm: draft.utm, social: draft.social,
+    }, req.user.email);
+    res.status(201).json({ ok: true, link: { shortUrl: link.shortUrl, linkName: link.linkName }, url: actionViewPath('createChottuLink') });
+  }));
+
+  // POST /api/owl/act/apply-chottu-template — the user confirming the link-set card
+  // the applyLinkTemplate tool produced. Sequential creation with per-item results
+  // (same engine as the Links UI); permission re-checked as above.
+  app.post('/api/owl/act/apply-chottu-template', auth.requireAuth, asyncHandler(async (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const { entityId, suiteId, templateId, base, items } = req.body || {};
+    if (!entityId || !suiteId || !templateId) return res.status(400).json({ error: 'entityId, suiteId and templateId are required.' });
+    if (req.user.role !== 'admin' && (!(req.user.entityIds || []).includes(entityId) || !auth.hasPermission(req.user, entityId, 'campaigns.approve'))) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
+    const chottuApi = typeof getChottuApi === 'function' ? getChottuApi() : null;
+    if (!chottuApi || !chottuApi.applyTemplate) return res.status(503).json({ error: 'Links aren\'t available right now.' });
+    const r = await chottuApi.applyTemplate(entityId, templateId, { suiteId, base, items }, req.user.email);
+    res.status(201).json({ ok: true, ...r, url: actionViewPath('applyChottuTemplate') });
+  }));
+
   // POST /api/owl/act/draft-campaign — the user tapping "Create draft campaign" on the
   // card the draftCampaign tool produced. Creates a DRAFT campaign only (status 'draft',
   // never sends); a human reviews, approves and sends it in Engage. Re-checks entity
@@ -728,6 +903,54 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     res.status(201).json({ ok: true, campaign: { id: r.action.id, title: r.action.title }, url: actionViewPath('draftCampaign') });
   });
 
+  // POST /api/owl/act/draft-journey — the user tapping "Create draft journey" on the
+  // chat's journey tree card. Mirrors draft-campaign: a NEW chat cohort is SAVED as a
+  // reusable segment first (so the audience exists visibly in Engage), then the
+  // journey's opening (pre-decision) sequence lands as a DRAFT sequence campaign a
+  // human finishes and approves. Permission is re-checked in createDraftCampaign.
+  app.post('/api/owl/act/draft-journey', auth.requireAuth, (req, res) => {
+    if (!owlAllowed(req.user)) return res.status(403).json({ error: 'The native Owl isn\'t enabled for your account yet.' });
+    const journeys = require('./journeys');
+    const { entityId, suiteId, audienceName, master } = req.body || {};
+    let { audience } = req.body || {};
+    let journey;
+    try { journey = journeys.validateJourney(req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+    if (!entityId) return res.status(400).json({ error: 'entityId is required.' });
+    // Branches that watch a saved segment ("if they're in Buyers") link to it by
+    // id now, while the segment list is at hand — the engine resolves it per tick.
+    try { const segApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null; if (segApi?.listSegments) journeys.linkBranchSegments(journey.nodes, segApi.listSegments(entityId)); } catch { /* unlinked branches simply never match */ }
+    const actionsApi = typeof getActionsApi === 'function' ? getActionsApi() : null;
+    if (!actionsApi || !actionsApi.createDraftCampaign) return res.status(503).json({ error: 'Campaigns aren\'t available right now.' });
+    let savedSegment = null; // set when a new chat cohort is persisted as a segment below
+    if (audience && audience.mode === 'query') {
+      const cat = getOwlTools().catalogue;
+      if (cat && (audience.model !== cat.model || audience.view !== cat.explore)) {
+        return res.status(400).json({ error: "I can only build an audience from your ticket data, not this dashboard's own data." });
+      }
+      const segmentsApi = typeof getSegmentsApi === 'function' ? getSegmentsApi() : null;
+      if (segmentsApi && segmentsApi.createSegment) {
+        const segName = String(audienceName || journey.name || 'Journey audience').slice(0, 120);
+        const sr = segmentsApi.createSegment({ entityId, name: segName, definition: audience, user: req.user, suiteId: suiteId || '', via: 'owl' });
+        if (sr.ok) { audience = { mode: 'segment', segmentId: sr.segment.id }; savedSegment = { id: sr.segment.id, name: sr.segment.name }; } // reference the saved segment
+      }
+    }
+    const steps = journeys.openingSteps(journey.nodes).map((s) => ({ delayHours: s.delayHours, subject: s.subject, body: s.body, ctaText: s.ctaText }));
+    const chans = [...new Set(journeys.openingSteps(journey.nodes).map((s) => s.channel))];
+    const config = {
+      channel: chans.length > 1 ? 'both' : (chans[0] || 'email'),
+      audience: audience || {}, campaignMode: 'sequence', dripStart: 'send', steps,
+      subject: steps[0]?.subject || journey.name, body: steps[0]?.body || '', ctaText: steps[0]?.ctaText || '',
+      goal: journey.goal, eventSuiteId: String(suiteId || ''),
+      master: String(master || '').slice(0, 80), // optional master-campaign group (user's call)
+      // Persist the FULL branching tree — the Journeys page lists drafts by it,
+      // and the branch-execution engine will run it. Steps above are the opening.
+      journey: { name: journey.name, goal: journey.goal, summary: journey.summary, nodes: journey.nodes },
+    };
+    const r = actionsApi.createDraftCampaign({ entityId, title: journey.name, config, user: req.user, via: 'owl' });
+    if (!r.ok) return res.status(r.error === 'Not allowed' ? 403 : 400).json({ error: r.error || 'Could not create the journey.' });
+    res.status(201).json({ ok: true, journey: { id: r.action.id, title: r.action.title }, segment: savedSegment, url: actionViewPath('draftJourney') });
+  });
+
   // Pin-to-dashboard lives in its own disposable module; mount it here so index.js
   // stays at budget. Shares the Owl allowlist gate.
   require('./owlPin').mount(app, { db, auth });
@@ -752,7 +975,7 @@ function mount(app, { db, auth, insights, getOwlTools, uploads, getDriveApi, get
     if (!item) return res.status(400).json({ error: 'Could not save that.' });
     res.status(201).json({ ok: true, item });
   });
-  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }); // WhatsApp door onto the Owl (Clickatell)
+  require('./owlWhatsapp').mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound }); // WhatsApp door onto the Owl (Clickatell)
   console.log('[owlChat] agentic Owl chat module mounted');
 }
 

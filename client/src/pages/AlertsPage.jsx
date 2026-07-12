@@ -3,8 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import { useProfile } from '../lib/profile.jsx';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import AlertEditor from '../components/AlertEditor.jsx';
+import LivePulsePanel from '../components/LivePulsePanel.jsx';
 
 // The Alerts surface (insight → action). Grouped by event, like Goals: each event
 // lists its metric watchers, with a one-tap "New alert". An alert is a saved rule
@@ -20,7 +21,7 @@ export default function AlertsPage() {
   const [suitesLoading, setSuitesLoading] = useState(true);
   const [params, setParams] = useSearchParams();
   const handled = useRef(false);
-  const [tab, setTab] = useState('alerts');         // 'alerts' | 'templates'
+  const [tab, setTab] = useState(params.get('tab') === 'live' ? 'live' : 'alerts'); // 'alerts' | 'live' | 'templates' (?tab=live deep-links from the Owl)
   const [templates, setTemplates] = useState(null);  // reusable templates (this client + global)
 
   useEffect(() => { api.mySuites().then(setSuites).catch(() => {}).finally(() => setSuitesLoading(false)); }, []);
@@ -69,13 +70,7 @@ export default function AlertsPage() {
 
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '4px 2px 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 12px' }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Action</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Alerts</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Action" title="Alerts" />
       <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 18px', lineHeight: 1.5 }}>
         Get a tap on the shoulder the moment a number matters — a sell-out, a revenue milestone, stock running low.
         Pulse watches the metric for you (checked every few minutes) and tells you on your phone, by email or SMS.
@@ -84,8 +79,12 @@ export default function AlertsPage() {
       {/* Tabs: live alerts vs the reusable templates available to this client. */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid var(--hairline)' }}>
         <TabBtn active={tab === 'alerts'} onClick={() => setTab('alerts')}>Alerts</TabBtn>
+        <TabBtn active={tab === 'live'} onClick={() => setTab('live')}>⚡ Live updates</TabBtn>
         <TabBtn active={tab === 'templates'} onClick={() => setTab('templates')}>Templates{templates && templates.length ? ` (${templates.length})` : ''}</TabBtn>
       </div>
+
+      {/* Live updates — recurring event-day multi-metric snapshots (Live Pulse). */}
+      {tab === 'live' && <LivePulsePanel suites={visibleSuites} />}
 
       {tab === 'templates' && (
         <TemplatesView templates={templates} canUse={rows.some((r) => r.canManage) || visibleSuites.length > 0} onUse={useTemplate} onDelete={deleteTpl} />

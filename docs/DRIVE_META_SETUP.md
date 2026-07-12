@@ -8,6 +8,51 @@
 
 ---
 
+## 0. The EASY paths — one-click connect (shipped 2026-07-02, later the same day)
+
+Once Howler does a **one-time platform app registration** per platform (0a/0b),
+clients never see keys or tokens again — the cards in Settings → Integrations
+show **"Connect with Google"** and **"Continue with Facebook"** buttons. The
+manual paths in §1–2 below still work and remain the fallback.
+
+### 0a. One-time platform setup — Google (≈10 min, no verification ordeal)
+1. In the Google Cloud project (https://console.cloud.google.com):
+   - Enable **Google Drive API** and **Google Picker API**
+     (https://console.cloud.google.com/apis/library).
+   - **OAuth consent screen** (https://console.cloud.google.com/apis/credentials/consent):
+     External → fill the basics → **Publish**. We only use the `drive.file`
+     scope, which is **non-sensitive** — no Google review/assessment needed.
+   - **Credentials** (https://console.cloud.google.com/apis/credentials):
+     Create **OAuth client ID** → Web application → Authorized redirect URI
+     `https://howler-pulse-v2.onrender.com/api/drive/oauth/callback`.
+     Also create an **API key** (restrict it to the Picker API).
+2. In Render (https://dashboard.render.com) set:
+   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_API_KEY`.
+   (Settings `google_oauth_client_id` / `google_oauth_client_secret` /
+   `google_api_key` work too.)
+3. Client experience: Settings → Integrations → Google Drive →
+   **Connect with Google** → sign in → **Pick files or folders** (a native
+   Google picker). The app can only EVER see what they pick — better privacy
+   than the share-with-email path, and zero setup for the client.
+
+### 0b. One-time platform setup — Meta (≈10 min + the verification long pole)
+1. https://developers.facebook.com/apps → create/select the Business app →
+   add the **Facebook Login** product → Settings → **Valid OAuth Redirect
+   URIs**: `https://howler-pulse-v2.onrender.com/api/meta/oauth/callback`.
+2. In Render set `META_APP_ID` + `META_APP_SECRET` (or settings
+   `meta_app_id` / `meta_app_secret`).
+3. Client experience: Settings → Integrations → **Continue with Facebook** →
+   approve → if they manage several ad accounts, pick the right one in the
+   card → done. Works for audience-sync AND paid-ads reporting (same fields).
+4. **Interim caveat:** without **Advanced Access** (Meta Business
+   Verification + App Review — start it at the app's App Review tab), tokens
+   last ~60 days (the card shows the renewal date and flags reconnect at ≤7
+   days) and Standard Access limits who can connect (users with a role on the
+   app/business). Kick off verification once; after approval the same button
+   mints durable tokens for any client, no code change.
+
+---
+
 ## 1. Google Drive — setup (~5 minutes)
 
 ### 1a. Create the service account (once)
@@ -63,7 +108,13 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
   https://business.facebook.com
 - One Meta **app** of type Business linked to that business:
   https://developers.facebook.com/apps (no app review needed — you only
-  access your own assets).
+  access your own assets). **This is the #1 blocker for new businesses** —
+  without an app in the portfolio, Meta greys out **Generate token** with
+  *"an app must be part of this business portfolio. Please add an app."*
+  To fix: https://developers.facebook.com/apps → **Create app** → type
+  **Business** → name it (e.g. "Pulse") → link it to the business portfolio
+  when prompted. If the app already exists but isn't linked: Business
+  settings → **Accounts → Apps** → Add → Connect an app ID.
 
 ### 2b. Create the system user + token
 1. Business settings: https://business.facebook.com/settings → Users →
@@ -83,6 +134,7 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
 ### 2c. Common blockers (in order of likelihood)
 | Symptom | Cause → fix |
 |---|---|
+| **Generate token** greyed out — "an app must be part of this business portfolio" | No Business app linked to the portfolio → create/link one (2a) |
 | Worked, then 401/"session expired" after a few hours | Graph Explorer token → use the system-user token (2b) |
 | "Unsupported get request" / permission error | Ad account not assigned to the system user (2b step 2) |
 | Insights sync fails | Missing `ads_read` on the token |
