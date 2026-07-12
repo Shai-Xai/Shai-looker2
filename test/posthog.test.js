@@ -472,14 +472,16 @@ test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; ste
   const h = makeHarness({
     suites: [{ id: 's1', entityId: 'e1' }],
     locks: { s1: { 'core_events.id': '101' } },
-    responder: (q) => { queries.push(q); return HOGQL(['u0', 'n0', 'u1', 'n1', 'u2', 'n2', 'u3', 'n3'], [[900, 4000, 220, 600, 180, 210, 65, 70]]); },
+    responder: (q) => { queries.push(q); return HOGQL(['u0', 'n0', 'u1', 'n1', 'u2', 'n2', 'u3', 'n3', 'revenue'], [[900, 4000, 220, 600, 180, 210, 65, 70, 12400.5]]); },
   });
   const out = await h.invoke('GET /api/my/app-analytics/:entityId/funnel', { params: { entityId: 'e1' } });
   assert.equal(out.status, 200);
   assert.deepEqual(out.body.steps.map((s) => s.label), ['Tickets viewed', 'Checkout', 'Payment tapped', 'Order confirmed']);
   assert.deepEqual(out.body.steps.map((s) => s.people), [900, 220, 180, 65]);
   assert.equal(out.body.steps[0].events, 4000);
+  assert.equal(out.body.revenue, 12400.5, 'in-app revenue rides the same query');
   assert.equal(queries.length, 1, 'all stages ride ONE HogQL query');
+  assert.ok(queries[0].includes("sum(toFloat(properties['order_amount_cents'])) / 100 AS revenue"), 'revenue sums the mapped value prop, cents converted');
   const q = queries[0];
   assert.ok(q.includes("uniqIf(person_id, (event = 'interaction' AND toString(properties['surface']) = 'ticket_categories'))"), 'stage condition compiles from the mapping grammar');
   assert.ok(q.includes("toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success'"), 'the & chain reaches the query');

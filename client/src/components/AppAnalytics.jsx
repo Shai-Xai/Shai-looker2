@@ -793,6 +793,7 @@ function EventsTable({ rows, title: heading, days }) {
     ['interactions', 'Interactions', true],
     ['ctaTaps', 'CTA taps', rows.some((r) => r.ctaTaps > 0)],
     ['purchases', 'Purchases', rows.some((r) => r.purchases > 0)],
+    ['purchaseValue', 'In-app revenue', rows.some((r) => r.purchaseValue > 0)],
   ].filter(([, , show]) => show);
   return (
     <div style={{ ...card, marginTop: 12, overflowX: 'auto' }}>
@@ -805,7 +806,7 @@ function EventsTable({ rows, title: heading, days }) {
             <tr key={r.eventRef}>
               <td style={{ ...td, fontWeight: 600 }}>{r.eventName || `Event ${r.eventRef}`}<span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.eventRef}</span></td>
               {cols.map(([k]) => (
-                <td key={k} style={td}>{fmt(r[k])}{k === 'purchases' && r.purchaseValue > 0 && <span style={{ color: 'var(--muted)' }}> · {fmtR(r.purchaseValue)}</span>}</td>
+                <td key={k} style={td}>{k === 'purchaseValue' ? (r.purchaseValue > 0 ? fmtR(r.purchaseValue) : '—') : fmt(r[k])}</td>
               ))}
             </tr>
           ))}
@@ -948,6 +949,7 @@ function FunnelCard({ loader, admin = false }) {
                   <span style={{ fontSize: 12.5, fontWeight: 700 }}>{s.label}</span>
                   <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmt(s.people)}</span>
                   {conv != null && <span style={{ fontSize: 11.5, color: conv < 5 ? 'var(--danger, #dc2626)' : 'var(--muted)' }}>{pct(conv)}% of previous</span>}
+                  {i === steps.length - 1 && out.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--success, #10b981)' }}>{fmtR(out.revenue)} in-app revenue</span>}
                 </div>
                 <div style={{ height: 14, borderRadius: 7, background: 'rgba(128,128,128,0.12)', overflow: 'hidden' }}>
                   <div style={{ height: '100%', borderRadius: 7, background: 'var(--brand)', opacity: 0.85, width: `${Math.max(1, (s.people / top) * 100)}%` }} />

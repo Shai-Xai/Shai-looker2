@@ -792,15 +792,20 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // honest, cheap, and robust to the app's optional paths.
   async function funnel({ ids = null, days, from, to } = {}) {
     const w = win({ days, from, to });
-    const steps = metricMap().funnelSteps;
-    if (!steps.length) return { days: w.days, from: w.from, to: w.to, steps: [] };
+    const m = metricMap();
+    const steps = m.funnelSteps;
+    if (!steps.length) return { days: w.days, from: w.from, to: w.to, steps: [], revenue: 0 };
     const c = conn();
     const scope = ids ? ` AND toString(${prop(c.eventIdProp)}) IN (${hqlList(ids)})` : '';
     const sel = steps.map((s, i) => `uniqIf(person_id, ${mapCond(s.events)}) AS u${i}, countIf(${mapCond(s.events)}) AS n${i}`).join(', ');
-    const [row] = await hogql(`SELECT ${sel} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
+    // in-app revenue over the same window/scope rides the same query — shown
+    // on the funnel's final (order) stage
+    const val = m.purchaseValueProp ? `, sum(toFloat(${prop(m.purchaseValueProp)}))${m.purchaseValueCents ? ' / 100' : ''} AS revenue` : '';
+    const [row] = await hogql(`SELECT ${sel}${val} FROM events WHERE ${tsWin(w)}${scope}`, { ttl: LIVE_TTL });
     return {
       days: w.days, from: w.from, to: w.to,
       steps: steps.map((s, i) => ({ label: s.label, people: Number(row?.[`u${i}`]) || 0, events: Number(row?.[`n${i}`]) || 0 })),
+      revenue: Number(row?.revenue) || 0,
     };
   }
 
