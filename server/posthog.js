@@ -1216,7 +1216,14 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
         return rows.map((r) => ({ key: String(r.key), count: Number(r.n) || 0 }));
       } catch { return null; }
     };
+    // 💰 revenue probe — run the order-level revenue query verbatim (whole
+    // app, 90 days) and report the result OR the raw error, so "revenue tile
+    // missing" is diagnosable in one tap instead of guesswork.
+    let revenueProbe;
+    try { revenueProbe = { ...(await orderRevenue({ days: 90 })), error: '' }; }
+    catch (e) { revenueProbe = { orders: 0, revenue: 0, error: String(e.message || e).slice(0, 300) }; }
     res.json({
+      revenueProbe,
       eventIdProp: c.eventIdProp,
       taggedEvents7d: Number(tagged?.n) || 0,
       distinctIds7d: Number(tagged?.ids) || 0,
