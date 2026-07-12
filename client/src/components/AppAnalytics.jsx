@@ -18,6 +18,8 @@ import AiMark from './AiMark.jsx';
 //                         used by the client's App page and the admin lens
 // Uninstall with server/posthog.js — see that file's header.
 
+import { prettyDevice, DEVICE_KEYS } from '../lib/deviceNames.js';
+
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
 // Rand amounts (in-app revenue tracked by PostHog) — compact above 100k.
 const fmtR = (v) => (v == null ? '—' : `R${Intl.NumberFormat('en-ZA', { notation: v >= 100000 ? 'compact' : 'standard', maximumFractionDigits: v >= 100000 ? 1 : 0 }).format(v)}`);
@@ -845,6 +847,8 @@ function BreakdownsCard({ keys, loader, seriesLoader }) {
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps -- loaders are stable per mount (card is keyed by scope)
   if (!keys.length) return null;
   const max = Math.max(1, ...(out?.values || []).map((v) => v.count));
+  // device identifiers render as marketing names ("pa3q" → Galaxy S25 Ultra)
+  const pretty = DEVICE_KEYS.has(key) ? prettyDevice : (x) => x;
   return (
     <div style={{ ...card, marginTop: 12 }}>
       <div style={title}>🧩 What's driving it</div>
@@ -853,7 +857,7 @@ function BreakdownsCard({ keys, loader, seriesLoader }) {
         {keys.map((k) => <Chip key={k} on={key === k} onClick={() => setKey(k)}>{k}</Chip>)}
       </div>
       {error && <div style={errBox}>{error}</div>}
-      {seriesOut && seriesOut.series?.length > 0 && <BreakdownSeriesChart data={seriesOut} />}
+      {seriesOut && seriesOut.series?.length > 0 && <BreakdownSeriesChart data={seriesOut} labelFn={pretty} />}
       {busy && <p style={mutedTxt}>Loading…</p>}
       {!busy && out && out.values.length === 0 && <p style={sub}>Nothing recorded for "{out.key}" in this window.</p>}
       {!busy && out && out.values.length > 0 && (
@@ -863,7 +867,7 @@ function BreakdownsCard({ keys, loader, seriesLoader }) {
             <tbody>
               {out.values.map((v) => (
                 <tr key={v.value}>
-                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'normal' }}>{v.value}</td>
+                  <td style={{ ...td, fontWeight: 600, whiteSpace: 'normal' }}>{pretty(v.value)}{pretty(v.value) !== v.value && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {v.value}</span>}</td>
                   <td style={{ ...td, width: '30%', minWidth: 90 }}><span style={{ display: 'inline-block', height: 8, borderRadius: 4, background: 'var(--brand)', opacity: 0.75, width: `${Math.max(3, Math.round((v.count / max) * 100))}%` }} /></td>
                   <td style={td}>{fmt(v.count)}</td>
                   <td style={td}>{fmt(v.uniques)}</td>
@@ -879,7 +883,7 @@ function BreakdownsCard({ keys, loader, seriesLoader }) {
 
 // One line per breakdown value over the window. ECharts' legend does the value
 // filtering natively; colors are the validated fixed order (SERIES_COLORS).
-function BreakdownSeriesChart({ data }) {
+function BreakdownSeriesChart({ data, labelFn = (x) => x }) {
   const isMobile = useIsMobile();
   const option = useMemo(() => {
     const days = [...new Set(data.series.map((r) => r.day))].sort();
@@ -893,13 +897,13 @@ function BreakdownSeriesChart({ data }) {
       xAxis: { type: 'category', data: days, axisLine: { lineStyle: { color: 'rgba(128,128,128,0.25)' } }, axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, hideOverlap: true, formatter: (d) => String(d).slice(5, 16) }, splitLine: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: 'var(--muted, #888)', fontSize: 10.5, formatter: (v) => fmt(v) }, splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } } },
       series: data.values.map((v, i) => ({
-        name: v, type: 'line', showSymbol: days.length < 3, smooth: 0.15,
+        name: labelFn(v), type: 'line', showSymbol: days.length < 3, smooth: 0.15,
         lineStyle: { width: 2, color: SERIES_COLORS[i % SERIES_COLORS.length] },
         itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
         data: days.map((d) => byValue.get(v)?.get(d) ?? 0),
       })),
     };
-  }, [data]);
+  }, [data, labelFn]);
   return (
     <div style={{ width: '100%', overflow: 'hidden', marginBottom: 12 }}>
       <ReactECharts echarts={echarts} option={option} notMerge style={{ height: isMobile ? 220 : 280, width: '100%' }} opts={{ renderer: 'canvas' }} />

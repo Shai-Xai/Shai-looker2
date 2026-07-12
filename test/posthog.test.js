@@ -569,13 +569,13 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   const m = JSON.parse(h.settings.posthog_metric_map);
   assert.deepEqual(m.screenEvents, ['interaction : interaction_type=content_view'], 'dead $screen mapping → confirmed views slice');
   assert.deepEqual(m.ctaEvents, ['interaction : interaction_type=cta_click'], 'bare mis-cased Interaction → confirmed CTA slice');
-  assert.deepEqual(m.breakdownProps, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type', '$device_name'], 'CTA_Label swapped for cta_label, surface-first order, OS/device/model-name appended (v3+v9)');
+  assert.deepEqual(m.breakdownProps, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type', '$device_model'], 'CTA_Label swapped for cta_label, surface-first order, OS/device/model appended (v3+v10)');
   assert.equal(m.ctaLabelProp, 'cta_label');
   assert.deepEqual(m.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'blank Purchases → confirmed order-confirmation slice (v2)');
   assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
   assert.equal(m.purchaseValueProp, 'order_amount_cents', 'blank value box → PostHog revenue tracker (v4)');
   assert.equal(m.purchaseValueCents, true);
-  assert.equal(h.settings.posthog_map_healed, '9');
+  assert.equal(h.settings.posthog_map_healed, '10');
   // A v1-healed install upgrades to v2 (purchases fill) WITHOUT re-running the
   // v1 rewrites — deliberate edits stay.
   const v1 = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
@@ -584,7 +584,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.deepEqual(m2.ctaEvents, ['my_custom_cta'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.screenEvents, ['$screen'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'v2 fills the blank Purchases box');
-  assert.equal(h2.settings.posthog_map_healed, '9');
+  assert.equal(h2.settings.posthog_map_healed, '10');
   // A customised chip set is never reordered by v3.
   const h2b = makeHarness({ presetSettings: { posthog_metric_map: JSON.stringify({ breakdownProps: ['interaction_type', 'my_prop'] }), posthog_map_healed: '2' } });
   assert.deepEqual(JSON.parse(h2b.settings.posthog_metric_map).breakdownProps, ['interaction_type', 'my_prop'], 'custom chips keep their order');
@@ -593,7 +593,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(JSON.parse(h2c.settings.posthog_metric_map).purchaseValueProp, 'my_amount', 'deliberate value props are never overwritten');
   // Fully healed → the migration is a no-op, deliberate purchase mappings kept.
   const done = JSON.stringify({ purchaseEvents: ['my_purchase'] });
-  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '9' } });
+  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '10' } });
   assert.equal(h3.settings.posthog_metric_map, done, 'healed flag makes the migration a no-op');
 });
 
@@ -618,7 +618,7 @@ test('purchase value: ONE amount per order_reference — grouped, zero-proof, ce
 test('reports carry the configured breakdown keys and live window uniques', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
-  assert.deepEqual(h.api.appReport(7).breakdowns, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type', '$device_name']);
+  assert.deepEqual(h.api.appReport(7).breakdowns, ['surface', 'cta_label', 'interaction_type', '$os_name', '$device_type', '$device_model']);
   const u = await h.api.windowUniques(['101'], 28);
   assert.equal(typeof u, 'number');
 });
