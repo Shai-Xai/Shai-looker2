@@ -1425,6 +1425,9 @@ function MappingEditor() {
             value is in cents (÷100 → rand)
           </span>
         </label>
+        <label style={lbl}>Order reference property (dedupes revenue to one amount per order)
+          <input style={input} value={m.orderRefProp || ''} onChange={(e) => setM({ ...m, orderRefProp: e.target.value })} placeholder="e.g. order_reference" autoComplete="off" />
+        </label>
         <label style={lbl}>CTA label property (the 🎯 "CTA clicks by label" chart)
           <input style={input} value={m.ctaLabelProp || ''} onChange={(e) => setM({ ...m, ctaLabelProp: e.target.value })} placeholder="e.g. cta_label" autoComplete="off" />
         </label>

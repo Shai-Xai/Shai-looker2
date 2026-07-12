@@ -119,6 +119,7 @@ function makeHarness({ responder, suites = [], locks = {}, dashboards = [], look
 const today = new Date().toISOString().slice(0, 10);
 function syncResponder(q) {
   if (q.includes('FROM persons')) return HOGQL(['day', 'new_users'], [[today, 41]]);
+  if (q.includes('AS orders')) return HOGQL(['day', 'event_ref', 'orders', 'total'], [[today, '101', 2, 339000]]);
   if (q.includes('GROUP BY day, event_ref')) {
     return HOGQL(['day', 'event_ref', 'event_name', 'uniques', 'interactions', 'views', 'cta_taps', 'purchases', 'purchase_value', 'notif_events'],
       [[today, '101', 'Milk & Cookies JHB', 500, 2000, 900, 120, 30, 4500, 75], [today, '202', 'Ultra SA', 300, 1100, 500, 60, 10, 1500, 25]]);
@@ -140,7 +141,7 @@ test('syncDaily writes both rollup tables, the headline uniques and last-sync', 
   assert.equal(app.new_users, 41, 'new-user counts merge into the same row');
   const ev = h.sqlite.prepare('SELECT * FROM posthog_daily_event WHERE event_ref=?').get('101');
   assert.equal(ev.uniques, 500);
-  assert.equal(ev.purchase_value, 4500);
+  assert.equal(ev.purchase_value, 3390, 'order-level revenue overwrites the per-event pass (cents → rand)');
   assert.equal(ev.notif_events, 75, 'notification counts land per event too');
   assert.ok(h.settings.posthog_last_sync, 'last sync recorded');
   assert.deepEqual(JSON.parse(h.settings.posthog_headline).wau, 2100);
@@ -501,16 +502,21 @@ test('checkout funnel: one query, per-stage uniques, scoped and fail-closed; ste
   const h = makeHarness({
     suites: [{ id: 's1', entityId: 'e1' }],
     locks: { s1: { 'core_events.id': '101' } },
-    responder: (q) => { queries.push(q); return HOGQL(['u0', 'n0', 'u1', 'n1', 'u2', 'n2', 'u3', 'n3', 'revenue'], [[900, 4000, 220, 600, 180, 210, 65, 70, 12400.5]]); },
+    responder: (q) => {
+      queries.push(q);
+      if (q.includes('AS orders')) return HOGQL(['orders', 'total'], [[8, 1240050]]);
+      return HOGQL(['u0', 'n0', 'u1', 'n1', 'u2', 'n2', 'u3', 'n3'], [[900, 4000, 220, 600, 180, 210, 65, 70]]);
+    },
   });
   const out = await h.invoke('GET /api/my/app-analytics/:entityId/funnel', { params: { entityId: 'e1' } });
   assert.equal(out.status, 200);
   assert.deepEqual(out.body.steps.map((s) => s.label), ['Tickets viewed', 'Checkout', 'Payment tapped', 'Order confirmed']);
   assert.deepEqual(out.body.steps.map((s) => s.people), [900, 220, 180, 65]);
   assert.equal(out.body.steps[0].events, 4000);
-  assert.equal(out.body.revenue, 12400.5, 'in-app revenue rides the same query');
-  assert.equal(queries.length, 1, 'all stages ride ONE HogQL query');
-  assert.ok(queries[0].includes("sumIf(toFloat(properties['order_amount_cents']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) / 100 AS revenue"), 'revenue counted once per order (the confirmation view), cents converted');
+  assert.equal(out.body.revenue, 12400.5, 'order-level revenue: 1240050 cents over 8 orders → R12400.50');
+  assert.equal(queries.length, 2, 'stages ride one query; order-level revenue rides one more');
+  const oq = queries.find((q) => q.includes('AS orders'));
+  assert.ok(oq.includes('GROUP BY r') && oq.includes("IN ('101')"), 'revenue deduped per order AND scoped to the client');
   const q = queries[0];
   assert.ok(q.includes("uniqIf(person_id, (event = 'interaction' AND toString(properties['surface']) = 'ticket_categories'))"), 'stage condition compiles from the mapping grammar');
   assert.ok(q.includes("toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success'"), 'the & chain reaches the query');
@@ -569,7 +575,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(m.personProps.email, 'custom_email', 'unrelated saved values survive');
   assert.equal(m.purchaseValueProp, 'order_amount_cents', 'blank value box → PostHog revenue tracker (v4)');
   assert.equal(m.purchaseValueCents, true);
-  assert.equal(h.settings.posthog_map_healed, '5');
+  assert.equal(h.settings.posthog_map_healed, '6');
   // A v1-healed install upgrades to v2 (purchases fill) WITHOUT re-running the
   // v1 rewrites — deliberate edits stay.
   const v1 = JSON.stringify({ ctaEvents: ['my_custom_cta'], screenEvents: ['$screen'] });
@@ -578,7 +584,7 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.deepEqual(m2.ctaEvents, ['my_custom_cta'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.screenEvents, ['$screen'], 'v1 rewrites do not re-run');
   assert.deepEqual(m2.purchaseEvents, ['interaction : interaction_type=content_view & surface=order_success'], 'v2 fills the blank Purchases box');
-  assert.equal(h2.settings.posthog_map_healed, '5');
+  assert.equal(h2.settings.posthog_map_healed, '6');
   // A customised chip set is never reordered by v3.
   const h2b = makeHarness({ presetSettings: { posthog_metric_map: JSON.stringify({ breakdownProps: ['interaction_type', 'my_prop'] }), posthog_map_healed: '2' } });
   assert.deepEqual(JSON.parse(h2b.settings.posthog_metric_map).breakdownProps, ['interaction_type', 'my_prop'], 'custom chips keep their order');
@@ -587,21 +593,26 @@ test('a legacy stored mapping heals itself on mount — once, keeping custom val
   assert.equal(JSON.parse(h2c.settings.posthog_metric_map).purchaseValueProp, 'my_amount', 'deliberate value props are never overwritten');
   // Fully healed → the migration is a no-op, deliberate purchase mappings kept.
   const done = JSON.stringify({ purchaseEvents: ['my_purchase'] });
-  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '5' } });
+  const h3 = makeHarness({ presetSettings: { posthog_metric_map: done, posthog_map_healed: '6' } });
   assert.equal(h3.settings.posthog_metric_map, done, 'healed flag makes the migration a no-op');
 });
 
-test('purchase value: cents-denominated PostHog revenue lands ÷100 in the rollup', async () => {
+test('purchase value: ONE amount per order_reference — grouped, zero-proof, cents ÷100', async () => {
   const h = makeHarness({ responder: syncResponder });
   await h.api.syncDaily(7);
-  const q1 = h.queries.find((q) => q.includes('GROUP BY day, event_ref'));
-  assert.ok(q1.includes("sumIf(toFloat(properties['order_amount_cents']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) / 100 AS purchase_value"), 'amount counted ONCE per order — only on the confirmation view, converted to rand');
-  // a rand-denominated custom prop skips the conversion
-  h.settings.posthog_metric_map = JSON.stringify({ purchaseValueProp: 'amount_rand', purchaseValueCents: false });
+  const oq = h.queries.find((q) => q.includes('AS orders'));
+  assert.ok(oq, 'the order-level revenue pass runs');
+  assert.ok(oq.includes("notEmpty(toString(properties['order_reference']))"), 'grouped by the mapped order reference');
+  assert.ok(oq.includes('GROUP BY r'), 'one amount per order, however many screens echo it');
+  assert.ok(oq.includes("toFloat(properties['order_amount_cents']) > 0"), 'zero amounts never count');
+  const ev = h.sqlite.prepare('SELECT purchase_value FROM posthog_daily_event WHERE event_ref=?').get('101');
+  assert.equal(ev.purchase_value, 3390, '339000 cents → R3390');
+  // clearing the order reference falls back to the slice-scoped sum
+  h.settings.posthog_metric_map = JSON.stringify({ orderRefProp: '', purchaseValueProp: 'amount_rand', purchaseValueCents: false });
   await h.api.syncDaily(7);
-  const q2 = h.queries.filter((q) => q.includes('GROUP BY day, event_ref')).pop();
-  assert.ok(q2.includes("sumIf(toFloat(properties['amount_rand']), (event = 'interaction' AND toString(properties['interaction_type']) = 'content_view' AND toString(properties['surface']) = 'order_success')) AS purchase_value"));
-  assert.ok(!q2.includes('/ 100'));
+  const q2 = h.queries.filter((q) => q.includes('GROUP BY day, event_ref') && !q.includes('AS orders')).pop();
+  assert.ok(q2.includes("sumIf(toFloat(properties['amount_rand'])"), 'fallback slice-sum without an order reference');
+  assert.ok(!q2.includes('/ 100'), 'rand-denominated prop skips the conversion');
 });
 
 test('reports carry the configured breakdown keys and live window uniques', async () => {
