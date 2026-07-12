@@ -1566,6 +1566,15 @@ function DiagnoseCard() {
       {error && <div style={errBox}>{error}</div>}
       {d && (
         <>
+          {d.revenueProbe && (
+            <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.revenueProbe.error ? 'var(--danger, #dc2626)' : d.revenueProbe.revenue > 0 ? 'var(--success, #10b981)' : '#d97706' }}>
+              {d.revenueProbe.error
+                ? `✗ Revenue query failed: ${d.revenueProbe.error}`
+                : d.revenueProbe.revenue > 0
+                  ? `✓ Revenue pipeline works — whole app, 90 days: ${fmt(d.revenueProbe.orders)} orders · ${fmtR(d.revenueProbe.revenue)}. A client showing no revenue simply had none (free orders count as purchases but R0).`
+                  : `⚠ The revenue query runs but finds R0 in 90 days — every order_amount_cents in the window is zero or the mapped properties are off.`}
+            </p>
+          )}
           <p style={{ fontSize: 13, margin: '0 0 10px', fontWeight: 600, color: d.taggedEvents7d > 0 ? 'var(--success, #10b981)' : 'var(--danger, #dc2626)' }}>
             {d.taggedEvents7d > 0
               ? `✓ ${fmt(d.taggedEvents7d)} events in the last 7 days carry "${d.eventIdProp}" (${fmt(d.distinctIds7d)} distinct events)`
