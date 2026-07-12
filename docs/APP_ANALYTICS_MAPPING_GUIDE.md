@@ -65,7 +65,7 @@ whole app" selector active):
 | **Purchase value property** | the property carrying the order amount — powers the **In-app revenue** tile, the By-event column and the funnel figure | `order_amount_cents` ✅ confirmed (CENTS — keep the "÷100 → rand" checkbox ticked) — now the built-in default |
 | **Order reference property** | dedupes revenue to ONE amount per order — the amount is stamped on every checkout screen, so without this an order would count hundreds of times | `order_reference` ✅ confirmed — now the built-in default |
 | **CTA label property** | the property carrying the button label (`view_tickets`, `buy_tickets`, …) — powers the 🎯 **CTA clicks by label** chart | `cta_label` ✅ confirmed (lowercase — NOT `CTA_Label`) — now the built-in default |
-| **Breakdown properties** | which property chips show in "What's driving it" — line order = chip order | `surface`, `cta_label`, `interaction_type`, `$os_name`, `$device_type` — now the built-in default (OS + device splits ride the same card) |
+| **Breakdown properties** | which property chips show in "What's driving it" — line order = chip order | `surface`, `cta_label`, `interaction_type`, `$os_name`, `$device_type`, `$device_name`, `$device_model` — now the built-in default (OS + device splits ride the same card) |
 | **Funnel steps** | the stages of the 🛒 **Checkout funnel** card, one per line as `Label :: mapping entry` | Tickets viewed → Checkout → Payment tapped → Order confirmed (confirmed surfaces/taps) — now the built-in default |
 | **Person profile properties** | where names/emails/mobiles live on PostHog person profiles | run 🔬 Diagnose and copy the real keys (email is `$email`; the name/surname/mobile keys likely differ from the defaults) |
 
