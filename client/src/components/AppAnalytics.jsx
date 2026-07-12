@@ -1700,6 +1700,33 @@ function ValueExplorer() {
                   ))}
                 </div>
               )}
+              {out.slices?.length > 0 && (
+                <>
+                  <div style={{ ...title, fontSize: 12.5, marginTop: 10 }}>Where the non-zero values ride (mapping slices)</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 420 }}>
+                    <tbody>
+                      {out.slices.map((r, i) => (
+                        <tr key={i}>
+                          <td style={{ ...td, fontFamily: 'ui-monospace, monospace', fontWeight: 600, whiteSpace: 'normal' }}>{r.slice}</td>
+                          <td style={{ ...td, width: 80 }}>{fmt(r.count)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {out.siblingKeys?.length > 0 && (
+                <>
+                  <div style={{ ...title, fontSize: 12.5, marginTop: 10 }}>Other properties on those rows</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {out.siblingKeys.map((k) => (
+                      <span key={k.key} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
+                        {k.key} <span style={{ color: 'var(--muted)' }}>· {fmt(k.count)}</span>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )
       )}
