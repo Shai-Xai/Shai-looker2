@@ -292,6 +292,30 @@ test('diagnose reports tagged-event counts, sample ids and rollup state (admin o
   assert.equal(denied.status, 403);
 });
 
+test('reverse property lookup: which events carry a key, and are they event-id tagged', async () => {
+  const h = makeHarness({
+    responder: (q) => {
+      if (q.includes('GROUP BY event')) {
+        return HOGQL(['event', 'n', 'tagged', 'firstSeen', 'lastSeen'],
+          [['order_completed', 550, 0, '2025-08-01 10:00:00', '2026-07-12 09:00:00'], ['interaction', 22, 22, '2026-06-01 10:00:00', '2026-07-11 09:00:00']]);
+      }
+      return HOGQL(['v', 'n'], [['85000', 12], ['12000', 9]]);
+    },
+  });
+  const out = await h.invoke('GET /api/admin/posthog/property-values', { user: { role: 'admin' }, query: { key: 'order_amount_cents' } });
+  assert.equal(out.status, 200);
+  assert.equal(out.body.carriers[0].event, 'order_completed');
+  assert.equal(out.body.carriers[0].tagged, 0, 'untagged rows are called out — they never reach a client');
+  assert.equal(out.body.carriers[1].tagged, 22);
+  assert.equal(out.body.values[0].value, '85000');
+  const q = h.queries[0];
+  assert.ok(q.includes("notEmpty(toString(properties['order_amount_cents']))"), 'filters to rows carrying the key');
+  assert.ok(q.includes('INTERVAL 365 DAY'), 'a full year, not just recent data');
+  // no event AND no key still errors helpfully
+  const bad = await h.invoke('GET /api/admin/posthog/property-values', { user: { role: 'admin' }, query: {} });
+  assert.equal(bad.status, 400);
+});
+
 test('property-values explorer: values, slice-aware, key listing, escaped, admin only', async () => {
   let captured = '';
   const h = makeHarness({ responder: (q) => {

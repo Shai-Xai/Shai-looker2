@@ -1110,7 +1110,22 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/admin/posthog/property-values', auth.requireAdmin, asyncHandler(async (req, res) => {
     const event = String(req.query.event || '').trim().slice(0, 200);
     const key = String(req.query.key || '').trim().slice(0, 200);
-    if (!event) throw new HttpError(400, 'Pass ?event= (a name, or `event : property=value` for a slice).');
+    // KEY without EVENT = the reverse lookup — which events carry this
+    // property at all (a full year), how many of those rows are tagged with
+    // the Howler event id (untagged rows never reach a client's numbers), and
+    // what the values look like. THE tool for "where does the amount live?".
+    if (!event && key) {
+      const c = conn();
+      const has = `notEmpty(toString(${prop(key)}))`;
+      const carriers = await hogql(`SELECT event, count() AS n, countIf(notEmpty(toString(${prop(c.eventIdProp)}))) AS tagged, toString(min(timestamp)) AS firstSeen, toString(max(timestamp)) AS lastSeen FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${has} GROUP BY event ORDER BY n DESC LIMIT 20`, { ttl: CATALOG_TTL });
+      const values = await hogql(`SELECT toString(${prop(key)}) AS v, count() AS n FROM events WHERE timestamp >= now() - INTERVAL 365 DAY AND ${has} GROUP BY v ORDER BY n DESC LIMIT 10`, { ttl: CATALOG_TTL });
+      return res.json({
+        key,
+        carriers: carriers.map((r) => ({ event: String(r.event), count: Number(r.n) || 0, tagged: Number(r.tagged) || 0, firstSeen: String(r.firstSeen), lastSeen: String(r.lastSeen) })),
+        values: values.map((r) => ({ value: String(r.v), count: Number(r.n) || 0 })),
+      });
+    }
+    if (!event) throw new HttpError(400, 'Pass ?event= (a name, or `event : property=value` for a slice) — or just a key to find which events carry it.');
     const cond = entryCond(parseMapEntry(event));
     if (!key) {
       const rows = await hogql(`SELECT arrayJoin(JSONExtractKeys(properties)) AS k, count() AS n FROM events WHERE ${cond} AND timestamp >= now() - INTERVAL 30 DAY GROUP BY k ORDER BY n DESC LIMIT 60`, { ttl: CATALOG_TTL });

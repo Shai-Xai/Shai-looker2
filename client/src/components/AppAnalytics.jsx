@@ -1654,11 +1654,11 @@ function ValueExplorer() {
   const go = async (e) => {
     e?.preventDefault();
     let ev = event.trim();
-    if (!ev) return;
+    if (!ev && !key.trim()) return;
     // Forgiving input: "interaction_type=cta_click" without an event means the
     // slice form minus its event — everything rides the generic `interaction`
     // event in this app, so prefix it and show the corrected slice in the field.
-    if (ev.includes('=') && !ev.includes(':')) { ev = `interaction : ${ev}`; setEvent(ev); }
+    if (ev && ev.includes('=') && !ev.includes(':')) { ev = `interaction : ${ev}`; setEvent(ev); }
     setBusy(true); setError('');
     try { setOut(await api.posthogPropertyValues(ev, key.trim())); } catch (err) { setError(err.message); }
     setBusy(false);
@@ -1666,13 +1666,43 @@ function ValueExplorer() {
   return (
     <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, margin: '4px 0 12px' }}>
       <div style={{ ...title, fontSize: 12.5 }}>Explore an event's properties</div>
-      <p style={{ ...sub, marginBottom: 8 }}>Leave the property BLANK to list the keys this event actually carries. The event accepts a slice too — e.g. <code>interaction : interaction_type=cta_click</code> to see what rides only on CTA taps.</p>
+      <p style={{ ...sub, marginBottom: 8 }}>Leave the property BLANK to list the keys this event actually carries. The event accepts a slice too — e.g. <code>interaction : interaction_type=cta_click</code>. Or leave the EVENT blank with a property filled to find which events carry it (a full year) — the "where does this live?" lookup.</p>
       <form style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} onSubmit={go}>
         <input style={{ ...input, flex: 1.4, minWidth: 160, marginTop: 0 }} value={event} onChange={(e) => setEvent(e.target.value)} placeholder="event or slice, e.g. interaction : interaction_type=cta_click" />
         <input style={{ ...input, flex: 1, minWidth: 120, marginTop: 0 }} value={key} onChange={(e) => setKey(e.target.value)} placeholder="property (blank = list keys)" />
-        <button type="submit" style={ghostBtn} disabled={busy || !event.trim()}>{busy ? '…' : key.trim() ? 'Show values' : 'List keys'}</button>
+        <button type="submit" style={ghostBtn} disabled={busy || (!event.trim() && !key.trim())}>{busy ? '…' : !event.trim() ? 'Find events carrying it' : key.trim() ? 'Show values' : 'List keys'}</button>
       </form>
       {error && <div style={{ ...errBox, marginTop: 8 }}>{error}</div>}
+      {out && out.carriers && (
+        out.carriers.length === 0
+          ? <p style={{ ...sub, marginTop: 8 }}>NOTHING in the last 365 days carries "{out.key}" — the property doesn't exist on app events under that name (check the spelling, or the metric may be computed outside event tracking, e.g. a PostHog warehouse table).</p>
+          : (
+            <div style={{ overflowX: 'auto', marginTop: 10 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
+                <thead><tr>{['Event carrying it', 'Rows (1y)', 'With event ID', 'Seen'].map((hh, i) => <th key={i} style={th}>{hh}</th>)}</tr></thead>
+                <tbody>
+                  {out.carriers.map((r) => (
+                    <tr key={r.event}>
+                      <td style={{ ...td, fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}>{r.event}</td>
+                      <td style={td}>{fmt(r.count)}</td>
+                      <td style={{ ...td, color: r.tagged === 0 ? 'var(--danger, #dc2626)' : undefined }}>{fmt(r.tagged)}{r.tagged === 0 ? ' — never reaches a client!' : ''}</td>
+                      <td style={td}>{String(r.firstSeen).slice(0, 10)} → {String(r.lastSeen).slice(0, 10)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {out.values?.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  {out.values.map((v) => (
+                    <span key={v.value} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, monospace', border: '1px solid var(--hairline)', borderRadius: 6, padding: '3px 8px' }}>
+                      {out.key}={v.value} <span style={{ color: 'var(--muted)' }}>· {fmt(v.count)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+      )}
       {out && out.keys && (
         out.keys.length === 0
           ? <p style={{ ...sub, marginTop: 8 }}>No properties found on "{out.event}" in the last 30 days.</p>
@@ -1687,7 +1717,7 @@ function ValueExplorer() {
             </div>
           )
       )}
-      {out && out.values && (
+      {out && out.values && !out.carriers && (
         out.values.length === 0
           ? <p style={{ ...sub, marginTop: 8 }}>No values for "{out.key}" on "{out.event}" in the last 30 days — clear the property field and List keys to see what this event really carries.</p>
           : (
