@@ -728,6 +728,18 @@ function setEntityIntegrations(id, patch) {
     }
   } catch (err) { console.error('[db] secret-seal migration skipped:', err.message); }
 })();
+// One-time cleanup: purge the passive 'goal.view' rows the home "Your goals"
+// widget logged on every page load (now suppressed at source via ?bg=1). These
+// swamped the admin activity report. Idempotent — a settings flag makes it run
+// once, then no-op on every later boot (and on fresh/test DBs with none).
+(function purgePassiveGoalViews() {
+  try {
+    if (getSetting('cleanup_goalview_v1', '')) return;
+    const n = db.prepare("DELETE FROM user_actions WHERE action='goal.view'").run().changes;
+    setSetting('cleanup_goalview_v1', now());
+    if (n) console.log(`[db] purged ${n} passive goal.view audit rows`);
+  } catch (err) { console.error('[db] goal.view cleanup skipped:', err.message); }
+})();
 // Per-integration FREEZE locks for a client: { looker:false, meta:true, … }.
 // Integrations are LOCKED BY DEFAULT — a key is only unlocked when stored
 // explicitly as `false`, so a missing key reads as locked. A frozen integration
