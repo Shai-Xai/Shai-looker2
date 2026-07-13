@@ -108,7 +108,15 @@
     // so the chat reopens on the new page with its context.
     if (e.data && e.data.t === 'howler-fan-owl:nav' && typeof e.data.path === 'string') {
       var dest;
-      try { dest = new URL(e.data.path, window.location.origin); } catch (err) { return; }
+      try {
+        if (window.location.origin === base && window.location.pathname === '/fan-owl-test') {
+          // The hosted PREVIEW page has no real event pages — simulate the hop the
+          // same way its nav links do (?path=…), instead of landing in the Pulse app.
+          dest = new URL('/fan-owl-test?k=' + encodeURIComponent(siteKey) + '&path=' + encodeURIComponent(e.data.path), base);
+        } else {
+          dest = new URL(e.data.path, window.location.origin);
+        }
+      } catch (err) { return; }
       if (dest.origin !== window.location.origin) return; // same-site only
       try { window.sessionStorage.setItem(SS_REOPEN, '1'); } catch (err) { /* still navigates; just won't auto-reopen */ }
       window.location.href = dest.toString();
