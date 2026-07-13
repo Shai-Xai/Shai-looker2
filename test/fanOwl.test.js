@@ -116,6 +116,19 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const boot = await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`);
   assert.deepEqual(boot.body.starters, ['Who plays Saturday?']);
   assert.deepEqual(boot.body.offer.images, ['https://fest.example/img/camp1.jpg']);
+  // The "you are here" pill: boot names the matched page; unmatched pages carry none.
+  assert.deepEqual(boot.body.page, { pageType: 'artist', note: 'artist pages', urlPattern: '/artists/*' });
+  const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
+  const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
+  assert.equal(bootHome.body.page, null);
+  // pageChanged: first boot no (nothing to compare), reopening on the SAME page
+  // no, reopening after moving to another page yes → the widget re-surfaces
+  // the new page's pitch/offer/starters.
+  assert.equal(boot.body.pageChanged, false);
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, false);
+  await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', sessionId: back.body.sessionId }, headers: ORIGIN });
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, true);
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, false);
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {
@@ -232,11 +245,13 @@ test('funnel: beacons are whitelisted and roll up in the insights view', async (
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
   const sid = ctx.body.sessionId;
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'deeplink_click', payload: { itemId: 'x' } } });
+  await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'nav_click', payload: { path: '/artists/' } } }); // Owl-driven page hop
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'drop_table', payload: {} } }); // not whitelisted → ignored
   const s = await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/insights`, { as: admin });
   const funnel = s.body.sites[0].funnel;
   assert.equal(funnel.ribbon_view, 1);
   assert.equal(funnel.deeplink_click, 1);
+  assert.equal(funnel.nav_click, 1);
   assert.equal(funnel.drop_table, undefined);
 });
 
@@ -248,4 +263,36 @@ test('coerceOwlJson tolerates fences and prose around the ingest JSON', () => {
   assert.deepEqual(coerceOwlJson('Here is the JSON:\n```\n' + JSON.stringify(obj) + '\n```\nHope this helps'), obj); // prose + fence
   assert.deepEqual(coerceOwlJson('Sure! ' + JSON.stringify(obj)), obj);            // leading prose, no fence
   assert.throws(() => coerceOwlJson('{"knowledge":[{"kind":"faq","body":"trunca')); // truncated → throws
+});
+
+test('catalogue image uploads: gated like config, stored + served publicly, orphans swept on save', async () => {
+  const e = h.makeEntity('FanImg Co', 'fanimg-org');
+  const other = h.makeEntity('FanImgOther Co', 'fanimg-other-org');
+  const client = h.makeClient('fan-img@test.local', [e.id], 'owner');
+  const px = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  // Gates: anonymous 401s, wrong entity 403s, non-image data 400s.
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/images`, { body: { dataUrl: px } })).status, 401);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${other.id}/images`, { as: client, body: { dataUrl: px } })).status, 403);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${e.id}/images`, { as: client, body: { dataUrl: 'data:text/html;base64,PGI+aGk=' } })).status, 400);
+  // Upload → hosted absolute URL (the save filter + embed only accept https?://).
+  const up = await app.req('POST', `/api/my/fan-owl/${e.id}/images`, { as: client, body: { dataUrl: px } });
+  assert.equal(up.status, 200);
+  assert.match(up.body.url, /^https?:\/\/.+\/fan-owl-assets\/[0-9a-f]{32}$/);
+  const token = up.body.url.split('/').pop();
+  assert.equal((await app.req('GET', `/fan-owl-assets/${token}`)).status, 200); // public — fan-facing by definition
+  assert.equal((await app.req('GET', '/fan-owl-assets/nope')).status, 404);
+  // Sweep: a save keeps referenced uploads (even old ones) and reaps old orphans;
+  // fresh unreferenced uploads survive the day's grace.
+  const orphan = await app.req('POST', `/api/my/fan-owl/${e.id}/images`, { as: client, body: { dataUrl: px } });
+  const orphanToken = orphan.body.url.split('/').pop();
+  const old = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  h.db.db.prepare('UPDATE fan_assets SET created_at = ? WHERE token IN (?, ?)').run(old, token, orphanToken);
+  const fresh = await app.req('POST', `/api/my/fan-owl/${e.id}/images`, { as: client, body: { dataUrl: px } });
+  const freshToken = fresh.body.url.split('/').pop();
+  const save = await app.req('PUT', `/api/my/fan-owl/${e.id}`, { as: client, body: { catalogue: [{ label: 'Pass', kind: 'ticket', images: [up.body.url] }] } });
+  assert.equal(save.status, 200);
+  assert.deepEqual(save.body.catalogue[0].images, [up.body.url]);
+  assert.equal((await app.req('GET', `/fan-owl-assets/${token}`)).status, 200); // referenced → kept
+  assert.equal((await app.req('GET', `/fan-owl-assets/${orphanToken}`)).status, 404); // old orphan → swept
+  assert.equal((await app.req('GET', `/fan-owl-assets/${freshToken}`)).status, 200); // fresh → grace period
 });

@@ -1,6 +1,7 @@
 // ─── Fan Owl — the consumer-facing booking guide on promoters' event sites ─────
 // SELF-CONTAINED, DISPOSABLE MODULE. Owns the fan_* tables and all /api/fan/*,
-// /api/admin/entities/:id/fan-owl and /api/my/fan-owl/:id routes. Mounted from
+// /api/admin/entities/:id/fan-owl, /api/my/fan-owl/:id and /fan-owl-assets/*
+// (uploaded catalogue images, public) routes. Mounted from
 // index.js with one line; remove that line + this file (+ the /embed/fan client
 // page and client/public/fan-owl.js) to uninstall. Spec: docs/specs/FAN_OWL_SPEC.md.
 //
@@ -44,6 +45,7 @@ TOOLS:
 - getOffer → the tickets/add-ons relevant to the page the fan is on (plus the full public catalogue). Call it before recommending.
 - searchKnowledge → the organiser's FAQs/policies/info. Call it for ANY question about rules, logistics, inclusions or policies.
 - getCheckoutLink → the buy link for ONE catalogue item. Call it when the fan is ready to buy (or asks where to buy); the app renders it as a button — do NOT paste raw URLs into your reply text.
+- goToPage → send the fan to another page of THIS website (pick a urlPattern from the pages list in your instructions). Call it when the fan asks to see or go somewhere — the lineup, the tickets page, accommodation… The app shows a "Take me there" button under your reply; say you're pointing them there, never paste the URL.
 - captureLead → save the fan's name/email ONLY when the fan has explicitly given them AND agreed to be contacted. Never ask more than once, never require it, never invent consent. Offer it only as a favour ("want me to send you this / give you a heads-up before it sells out?").
 - logInterest → note what the fan cares about (a topic like "camping", "VIP", "kids") whenever real interest or an unanswerable question shows — this is how organisers learn what fans want.
 
@@ -148,6 +150,11 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_fan_events_site ON fan_events(site_id, created_at);
+    CREATE TABLE IF NOT EXISTS fan_assets (
+      token TEXT PRIMARY KEY, entity_id TEXT NOT NULL, mime TEXT NOT NULL,
+      bytes BLOB NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fan_assets_entity ON fan_assets(entity_id);
   `);
   // Migration: page mappings gained long-form "page info" — the organiser-approved
   // content the Owl serves for that page (general FAQs stay in fan_knowledge).
@@ -159,6 +166,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN pitch TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   // Migration: catalogue items gained images (URLs; a scrollable strip on offer cards).
   try { sql.exec("ALTER TABLE fan_catalogue ADD COLUMN images TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+  // Migration: where the chat was last OPENED (vs page_url = where the fan is now) —
+  // lets boot flag "you've moved pages" so the widget re-surfaces the new page's info.
+  try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN chat_page_url TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -236,6 +246,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
             .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i,
               JSON.stringify((c.images || []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 8)));
         });
+        // Sweep uploaded images nothing references any more. A day's grace keeps an
+        // upload alive between hitting Upload and hitting Save in the editor.
+        const used = catByEntity.all(entityId).flatMap((c) => J(c.images, [])).join(' ');
+        const grace = new Date(Date.now() - 86_400_000).toISOString();
+        for (const a of sql.prepare('SELECT token FROM fan_assets WHERE entity_id = ? AND created_at < ?').all(entityId, grace)) {
+          if (!used.includes(a.token)) sql.prepare('DELETE FROM fan_assets WHERE token = ?').run(a.token);
+        }
       }
       if (Array.isArray(b.knowledge)) {
         sql.prepare('DELETE FROM fan_knowledge WHERE entity_id = ?').run(entityId);
@@ -270,6 +287,36 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   app.put('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
   app.get('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(configView(req.params.entityId)));
   app.put('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
+
+  // ── Catalogue image uploads ────────────────────────────────────────────────
+  // The editor downscales the picked file and sends a data-URL; we store the bytes
+  // (fan_assets) and hand back a hosted, unguessable URL that rides the item's
+  // images array like any pasted URL. Served publicly below with a long cache —
+  // these are fan-facing offer images by definition. Uploads a save no longer
+  // references are swept in saveConfig.
+  const IMG_CAP = 2 * 1024 * 1024; // bytes, post-downscale (the editor resizes to ≤1600px JPEG)
+  const imageHandler = asyncHandler(async (req, res) => {
+    const m = String((req.body || {}).dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/);
+    if (!m) throw new HttpError(400, 'Upload a JPEG, PNG, WebP or GIF image.');
+    const bytes = Buffer.from(m[2], 'base64');
+    if (!bytes.length) throw new HttpError(400, 'That image came through empty — try again.');
+    if (bytes.length > IMG_CAP) throw new HttpError(400, 'Images can be up to 2MB.');
+    const token = crypto.randomBytes(16).toString('hex');
+    sql.prepare('INSERT INTO fan_assets (token,entity_id,mime,bytes,created_at) VALUES (?,?,?,?,?)')
+      .run(token, req.params.entityId, m[1], bytes, now());
+    // Absolute URL: the catalogue save + the embed's image strip only accept https?://.
+    res.json({ url: `${req.protocol}://${req.get('host')}/fan-owl-assets/${token}` });
+  });
+  const imageLimit = rateLimit({ windowMs: 60_000, max: 30, by: 'user', scope: 'fan-image' });
+  app.post('/api/admin/entities/:entityId/fan-owl/images', auth.requireAdmin, requireManager, imageLimit, imageHandler);
+  app.post('/api/my/fan-owl/:entityId/images', auth.requireAuth, requireMyEntity, requireManager, imageLimit, imageHandler);
+  app.get('/fan-owl-assets/:token', (req, res) => {
+    const a = sql.prepare('SELECT mime, bytes FROM fan_assets WHERE token = ?').get(String(req.params.token || ''));
+    if (!a) return res.status(404).end();
+    res.set('Content-Type', a.mime);
+    res.set('Cache-Control', 'public, max-age=2592000, immutable'); // bytes never change per token
+    res.send(Buffer.isBuffer(a.bytes) ? a.bytes : Buffer.from(a.bytes));
+  });
 
   // Insight flywheel (spec §6): interaction funnel + FAQ gaps + interest topics, per
   // site — the promoter-facing read; same payload on both surfaces.
@@ -487,6 +534,11 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return best;
   }
   const publicItem = (c) => ({ id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price, currency: c.currency, availability: c.availability, images: J(c.images, []) });
+  // A mapping's navigable path: the pattern minus wildcards/junk (same derivation
+  // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
+  // the loader, so the Owl can only ever send fans within the promoter's own site.
+  const navPath = (pattern) => String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+  const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
     const page = matchPage(site, url);
@@ -560,9 +612,15 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     // Chips: the current page's configured starters (set by hand or drafted by the
     // website reader) win; otherwise sensible generic defaults.
     const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
+    // Has the fan moved pages since the chat was last open? Then the widget leads
+    // with THIS page's info (pitch/offer/starters), not just the old thread.
+    const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
+    sql.prepare('UPDATE fan_sessions SET chat_page_url = ? WHERE id = ?').run(session.page_url || '', session.id);
     res.json({
       site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
       event: suite ? { name: suite.name } : null,
+      page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
+      pageChanged,
       pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
@@ -620,6 +678,18 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         schema: { name: 'logInterest', description: 'Note a topic the fan showed real interest in, or a question you could not answer — organisers learn from these.', input_schema: { type: 'object', properties: { topic: { type: 'string' }, detail: { type: 'string' } }, required: ['topic'] } },
         run: async ({ topic, detail }) => { logEvent(site.id, session.id, 'interest', { topic: String(topic || '').slice(0, 120), detail: String(detail || '').slice(0, 300) }); return { ok: true }; },
       },
+      goToPage: {
+        schema: { name: 'goToPage', description: 'Take the fan to another page of THIS event website — pick a urlPattern from the pages list in your instructions. The app shows a "Take me there" button under your reply; the button does the moving and the chat reopens there.', input_schema: { type: 'object', properties: { urlPattern: { type: 'string', description: 'the target page\'s urlPattern, exactly as listed in your instructions' } }, required: ['urlPattern'] } },
+        run: async ({ urlPattern }) => {
+          const want = String(urlPattern || '').trim().toLowerCase();
+          const pages = pagesBySite.all(site.id).filter((x) => navPath(x.url_pattern));
+          const p = pages.find((x) => x.url_pattern.toLowerCase() === want)
+            || (want && pages.find((x) => x.url_pattern.toLowerCase().includes(want) || want.includes(navPath(x.url_pattern).toLowerCase())));
+          if (!p) return { ok: false, reason: 'unknown_page', message: 'That page isn’t in the site’s page list — offer the fan the pages you do have.' };
+          logEvent(site.id, session.id, 'nav_issued', { pattern: p.url_pattern });
+          return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
+        },
+      },
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -660,7 +730,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
 
   // POST /api/fan/event — interaction beacons from the widget (deep-link clicks
   // etc.), the funnel's client-side half. Whitelisted kinds only.
-  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close']);
+  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close', 'nav_click']);
   app.post('/api/fan/event', rateLimit({ windowMs: 60_000, max: 60, by: 'ip', scope: 'fan-event' }), (req, res) => {
     const b = req.body || {};
     const session = getSession.get(String(b.sessionId || ''));
@@ -674,6 +744,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
   const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
   const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
+  const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
   const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
   app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
     const b = req.body || {};
@@ -717,6 +788,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       memory,
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
+      (() => {
+        const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
+        return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
+      })(),
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');
 
@@ -773,6 +848,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Offer cards: any buy links issued this turn (label + price + button URL).
       const offers = trail.filter((t) => t.name === 'getCheckoutLink' && t.result?.ok).map((t) => ({ ...t.result.item, url: t.result.url }));
       if (offers.length) res.write(OFFERS_MARK + JSON.stringify(offers));
+      // Navigation card: the last goToPage this turn (one destination per reply).
+      const navs = trail.filter((t) => t.name === 'goToPage' && t.result?.ok).map((t) => t.result.page);
+      if (navs.length) res.write(NAV_MARK + JSON.stringify(navs[navs.length - 1]));
       res.end();
     } catch (err) {
       console.error('[POST /api/fan/chat]', err.message);
