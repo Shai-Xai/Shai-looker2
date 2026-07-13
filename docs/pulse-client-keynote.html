@@ -159,6 +159,8 @@
   }
   .card h3 { font-family: var(--display); font-size: clamp(15px, 1.9vw, 18px); font-weight: 700; letter-spacing: -0.01em; margin-bottom: 8px; }
   .card p { font-size: clamp(13px, 1.6vw, 14.5px); line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .card p b { color: var(--text); font-weight: 600; }
+  .card.idea { flex: 1 1 420px; border-color: rgba(255,56,92,0.20); }
   .card.dimcard { background: var(--dim-panel); }
   .card.dimcard .tag { color: var(--dim); }
   .card.dimcard h3 { color: var(--dim); }
@@ -249,6 +251,32 @@
   .fgroup { display: flex; flex-direction: column; gap: 8px; }
   .flownote { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
   .flownote b { color: var(--rose); font-weight: 600; }
+
+  /* One story, every surface — feed ad / email / sms mockups */
+  .surfaces { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; align-items: stretch; }
+  .surf { flex: 1 1 250px; min-width: 0; max-width: 350px; display: flex; flex-direction: column; }
+  .slabel { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 9px; }
+  .slabel .i { width: 12px; height: 12px; color: var(--rose); flex-shrink: 0; }
+  .surfcard { flex: 1 1 auto; background: var(--panel); border: 1px solid var(--hairline-soft); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(120deg, var(--signal), var(--signal-2)); flex-shrink: 0; }
+  .adhead, .mailrow { display: flex; align-items: center; gap: 9px; padding: 10px 12px; }
+  .adhead b, .mailrow b { font-family: var(--display); font-size: 12.5px; font-weight: 700; display: block; }
+  .adhead small, .mailrow small { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+  .admedia { background: linear-gradient(130deg, #ff385c, #ff6b35 68%, #9a5cf6); padding: 22px 16px; color: #fff; }
+  .admedia .adkick { font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; opacity: .85; margin-bottom: 6px; }
+  .admedia .adbig { font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -0.02em; line-height: 1.08; }
+  .adcta { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-family: var(--display); font-weight: 700; font-size: 12.5px; color: var(--rose); border-bottom: 1px solid var(--hairline-soft); }
+  .adfoot { display: flex; gap: 10px; padding: 9px 12px; color: var(--muted); font-family: var(--mono); font-size: 9.5px; align-items: center; }
+  .adfoot .i { width: 14px; height: 14px; }
+  .mailsub { padding: 2px 12px 5px; font-family: var(--display); font-weight: 700; font-size: 13px; }
+  .mailprev { padding: 0 12px 14px; font-size: 12px; line-height: 1.5; color: var(--muted); flex: 1 1 auto; }
+  .mailcta { margin-top: auto; padding: 10px 12px; border-top: 1px solid var(--hairline-soft); font-family: var(--display); font-weight: 700; font-size: 12.5px; color: var(--rose); display: flex; justify-content: space-between; }
+  .smswrap { flex: 1 1 auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+  .bubble { background: var(--panel-2); border: 1px solid var(--hairline-soft); border-radius: 16px 16px 16px 5px; padding: 11px 13px; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+  .bubble b { font-weight: 600; }
+  .btime { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.1em; color: rgba(255,255,255,0.32); padding-left: 4px; }
+  .surfnote { margin-top: 14px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); }
+  .surfnote b { color: var(--rose); }
 
   /* Journey band */
   .band-wrap { overflow-x: auto; margin-top: 26px; padding-bottom: 8px; }
@@ -432,6 +460,7 @@
     <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.4 12.3l2.5 2.5 4.7-5.2"/></symbol>
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5L21 8l-9 4.5L3 8z"/><path d="M4.5 12.5L12 16.2l7.5-3.7M4.5 17L12 20.7 19.5 17"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c-4.7 4.7-4.7 12.3 0 17M12 3.5c4.7 4.7 4.7 12.3 0 17"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.2-4.7-7.2-9.7a4.1 4.1 0 017.2-2.7 4.1 4.1 0 017.2 2.7C19.2 15.3 12 20 12 20z"/></symbol>
   </defs>
 </svg>
 
@@ -599,10 +628,42 @@
     </div>
   </section>
 
-  <!-- 9 · AD PLATFORMS ══════════════════════════════════════════════════════ -->
+  <!-- 9 · BE BOLD ═══════════════════════════════════════════════════════════ -->
+  <section class="slide" data-note="This is the mindset slide — the whole deck turns here, so give it air. The argument: creativity was never the constraint, the tooling was. Every idea used to cost a brief, a build and a sign-off chain, so only the safe, vanilla ideas survived the process. When an experiment costs minutes, bold becomes the RATIONAL strategy, not the risky one. Invite them directly: bring your wildest idea to the workshop — the platform's job is to make trying it cheap. If it works, scale it; if it doesn't, you spent an afternoon.">
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>08 · Permission to be bold</span><span class="rule"></span></div>
+      <h2>Time to think different.<br><span class="grad">Bold is cheap now.</span></h2>
+      <p class="lede">The old stack <strong>punished experiments</strong> — every idea cost a brief, a build and a sign-off chain, so only the safe, vanilla ideas survived. When trying something takes <strong>minutes instead of weeks</strong>, creativity stops being a risk and starts being the strategy.</p>
+      <div class="cards">
+        <div class="card idea">
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-check"/></svg></span><span class="tag">Now thinkable</span></div>
+          <h3>A love letter to your top 100</h3>
+          <p>Your most loyal fans, by name, with their own private pre-sale window — drafted in an afternoon, not a sprint.</p>
+        </div>
+        <div class="card idea">
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span><span class="tag">Now thinkable</span></div>
+          <h3>A cheeky 22:00 nudge</h3>
+          <p>Last night's cart-abandoners get a playful SMS while the intent is still warm — not a polite email next Tuesday.</p>
+        </div>
+        <div class="card idea">
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-globe"/></svg></span><span class="tag">Now thinkable</span></div>
+          <h3>One send, two voices</h3>
+          <p>Afrikaans to Pretoria, English to Joburg, a different tone for the students — the same campaign, speaking like a local everywhere.</p>
+        </div>
+        <div class="card idea">
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-spark"/></svg></span><span class="tag">Now thinkable</span></div>
+          <h3>Test wild on 500 first</h3>
+          <p>Try the weird idea on a small segment tonight, read the results by morning, scale what works. If it flops, you spent an afternoon.</p>
+        </div>
+      </div>
+      <p class="loopnote"><b>↯</b> when an experiment costs minutes, bold beats safe — every time.</p>
+    </div>
+  </section>
+
+  <!-- 10 · AD PLATFORMS ═════════════════════════════════════════════════════ -->
   <section class="slide" data-note="The stale-CSV upload is the ritual everyone recognises — kill it here. Pulse mirrors the segment to Meta/TikTok and auto-syncs daily: buyers leave the audience automatically, so you stop paying to advertise to people who already bought. Identities are hashed before they leave Pulse. And spend/ROAS reads back into Pulse, next to real ticket sales.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>08 · The ad platforms</span><span class="rule"></span></div>
+      <div class="kicker"><span>09 · The ad platforms</span><span class="rule"></span></div>
       <h2>Ad audiences that are <span class="grad">live</span> —<br>not last month's CSV.</h2>
       <div class="flow" role="img" aria-label="A live Pulse segment syncs daily, hashed, to Meta and TikTok custom audiences; buyers drop out automatically and spend plus ROAS reads back into Pulse.">
         <span class="fnode src"><svg class="i"><use href="#i-target"/></svg><span class="fl">Live Pulse segment<small>re-resolves daily</small></span></span>
@@ -623,11 +684,42 @@
   </section>
 
   <!-- 10 · 360° ORCHESTRATION ═══════════════════════════════════════════════ -->
-  <section class="slide" data-note="One audience brain behind every channel — that's the 360 claim. The ads a person sees and the email they get tell the same story at the same moment, because they're driven by the same live segment. Walk the band left to right; note the channel mix shifting as the campaign arc progresses. WhatsApp is rolling out via the Owl today, growing as a channel.">
+  <section class="slide" data-note="One audience brain behind every channel — that's the 360 claim. Walk the trio first, as one person's week: Thandi scrolls Instagram and sees the ad, opens the matching email the same morning, and gets the last-call SMS on Friday night. Same story, same beat, same person — because one live segment drives all three surfaces. Then the band below: the channel mix shifts as the campaign arc progresses. WhatsApp is rolling out via the Owl today, growing as a channel.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>09 · 360° orchestration</span><span class="rule"></span></div>
+      <div class="kicker"><span>10 · 360° orchestration</span><span class="rule"></span></div>
       <h2>Right message, right channel,<br>right moment of the campaign.</h2>
       <p class="lede">Email, SMS, WhatsApp and the ad platforms, run off <strong>one audience brain</strong> — so every channel tells the same person the same story, at the right beat of the arc.</p>
+      <div class="surfaces" role="img" aria-label="The same final-release message shown three ways: as a sponsored feed ad on Instagram or TikTok, as an email the same morning, and as a last-call SMS on Friday evening.">
+        <div class="surf">
+          <div class="slabel"><svg class="i"><use href="#i-ads"/></svg><span>The ad · Instagram / TikTok feed</span></div>
+          <div class="surfcard">
+            <div class="adhead"><span class="avatar"></span><div><b>yourfestival</b><small>Sponsored</small></div></div>
+            <div class="admedia"><div class="adkick">Final release</div><div class="adbig">Ends Friday.<br>Don't sleep on it.</div></div>
+            <div class="adcta"><span>Get tickets</span><span>→</span></div>
+            <div class="adfoot"><svg class="i"><use href="#i-heart"/></svg><svg class="i"><use href="#i-sms"/></svg><span>1,204 likes</span></div>
+          </div>
+        </div>
+        <div class="surf">
+          <div class="slabel"><svg class="i"><use href="#i-mail"/></svg><span>The email · same morning</span></div>
+          <div class="surfcard">
+            <div class="mailrow"><span class="avatar"></span><div><b>Your Festival</b><small>Inbox · 09:00</small></div></div>
+            <div class="mailsub">Final release ends Friday, Thandi</div>
+            <div class="mailprev">Your crew came last year — this one's bigger. Your 10% loyalty code is inside, and prices step up at midnight Friday…</div>
+            <div class="mailcta"><span>Claim your code</span><span>→</span></div>
+          </div>
+        </div>
+        <div class="surf">
+          <div class="slabel"><svg class="i"><use href="#i-sms"/></svg><span>The SMS · Friday, 18:00</span></div>
+          <div class="surfcard">
+            <div class="smswrap">
+              <div class="bubble"><b>Last call, Thandi</b> — final release ends tonight. Your passes, one tap: how.lr/x8fk2</div>
+              <div class="btime">Fri 18:02 · Your Festival</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="surfnote"><b>one segment, one story</b> — the feed, the inbox and the phone speaking to the same person, about the same moment.</p>
+      <p class="flownote" style="margin-top:30px">…and the mix shifts with the arc of the campaign:</p>
       <div class="band-wrap">
         <div class="band">
           <div class="phase">
@@ -673,7 +765,7 @@
   <!-- 11 · JOURNEYS ═════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Frame: a campaign assumes everyone is at the same point; a journey meets each person where they actually are. Abandon at 21:40 → step one lands 22:40, timed off THEIR moment, not a send calendar. Buy at any point → the journey stops itself. The waterfall shows exactly where people open, click, convert and drop — illustrative numbers, every real journey shows its own.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>10 · Journeys, not blasts</span><span class="rule"></span></div>
+      <div class="kicker"><span>11 · Journeys, not blasts</span><span class="rule"></span></div>
       <h2>Every customer's path is different.<br><span class="grad">Now every journey is too.</span></h2>
       <ul class="points">
         <li><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span><div class="txt"><strong>Behaviour sets the clock</strong> — abandoned-cart recovery times each step from <em>that person's</em> abandonment moment, in real time.</div></li>
@@ -693,7 +785,7 @@
   <!-- 12 · SPEED, SAFELY ════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Pre-empt the fear directly: fast does not mean reckless. The AI drafts; a named human approves — nothing sends without sign-off. Consent is enforced per channel at send time (POPIA), unsubscribe is one click, and send caps put a hard ceiling on cost. The red tape is gone; the guardrails are not.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>11 · Speed, safely</span><span class="rule"></span></div>
+      <div class="kicker"><span>12 · Speed, safely</span><span class="rule"></span></div>
       <h2>Signal to send in minutes —<br>with a human hand on the gate.</h2>
       <ul class="points">
         <li><span class="ic"><svg class="i"><use href="#i-bolt"/></svg></span><div class="txt"><strong>One-tap drafts</strong> — the Owl turns an insight into a targeted, on-brand, ready-to-review campaign straight from the briefing.</div></li>
@@ -705,15 +797,15 @@
   </section>
 
   <!-- 13 · NEXT ═════════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Direction, not dates — don't promise quarters. App push is the near one: Pulse installs on the phone today and already delivers push; opening that as a marketing channel means reaching your audience with no send cost and no inbox to fight through. WhatsApp campaigns and behaviour-branched journeys follow the same arc.">
+  <section class="slide" data-note="Direction, not dates — don't promise quarters. The app card is the HOWLER SUPER APP — the consumer app where fans browse content, buy tickets and receive notifications (not the Pulse client app). The unlock is app analytics: you can see exactly who is active in the app around your event but hasn't bought a ticket — that's a live segment of warm prospects, ready to target with push and in-app messages the moment the channel opens. WhatsApp campaigns and behaviour-branched journeys follow the same arc.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>12 · On the horizon</span><span class="rule"></span></div>
+      <div class="kicker"><span>13 · On the horizon</span><span class="rule"></span></div>
       <h2>The next channel is already<br>in their pocket.</h2>
       <div class="cards">
         <div class="card">
           <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-push"/></svg></span><span class="tag">Next channel</span></div>
-          <h3>The app itself</h3>
-          <p>Pulse installs on the phone and already delivers push. Opening app push as a marketing channel means reaching your audience directly — no inbox to fight, no per-message cost.</p>
+          <h3>The Howler super app</h3>
+          <p>Your fans already live in the Howler app — browsing events, buying tickets, getting notifications. App analytics show exactly <b>who's engaging with your event but hasn't bought yet</b> — a ready-made segment to reach with push and in-app messages, no inbox to fight, no per-message cost.</p>
         </div>
         <div class="card">
           <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-wa"/></svg></span><span class="tag">Growing channel</span></div>
@@ -732,7 +824,7 @@
   <!-- 14 · THEN / NOW ═══════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Recap slide — let it breathe, read a couple of rows aloud and let them scan the rest. If one row sparks a conversation, stay on it; this slide is the whole argument in one table.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
-      <div class="kicker"><span>13 · The shift, summarised</span><span class="rule"></span></div>
+      <div class="kicker"><span>14 · The shift, summarised</span><span class="rule"></span></div>
       <h2>From static to signal.</h2>
       <div class="thennow" role="table" aria-label="Then versus now comparison">
         <div class="tn-row head" role="row"><div class="then" role="columnheader">Then</div><div class="now" role="columnheader">Now, with Pulse</div></div>
@@ -775,7 +867,7 @@
     <button class="notesbtn" id="btnNotes" aria-pressed="false">Notes&nbsp;(N)</button>
     <button id="btnNext" aria-label="Next slide">→</button>
   </div>
-  <div class="counter" id="counter"><b>01</b> / 15</div>
+  <div class="counter" id="counter"><b>01</b> / 16</div>
 </div>
 
 <div class="hint" id="hint">← → to navigate · N for presenter notes · swipe on mobile</div>
