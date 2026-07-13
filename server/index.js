@@ -1776,7 +1776,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey, app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1788,7 +1788,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 5).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text), /* 5th slot = the app-audience point */
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => {
