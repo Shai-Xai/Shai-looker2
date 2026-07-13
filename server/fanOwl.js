@@ -1,6 +1,7 @@
 // ─── Fan Owl — the consumer-facing booking guide on promoters' event sites ─────
 // SELF-CONTAINED, DISPOSABLE MODULE. Owns the fan_* tables and all /api/fan/*,
-// /api/admin/entities/:id/fan-owl and /api/my/fan-owl/:id routes. Mounted from
+// /api/admin/entities/:id/fan-owl, /api/my/fan-owl/:id and /fan-owl-assets/*
+// (uploaded catalogue images, public) routes. Mounted from
 // index.js with one line; remove that line + this file (+ the /embed/fan client
 // page and client/public/fan-owl.js) to uninstall. Spec: docs/specs/FAN_OWL_SPEC.md.
 //
@@ -148,6 +149,11 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_fan_events_site ON fan_events(site_id, created_at);
+    CREATE TABLE IF NOT EXISTS fan_assets (
+      token TEXT PRIMARY KEY, entity_id TEXT NOT NULL, mime TEXT NOT NULL,
+      bytes BLOB NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fan_assets_entity ON fan_assets(entity_id);
   `);
   // Migration: page mappings gained long-form "page info" — the organiser-approved
   // content the Owl serves for that page (general FAQs stay in fan_knowledge).
@@ -236,6 +242,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
             .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i,
               JSON.stringify((c.images || []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 8)));
         });
+        // Sweep uploaded images nothing references any more. A day's grace keeps an
+        // upload alive between hitting Upload and hitting Save in the editor.
+        const used = catByEntity.all(entityId).flatMap((c) => J(c.images, [])).join(' ');
+        const grace = new Date(Date.now() - 86_400_000).toISOString();
+        for (const a of sql.prepare('SELECT token FROM fan_assets WHERE entity_id = ? AND created_at < ?').all(entityId, grace)) {
+          if (!used.includes(a.token)) sql.prepare('DELETE FROM fan_assets WHERE token = ?').run(a.token);
+        }
       }
       if (Array.isArray(b.knowledge)) {
         sql.prepare('DELETE FROM fan_knowledge WHERE entity_id = ?').run(entityId);
@@ -270,6 +283,36 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   app.put('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
   app.get('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(configView(req.params.entityId)));
   app.put('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
+
+  // ── Catalogue image uploads ────────────────────────────────────────────────
+  // The editor downscales the picked file and sends a data-URL; we store the bytes
+  // (fan_assets) and hand back a hosted, unguessable URL that rides the item's
+  // images array like any pasted URL. Served publicly below with a long cache —
+  // these are fan-facing offer images by definition. Uploads a save no longer
+  // references are swept in saveConfig.
+  const IMG_CAP = 2 * 1024 * 1024; // bytes, post-downscale (the editor resizes to ≤1600px JPEG)
+  const imageHandler = asyncHandler(async (req, res) => {
+    const m = String((req.body || {}).dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/);
+    if (!m) throw new HttpError(400, 'Upload a JPEG, PNG, WebP or GIF image.');
+    const bytes = Buffer.from(m[2], 'base64');
+    if (!bytes.length) throw new HttpError(400, 'That image came through empty — try again.');
+    if (bytes.length > IMG_CAP) throw new HttpError(400, 'Images can be up to 2MB.');
+    const token = crypto.randomBytes(16).toString('hex');
+    sql.prepare('INSERT INTO fan_assets (token,entity_id,mime,bytes,created_at) VALUES (?,?,?,?,?)')
+      .run(token, req.params.entityId, m[1], bytes, now());
+    // Absolute URL: the catalogue save + the embed's image strip only accept https?://.
+    res.json({ url: `${req.protocol}://${req.get('host')}/fan-owl-assets/${token}` });
+  });
+  const imageLimit = rateLimit({ windowMs: 60_000, max: 30, by: 'user', scope: 'fan-image' });
+  app.post('/api/admin/entities/:entityId/fan-owl/images', auth.requireAdmin, requireManager, imageLimit, imageHandler);
+  app.post('/api/my/fan-owl/:entityId/images', auth.requireAuth, requireMyEntity, requireManager, imageLimit, imageHandler);
+  app.get('/fan-owl-assets/:token', (req, res) => {
+    const a = sql.prepare('SELECT mime, bytes FROM fan_assets WHERE token = ?').get(String(req.params.token || ''));
+    if (!a) return res.status(404).end();
+    res.set('Content-Type', a.mime);
+    res.set('Cache-Control', 'public, max-age=2592000, immutable'); // bytes never change per token
+    res.send(Buffer.isBuffer(a.bytes) ? a.bytes : Buffer.from(a.bytes));
+  });
 
   // Insight flywheel (spec §6): interaction funnel + FAQ gaps + interest topics, per
   // site — the promoter-facing read; same payload on both surfaces.

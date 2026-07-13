@@ -34,6 +34,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [ingesting, setIngesting] = useState(false);
   const [ingestNote, setIngestNote] = useState('');
   const [tab, setTab] = useState('sites');
+  const [imgBusy, setImgBusy] = useState(-1); // catalogue index mid-upload
+  const [imgNote, setImgNote] = useState(null); // { i, text }
   const TABS = [['sites', '🌐 Sites'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
@@ -61,6 +63,28 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
     pages.splice(to, 0, x);
     setSite(i, { pages });
   };
+
+  // Upload catalogue images: downscale in the browser (≤1600px JPEG), POST the
+  // data-URL, and drop the returned hosted URL into the item's images like any
+  // pasted URL. Nothing goes live until Save.
+  async function uploadImages(i, files) {
+    const room = 8 - (cfg.catalogue[i].images || []).length;
+    const picked = [...files].filter((f) => f.type.startsWith('image/')).slice(0, Math.max(0, room));
+    if (!picked.length) { setImgNote({ i, text: room <= 0 ? 'This item already has 8 images — remove one first.' : 'Pick an image file (JPEG/PNG/WebP).' }); return; }
+    setImgBusy(i); setImgNote(null);
+    try {
+      const urls = [];
+      for (const f of picked) {
+        const r = await fetch(`${base}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: await downscaleImage(f) }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Upload failed — try again.');
+        urls.push(d.url);
+      }
+      setCfg((c) => ({ ...c, catalogue: c.catalogue.map((x, j) => (j === i ? { ...x, images: [...(x.images || []), ...urls].slice(0, 8) } : x)) }));
+      setImgNote({ i, text: `Uploaded ${urls.length} image${urls.length === 1 ? '' : 's'} ✓ — remember to Save.` });
+    } catch (e) { setImgNote({ i, text: `⚠️ ${e.message}` }); }
+    finally { setImgBusy(-1); }
+  }
 
   async function save() {
     setSaving(true);
@@ -308,14 +332,33 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
               <input style={{ ...input, marginTop: 6 }} value={c.deepLink} placeholder="Howler checkout link (https://…)" onChange={(e) => setCat(i, { deepLink: e.target.value })} />
               <input style={{ ...input, marginTop: 6 }} value={c.description} placeholder="One-liner the Owl can use (what's included, who it's for)" onChange={(e) => setCat(i, { description: e.target.value })} />
-              <input style={{ ...input, marginTop: 6 }} value={(c.images || []).join(', ')}
-                placeholder="Image URLs, comma-separated (https://… — fans scroll through them on the offer card)"
-                onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                <label style={{ ...btn, display: 'inline-flex', alignItems: 'center', fontWeight: 700, opacity: imgBusy === i ? 0.6 : 1 }}>
+                  {imgBusy === i ? 'Uploading…' : '📷 Upload images'}
+                  <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={imgBusy !== -1}
+                    onChange={(e) => { uploadImages(i, e.target.files); e.target.value = ''; }} />
+                </label>
+                <span style={{ ...small, margin: 0 }}>Up to 8 — fans scroll through them on the offer card.</span>
+              </div>
+              {imgNote && imgNote.i === i && <p style={{ ...small, marginTop: 6 }}>{imgNote.text}</p>}
               {(c.images || []).filter((u) => /^https?:\/\//i.test(u)).length > 0 && (
-                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 6 }}>
-                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => <img key={u} src={u} alt="" style={{ height: 54, borderRadius: 8, flex: '0 0 auto', objectFit: 'cover' }} />)}
+                <div style={{ display: 'flex', gap: 10, overflowX: 'auto', marginTop: 6, paddingTop: 8 }}>
+                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => (
+                    <div key={u} style={{ position: 'relative', flex: '0 0 auto' }}>
+                      <img src={u} alt="" style={{ height: 54, borderRadius: 8, objectFit: 'cover', display: 'block' }} />
+                      <button type="button" aria-label="Remove image" title="Remove image"
+                        onClick={() => setCat(i, { images: c.images.filter((x) => x !== u) })}
+                        style={{ position: 'absolute', top: -8, right: -8, width: 24, height: 24, borderRadius: 12, border: 0, background: 'var(--text)', color: 'var(--bg, #fff)', fontSize: 12, lineHeight: '24px', padding: 0, cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
                 </div>
               )}
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ ...small, cursor: 'pointer', listStyle: 'none' }}>Paste image URLs instead…</summary>
+                <input style={{ ...input, marginTop: 4 }} value={(c.images || []).join(', ')}
+                  placeholder="Image URLs, comma-separated (https://…)"
+                  onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              </details>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
                   <input type="checkbox" checked={c.public !== false} onChange={(e) => setCat(i, { public: e.target.checked })} style={{ width: 16, height: 16 }} />
@@ -362,6 +405,28 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       )}
     </div>
   );
+}
+
+// Downscale a picked image to a phone-friendly JPEG data-URL before upload
+// (same approach as ReportForm) — keeps the payload under the server's 2MB cap.
+function downscaleImage(file, max = 1600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('That file doesn’t look like an image.'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('Couldn’t read that file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function Flywheel({ stats, leads, loadLeads }) {
