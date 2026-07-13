@@ -7,7 +7,7 @@
 //   1. The fundamentals   — dashboards, the app, notifications, the Owl, digest
 //   2. Goals & first sends — goals, alerts, audiences, a first simple email
 //   3. The Owl everywhere  — WhatsApp, Claude & ChatGPT connectors
-//   4. Automate & amplify  — journeys, ad accounts, the Pulse Pixel
+//   4. Automate & scale  — journeys, ad accounts, the Pulse Pixel
 // An email layer walks the client through the layers: a branded WELCOME PACK
 // when their first login exists, then a congratulations + "here's what's next"
 // email as each phase completes (an inbox announcement rides along). The account
@@ -78,7 +78,7 @@ function mount(app, { db, auth, mailer, os }) {
     { key: 'meetowl', icon: '🦉', title: 'Meet the Owl', sticker: '🦉 Owl Whisperer', tagline: 'Your on-demand analyst — it answers, builds and drafts for you.' },
     { key: 'engage', icon: '🎯', title: 'Goals & first sends', sticker: '🎯 Sharpshooter', tagline: 'Set targets, get to know your audiences, and send your first email.' },
     { key: 'owl', icon: '💬', title: 'The Owl everywhere', sticker: '💬 Everywhere Owl', tagline: 'Take your data analyst with you — WhatsApp, Claude and ChatGPT.' },
-    { key: 'automate', icon: '⚙️', title: 'Automate & amplify', sticker: '⚙️ Automation Architect', tagline: 'Journeys that run themselves, and your ad accounts wired in.' },
+    { key: 'automate', icon: '⚙️', title: 'Automate & scale', sticker: '⚙️ Automation Architect', tagline: 'Journeys that run themselves, and your ad accounts wired in.' },
   ];
 
   // Step catalogue. `auto` (when present) auto-completes the step from real state;
