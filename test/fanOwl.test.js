@@ -121,6 +121,14 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
   const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
   assert.equal(bootHome.body.page, null);
+  // pageChanged: first boot no (nothing to compare), reopening on the SAME page
+  // no, reopening after moving to another page yes → the widget re-surfaces
+  // the new page's pitch/offer/starters.
+  assert.equal(boot.body.pageChanged, false);
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, false);
+  await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', sessionId: back.body.sessionId }, headers: ORIGIN });
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, true);
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, false);
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {

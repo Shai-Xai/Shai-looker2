@@ -61,8 +61,22 @@
     return n;
   }
 
+  var frameHref = ''; // the host page the iframe was last (re)built on
+  var frameSeq = 0;   // cache-buster so re-setting src forces a fresh boot
+  function frameSrc(afterNav) {
+    frameSeq += 1;
+    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '');
+  }
   function openPanel(afterNav) {
-    if (frameWrap) { frameWrap.style.display = 'block'; launcher.style.display = 'none'; beacon('widget_open'); return; }
+    if (frameWrap) {
+      // Reopening on a DIFFERENT page (SPA navigations keep this iframe alive):
+      // reload it so the chat boots with THIS page's context, not the stale one.
+      if (window.location.href !== frameHref) { frameHref = window.location.href; frame.src = frameSrc(afterNav); }
+      frameWrap.style.display = 'block'; launcher.style.display = 'none';
+      if (teaser) teaser.style.display = 'none';
+      beacon('widget_open');
+      return;
+    }
     frameWrap = el('div', MOBILE() ? {
       position: 'fixed', inset: '0', zIndex: '2147483000', background: '#0008',
     } : {
@@ -75,7 +89,8 @@
     }, frameWrap);
     frame.setAttribute('title', 'Event assistant');
     frame.setAttribute('allow', 'clipboard-write');
-    frame.src = base + '/embed/fan#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '');
+    frameHref = window.location.href;
+    frame.src = frameSrc(afterNav);
     launcher.style.display = 'none';
     if (teaser) teaser.style.display = 'none';
     beacon('widget_open');

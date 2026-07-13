@@ -29,8 +29,10 @@ const lastStatus = (raw) => { let m; let s = ''; STATUS_RE.lastIndex = 0; while 
 
 export default function FanOwlEmbedPage() {
   const [sid] = useState(() => (/[#&]sid=([^&]+)/.exec(window.location.hash || '') || [])[1] || '');
-  // The loader adds &nav=1 when it reopens the chat after an Owl-driven page
-  // hop — greet the fan with the NEW page's context (pill, note, starters).
+  // "You've moved pages" — greet the fan with the NEW page's context (pill,
+  // pitch, offer, starters) instead of just resuming the old thread. Set by the
+  // loader's &nav=1 (an Owl-driven hop) or by boot's pageChanged flag (the fan
+  // browsed to another page and reopened the chat there).
   const [navArrived, setNavArrived] = useState(() => /[#&]nav=1/.test(window.location.hash || ''));
   const [boot, setBoot] = useState(null);
   const [error, setError] = useState('');
@@ -48,6 +50,7 @@ export default function FanOwlEmbedPage() {
       .then((b) => {
         setBoot(b);
         setMessages((b.messages || []).map((m) => ({ role: m.role, ...splitAnswer(m.body) })));
+        if (b.pageChanged && b.page && (b.messages || []).length) setNavArrived(true);
       })
       .catch(() => setError('This session has expired — close and reopen the assistant.'));
   }, [sid]);
@@ -137,10 +140,12 @@ export default function FanOwlEmbedPage() {
   if (!boot) return <div style={S.center}>🦉 One sec…</div>;
 
   const latest = messages[messages.length - 1];
-  // Fresh off an Owl-driven page hop → lead with the NEW page's starters, not the
-  // previous page's follow-ups.
-  const chips = navArrived ? (boot.starters || [])
-    : (!busy && latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : (!messages.length ? boot.starters : []));
+  // Suggested pills are ALWAYS on offer: right after an Owl reply its follow-ups
+  // lead; any other time (fresh open, reopened thread, page hop) the CURRENT
+  // page's starters show, so every page invites its own questions.
+  const chips = busy ? []
+    : (navArrived ? (boot.starters || [])
+      : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : (boot.starters || [])));
 
   return (
     <div style={S.shell}>
@@ -205,8 +210,22 @@ export default function FanOwlEmbedPage() {
           </div>
         ))}
         {navArrived && boot.page && (
-          <div style={{ textAlign: 'center', fontSize: 12.5, color: '#888', padding: '2px 8px' }}>
-            📍 You’re now on {pageLabel(boot.page)} — ask me anything about it
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <div style={{ alignSelf: 'center', fontSize: 12.5, color: '#888', padding: '2px 8px' }}>
+              📍 You’re now on {pageLabel(boot.page)} — ask me anything about it
+            </div>
+            {boot.pitch && <div style={{ ...S.bubble, ...S.theirs }}>{boot.pitch}</div>}
+            {boot.offer && (
+              <div style={S.offerCard}>
+                <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>
+                  {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : 'See tickets'}
+                  {boot.offer.availability ? ` · ${boot.offer.availability}` : ''}
+                </div>
+                <ImageStrip images={boot.offer.images} />
+                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>Tell me more</button>
+              </div>
+            )}
           </div>
         )}
         {chips.length > 0 && (

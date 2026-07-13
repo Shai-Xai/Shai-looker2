@@ -1030,9 +1030,11 @@ see "The continuous comms loop" above.)*
 - **2026-07-13** — **Fan Owl: site navigation + image uploads** 🧪: the chat now
   shows the page the fan is on and the Owl can take them to any mapped page of the
   website ("show me the lineup" → a **Take me there** button that opens the page
-  and reopens the chat in its context). Catalogue images can now be **uploaded**
-  in the editor (auto-resized, hosted by Pulse) instead of pasting URLs — both in
-  Admin → client → Fan Owl and client Settings → Fan Owl.
+  and reopens the chat in its context). Reopening the chat on a different page
+  re-surfaces that page's pitch, offer and suggested questions (which now always
+  show, per page) instead of just resuming the old thread. Catalogue images can
+  now be **uploaded** in the editor (auto-resized, hosted by Pulse) instead of
+  pasting URLs — both in Admin → client → Fan Owl and client Settings → Fan Owl.
 - **2026-07-11** — **🎯 App-audience groups → LIVE Engage segments** 🧪 (new):
   **tap any tile** on the App-audience card (app users, holders/buyers on or
   off the app, never-ticketed fans, group-buy upgraders) to save that group as

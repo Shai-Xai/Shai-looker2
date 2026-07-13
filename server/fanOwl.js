@@ -166,6 +166,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN pitch TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   // Migration: catalogue items gained images (URLs; a scrollable strip on offer cards).
   try { sql.exec("ALTER TABLE fan_catalogue ADD COLUMN images TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+  // Migration: where the chat was last OPENED (vs page_url = where the fan is now) —
+  // lets boot flag "you've moved pages" so the widget re-surfaces the new page's info.
+  try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN chat_page_url TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -609,10 +612,15 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     // Chips: the current page's configured starters (set by hand or drafted by the
     // website reader) win; otherwise sensible generic defaults.
     const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
+    // Has the fan moved pages since the chat was last open? Then the widget leads
+    // with THIS page's info (pitch/offer/starters), not just the old thread.
+    const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
+    sql.prepare('UPDATE fan_sessions SET chat_page_url = ? WHERE id = ?').run(session.page_url || '', session.id);
     res.json({
       site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
       event: suite ? { name: suite.name } : null,
       page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
+      pageChanged,
       pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
