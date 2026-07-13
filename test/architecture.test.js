@@ -23,7 +23,7 @@ const BUDGETS = {
   'index.js': 2950,    // composition root — keep extracting; ratchet down (integrations patch/views → integrationsConfig.js)
   'actions.js': 1690,   // tracking/tokens/approvals/automations extracted; preview+test-send → actionPreview.js
   'db.js': 1620,     // tile-library cluster extracted to tileLibrary.js — locked in lower
-  'insights.js': 1150,
+  'insights.js': 1100,   // JSON-salvage layer extracted to aiJson.js — locked in lower
   'goals.js': 1100,
 };
 
