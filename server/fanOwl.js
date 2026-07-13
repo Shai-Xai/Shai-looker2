@@ -537,7 +537,12 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // A mapping's navigable path: the pattern minus wildcards/junk (same derivation
   // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
   // the loader, so the Owl can only ever send fans within the promoter's own site.
-  const navPath = (pattern) => String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+  const navPath = (pattern) => {
+    const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+    // Root-relative, always: "lineup" must land on /lineup, not resolve against
+    // whatever sub-path the fan happens to be on.
+    return !frag || frag.startsWith('/') ? frag : `/${frag}`;
+  };
   const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
