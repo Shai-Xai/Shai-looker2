@@ -315,6 +315,23 @@
   .wfbar span { font-family: var(--mono); font-size: 10px; font-weight: 600; color: #fff; }
   .wfnote { margin-top: 10px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: rgba(255,255,255,0.35); }
 
+  /* App-analytics console mockup */
+  .appmock { display: flex; flex-direction: column; gap: 8px; }
+  .appmock .bignum { font-family: var(--display); font-weight: 800; font-size: 30px; letter-spacing: -0.02em; line-height: 1; }
+  .appmock .bigcap { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+  .split { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+  .srow { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); background: rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 10px; }
+  .srow b { font-weight: 600; color: inherit; font-variant-numeric: tabular-nums; }
+  .srow.hot { background: var(--signal-soft); color: var(--rose); border: 1px solid rgba(255,56,92,0.3); }
+  .vstep { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); text-align: center; padding: 1px 0; }
+  .segchip { display: flex; align-items: center; gap: 8px; border: 1px solid rgba(255,56,92,0.35); background: var(--signal-soft); color: var(--rose); border-radius: 10px; padding: 8px 11px; font-family: var(--display); font-weight: 700; font-size: 12px; }
+  .segchip .i { width: 14px; height: 14px; flex-shrink: 0; }
+  .notif { background: var(--panel-2); border: 1px solid var(--hairline-soft); border-radius: 12px; padding: 9px 11px; display: flex; gap: 9px; align-items: flex-start; }
+  .notif .avatar { width: 22px; height: 22px; border-radius: 6px; }
+  .notif .ntitle { font-family: var(--display); font-weight: 700; font-size: 11.5px; }
+  .notif .ntime { font-family: var(--mono); font-size: 8px; color: var(--muted); margin-left: 6px; }
+  .notif .ntext { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+
   /* Branched-journey decision tree */
   .tree { margin-top: 14px; max-width: 880px; }
   .troot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -809,7 +826,7 @@
   </section>
 
   <!-- 13 · NEXT ═════════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Direction, not dates — don't promise quarters. The app card is the HOWLER SUPER APP — the consumer app where fans browse content, buy tickets and receive notifications (not the Pulse client app). The unlock is app analytics: you can see exactly who is active in the app around your event but hasn't bought a ticket — that's a live segment of warm prospects, ready to target with push and in-app messages the moment the channel opens. WhatsApp campaigns and behaviour-branched journeys follow the same arc. Walk the tree bottom of the slide as one send becoming three paths: the clicker gets a personal code by SMS and exits when they buy; the opener gets a fresh angle; the non-opener gets a new subject line, then an SMS. Every fan follows their own path — nobody gets the blast.">
+  <section class="slide" data-note="Direction, not dates — don't promise quarters. The app is the HOWLER SUPER APP — the consumer app where fans browse content, buy tickets and receive notifications (not the Pulse client app). Walk the middle mockup top to bottom as one motion: 3,482 fans in the app right now, 2,278 of them without a ticket — one tap turns that into a live segment, and a push notification is ready to send, with no per-message cost. The numbers are illustrative; the flow is the pitch. Then the tree at the bottom, as one send becoming three paths: the clicker gets a personal code by SMS and exits when they buy; the opener gets a fresh angle; the non-opener gets a new subject line, then an SMS. Every fan follows their own path — nobody gets the blast.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
       <div class="kicker"><span>13 · On the horizon</span><span class="rule"></span></div>
       <h2>The next channel is already<br>in their pocket.</h2>
@@ -819,10 +836,18 @@
           <h3>The Howler super app</h3>
           <p>Your fans already live in the Howler app — browsing events, buying tickets, getting notifications. App analytics show exactly <b>who's engaging with your event but hasn't bought yet</b> — a ready-made segment to reach with push and in-app messages, no inbox to fight, no per-message cost.</p>
         </div>
-        <div class="card">
-          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-wa"/></svg></span><span class="tag">Growing channel</span></div>
-          <h3>WhatsApp, fully</h3>
-          <p>The Owl already talks on WhatsApp and delivers live event-night updates there. Full WhatsApp campaigns join email and SMS as a first-class send channel.</p>
+        <div class="card appmock" role="img" aria-label="App analytics mockup: 3,482 fans in the app right now, 2,278 without a ticket yet — one tap builds that segment, and a push notification is ready to send.">
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-live"/></svg></span><span class="tag">App analytics · live</span></div>
+          <div><div class="bignum">3,482</div><div class="bigcap">fans in the app right now</div></div>
+          <div class="split">
+            <div class="srow"><span>Have tickets</span><b>1,204</b></div>
+            <div class="srow hot"><span>No ticket yet</span><b>2,278</b></div>
+          </div>
+          <div class="vstep">↓ one tap</div>
+          <div class="segchip"><svg class="i"><use href="#i-target"/></svg><span>Segment · in-app, no ticket (2,278)</span></div>
+          <div class="vstep">↓ send</div>
+          <div class="notif"><span class="avatar"></span><div><span class="ntitle">Your Festival</span><span class="ntime">now</span><div class="ntext">Phase 2 just dropped — your early code is inside.</div></div></div>
+          <div class="mbtn">Send push · no per-message cost</div>
         </div>
         <div class="card">
           <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-branch"/></svg></span><span class="tag">Deeper journeys</span></div>
