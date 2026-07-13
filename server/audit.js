@@ -142,8 +142,13 @@ function mount(app, { db }) {
     // response in edge cases). originalUrl is never rewritten.
     const method = req.method;
     if (!M.WRITE.includes(method) && method !== 'GET') return next();
-    const path = String(req.originalUrl || req.url || '').split('?')[0];
+    const rawUrl = String(req.originalUrl || req.url || '');
+    const path = rawUrl.split('?')[0];
     if (!path.startsWith('/api/')) return next();
+    // A passive/background fetch (home widget, admin overview) marks itself with
+    // ?bg=1 so its GET isn't recorded as a deliberate "view" action — otherwise
+    // every home-page load counts as "Viewed goals" and swamps the report.
+    const isBackground = /[?&]bg=1(?:&|$)/.test(rawUrl);
     const body = req.body && typeof req.body === 'object' ? req.body : null;
     const bodyName = body ? (body.name || body.title || body.label || '') : '';
     const bodyEntity = body ? (body.entityId || '') : '';
@@ -160,6 +165,7 @@ function mount(app, { db }) {
           let entityId = rule.entity === 'body' ? bodyEntity : resolveEntity(rule.entity, m);
           const targetId = rule.target ? (m[Number(rule.target.replace('p', ''))] || '') : '';
           if (rule.view) {
+            if (isBackground) return; // widget/overview fetch — not a deliberate view
             const key = `${user.id}|${rule.action}|${targetId || entityId}`;
             const prev = lastView.get(key) || 0;
             if (Date.now() - prev < VIEW_THROTTLE_MS) return; // seen recently — skip

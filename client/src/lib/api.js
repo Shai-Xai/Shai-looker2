@@ -914,7 +914,9 @@ export const api = {
 
   // Goals (the Results pillar) — one guarded route set serves admin + client.
   // Goals are per event (suite); the list returns each goal with resolved progress.
-  suiteGoals: (suiteId) => fetch(`/api/goals/suites/${suiteId}`).then(json),
+  // `bg` marks a passive/background fetch (home widget, admin overview) so the
+  // audit log doesn't record it as a deliberate "Viewed goals" action.
+  suiteGoals: (suiteId, bg = false) => fetch(`/api/goals/suites/${suiteId}${bg ? '?bg=1' : ''}`).then(json),
   createGoal: (suiteId, b) => fetch(`/api/goals/suites/${suiteId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateGoal: (id, b) => fetch(`/api/goals/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   deleteGoal: (id) => fetch(`/api/goals/${id}`, { method: 'DELETE' }).then((r) => r.ok),
