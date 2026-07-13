@@ -903,7 +903,7 @@ function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = fal
   return lines;
 }
 
-async function briefHomeOverall({ groups, catalogue, capabilities, actions, today, instructions, apiKey }) {
+async function briefHomeOverall({ groups, catalogue, capabilities, actions, today, instructions, apiKey, app }) {
   const c = requireClient(apiKey);
   const lines = [];
   if (today) lines.push(`TODAY: ${today} (anchor all time references to this).`, '');
@@ -918,7 +918,7 @@ async function briefHomeOverall({ groups, catalogue, capabilities, actions, toda
     for (const cap of capabilities) lines.push(`- ${cap.key}: ${cap.description}`);
     lines.push('');
   }
-  lines.push('CATALOGUE (dashboardId: title [set, event]):');
+  if (app?.actives) lines.push(`APP AUDIENCE (their fans INSIDE the Howler consumer app — include ONE dedicated narrative point on this audience, an extra point is allowed for it, nudging a post to their in-app community): active app users last 28 days: ${app.actives}${app.communities ? `; in-app communities: ${app.communities}${app.members ? ` with ${app.members} members` : ''}` : ''}.`, ''); lines.push('CATALOGUE (dashboardId: title [set, event]):');
   for (const d of catalogue || []) lines.push(`- ${d.dashboardId}: ${d.title} [${d.setName}, ${d.suiteName}]`);
   const resp = await c.messages.create({
     model: BRIEF_MODEL, max_tokens: 1100, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
