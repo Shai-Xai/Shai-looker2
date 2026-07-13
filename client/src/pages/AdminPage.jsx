@@ -2887,7 +2887,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       api.getEntityIntegrations(entity.id).catch(() => null),
-      Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
+      Promise.all(suites.map((su) => api.suiteGoals(su.id, true).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
       Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
     ]).then(([mt, digests, prog, integ, goalsArr, suiteMtArr, alertsArr]) => {
