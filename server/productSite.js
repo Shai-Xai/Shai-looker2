@@ -276,6 +276,7 @@ const OVERVIEW_HTML = path.join(__dirname, '../docs/product-overview-sales.html'
 const SALES_HTML = path.join(__dirname, '../docs/pulse-sales-v2.html');
 const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features-v2.html');
 const MOCKUPS_DIR = path.join(__dirname, '../docs/mockups'); // "see it in motion" concept pages
+const KEYNOTE_HTML = path.join(__dirname, '../docs/pulse-client-keynote.html');
 
 // Stable slug for a `##` heading — survives status-emoji / punctuation edits.
 function slugify(heading) {
@@ -394,6 +395,15 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
   app.use('/sales/experience',
     (_req, res, next) => { allowInlineScripts(res); next(); },
     require('express').static(MOCKUPS_DIR, { index: 'index.html' }));
+
+  // The client-facing keynote deck (static → signal story) — a self-contained
+  // slide deck presented in meetings, shareable at a clean URL like /pitch.
+  // Its navigation lives in an inline <script>, hence the per-page CSP relax.
+  app.get(['/keynote', '/pulse-client-keynote', '/pulse-client-keynote.html'], (_req, res) => {
+    allowInlineScripts(res);
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.sendFile(KEYNOTE_HTML);
+  });
 
   // ── Admin: the full picture + include/exclude toggles ────────────────────────
   app.get('/api/admin/product/matrix', auth.requireAdmin, (_req, res) => {
