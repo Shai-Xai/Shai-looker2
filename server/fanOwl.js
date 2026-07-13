@@ -45,6 +45,7 @@ TOOLS:
 - getOffer → the tickets/add-ons relevant to the page the fan is on (plus the full public catalogue). Call it before recommending.
 - searchKnowledge → the organiser's FAQs/policies/info. Call it for ANY question about rules, logistics, inclusions or policies.
 - getCheckoutLink → the buy link for ONE catalogue item. Call it when the fan is ready to buy (or asks where to buy); the app renders it as a button — do NOT paste raw URLs into your reply text.
+- goToPage → send the fan to another page of THIS website (pick a urlPattern from the pages list in your instructions). Call it when the fan asks to see or go somewhere — the lineup, the tickets page, accommodation… The app shows a "Take me there" button under your reply; say you're pointing them there, never paste the URL.
 - captureLead → save the fan's name/email ONLY when the fan has explicitly given them AND agreed to be contacted. Never ask more than once, never require it, never invent consent. Offer it only as a favour ("want me to send you this / give you a heads-up before it sells out?").
 - logInterest → note what the fan cares about (a topic like "camping", "VIP", "kids") whenever real interest or an unanswerable question shows — this is how organisers learn what fans want.
 
@@ -530,6 +531,11 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return best;
   }
   const publicItem = (c) => ({ id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price, currency: c.currency, availability: c.availability, images: J(c.images, []) });
+  // A mapping's navigable path: the pattern minus wildcards/junk (same derivation
+  // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
+  // the loader, so the Owl can only ever send fans within the promoter's own site.
+  const navPath = (pattern) => String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+  const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
     const page = matchPage(site, url);
@@ -606,6 +612,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.json({
       site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
       event: suite ? { name: suite.name } : null,
+      page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
       pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
@@ -663,6 +670,18 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         schema: { name: 'logInterest', description: 'Note a topic the fan showed real interest in, or a question you could not answer — organisers learn from these.', input_schema: { type: 'object', properties: { topic: { type: 'string' }, detail: { type: 'string' } }, required: ['topic'] } },
         run: async ({ topic, detail }) => { logEvent(site.id, session.id, 'interest', { topic: String(topic || '').slice(0, 120), detail: String(detail || '').slice(0, 300) }); return { ok: true }; },
       },
+      goToPage: {
+        schema: { name: 'goToPage', description: 'Take the fan to another page of THIS event website — pick a urlPattern from the pages list in your instructions. The app shows a "Take me there" button under your reply; the button does the moving and the chat reopens there.', input_schema: { type: 'object', properties: { urlPattern: { type: 'string', description: 'the target page\'s urlPattern, exactly as listed in your instructions' } }, required: ['urlPattern'] } },
+        run: async ({ urlPattern }) => {
+          const want = String(urlPattern || '').trim().toLowerCase();
+          const pages = pagesBySite.all(site.id).filter((x) => navPath(x.url_pattern));
+          const p = pages.find((x) => x.url_pattern.toLowerCase() === want)
+            || (want && pages.find((x) => x.url_pattern.toLowerCase().includes(want) || want.includes(navPath(x.url_pattern).toLowerCase())));
+          if (!p) return { ok: false, reason: 'unknown_page', message: 'That page isn’t in the site’s page list — offer the fan the pages you do have.' };
+          logEvent(site.id, session.id, 'nav_issued', { pattern: p.url_pattern });
+          return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
+        },
+      },
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -703,7 +722,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
 
   // POST /api/fan/event — interaction beacons from the widget (deep-link clicks
   // etc.), the funnel's client-side half. Whitelisted kinds only.
-  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close']);
+  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close', 'nav_click']);
   app.post('/api/fan/event', rateLimit({ windowMs: 60_000, max: 60, by: 'ip', scope: 'fan-event' }), (req, res) => {
     const b = req.body || {};
     const session = getSession.get(String(b.sessionId || ''));
@@ -717,6 +736,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
   const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
   const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
+  const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
   const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
   app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
     const b = req.body || {};
@@ -760,6 +780,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       memory,
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
+      (() => {
+        const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
+        return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
+      })(),
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');
 
@@ -816,6 +840,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Offer cards: any buy links issued this turn (label + price + button URL).
       const offers = trail.filter((t) => t.name === 'getCheckoutLink' && t.result?.ok).map((t) => ({ ...t.result.item, url: t.result.url }));
       if (offers.length) res.write(OFFERS_MARK + JSON.stringify(offers));
+      // Navigation card: the last goToPage this turn (one destination per reply).
+      const navs = trail.filter((t) => t.name === 'goToPage' && t.result?.ok).map((t) => t.result.page);
+      if (navs.length) res.write(NAV_MARK + JSON.stringify(navs[navs.length - 1]));
       res.end();
     } catch (err) {
       console.error('[POST /api/fan/chat]', err.message);

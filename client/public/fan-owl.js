@@ -24,6 +24,7 @@
   // the SAME conversation — the Owl remembers what you talked about last visit.
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
+  var SS_REOPEN = 'howler_fan_reopen_' + siteKey.slice(-8); // per-tab: reopen the chat after an Owl-driven page hop
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -60,7 +61,7 @@
     return n;
   }
 
-  function openPanel() {
+  function openPanel(afterNav) {
     if (frameWrap) { frameWrap.style.display = 'block'; launcher.style.display = 'none'; beacon('widget_open'); return; }
     frameWrap = el('div', MOBILE() ? {
       position: 'fixed', inset: '0', zIndex: '2147483000', background: '#0008',
@@ -74,7 +75,7 @@
     }, frameWrap);
     frame.setAttribute('title', 'Event assistant');
     frame.setAttribute('allow', 'clipboard-write');
-    frame.src = base + '/embed/fan#sid=' + encodeURIComponent(ctx.sessionId);
+    frame.src = base + '/embed/fan#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '');
     launcher.style.display = 'none';
     if (teaser) teaser.style.display = 'none';
     beacon('widget_open');
@@ -85,7 +86,18 @@
     beacon('widget_close');
   }
   window.addEventListener('message', function (e) {
-    if (e.origin === base && e.data === 'howler-fan-owl:close') closePanel();
+    if (e.origin !== base) return;
+    if (e.data === 'howler-fan-owl:close') { closePanel(); return; }
+    // The Owl's "Take me there" button: navigate WITHIN the host site (the path is
+    // resolved against this page's own origin — never off-site), flagging the tab
+    // so the chat reopens on the new page with its context.
+    if (e.data && e.data.t === 'howler-fan-owl:nav' && typeof e.data.path === 'string') {
+      var dest;
+      try { dest = new URL(e.data.path, window.location.origin); } catch (err) { return; }
+      if (dest.origin !== window.location.origin) return; // same-site only
+      try { window.sessionStorage.setItem(SS_REOPEN, '1'); } catch (err) { /* still navigates; just won't auto-reopen */ }
+      window.location.href = dest.toString();
+    }
   });
 
   function render() {
@@ -102,9 +114,14 @@
     launcher.type = 'button';
     launcher.setAttribute('aria-label', 'Ask about tickets');
     launcher.textContent = '🦉';
-    launcher.addEventListener('click', openPanel);
+    launcher.addEventListener('click', function () { openPanel(); });
 
-    updateTeaser();
+    // Arriving from an Owl-driven page hop? Reopen the chat straight away so the
+    // conversation continues on this page's context; otherwise show the teaser.
+    var reopen = null;
+    try { reopen = window.sessionStorage.getItem(SS_REOPEN); if (reopen) window.sessionStorage.removeItem(SS_REOPEN); } catch (e) { /* ignore */ }
+    if (reopen === '1') openPanel(true);
+    else updateTeaser();
   }
 
   // The teaser: the deterministic ribbon — the page's mapped offer (or the site's

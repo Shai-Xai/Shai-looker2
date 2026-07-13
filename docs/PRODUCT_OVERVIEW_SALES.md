@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-11 (🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join · previously: 👥 Social+ in-app community analytics · 📲 App analytics via direct PostHog integration) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-13 (🦉 Fan Owl: in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -194,6 +194,12 @@ ticket like a well-informed friend who's already going.
 - **Knows the page the fan is on** — on an artist page it leads with the ticket
   that gets you to that artist; on the tickets page, the best options; plus a
   no-AI "ribbon" teaser (offer + live availability tag) on every page.
+- **Navigates the site with the fan** — the chat shows which page the fan is on
+  ("📍 tickets page") and the Owl can walk them around the website: ask for the
+  lineup or accommodation and it offers a **"Take me there"** button that opens
+  that page and continues the chat in its context.
+- **Offer cards with real photos** — upload images per ticket/add-on straight from
+  the editor (or paste URLs); fans swipe through them on the offer card.
 - **Answers like the organiser would** — FAQs, refund policy, what's included:
   answered ONLY from the knowledge base the promoter writes (never invented), with
   prices only ever from the configured catalogue. Urgency only from real
@@ -1021,6 +1027,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-13** — **Fan Owl: site navigation + image uploads** 🧪: the chat now
+  shows the page the fan is on and the Owl can take them to any mapped page of the
+  website ("show me the lineup" → a **Take me there** button that opens the page
+  and reopens the chat in its context). Catalogue images can now be **uploaded**
+  in the editor (auto-resized, hosted by Pulse) instead of pasting URLs — both in
+  Admin → client → Fan Owl and client Settings → Fan Owl.
 - **2026-07-11** — **🎯 App-audience groups → LIVE Engage segments** 🧪 (new):
   **tap any tile** on the App-audience card (app users, holders/buyers on or
   off the app, never-ticketed fans, group-buy upgraders) to save that group as

@@ -116,6 +116,11 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const boot = await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`);
   assert.deepEqual(boot.body.starters, ['Who plays Saturday?']);
   assert.deepEqual(boot.body.offer.images, ['https://fest.example/img/camp1.jpg']);
+  // The "you are here" pill: boot names the matched page; unmatched pages carry none.
+  assert.deepEqual(boot.body.page, { pageType: 'artist', note: 'artist pages', urlPattern: '/artists/*' });
+  const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
+  const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
+  assert.equal(bootHome.body.page, null);
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {
@@ -232,11 +237,13 @@ test('funnel: beacons are whitelisted and roll up in the insights view', async (
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
   const sid = ctx.body.sessionId;
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'deeplink_click', payload: { itemId: 'x' } } });
+  await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'nav_click', payload: { path: '/artists/' } } }); // Owl-driven page hop
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'drop_table', payload: {} } }); // not whitelisted → ignored
   const s = await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/insights`, { as: admin });
   const funnel = s.body.sites[0].funnel;
   assert.equal(funnel.ribbon_view, 1);
   assert.equal(funnel.deeplink_click, 1);
+  assert.equal(funnel.nav_click, 1);
   assert.equal(funnel.drop_table, undefined);
 });
 
