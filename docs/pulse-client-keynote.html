@@ -315,6 +315,18 @@
   .wfbar span { font-family: var(--mono); font-size: 10px; font-weight: 600; color: #fff; }
   .wfnote { margin-top: 10px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: rgba(255,255,255,0.35); }
 
+  /* Branched-journey decision tree */
+  .tree { margin-top: 14px; max-width: 880px; }
+  .troot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .troot .tsplit { font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .branch { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 9px 0 9px 22px; margin-left: 20px; border-left: 2px solid var(--hairline-soft); }
+  .ta { color: var(--signal); font-size: 15px; line-height: 1; }
+  .cond { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
+  .cond.hit { color: var(--rose); background: var(--signal-soft); border: 1px solid rgba(255,56,92,0.35); }
+  .cond.miss { color: var(--dim); border: 1px dashed rgba(255,255,255,0.22); }
+  .out { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--muted); }
+  .out .i { width: 13px; height: 13px; color: var(--rose); flex-shrink: 0; }
+
   /* Then / Now table */
   .thennow { margin-top: 26px; border: 1px solid var(--hairline-soft); border-radius: 16px; overflow: hidden; }
   .tn-row { display: flex; }
@@ -797,7 +809,7 @@
   </section>
 
   <!-- 13 · NEXT ═════════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Direction, not dates — don't promise quarters. The app card is the HOWLER SUPER APP — the consumer app where fans browse content, buy tickets and receive notifications (not the Pulse client app). The unlock is app analytics: you can see exactly who is active in the app around your event but hasn't bought a ticket — that's a live segment of warm prospects, ready to target with push and in-app messages the moment the channel opens. WhatsApp campaigns and behaviour-branched journeys follow the same arc.">
+  <section class="slide" data-note="Direction, not dates — don't promise quarters. The app card is the HOWLER SUPER APP — the consumer app where fans browse content, buy tickets and receive notifications (not the Pulse client app). The unlock is app analytics: you can see exactly who is active in the app around your event but hasn't bought a ticket — that's a live segment of warm prospects, ready to target with push and in-app messages the moment the channel opens. WhatsApp campaigns and behaviour-branched journeys follow the same arc. Walk the tree bottom of the slide as one send becoming three paths: the clicker gets a personal code by SMS and exits when they buy; the opener gets a fresh angle; the non-opener gets a new subject line, then an SMS. Every fan follows their own path — nobody gets the blast.">
     <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
       <div class="kicker"><span>13 · On the horizon</span><span class="rule"></span></div>
       <h2>The next channel is already<br>in their pocket.</h2>
@@ -816,6 +828,28 @@
           <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-branch"/></svg></span><span class="tag">Deeper journeys</span></div>
           <h3>Branching on behaviour</h3>
           <p>Journeys that fork on what each person does — opened, clicked, purchased — so the path adapts mid-flight, not just the timing.</p>
+        </div>
+      </div>
+      <p class="flownote" style="margin-top:30px">…what a branched journey looks like — one send, three paths:</p>
+      <div class="tree" role="img" aria-label="A branched email journey: one announce email splits on behaviour. Clicked but didn't buy gets an SMS with a personal code two hours later and exits on purchase. Opened but didn't click gets a second email with a new angle. Didn't open gets the same email with a new subject line two days later, then an SMS if still quiet.">
+        <div class="troot">
+          <span class="fnode src"><svg class="i"><use href="#i-mail"/></svg><span class="fl">Email 1 · final release<small>sent to the live segment</small></span></span>
+          <span class="tsplit">splits on behaviour ↓</span>
+        </div>
+        <div class="branch">
+          <span class="cond hit">✓ clicked, didn't buy</span><span class="ta">→</span>
+          <span class="fnode"><svg class="i"><use href="#i-sms"/></svg><span class="fl">SMS · personal 10% code<small>2 hours later</small></span></span><span class="ta">→</span>
+          <span class="out"><svg class="i"><use href="#i-check"/></svg><span>buys → exits the journey</span></span>
+        </div>
+        <div class="branch">
+          <span class="cond hit">✓ opened, didn't click</span><span class="ta">→</span>
+          <span class="fnode"><svg class="i"><use href="#i-mail"/></svg><span class="fl">Email 2 · a new angle<small>the line-up story, next day</small></span></span><span class="ta">→</span>
+          <span class="out"><svg class="i"><use href="#i-sync"/></svg><span>watches the next signal</span></span>
+        </div>
+        <div class="branch">
+          <span class="cond miss">✗ didn't open</span><span class="ta">→</span>
+          <span class="fnode"><svg class="i"><use href="#i-mail"/></svg><span class="fl">Email 1B · new subject line<small>two days later</small></span></span><span class="ta">→</span>
+          <span class="out"><svg class="i"><use href="#i-sms"/></svg><span>SMS if still quiet</span></span>
         </div>
       </div>
     </div>
