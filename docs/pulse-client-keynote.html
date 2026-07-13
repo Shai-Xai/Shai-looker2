@@ -21,7 +21,7 @@
     --signal-2: #ff6b35;       /* gradient partner */
     --signal-3: #8b5cf6;       /* family gradient tail (see /sales, /pitch) */
     --signal-soft: rgba(255,56,92,0.14);
-    --ok: #34d399;
+    --rose: #ff8aa0;
     --display: -apple-system, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
     --body: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -30,18 +30,15 @@
   /* One visual world by design — the deck stays a dark stage in either theme. */
   :root[data-theme="light"], :root[data-theme="dark"] { color-scheme: dark; }
 
-  html, body { height: 100%; }
+  html, body { min-height: 100%; }
   body {
-    background: var(--stage);
+    background: #0b0b0f; background-color: var(--stage);
     color: var(--text);
     font-family: var(--body);
     -webkit-font-smoothing: antialiased;
-    overflow: hidden;
   }
 
   /* ─── Deck chrome ───────────────────────────────────────────────────────── */
-  .deck { position: fixed; inset: 0; }
-
   .progress {
     position: fixed; top: 0; left: 0; height: 3px; z-index: 40;
     background: linear-gradient(90deg, var(--signal), var(--signal-2) 55%, var(--signal-3));
@@ -54,6 +51,7 @@
     padding: 12px clamp(16px, 4vw, 40px);
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
     color: var(--muted); pointer-events: none;
+    background: linear-gradient(180deg, rgba(11,11,15,0), rgba(11,11,15,0.88) 55%);
   }
   .chrome > * { pointer-events: auto; }
   .brandmark { display: flex; align-items: center; gap: 8px; text-transform: uppercase; }
@@ -64,7 +62,7 @@
   }
   @keyframes beat { 0%,100% { transform: scale(1); opacity: .85; } 12% { transform: scale(1.45); opacity: 1; } 24% { transform: scale(1); } }
 
-  .counter { font-variant-numeric: tabular-nums; }
+  .counter { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .counter b { color: var(--text); font-weight: 600; }
 
   .navbtns { display: flex; gap: 8px; }
@@ -77,158 +75,235 @@
   .navbtns button:hover, .notesbtn:hover { color: var(--text); border-color: rgba(255,255,255,0.22); }
   .navbtns button:focus-visible, .notesbtn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-  /* ─── Slides ────────────────────────────────────────────────────────────── */
+  /* ─── Slides — display-toggled by JS (inline styles), animated on entry ── */
   .slide {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column; justify-content: center;
-    padding: clamp(20px, 5vh, 56px) clamp(20px, 6vw, 96px) clamp(64px, 10vh, 96px);
-    opacity: 0; visibility: hidden;
-    transform: translateX(28px);
-    transition: opacity 420ms cubic-bezier(0.22,1,0.36,1), transform 420ms cubic-bezier(0.22,1,0.36,1), visibility 0s linear 420ms;
-    overflow-y: auto;
+    display: none;
+    min-height: 100vh;
+    flex-direction: column; justify-content: center;
+    padding: 48px clamp(20px, 6vw, 96px) 96px;
   }
-  .slide.on {
-    opacity: 1; visibility: visible; transform: none;
-    transition: opacity 420ms cubic-bezier(0.22,1,0.36,1), transform 420ms cubic-bezier(0.22,1,0.36,1);
-    z-index: 10;
-  }
-  .slide.leftward { transform: translateX(-28px); }
-  .slide.on.leftward { transform: none; }
+  .slide.on { animation: enter 460ms cubic-bezier(0.22,1,0.36,1); }
+  @keyframes enter { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
 
-  .inner { width: 100%; max-width: 1060px; margin: 0 auto; }
+  .inner { width: 100%; max-width: 1060px; margin-left: auto; margin-right: auto; }
 
   .kicker {
-    font-family: var(--mono); font-size: clamp(10px, 1.4vw, 12px);
+    font-family: var(--mono); font-size: 11.5px;
     letter-spacing: 0.22em; text-transform: uppercase;
-    color: var(--signal); margin-bottom: clamp(14px, 2.5vh, 24px);
+    color: var(--signal); margin-bottom: 20px;
     display: flex; align-items: center; gap: 12px;
   }
-  .kicker::after { content: ""; flex: 0 0 42px; height: 1px; background: linear-gradient(90deg, var(--signal), transparent); }
+  .kicker .rule { width: 42px; height: 1px; background: linear-gradient(90deg, var(--signal), transparent); }
   .kicker.dimmed { color: var(--dim); }
-  .kicker.dimmed::after { background: linear-gradient(90deg, var(--dim), transparent); }
+  .kicker.dimmed .rule { background: linear-gradient(90deg, var(--dim), transparent); }
 
   h1 {
     font-family: var(--display);
     font-size: clamp(34px, 7.2vw, 76px);
     line-height: 1.02; font-weight: 800; letter-spacing: -0.03em;
-    text-wrap: balance; margin-bottom: clamp(14px, 3vh, 26px);
+    text-wrap: balance; margin-bottom: 22px;
   }
   h2 {
     font-family: var(--display);
     font-size: clamp(27px, 4.6vw, 52px);
     line-height: 1.06; font-weight: 800; letter-spacing: -0.025em;
-    text-wrap: balance; margin-bottom: clamp(12px, 2.6vh, 22px);
+    text-wrap: balance; margin-bottom: 18px;
   }
   .grad {
     background: linear-gradient(92deg, var(--signal) 10%, var(--signal-2) 90%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .lede {
-    font-size: clamp(15px, 2.2vw, 20px); line-height: 1.55;
-    color: var(--muted); max-width: 40em; text-wrap: pretty;
+    font-size: clamp(15px, 2.1vw, 19px); line-height: 1.55;
+    color: var(--muted); max-width: 720px; text-wrap: pretty;
   }
   .lede strong { color: var(--text); font-weight: 600; }
 
-  /* Bullet rows — a marker tick, not a disc */
-  .points { list-style: none; margin-top: clamp(18px, 3.4vh, 32px); display: grid; gap: clamp(10px, 1.8vh, 16px); max-width: 46em; }
-  .points li {
-    display: grid; grid-template-columns: 18px 1fr; gap: 14px; align-items: baseline;
-    font-size: clamp(14px, 1.9vw, 17px); line-height: 1.5; color: var(--muted);
+  /* ─── Icons ─────────────────────────────────────────────────────────────── */
+  .i {
+    width: 18px; height: 18px; display: block;
+    stroke: currentColor; fill: none;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
   }
-  .points li::before {
-    content: ""; width: 18px; height: 2px; border-radius: 2px;
-    background: linear-gradient(90deg, var(--signal), var(--signal-2));
-    transform: translateY(-4px);
+  .ic {
+    width: 36px; height: 36px; border-radius: 11px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--signal-soft); color: var(--rose);
+    flex-shrink: 0;
   }
-  .points li strong { color: var(--text); font-weight: 600; }
-  .points.dimmed li::before { background: var(--dim); }
+  .ic.dim { background: rgba(255,255,255,0.05); color: var(--dim); }
+  .ic.mini { width: 26px; height: 26px; border-radius: 8px; }
+  .ic.mini .i { width: 14px; height: 14px; }
+
+  /* Icon bullet rows */
+  .points { list-style: none; margin-top: 28px; max-width: 780px; }
+  .points li { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+  .points .txt {
+    flex: 1 1 0; min-width: 0;
+    font-size: clamp(14px, 1.9vw, 16.5px); line-height: 1.55; color: var(--muted);
+    padding-top: 6px; text-wrap: pretty;
+  }
+  .points .txt strong { color: var(--text); font-weight: 600; }
 
   /* Cards */
-  .cards { display: grid; gap: clamp(10px, 1.6vw, 16px); margin-top: clamp(18px, 3.4vh, 32px); }
-  .cards.three { grid-template-columns: repeat(3, 1fr); }
+  .cards { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
   .card {
+    flex: 1 1 260px; min-width: 0;
     background: var(--panel); border: 1px solid var(--hairline-soft);
-    border-radius: 16px; padding: clamp(14px, 2vw, 22px);
+    border-radius: 16px; padding: 20px;
+  }
+  .card .cardtop { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card .tag {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--signal);
   }
   .card h3 { font-family: var(--display); font-size: clamp(15px, 1.9vw, 18px); font-weight: 700; letter-spacing: -0.01em; margin-bottom: 8px; }
   .card p { font-size: clamp(13px, 1.6vw, 14.5px); line-height: 1.55; color: var(--muted); text-wrap: pretty; }
-  .card .tag {
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--signal); display: block; margin-bottom: 10px;
-  }
-  .card.dim { background: var(--dim-panel); }
-  .card.dim .tag { color: var(--dim); }
-  .card.dim h3 { color: var(--dim); }
+  .card.dimcard { background: var(--dim-panel); }
+  .card.dimcard .tag { color: var(--dim); }
+  .card.dimcard h3 { color: var(--dim); }
 
   /* Old-world layer stack */
-  .stack { display: grid; gap: 8px; margin-top: clamp(18px, 3vh, 28px); max-width: 560px; }
+  .stack { margin-top: 26px; max-width: 600px; }
   .layer {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    display: flex; align-items: center; gap: 12px;
     background: var(--dim-panel); border: 1px dashed rgba(255,255,255,0.13);
-    border-radius: 10px; padding: 11px 16px;
+    border-radius: 12px; padding: 10px 14px; margin-bottom: 8px;
     font-size: clamp(12.5px, 1.6vw, 14.5px); color: var(--dim);
   }
+  .layer .lname { flex: 1 1 0; min-width: 0; }
   .layer .lag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; color: rgba(255,255,255,0.32); white-space: nowrap; }
 
-  /* The loop */
-  .loop { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 6px; margin-top: clamp(18px, 3.4vh, 30px); }
+  /* The loop + phone mockup */
+  .duo { display: flex; gap: 40px; align-items: center; margin-top: 8px; }
+  .duo .main { flex: 1 1 0; min-width: 0; }
+  .loop { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 6px; margin-top: 26px; }
   .loop .node {
+    display: inline-flex; align-items: center; gap: 8px;
     background: var(--panel-2); border: 1px solid var(--hairline);
-    border-radius: 999px; padding: 11px 20px;
-    font-family: var(--display); font-weight: 700; font-size: clamp(13.5px, 1.9vw, 16px);
+    border-radius: 999px; padding: 9px 18px;
+    font-family: var(--display); font-weight: 700; font-size: clamp(13px, 1.8vw, 15px);
     letter-spacing: -0.01em; white-space: nowrap;
   }
-  .loop .node.hot { background: var(--signal-soft); border-color: rgba(255,56,92,0.4); color: #ff8aa0; }
+  .loop .node .i { width: 15px; height: 15px; color: var(--rose); flex-shrink: 0; }
+  .loop .node.hot { background: var(--signal-soft); border-color: rgba(255,56,92,0.4); color: var(--rose); }
   .loop .arr { color: var(--signal); font-size: 18px; line-height: 1; }
-  .loopnote { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); }
+  .loopnote { margin-top: 16px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); }
   .loopnote b { color: var(--signal); font-weight: 600; }
 
-  /* Personalised message cards */
-  .msg { border-radius: 14px; overflow: hidden; border: 1px solid var(--hairline-soft); background: var(--panel); }
-  .msg header {
-    padding: 9px 14px; border-bottom: 1px solid var(--hairline-soft);
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--signal);
-    display: flex; justify-content: space-between; gap: 8px;
+  /* Phone mockup (pure HTML, themable) */
+  .mock {
+    flex: 0 0 232px; width: 232px;
+    border: 1px solid var(--hairline); border-radius: 30px;
+    background: #101016; padding: 12px; box-shadow: 0 18px 50px -18px rgba(0,0,0,0.8);
   }
-  .msg header span:last-child { color: var(--muted); letter-spacing: 0.04em; text-transform: none; }
-  .msg .body { padding: 13px 14px; font-size: clamp(12.5px, 1.5vw, 13.8px); line-height: 1.55; color: var(--muted); }
-  .msg .body b { color: var(--text); font-weight: 600; }
+  .mock .mtop { display: flex; align-items: center; gap: 8px; padding: 6px 4px 12px; }
+  .mock .mtop .ic { width: 26px; height: 26px; border-radius: 8px; }
+  .mock .mtop .ic .i { width: 14px; height: 14px; }
+  .mock .mtitle { font-family: var(--display); font-weight: 700; font-size: 12px; }
+  .mock .msub { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .mcard { background: var(--panel-2); border: 1px solid var(--hairline-soft); border-radius: 14px; padding: 11px; margin-bottom: 8px; }
+  .mcard .mlabel { font-family: var(--mono); font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--signal); margin-bottom: 7px; }
+  .mline { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.10); margin-bottom: 5px; }
+  .mline.short { width: 62%; }
+  .mrow { display: flex; gap: 6px; }
+  .mchip { flex: 1; background: rgba(255,255,255,0.05); border-radius: 9px; padding: 7px 8px; }
+  .mchip .mnum { font-family: var(--display); font-weight: 800; font-size: 13px; letter-spacing: -0.02em; }
+  .mchip .mcap { font-family: var(--mono); font-size: 7.5px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
+  .mbtn {
+    margin-top: 2px; text-align: center; border-radius: 999px; padding: 8px;
+    background: linear-gradient(92deg, var(--signal), var(--signal-2));
+    font-family: var(--display); font-weight: 700; font-size: 11px; color: #fff;
+  }
+  .mpulse { display: block; width: 100%; height: 34px; }
+
+  /* Personalised message cards */
+  .msg {
+    flex: 1 1 240px; min-width: 0;
+    border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--hairline-soft); background: var(--panel);
+  }
+  .msg .mhead {
+    padding: 9px 13px; border-bottom: 1px solid var(--hairline-soft);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .msg .mhead .seg { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--signal); flex: 1 1 0; min-width: 0; }
+  .msg .mhead .via { font-family: var(--mono); font-size: 9.5px; color: var(--muted); white-space: nowrap; }
+  .msg .mbody { padding: 13px 14px; font-size: clamp(12.5px, 1.5vw, 13.8px); line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .msg .mbody b { color: var(--text); font-weight: 600; }
+
+  /* Ad-sync diagram */
+  .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 28px 0 6px; }
+  .fnode {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--panel); border: 1px solid var(--hairline);
+    border-radius: 13px; padding: 12px 16px;
+    font-family: var(--display); font-weight: 700; font-size: 14px; white-space: nowrap;
+  }
+  .fnode.src { border-color: rgba(255,56,92,0.45); background: var(--signal-soft); color: var(--rose); }
+  .fnode small { display: block; font-family: var(--mono); font-weight: 400; font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+  .fnode .fl { line-height: 1.1; }
+  .farr { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); }
+  .farr .fa { color: var(--signal); font-size: 17px; line-height: 1; }
+  .farr .fcap { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .fgroup { display: flex; flex-direction: column; gap: 8px; }
+  .flownote { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .flownote b { color: var(--rose); font-weight: 600; }
 
   /* Journey band */
-  .band-wrap { overflow-x: auto; margin-top: clamp(18px, 3.2vh, 30px); padding-bottom: 8px; }
-  .band { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; min-width: 820px; }
+  .band-wrap { overflow-x: auto; margin-top: 26px; padding-bottom: 8px; }
+  .band { display: flex; gap: 10px; min-width: 830px; }
   .phase {
+    flex: 1 1 0; min-width: 150px;
     background: var(--panel); border: 1px solid var(--hairline-soft); border-radius: 14px;
     padding: 14px; position: relative;
   }
-  .phase::before {
-    content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 2px; border-radius: 2px;
-    background: linear-gradient(90deg, var(--signal), var(--signal-2));
-    opacity: calc(0.25 + var(--heat, 0) * 0.75);
-  }
-  .phase h4 { font-family: var(--display); font-size: 13.5px; font-weight: 700; margin: 6px 0 4px; letter-spacing: -0.01em; }
-  .phase .when { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
-  .phase p { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 6px 0 10px; }
+  .phase .heatbar { height: 2px; border-radius: 2px; margin-bottom: 10px;
+    background: linear-gradient(90deg, var(--signal), var(--signal-2)); }
+  .phase .ptop { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .phase h4 { font-family: var(--display); font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
+  .phase .when { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 5px; }
+  .phase p { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 4px 0 10px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip {
+    display: inline-flex; align-items: center; gap: 4px;
     font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em;
     border: 1px solid var(--hairline); border-radius: 999px; padding: 3px 9px; color: var(--muted);
   }
-  .chip.hot { border-color: rgba(255,56,92,0.45); color: #ff8aa0; background: var(--signal-soft); }
+  .chip .i { width: 11px; height: 11px; }
+  .chip.hot { border-color: rgba(255,56,92,0.45); color: var(--rose); background: var(--signal-soft); }
+
+  /* Journey waterfall */
+  .wf { margin-top: 28px; max-width: 640px; }
+  .wfrow { display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
+  .wflabel { flex: 0 0 96px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); text-align: right; }
+  .wftrack { flex: 1 1 0; min-width: 0; }
+  .wfbar {
+    height: 22px; border-radius: 6px;
+    background: linear-gradient(92deg, var(--signal), var(--signal-2));
+    display: flex; align-items: center; justify-content: flex-end;
+    padding: 0 8px; min-width: 44px;
+  }
+  .wfbar span { font-family: var(--mono); font-size: 10px; font-weight: 600; color: #fff; }
+  .wfnote { margin-top: 10px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: rgba(255,255,255,0.35); }
 
   /* Then / Now table */
-  .thennow { margin-top: clamp(18px, 3.2vh, 30px); border: 1px solid var(--hairline-soft); border-radius: 16px; overflow: hidden; }
-  .tn-row { display: grid; grid-template-columns: 1fr 1fr; }
+  .thennow { margin-top: 26px; border: 1px solid var(--hairline-soft); border-radius: 16px; overflow: hidden; }
+  .tn-row { display: flex; }
   .tn-row + .tn-row { border-top: 1px solid var(--hairline-soft); }
   .tn-row.head { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; }
   .tn-row.head .then { color: var(--dim); } .tn-row.head .now { color: var(--signal); }
-  .tn-row > div { padding: clamp(10px, 1.6vh, 14px) clamp(12px, 2vw, 20px); font-size: clamp(12.5px, 1.7vw, 15px); line-height: 1.45; }
+  .tn-row .then, .tn-row .now {
+    flex: 1 1 0; min-width: 0;
+    padding: 12px clamp(12px, 2vw, 20px);
+    font-size: clamp(12.5px, 1.7vw, 15px); line-height: 1.45;
+  }
   .tn-row .then { color: var(--dim); background: var(--dim-panel); }
   .tn-row .now { color: var(--text); background: var(--panel); }
 
   /* EKG */
-  .ekg { display: block; width: min(720px, 100%); height: auto; margin-top: clamp(22px, 4.5vh, 44px); }
-  .ekg .flat { stroke: rgba(255,255,255,0.16); }
+  .ekg { display: block; width: 100%; max-width: 720px; height: auto; margin-top: 34px; }
+  .ekg .flatl { stroke: rgba(255,255,255,0.16); }
   .ekg .live {
     stroke: url(#sig); stroke-width: 2.5; fill: none;
     stroke-linecap: round; stroke-linejoin: round;
@@ -237,111 +312,141 @@
   }
   @keyframes draw { to { stroke-dashoffset: 0; } }
   .flatline {
-    height: 1px; max-width: 340px; margin-top: clamp(18px, 3vh, 28px);
+    height: 1px; max-width: 340px; margin-top: 24px;
     background: repeating-linear-gradient(90deg, rgba(255,255,255,0.22) 0 8px, transparent 8px 15px);
   }
 
-  .titlefoot { margin-top: clamp(20px, 4vh, 36px); font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; color: var(--muted); }
+  .titlefoot { margin-top: 30px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; color: var(--muted); }
   .titlefoot a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--hairline); }
   .titlefoot a:hover { color: var(--text); }
 
   /* Closing steps */
-  .steps { margin-top: clamp(18px, 3.4vh, 30px); display: grid; gap: 10px; max-width: 620px; counter-reset: step; list-style: none; }
+  .steps { margin-top: 26px; list-style: none; max-width: 640px; }
   .steps li {
-    counter-increment: step;
-    display: grid; grid-template-columns: 34px 1fr; gap: 14px; align-items: center;
+    display: flex; gap: 14px; align-items: center;
     background: var(--panel); border: 1px solid var(--hairline-soft); border-radius: 12px;
-    padding: 12px 16px; font-size: clamp(13.5px, 1.8vw, 15.5px); color: var(--muted);
+    padding: 12px 16px; margin-bottom: 10px;
   }
-  .steps li::before {
-    content: counter(step);
+  .steps .num {
+    flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
     font-family: var(--mono); font-size: 13px; font-weight: 600;
-    width: 34px; height: 34px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
     background: var(--signal-soft); color: var(--signal);
   }
-  .steps li strong { color: var(--text); font-weight: 600; }
+  .steps .txt { flex: 1 1 0; min-width: 0; font-size: clamp(13.5px, 1.8vw, 15.5px); line-height: 1.5; color: var(--muted); }
+  .steps .txt strong { color: var(--text); font-weight: 600; }
 
   /* Presenter notes */
   .notes {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-    background: rgba(16,16,21,0.96); border-top: 1px solid var(--hairline);
-    padding: 16px clamp(16px, 4vw, 40px) 52px;
+    background: rgba(16,16,21,0.97); border-top: 1px solid var(--hairline);
+    padding: 16px clamp(16px, 4vw, 40px) 56px;
     font-size: 13.5px; line-height: 1.6; color: var(--muted);
-    transform: translateY(100%); transition: transform 300ms cubic-bezier(0.22,1,0.36,1);
-    max-height: 42vh; overflow-y: auto;
+    display: none; max-height: 42vh; overflow-y: auto;
   }
-  .notes.open { transform: none; }
+  .notes.open { display: block; }
   .notes .nlabel { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--signal); margin-bottom: 8px; }
-  .notes p { max-width: 72em; }
 
   /* Tap zones (mobile advance) */
-  .tapzone { position: fixed; top: 60px; bottom: 60px; width: 18%; z-index: 30; background: transparent; border: 0; cursor: pointer; }
+  .tapzone { position: fixed; top: 70px; bottom: 70px; width: 15%; z-index: 30; background: transparent; border: 0; cursor: pointer; padding: 0; }
   .tapzone:focus-visible { outline: 2px solid var(--signal); outline-offset: -4px; }
   .tapzone.left { left: 0; } .tapzone.right { right: 0; }
 
   .hint {
-    position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 48px; left: 0; right: 0; text-align: center;
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: rgba(255,255,255,0.34);
-    z-index: 40; transition: opacity 600ms; pointer-events: none; text-align: center;
+    z-index: 40; transition: opacity 600ms; pointer-events: none;
   }
   .hint.gone { opacity: 0; }
 
   /* ─── Mobile ────────────────────────────────────────────────────────────── */
-  @media (max-width: 720px) {
-    .cards.three { grid-template-columns: 1fr; }
-    .tn-row { grid-template-columns: 1fr; }
+  @media (max-width: 760px) {
+    .slide { justify-content: flex-start; padding-top: 56px; }
+    .duo { flex-direction: column; align-items: flex-start; gap: 26px; }
+    .mock { flex-basis: auto; }
+    .tn-row { flex-direction: column; }
     .tn-row .then { border-bottom: 1px dashed var(--hairline-soft); }
-    .tn-row.head .now { display: none; }
-    .tn-row:not(.head) .now::before {
-      content: "NOW"; display: block; font-family: var(--mono); font-size: 9px;
-      letter-spacing: 0.2em; color: var(--signal); margin-bottom: 4px;
+    .tn-row.head { display: none; }
+    .tn-row .then .cell-tag, .tn-row .now .cell-tag {
+      display: block; font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+      text-transform: uppercase; margin-bottom: 4px;
     }
-    .tn-row:not(.head) .then::before {
-      content: "THEN"; display: block; font-family: var(--mono); font-size: 9px;
-      letter-spacing: 0.2em; color: var(--dim); margin-bottom: 4px;
-    }
+    .tn-row .then .cell-tag { color: var(--dim); }
+    .tn-row .now .cell-tag { color: var(--signal); }
     .navbtns { display: none; }
-    .slide { justify-content: flex-start; padding-top: clamp(48px, 9vh, 72px); }
+    .wflabel { flex-basis: 72px; }
+  }
+  @media (min-width: 761px) {
+    .cell-tag { display: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .slide, .progress, .notes { transition: none; }
+    .slide.on { animation: none; }
     .ekg .live { animation: none; stroke-dashoffset: 0; }
     .brandmark .dot { animation: none; }
+    .progress { transition: none; }
   }
 
   /* ─── Print → PDF export: every slide, one per page ─────────────────────── */
   @media print {
-    body { overflow: visible; background: #0b0b0f; }
-    .deck { position: static; }
-    .slide {
-      position: relative; opacity: 1; visibility: visible; transform: none;
-      page-break-after: always; min-height: 96vh; overflow: visible;
-    }
-    .progress, .chrome, .notes, .tapzone, .hint { display: none; }
+    body { background: #0b0b0f; }
+    .slide { display: flex !important; page-break-after: always; min-height: 96vh; }
+    .progress, .chrome, .notes, .tapzone, .hint { display: none !important; }
   }
 </style>
 </head>
 <body>
+
+<!-- Icon set — one stroke language, referenced with <use> -->
+<svg width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <defs>
+    <linearGradient id="sig" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff385c"/><stop offset="0.55" stop-color="#ff6b35"/><stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M15 7v10" stroke-dasharray="2.4 2.4"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-6"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
+    <symbol id="i-sms" viewBox="0 0 24 24"><path d="M4 5h16v11H9.5L4.5 20z"/><path d="M8.4 10.5h.01M12 10.5h.01M15.6 10.5h.01" stroke-width="2.4"/></symbol>
+    <symbol id="i-wa" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 01-12.3 7.6L4 21l1.5-4.1A8.5 8.5 0 1120.5 12z"/><path d="M9.2 10.2c.4 2 2.4 4 4.4 4.4l1.4-1.2 1.7 1.1c-.6 1.2-2 1.6-3.5 1-2.4-1-4.5-3.1-5.4-5.5-.5-1.4 0-2.8 1.2-3.3l1 1.8z" stroke-width="1.1"/></symbol>
+    <symbol id="i-ads" viewBox="0 0 24 24"><path d="M3 10v4h3l8 5V5l-8 5H3z"/><path d="M17.5 9a5.5 5.5 0 010 6"/></symbol>
+    <symbol id="i-stamp" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6.5"/><path d="M9.3 10.2l2 2 3.6-4M5 21h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.2V12l3.2 2"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M8 3v4M16 3v4M3.5 10.5h17"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6.5A2.5 2.5 0 004 7.5V16"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.6 5.6 1.9-5.6 1.9-1.9 5.6-1.9-5.6L4.5 11l5.6-1.9z"/><path d="M18.5 16.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" stroke-width="1.2"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5L5.5 13H11l-1.2 8.5L17.5 11H12l1-8.5z"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M19.5 8.5A8 8 0 006 6.2L4.5 7.7M4.5 3.9v3.8h3.8"/><path d="M4.5 15.5A8 8 0 0018 17.8l1.5-1.5M19.5 20.1v-3.8h-3.8"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="4.2"/><path d="M12 11.2v1.6" stroke-width="2.6"/></symbol>
+    <symbol id="i-venn" viewBox="0 0 24 24"><circle cx="9.2" cy="12" r="6"/><circle cx="14.8" cy="12" r="6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8.2 11V8.2a3.8 3.8 0 017.6 0V11"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.6" width="10" height="18.8" rx="2.6"/><path d="M10.6 18.4h2.8"/></symbol>
+    <symbol id="i-push" viewBox="0 0 24 24"><rect x="5" y="2.6" width="10" height="18.8" rx="2.6"/><path d="M18.6 9.2a4.6 4.6 0 010 5.6"/><path d="M8.6 18.4h2.8"/></symbol>
+    <symbol id="i-owl" viewBox="0 0 24 24"><circle cx="12" cy="12.5" r="8.2"/><circle cx="9" cy="11.5" r="1.9"/><circle cx="15" cy="11.5" r="1.9"/><path d="M12 14.3l-1.1 1.6h2.2zM6.6 7.4L9 6.2M17.4 7.4L15 6.2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 16v-5.5a5.5 5.5 0 0111 0V16l1.8 2H4.7z"/><path d="M10.2 20.6a1.9 1.9 0 003.6 0"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.8l7 2.8v5.8c0 4.3-2.9 7.4-7 8.8-4.1-1.4-7-4.5-7-8.8V5.6z"/><path d="M9 12l2.1 2.1L15.3 10"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 18.5a8.5 8.5 0 0115 0"/><path d="M12 14.5l4.2-4.2"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6.5" r="2"/><circle cx="6" cy="17.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6.5h3.5a4 4 0 014 4v.5M8 17.5h3.5a4 4 0 004-4v-.5"/></symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24"><path d="M9.5 4.5l-2 15M16.5 4.5l-2 15M4.5 9.5h16M3.5 14.5h16"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3.2v1.9M12 18.9v1.9M3.2 12h1.9M18.9 12h1.9M5.8 5.8l1.3 1.3M16.9 16.9l1.3 1.3M18.2 5.8l-1.3 1.3M7.1 16.9l-1.3 1.3"/></symbol>
+    <symbol id="i-live" viewBox="0 0 24 24"><path d="M12 11v2" stroke-width="3.4"/><path d="M8 8.2a5.6 5.6 0 000 7.6M16 8.2a5.6 5.6 0 010 7.6"/><path d="M5.3 5.6a9.4 9.4 0 000 12.8M18.7 5.6a9.4 9.4 0 010 12.8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.4 12.3l2.5 2.5 4.7-5.2"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5L21 8l-9 4.5L3 8z"/><path d="M4.5 12.5L12 16.2l7.5-3.7M4.5 17L12 20.7 19.5 17"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c-4.7 4.7-4.7 12.3 0 17M12 3.5c4.7 4.7 4.7 12.3 0 17"/></symbol>
+  </defs>
+</svg>
 
 <div class="progress" id="progress"></div>
 
 <main class="deck" id="deck" aria-live="polite">
 
   <!-- 1 · TITLE ═══════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Open warm. One line: 'Everything you're about to see runs on your own live event data — this isn't a concept deck, the platform is live.' Point at the line drawing itself: flat is where marketing has been; the beat is where we're going.">
-    <div class="inner">
-      <div class="kicker">Howler × You &nbsp;·&nbsp; Pulse — the Experience OS</div>
+  <section class="slide" style="display:flex" data-note="Open warm. One line: 'Everything you're about to see runs on your own live event data — this isn't a concept deck, the platform is live.' Point at the line drawing itself: flat is where marketing has been; the beat is where we're going.">
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>Howler × You · Pulse — the Experience OS</span><span class="rule"></span></div>
       <h1>Your marketing<br>has a <span class="grad">pulse</span> now.</h1>
       <p class="lede">From static, planned-months-ahead campaigns to <strong>live, hyper-personal conversations</strong> — powered by your own data, read by AI, delivered across every channel from one place.</p>
       <svg class="ekg" viewBox="0 0 720 90" aria-hidden="true">
-        <defs>
-          <linearGradient id="sig" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stop-color="#ff385c"/><stop offset="0.55" stop-color="#ff6b35"/><stop offset="1" stop-color="#8b5cf6"/>
-          </linearGradient>
-        </defs>
-        <line class="flat" x1="0" y1="45" x2="720" y2="45" stroke-width="1" stroke-dasharray="6 9"/>
+        <line class="flatl" x1="0" y1="45" x2="720" y2="45" stroke-width="1" stroke-dasharray="6 9"/>
         <path class="live" d="M0 45 H210 l14 -9 14 9 H300 l10 -30 12 58 10 -42 8 14 H430 l14 -8 12 8 H520 l10 -26 12 50 10 -36 8 12 H720"/>
       </svg>
       <p class="titlefoot"><a href="https://howler-pulse-v2.onrender.com">howler-pulse-v2.onrender.com</a> &nbsp;·&nbsp; July 2026</p>
@@ -350,17 +455,17 @@
 
   <!-- 2 · THE OLD WORLD ═════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Acknowledge this is nobody's fault — it's how the tooling forced everyone to work. Every box in the stack is a real platform, a real login, a real export. The lag column is the point: each hand-off adds days, and the customer signal goes cold while the campaign travels through the stack.">
-    <div class="inner">
-      <div class="kicker dimmed">01 · The old world</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker dimmed"><span>01 · The old world</span><span class="rule"></span></div>
       <h2>Marketing by relay race,<br>at the speed of paperwork.</h2>
       <p class="lede">Every campaign has had to travel through <strong>layers of platforms and layers of people</strong> before it ever reached a customer.</p>
       <div class="stack">
-        <div class="layer"><span>Ticketing platform — where the data lives</span><span class="lag">locked</span></div>
-        <div class="layer"><span>Analytics / BI — where the data is looked at</span><span class="lag">+ days</span></div>
-        <div class="layer"><span>Email tool — export a CSV, import a list</span><span class="lag">+ days</span></div>
-        <div class="layer"><span>SMS provider — another list, another login</span><span class="lag">+ days</span></div>
-        <div class="layer"><span>Ad manager — upload last month's audience</span><span class="lag">stale</span></div>
-        <div class="layer"><span>Agency &amp; approval chain — everyone signs off</span><span class="lag">+ weeks</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-ticket"/></svg></span><span class="lname">Ticketing platform — where the data lives</span><span class="lag">locked</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-chart"/></svg></span><span class="lname">Analytics / BI — where the data is looked at</span><span class="lag">+ days</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-mail"/></svg></span><span class="lname">Email tool — export a CSV, import a list</span><span class="lag">+ days</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-sms"/></svg></span><span class="lname">SMS provider — another list, another login</span><span class="lag">+ days</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-ads"/></svg></span><span class="lname">Ad manager — upload last month's audience</span><span class="lag">stale</span></div>
+        <div class="layer"><span class="ic dim mini"><svg class="i"><use href="#i-stamp"/></svg></span><span class="lname">Agency &amp; approval chain — everyone signs off</span><span class="lag">+ weeks</span></div>
       </div>
       <div class="flatline" aria-hidden="true"></div>
     </div>
@@ -368,22 +473,22 @@
 
   <!-- 3 · THE COST ══════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Make it concrete with their world: 'VIP tier starts moving on a Tuesday night. In the old model, someone spots it Thursday, briefs a designer Friday, and the send goes out the following week — after the surge died.' The vanilla point usually lands hardest: their most loyal fan and a total stranger got the identical email.">
-    <div class="inner">
-      <div class="kicker dimmed">02 · What it costs</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker dimmed"><span>02 · What it costs</span><span class="rule"></span></div>
       <h2>By the time the campaign ships,<br>the moment is gone.</h2>
-      <div class="cards three">
-        <div class="card dim">
-          <span class="tag">Missed opportunities</span>
+      <div class="cards">
+        <div class="card dimcard">
+          <div class="cardtop"><span class="ic dim"><svg class="i"><use href="#i-clock"/></svg></span><span class="tag">Missed opportunities</span></div>
           <h3>The signal goes cold</h3>
           <p>A surge, a stall, an abandoned cart — spotted Monday, briefed Wednesday, approved Friday. The customer moved on days ago.</p>
         </div>
-        <div class="card dim">
-          <span class="tag">Rigid calendars</span>
+        <div class="card dimcard">
+          <div class="cardtop"><span class="ic dim"><svg class="i"><use href="#i-cal"/></svg></span><span class="tag">Rigid calendars</span></div>
           <h3>Locked a quarter out</h3>
           <p>Campaigns planned months ahead can't react to what's actually happening. The plan gets executed whether the market agrees or not.</p>
         </div>
-        <div class="card dim">
-          <span class="tag">Vanilla messaging</span>
+        <div class="card dimcard">
+          <div class="cardtop"><span class="ic dim"><svg class="i"><use href="#i-copy"/></svg></span><span class="tag">Vanilla messaging</span></div>
           <h3>One message, everyone</h3>
           <p>The superfan on their fifth year, the first-timer, the person who abandoned checkout last night — all got the same email. Personalisation was a first name, at best.</p>
         </div>
@@ -393,82 +498,102 @@
 
   <!-- 4 · THE SHIFT ═════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="This is the pivot slide — slow down here. The argument: AI didn't just make the old process cheaper, it collapsed the process. When reading the data, deciding, writing the copy and building the send all happen in one place in minutes, the quarterly plan stops being the unit of marketing. The customer signal becomes the unit.">
-    <div class="inner">
-      <div class="kicker">03 · The shift</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>03 · The shift</span><span class="rule"></span></div>
       <h2>AI didn't just change the tools.<br><span class="grad">It changed the clock.</span></h2>
       <p class="lede">When live data, AI analysis and campaign execution live in <strong>one system</strong>, the distance from <strong>customer signal → response</strong> collapses from weeks to minutes. Marketing stops being a broadcast schedule and becomes a <strong>living system that responds</strong>.</p>
       <ul class="points">
-        <li><strong>Read</strong> — the data explains itself the moment it lands, no analyst queue.</li>
-        <li><strong>Decide</strong> — AI surfaces the opportunity and suggests the action.</li>
-        <li><strong>Act</strong> — the campaign is drafted, targeted and ready in the same place.</li>
-        <li><strong>Learn</strong> — results flow straight back in and sharpen the next move.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-chart"/></svg></span><div class="txt"><strong>Read</strong> — the data explains itself the moment it lands, no analyst queue.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-spark"/></svg></span><div class="txt"><strong>Decide</strong> — AI surfaces the opportunity and suggests the action.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-bolt"/></svg></span><div class="txt"><strong>Act</strong> — the campaign is drafted, targeted and ready in the same place.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-sync"/></svg></span><div class="txt"><strong>Learn</strong> — results flow straight back in and sharpen the next move.</div></li>
       </ul>
     </div>
   </section>
 
   <!-- 5 · MEET PULSE ════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Positioning line: it's not dashboards AND an email tool AND reports — it's one loop. The audiences you message are powered by the same governed data as the dashboards, so you go from seeing a cohort to acting on it in one tap. White-label: their logo, their colours, their sending identity. Installable on the phone, with push — mobile is the primary surface.">
-    <div class="inner">
-      <div class="kicker">04 · The platform</div>
-      <h2>Pulse. One place, one loop,<br>your brand.</h2>
-      <p class="lede">Live dashboards, an AI analyst, a full campaign engine and ad-platform sync — <strong>one login, on your phone, in your brand</strong>.</p>
-      <div class="loop" role="img" aria-label="The Pulse loop: live data lands, the AI reads it, you act, results flow back, and the loop repeats sharper.">
-        <span class="node">Live data lands</span><span class="arr">→</span>
-        <span class="node">AI reads it</span><span class="arr">→</span>
-        <span class="node hot">You act</span><span class="arr">→</span>
-        <span class="node">Results flow back</span><span class="arr">→</span>
-        <span class="node">Next move, sharper</span>
+  <section class="slide" data-note="Positioning line: it's not dashboards AND an email tool AND reports — it's one loop. The audiences you message are powered by the same governed data as the dashboards, so you go from seeing a cohort to acting on it in one tap. White-label: their logo, their colours, their sending identity. Installable on the phone, with push — mobile is the primary surface. The phone beside you is the point: this is what it looks like in their pocket.">
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>04 · The platform</span><span class="rule"></span></div>
+      <div class="duo">
+        <div class="main">
+          <h2>Pulse. One place, one loop,<br>your brand.</h2>
+          <p class="lede">Live dashboards, an AI analyst, a full campaign engine and ad-platform sync — <strong>one login, on your phone, in your brand</strong>.</p>
+          <div class="loop" role="img" aria-label="The Pulse loop: live data lands, the AI reads it, you act, results flow back, and the loop repeats sharper.">
+            <span class="node"><svg class="i"><use href="#i-chart"/></svg>Live data lands</span><span class="arr">→</span>
+            <span class="node"><svg class="i"><use href="#i-owl"/></svg>AI reads it</span><span class="arr">→</span>
+            <span class="node hot"><svg class="i"><use href="#i-bolt"/></svg>You act</span><span class="arr">→</span>
+            <span class="node"><svg class="i"><use href="#i-sync"/></svg>Results flow back</span>
+          </div>
+          <p class="loopnote"><b>↻</b> insight → action → results → improvement, on repeat — every cycle is sharper than the last.</p>
+        </div>
+        <div class="mock" aria-label="Pulse on a phone: morning briefing, live numbers, one-tap campaign draft.">
+          <div class="mtop"><span class="ic"><svg class="i"><use href="#i-owl"/></svg></span><div><div class="mtitle">Your brand · Pulse</div><div class="msub">Morning briefing</div></div></div>
+          <div class="mcard">
+            <div class="mlabel">Live now</div>
+            <svg class="mpulse" viewBox="0 0 200 34" aria-hidden="true"><path d="M0 22 H48 l6 -5 6 5 H92 l5 -14 6 24 5 -17 4 7 H150 l6 -4 5 4 H200" fill="none" stroke="url(#sig)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="mline"></div><div class="mline short"></div>
+          </div>
+          <div class="mrow" style="margin-bottom:8px">
+            <div class="mchip"><div class="mnum">R1.24m</div><div class="mcap">Revenue</div></div>
+            <div class="mchip"><div class="mnum">+312</div><div class="mcap">Tickets today</div></div>
+          </div>
+          <div class="mcard">
+            <div class="mlabel">Suggested action</div>
+            <div class="mline"></div><div class="mline short"></div>
+          </div>
+          <div class="mbtn">Draft this campaign →</div>
+        </div>
       </div>
-      <p class="loopnote"><b>↻</b> insight → action → results → improvement, on repeat — every cycle is sharper than the last.</p>
     </div>
   </section>
 
   <!-- 6 · INSIGHT ═══════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Demo-adjacent slide — if you can, open Pulse live here on your phone. The Owl answers plain-language questions grounded in their data only. Alerts flip the model: instead of checking dashboards, the number that matters taps you on the shoulder. On event night, Live Updates turns the phone into the control room.">
-    <div class="inner">
-      <div class="kicker">05 · Reliable, instant insight</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>05 · Reliable, instant insight</span><span class="rule"></span></div>
       <h2>Answers in seconds,<br>not reports in weeks.</h2>
       <ul class="points">
-        <li><strong>Live dashboards</strong> on your real ticketing, cashless and web data — drill from headline to detail, on your phone.</li>
-        <li><strong>Ask the Owl anything</strong> in plain language — "what's selling right now?", "how does this compare to last year?" — answered from your own data, in-app or on WhatsApp.</li>
-        <li><strong>An AI morning briefing</strong> that tells you what changed overnight and what to do about it — before you've asked.</li>
-        <li><strong>Alerts &amp; live event-day updates</strong> — the number that matters taps you on the shoulder the moment it moves; on event night, a mini report lands every 30 minutes.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-chart"/></svg></span><div class="txt"><strong>Live dashboards</strong> on your real ticketing, cashless and web data — drill from headline to detail, on your phone.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-owl"/></svg></span><div class="txt"><strong>Ask the Owl anything</strong> in plain language — "what's selling right now?", "how does this compare to last year?" — answered from your own data, in-app or on WhatsApp.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-sun"/></svg></span><div class="txt"><strong>An AI morning briefing</strong> that tells you what changed overnight and what to do about it — before you've asked.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-bell"/></svg></span><div class="txt"><strong>Alerts &amp; live event-day updates</strong> — the number that matters taps you on the shoulder the moment it moves; on event night, a mini report lands every 30 minutes.</div></li>
       </ul>
     </div>
   </section>
 
   <!-- 7 · SEGMENTATION ══════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Key phrase: 'always-live'. A segment isn't an exported snapshot — it re-resolves from the source data at the moment of use, every time. The combine example lands well: abandoned-cart MINUS the people the call centre already reached. And it's the same governed data as the dashboards — no CSV gymnastics, no version confusion.">
-    <div class="inner">
-      <div class="kicker">06 · Segmentation</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>06 · Segmentation</span><span class="rule"></span></div>
       <h2>Audiences that build themselves —<br><span class="grad">and never go stale.</span></h2>
       <ul class="points">
-        <li><strong>Built from your live data</strong> — turn any dashboard cohort into a named audience; filter on any field: ticket type, city, age, purchase history.</li>
-        <li><strong>Combine like sets</strong> — union, intersect, exclude. "Abandoned cart, <em>minus</em> everyone we already called."</li>
-        <li><strong>Always-live</strong> — segments re-resolve at the moment of send. New matches flow in, buyers drop out. No exported snapshot ever goes stale.</li>
-        <li><strong>Scoped and governed</strong> — locked to your events, on the same server-enforced data boundary as everything else in Pulse.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-target"/></svg></span><div class="txt"><strong>Built from your live data</strong> — turn any dashboard cohort into a named audience; filter on any field: ticket type, city, age, purchase history.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-venn"/></svg></span><div class="txt"><strong>Combine like sets</strong> — union, intersect, exclude. "Abandoned cart, <em>minus</em> everyone we already called."</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-sync"/></svg></span><div class="txt"><strong>Always-live</strong> — segments re-resolve at the moment of send. New matches flow in, buyers drop out. No exported snapshot ever goes stale.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-lock"/></svg></span><div class="txt"><strong>Scoped and governed</strong> — locked to your events, on the same server-enforced data boundary as everything else in Pulse.</div></li>
       </ul>
     </div>
   </section>
 
   <!-- 8 · HYPER-PERSONALISATION ═════════════════════════════════════════════ -->
   <section class="slide" data-note="The three message cards are one send moment, three audiences, three genuinely different messages — not a first-name token. The AI drafts the copy AND designs the email (themes, layout, even on-brand banners), always inside their branding, always editable. Different segments can even get different languages.">
-    <div class="inner">
-      <div class="kicker">07 · Hyper-personalisation</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>07 · Hyper-personalisation</span><span class="rule"></span></div>
       <h2>The end of the vanilla campaign.</h2>
       <p class="lede">Same moment, same event — <strong>three different customers, three different messages</strong>. Drafted by AI, on-brand, personalised on any field in the data.</p>
-      <div class="cards three">
+      <div class="cards">
         <div class="msg">
-          <header><span>Segment · Returning VIP</span><span>email + app</span></header>
-          <div class="body"><b>Welcome back, Thandi — year five.</b> Your VIP pre-sale opens 48 hours before everyone else. Your usual spot is waiting.</div>
+          <div class="mhead"><span class="ic mini"><svg class="i"><use href="#i-check"/></svg></span><span class="seg">Returning VIP</span><span class="via">email + app</span></div>
+          <div class="mbody"><b>Welcome back, Thandi — year five.</b> Your VIP pre-sale opens 48 hours before everyone else. Your usual spot is waiting.</div>
         </div>
         <div class="msg">
-          <header><span>Segment · First-timer</span><span>email</span></header>
-          <div class="body"><b>First time? Here's how it works.</b> What to bring, how cashless works, and the acts everyone regrets missing. GA early-bird ends Friday.</div>
+          <div class="mhead"><span class="ic mini"><svg class="i"><use href="#i-spark"/></svg></span><span class="seg">First-timer</span><span class="via">email</span></div>
+          <div class="mbody"><b>First time? Here's how it works.</b> What to bring, how cashless works, and the acts everyone regrets missing. GA early-bird ends Friday.</div>
         </div>
         <div class="msg">
-          <header><span>Segment · Abandoned cart</span><span>sms · 2h after</span></header>
-          <div class="body"><b>Your 2× Weekend passes are still in the cart.</b> Prices step up at midnight — finish checkout in one tap: how.lr/x8fk2</div>
+          <div class="mhead"><span class="ic mini"><svg class="i"><use href="#i-clock"/></svg></span><span class="seg">Abandoned cart</span><span class="via">sms · 2h after</span></div>
+          <div class="mbody"><b>Your 2× Weekend passes are still in the cart.</b> Prices step up at midnight — finish checkout in one tap: how.lr/x8fk2</div>
         </div>
       </div>
     </div>
@@ -476,50 +601,69 @@
 
   <!-- 9 · AD PLATFORMS ══════════════════════════════════════════════════════ -->
   <section class="slide" data-note="The stale-CSV upload is the ritual everyone recognises — kill it here. Pulse mirrors the segment to Meta/TikTok and auto-syncs daily: buyers leave the audience automatically, so you stop paying to advertise to people who already bought. Identities are hashed before they leave Pulse. And spend/ROAS reads back into Pulse, next to real ticket sales.">
-    <div class="inner">
-      <div class="kicker">08 · The ad platforms</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>08 · The ad platforms</span><span class="rule"></span></div>
       <h2>Ad audiences that are <span class="grad">live</span> —<br>not last month's CSV.</h2>
+      <div class="flow" role="img" aria-label="A live Pulse segment syncs daily, hashed, to Meta and TikTok custom audiences; buyers drop out automatically and spend plus ROAS reads back into Pulse.">
+        <span class="fnode src"><svg class="i"><use href="#i-target"/></svg><span class="fl">Live Pulse segment<small>re-resolves daily</small></span></span>
+        <span class="farr"><span class="fa">→</span><span class="fcap"><svg class="i" style="width:11px;height:11px;display:inline-block;vertical-align:-2px"><use href="#i-hash"/></svg> hashed</span></span>
+        <span class="fgroup">
+          <span class="fnode"><svg class="i"><use href="#i-ads"/></svg><span class="fl">Meta custom audience<small>facebook · instagram</small></span></span>
+          <span class="fnode"><svg class="i"><use href="#i-ads"/></svg><span class="fl">TikTok custom audience<small>targeting or exclusion</small></span></span>
+        </span>
+        <span class="farr"><span class="fa">→</span><span class="fcap">reads back</span></span>
+        <span class="fnode"><svg class="i"><use href="#i-chart"/></svg><span class="fl">Spend · clicks · ROAS<small>inside pulse</small></span></span>
+      </div>
+      <p class="flownote"><b>↩</b> someone buys → they leave the segment → they leave the ad audience on the next sync. No more paying to re-convert converted people.</p>
       <ul class="points">
-        <li><strong>One click to Meta &amp; TikTok</strong> — any Pulse segment becomes a Custom Audience for targeting or exclusion.</li>
-        <li><strong>Auto-synced daily</strong> — the platform audience mirrors the live segment. Someone buys, they leave the ad audience. Someone new matches, they join.</li>
-        <li><strong>Stop wasting spend</strong> — exclude purchasers automatically instead of paying to re-convert people who already converted.</li>
-        <li><strong>Privacy-safe &amp; measurable</strong> — identities are hashed before they leave Pulse, and ad spend, clicks and ROAS read back in, next to your actual ticket sales.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-bolt"/></svg></span><div class="txt"><strong>One click to Meta &amp; TikTok</strong> — any Pulse segment becomes a Custom Audience for targeting or exclusion, auto-synced daily.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-shield"/></svg></span><div class="txt"><strong>Privacy-safe &amp; measurable</strong> — identities are hashed before they leave Pulse, and ad spend, clicks and ROAS read back in, next to your actual ticket sales.</div></li>
       </ul>
     </div>
   </section>
 
   <!-- 10 · 360° ORCHESTRATION ═══════════════════════════════════════════════ -->
   <section class="slide" data-note="One audience brain behind every channel — that's the 360 claim. The ads a person sees and the email they get tell the same story at the same moment, because they're driven by the same live segment. Walk the band left to right; note the channel mix shifting as the campaign arc progresses. WhatsApp is rolling out via the Owl today, growing as a channel.">
-    <div class="inner">
-      <div class="kicker">09 · 360° orchestration</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>09 · 360° orchestration</span><span class="rule"></span></div>
       <h2>Right message, right channel,<br>right moment of the campaign.</h2>
       <p class="lede">Email, SMS, WhatsApp and the ad platforms, run off <strong>one audience brain</strong> — so every channel tells the same person the same story, at the right beat of the arc.</p>
       <div class="band-wrap">
         <div class="band">
-          <div class="phase" style="--heat:.2">
-            <span class="when">Announce</span><h4>Build the base</h4>
+          <div class="phase">
+            <div class="heatbar" style="opacity:.3"></div>
+            <div class="ptop"><span class="ic mini"><svg class="i"><use href="#i-ads"/></svg></span><h4>Build the base</h4></div>
+            <span class="when">Announce</span>
             <p>Tease last year's fans; lookalikes warm up on paid.</p>
-            <div class="chips"><span class="chip hot">Email</span><span class="chip">Meta</span><span class="chip">TikTok</span></div>
+            <div class="chips"><span class="chip hot"><svg class="i"><use href="#i-mail"/></svg>Email</span><span class="chip">Meta</span><span class="chip">TikTok</span></div>
           </div>
-          <div class="phase" style="--heat:.45">
-            <span class="when">On-sale</span><h4>Convert the warm</h4>
+          <div class="phase">
+            <div class="heatbar" style="opacity:.5"></div>
+            <div class="ptop"><span class="ic mini"><svg class="i"><use href="#i-bolt"/></svg></span><h4>Convert the warm</h4></div>
+            <span class="when">On-sale</span>
             <p>VIPs get pre-sale first; ads retarget engaged non-buyers.</p>
-            <div class="chips"><span class="chip hot">Email</span><span class="chip hot">SMS</span><span class="chip">Meta</span></div>
+            <div class="chips"><span class="chip hot"><svg class="i"><use href="#i-mail"/></svg>Email</span><span class="chip hot"><svg class="i"><use href="#i-sms"/></svg>SMS</span><span class="chip">Meta</span></div>
           </div>
-          <div class="phase" style="--heat:.65">
-            <span class="when">Mid-campaign</span><h4>Respond to signals</h4>
+          <div class="phase">
+            <div class="heatbar" style="opacity:.68"></div>
+            <div class="ptop"><span class="ic mini"><svg class="i"><use href="#i-branch"/></svg></span><h4>Respond to signals</h4></div>
+            <span class="when">Mid-campaign</span>
             <p>Abandoned-cart journeys; slow tiers get a targeted nudge.</p>
-            <div class="chips"><span class="chip hot">Journeys</span><span class="chip">Email</span><span class="chip">Meta</span></div>
+            <div class="chips"><span class="chip hot"><svg class="i"><use href="#i-branch"/></svg>Journeys</span><span class="chip"><svg class="i"><use href="#i-mail"/></svg>Email</span><span class="chip">Meta</span></div>
           </div>
-          <div class="phase" style="--heat:.85">
-            <span class="when">Final push</span><h4>Urgency, honestly</h4>
+          <div class="phase">
+            <div class="heatbar" style="opacity:.85"></div>
+            <div class="ptop"><span class="ic mini"><svg class="i"><use href="#i-clock"/></svg></span><h4>Urgency, honestly</h4></div>
+            <span class="when">Final push</span>
             <p>Real scarcity to real prospects; buyers excluded from every ad.</p>
-            <div class="chips"><span class="chip hot">SMS</span><span class="chip hot">WhatsApp</span><span class="chip">Paid</span></div>
+            <div class="chips"><span class="chip hot"><svg class="i"><use href="#i-sms"/></svg>SMS</span><span class="chip hot"><svg class="i"><use href="#i-wa"/></svg>WhatsApp</span><span class="chip">Paid</span></div>
           </div>
-          <div class="phase" style="--heat:1">
-            <span class="when">Event week</span><h4>Serve, then upsell</h4>
+          <div class="phase">
+            <div class="heatbar"></div>
+            <div class="ptop"><span class="ic mini"><svg class="i"><use href="#i-live"/></svg></span><h4>Serve, then upsell</h4></div>
+            <span class="when">Event week</span>
             <p>Know-before-you-go, cashless top-up nudges, live updates.</p>
-            <div class="chips"><span class="chip hot">WhatsApp</span><span class="chip">SMS</span><span class="chip">Email</span></div>
+            <div class="chips"><span class="chip hot"><svg class="i"><use href="#i-wa"/></svg>WhatsApp</span><span class="chip"><svg class="i"><use href="#i-sms"/></svg>SMS</span><span class="chip"><svg class="i"><use href="#i-mail"/></svg>Email</span></div>
           </div>
         </div>
       </div>
@@ -527,51 +671,57 @@
   </section>
 
   <!-- 11 · JOURNEYS ═════════════════════════════════════════════════════════ -->
-  <section class="slide" data-note="Frame: a campaign assumes everyone is at the same point; a journey meets each person where they actually are. Abandon at 21:40 → step one lands 22:40, timed off THEIR moment, not a send calendar. Buy at any point → the journey stops itself. The waterfall shows exactly where people open, click, convert and drop.">
-    <div class="inner">
-      <div class="kicker">10 · Journeys, not blasts</div>
+  <section class="slide" data-note="Frame: a campaign assumes everyone is at the same point; a journey meets each person where they actually are. Abandon at 21:40 → step one lands 22:40, timed off THEIR moment, not a send calendar. Buy at any point → the journey stops itself. The waterfall shows exactly where people open, click, convert and drop — illustrative numbers, every real journey shows its own.">
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>10 · Journeys, not blasts</span><span class="rule"></span></div>
       <h2>Every customer's path is different.<br><span class="grad">Now every journey is too.</span></h2>
       <ul class="points">
-        <li><strong>Behaviour sets the clock</strong> — abandoned-cart recovery times each step from <em>that person's</em> abandonment moment, in real time.</li>
-        <li><strong>Journeys stop themselves</strong> — the moment someone buys or opts out, they leave the sequence automatically. Nobody gets chased after converting.</li>
-        <li><strong>A waterfall per step</strong> — received, opened, clicked, converted, and the drop-off between steps. You see exactly where the journey works.</li>
-        <li><strong>Optimise for the person, not the plan</strong> — fixed campaigns become the exception; responsive journeys become the default.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-clock"/></svg></span><div class="txt"><strong>Behaviour sets the clock</strong> — abandoned-cart recovery times each step from <em>that person's</em> abandonment moment, in real time.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-check"/></svg></span><div class="txt"><strong>Journeys stop themselves</strong> — the moment someone buys or opts out, they leave the sequence automatically. Nobody gets chased after converting.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-branch"/></svg></span><div class="txt"><strong>Optimise for the person, not the plan</strong> — fixed campaigns become the exception; responsive journeys become the default.</div></li>
       </ul>
+      <div class="wf" role="img" aria-label="Example journey waterfall: everyone receives, fewer open, fewer click, some convert — and you see the drop-off at every step.">
+        <div class="wfrow"><span class="wflabel">Received</span><div class="wftrack"><div class="wfbar" style="width:100%"><span>100%</span></div></div></div>
+        <div class="wfrow"><span class="wflabel">Opened</span><div class="wftrack"><div class="wfbar" style="width:58%"><span>58%</span></div></div></div>
+        <div class="wfrow"><span class="wflabel">Clicked</span><div class="wftrack"><div class="wfbar" style="width:26%"><span>26%</span></div></div></div>
+        <div class="wfrow"><span class="wflabel">Converted</span><div class="wftrack"><div class="wfbar" style="width:11%"><span>11%</span></div></div></div>
+        <p class="wfnote">Illustrative — every journey step reports received · opened · clicked · converted, with the drop-off between steps.</p>
+      </div>
     </div>
   </section>
 
   <!-- 12 · SPEED, SAFELY ════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Pre-empt the fear directly: fast does not mean reckless. The AI drafts; a named human approves — nothing sends without sign-off. Consent is enforced per channel at send time (POPIA), unsubscribe is one click, and send caps put a hard ceiling on cost. The red tape is gone; the guardrails are not.">
-    <div class="inner">
-      <div class="kicker">11 · Speed, safely</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>11 · Speed, safely</span><span class="rule"></span></div>
       <h2>Signal to send in minutes —<br>with a human hand on the gate.</h2>
       <ul class="points">
-        <li><strong>One-tap drafts</strong> — the Owl turns an insight into a targeted, on-brand, ready-to-review campaign straight from the briefing.</li>
-        <li><strong>Nothing sends itself</strong> — every campaign passes an explicit approval gate, routed to the named people you choose.</li>
-        <li><strong>Consent, enforced</strong> — per-channel marketing consent (POPIA) checked at send time, one-click unsubscribe, always.</li>
-        <li><strong>Caps and audit</strong> — send caps put a hard ceiling on reach and cost, and every send is tracked per recipient.</li>
+        <li><span class="ic"><svg class="i"><use href="#i-bolt"/></svg></span><div class="txt"><strong>One-tap drafts</strong> — the Owl turns an insight into a targeted, on-brand, ready-to-review campaign straight from the briefing.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-stamp"/></svg></span><div class="txt"><strong>Nothing sends itself</strong> — every campaign passes an explicit approval gate, routed to the named people you choose.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-shield"/></svg></span><div class="txt"><strong>Consent, enforced</strong> — per-channel marketing consent (POPIA) checked at send time, one-click unsubscribe, always.</div></li>
+        <li><span class="ic"><svg class="i"><use href="#i-gauge"/></svg></span><div class="txt"><strong>Caps and audit</strong> — send caps put a hard ceiling on reach and cost, and every send is tracked per recipient.</div></li>
       </ul>
     </div>
   </section>
 
   <!-- 13 · NEXT ═════════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Direction, not dates — don't promise quarters. App push is the near one: Pulse installs on the phone today and already delivers push; opening that as a marketing channel means reaching your audience with no send cost and no inbox to fight through. WhatsApp campaigns and behaviour-branched journeys follow the same arc.">
-    <div class="inner">
-      <div class="kicker">12 · On the horizon</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>12 · On the horizon</span><span class="rule"></span></div>
       <h2>The next channel is already<br>in their pocket.</h2>
-      <div class="cards three">
+      <div class="cards">
         <div class="card">
-          <span class="tag">Next channel</span>
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-push"/></svg></span><span class="tag">Next channel</span></div>
           <h3>The app itself</h3>
           <p>Pulse installs on the phone and already delivers push. Opening app push as a marketing channel means reaching your audience directly — no inbox to fight, no per-message cost.</p>
         </div>
         <div class="card">
-          <span class="tag">Growing channel</span>
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-wa"/></svg></span><span class="tag">Growing channel</span></div>
           <h3>WhatsApp, fully</h3>
           <p>The Owl already talks on WhatsApp and delivers live event-night updates there. Full WhatsApp campaigns join email and SMS as a first-class send channel.</p>
         </div>
         <div class="card">
-          <span class="tag">Deeper journeys</span>
+          <div class="cardtop"><span class="ic"><svg class="i"><use href="#i-branch"/></svg></span><span class="tag">Deeper journeys</span></div>
           <h3>Branching on behaviour</h3>
           <p>Journeys that fork on what each person does — opened, clicked, purchased — so the path adapts mid-flight, not just the timing.</p>
         </div>
@@ -581,33 +731,33 @@
 
   <!-- 14 · THEN / NOW ═══════════════════════════════════════════════════════ -->
   <section class="slide" data-note="Recap slide — let it breathe, read a couple of rows aloud and let them scan the rest. If one row sparks a conversation, stay on it; this slide is the whole argument in one table.">
-    <div class="inner">
-      <div class="kicker">13 · The shift, summarised</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>13 · The shift, summarised</span><span class="rule"></span></div>
       <h2>From static to signal.</h2>
       <div class="thennow" role="table" aria-label="Then versus now comparison">
         <div class="tn-row head" role="row"><div class="then" role="columnheader">Then</div><div class="now" role="columnheader">Now, with Pulse</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Five platforms, stitched with CSV exports</div><div class="now" role="cell">One platform, one login, your brand</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Data locked away, read weekly at best</div><div class="now" role="cell">Live data that explains itself, on your phone</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Stale audience lists, uploaded by hand</div><div class="now" role="cell">Always-live segments, auto-synced to the ad platforms</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">One vanilla message for everyone</div><div class="now" role="cell">Custom messaging per segment, personal per person</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Campaigns locked in a quarterly plan</div><div class="now" role="cell">Rapid response to live customer signals</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Weeks of layers and sign-offs</div><div class="now" role="cell">Minutes to draft, one clear approval gate</div></div>
-        <div class="tn-row" role="row"><div class="then" role="cell">Results in a report, next month</div><div class="now" role="cell">Results live, per recipient, feeding the next move</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Five platforms, stitched with CSV exports</div><div class="now" role="cell"><span class="cell-tag">Now</span>One platform, one login, your brand</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Data locked away, read weekly at best</div><div class="now" role="cell"><span class="cell-tag">Now</span>Live data that explains itself, on your phone</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Stale audience lists, uploaded by hand</div><div class="now" role="cell"><span class="cell-tag">Now</span>Always-live segments, auto-synced to the ad platforms</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>One vanilla message for everyone</div><div class="now" role="cell"><span class="cell-tag">Now</span>Custom messaging per segment, personal per person</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Campaigns locked in a quarterly plan</div><div class="now" role="cell"><span class="cell-tag">Now</span>Rapid response to live customer signals</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Weeks of layers and sign-offs</div><div class="now" role="cell"><span class="cell-tag">Now</span>Minutes to draft, one clear approval gate</div></div>
+        <div class="tn-row" role="row"><div class="then" role="cell"><span class="cell-tag">Then</span>Results in a report, next month</div><div class="now" role="cell"><span class="cell-tag">Now</span>Results live, per recipient, feeding the next move</div></div>
       </div>
     </div>
   </section>
 
   <!-- 15 · CLOSE ════════════════════════════════════════════════════════════ -->
   <section class="slide" data-note="End with a concrete first step, not a philosophy. The four steps are a real first fortnight. Ask for the smallest commitment: one hour to stand up the first live segment together, and pick which journey — abandoned cart is usually the fastest visible win.">
-    <div class="inner">
-      <div class="kicker">Where we go from here</div>
+    <div class="inner" style="width:100%;max-width:1060px;margin:0 auto">
+      <div class="kicker"><span>Where we go from here</span><span class="rule"></span></div>
       <h2><span class="grad">Insight → Action → Results.</span><br>On repeat.</h2>
       <p class="lede">This isn't a migration project — it's a first win, then a loop that tightens. Here's the first fortnight:</p>
       <ol class="steps">
-        <li><strong>Your data, live</strong> — dashboards, briefing and the Owl on your own numbers, on your phone.</li>
-        <li><strong>First live segments</strong> — VIPs, first-timers, abandoners: built once, always current.</li>
-        <li><strong>First personalised journey</strong> — one automated sequence responding to a real customer signal.</li>
-        <li><strong>Ad audiences, synced</strong> — your live segments mirrored into Meta &amp; TikTok, buyers excluded automatically.</li>
+        <li><span class="num">1</span><div class="txt"><strong>Your data, live</strong> — dashboards, briefing and the Owl on your own numbers, on your phone.</div></li>
+        <li><span class="num">2</span><div class="txt"><strong>First live segments</strong> — VIPs, first-timers, abandoners: built once, always current.</div></li>
+        <li><span class="num">3</span><div class="txt"><strong>First personalised journey</strong> — one automated sequence responding to a real customer signal.</div></li>
+        <li><span class="num">4</span><div class="txt"><strong>Ad audiences, synced</strong> — your live segments mirrored into Meta &amp; TikTok, buyers excluded automatically.</div></li>
       </ol>
       <p class="titlefoot"><a href="https://howler-pulse-v2.onrender.com">howler-pulse-v2.onrender.com</a> &nbsp;·&nbsp; the full feature story: <a href="https://howler-pulse-v2.onrender.com/sales">/sales</a></p>
     </div>
@@ -636,43 +786,47 @@
 </aside>
 
 <script>
-  const slides = Array.from(document.querySelectorAll('.slide'));
-  const progress = document.getElementById('progress');
-  const counter = document.getElementById('counter');
-  const notes = document.getElementById('notes');
-  const notesBody = document.getElementById('notesBody');
-  const hint = document.getElementById('hint');
-  let i = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
-  let notesOpen = false;
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var progress = document.getElementById('progress');
+  var counter = document.getElementById('counter');
+  var notes = document.getElementById('notes');
+  var notesBody = document.getElementById('notesBody');
+  var hint = document.getElementById('hint');
+  var i = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+  var notesOpen = false;
 
-  function show(n, dir) {
+  // Slide switching is done with inline display styles (not stylesheet state),
+  // so the deck stays correct even where a host page rewrites/sanitizes CSS.
+  function show(n) {
     n = Math.max(0, Math.min(slides.length - 1, n));
-    slides.forEach((s, k) => {
+    slides.forEach(function (s, k) {
+      s.style.display = (k === n) ? 'flex' : 'none';
       s.classList.toggle('on', k === n);
-      s.classList.toggle('leftward', dir < 0 && k === n);
     });
     i = n;
     progress.style.width = ((i + 1) / slides.length * 100) + '%';
     counter.innerHTML = '<b>' + String(i + 1).padStart(2, '0') + '</b> / ' + slides.length;
-    notesBody.textContent = slides[i].dataset.note || '';
-    history.replaceState(null, '', '#' + (i + 1));
+    notesBody.textContent = slides[i].getAttribute('data-note') || '';
+    try { history.replaceState(null, '', '#' + (i + 1)); } catch (e) {}
+    window.scrollTo(0, 0);
   }
-  function next() { show(i + 1, 1); dismissHint(); }
-  function prev() { show(i - 1, -1); dismissHint(); }
+  function next() { show(i + 1); dismissHint(); }
+  function prev() { show(i - 1); dismissHint(); }
   function toggleNotes() {
     notesOpen = !notesOpen;
     notes.classList.toggle('open', notesOpen);
+    notes.style.display = notesOpen ? 'block' : 'none';
     document.getElementById('btnNotes').setAttribute('aria-pressed', String(notesOpen));
   }
-  let hinted = false;
-  function dismissHint() { if (!hinted) { hinted = true; hint.classList.add('gone'); } }
+  var hinted = false;
+  function dismissHint() { if (!hinted) { hinted = true; hint.classList.add('gone'); hint.style.opacity = '0'; } }
   setTimeout(dismissHint, 7000);
 
-  addEventListener('keydown', e => {
+  addEventListener('keydown', function (e) {
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
-    else if (e.key === 'Home') { e.preventDefault(); show(0, -1); }
-    else if (e.key === 'End') { e.preventDefault(); show(slides.length - 1, 1); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0); }
+    else if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
     else if (e.key.toLowerCase() === 'n') { toggleNotes(); }
   });
   document.getElementById('btnNext').addEventListener('click', next);
@@ -681,21 +835,21 @@
   document.getElementById('tapR').addEventListener('click', next);
   document.getElementById('tapL').addEventListener('click', prev);
 
-  let tx = null, ty = null;
-  addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
-  addEventListener('touchend', e => {
+  var tx = null, ty = null;
+  addEventListener('touchstart', function (e) { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+  addEventListener('touchend', function (e) {
     if (tx === null) return;
-    const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
-    if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.4) { dx < 0 ? next() : prev(); }
+    var dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.4) { if (dx < 0) { next(); } else { prev(); } }
     tx = ty = null;
   }, { passive: true });
 
-  addEventListener('hashchange', () => {
-    const n = (parseInt(location.hash.slice(1), 10) || 1) - 1;
-    if (n !== i) show(n, n > i ? 1 : -1);
+  addEventListener('hashchange', function () {
+    var n = (parseInt(location.hash.slice(1), 10) || 1) - 1;
+    if (n !== i) show(n);
   });
 
-  show(i, 1);
+  show(i);
 </script>
 </body>
 </html>
