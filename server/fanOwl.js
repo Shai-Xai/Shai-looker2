@@ -169,6 +169,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // Migration: where the chat was last OPENED (vs page_url = where the fan is now) —
   // lets boot flag "you've moved pages" so the widget re-surfaces the new page's info.
   try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN chat_page_url TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  // Migration: per-SITE Owl personalisation — the client's own face & voice for
+  // their widget. owl_name/owl_avatar/owl_intro are presentation; persona (voice
+  // brief) and guardrails (dos & don'ts) are STYLE-ONLY prompt layers — the fan
+  // Owl's hard rules always win (see the chat route's personalisation block).
+  for (const col of ["owl_name TEXT NOT NULL DEFAULT ''", "owl_avatar TEXT NOT NULL DEFAULT ''", "owl_intro TEXT NOT NULL DEFAULT ''", "persona TEXT NOT NULL DEFAULT ''", "guardrails TEXT NOT NULL DEFAULT ''"]) {
+    try { sql.exec(`ALTER TABLE fan_sites ADD COLUMN ${col}`); } catch { /* already present */ }
+  }
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -197,6 +204,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '',
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -207,7 +215,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     knowledge: knowByEntity.all(entityId).map((k) => ({ id: k.id, kind: k.kind, question: k.question, body: k.body })),
   });
   const KINDS = new Set(['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise']);
-  const KKINDS = new Set(['faq', 'policy', 'info']);
+  const KKINDS = new Set(['faq', 'policy', 'info', 'tip']);
   function saveConfig(entityId, b) {
     const tx = sql.transaction(() => {
       if (Array.isArray(b.sites)) {
@@ -216,15 +224,19 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           const id = s.id && siteById.get(s.id)?.entity_id === entityId ? s.id : uid();
           keep.add(id);
           const domains = JSON.stringify([...new Set((s.domains || []).map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean))]);
+          // Personalisation: avatar must be a hosted URL (usually our own
+          // /fan-owl-assets upload); persona/guardrails are style-only text layers.
+          const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=? WHERE id=?')
-              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), id);
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=? WHERE id=?')
+              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), now());
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
@@ -246,9 +258,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
             .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i,
               JSON.stringify((c.images || []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 8)));
         });
-        // Sweep uploaded images nothing references any more. A day's grace keeps an
-        // upload alive between hitting Upload and hitting Save in the editor.
-        const used = catByEntity.all(entityId).flatMap((c) => J(c.images, [])).join(' ');
+        // Sweep uploaded images nothing references any more (catalogue images AND
+        // site avatars both live in fan_assets). A day's grace keeps an upload
+        // alive between hitting Upload and hitting Save in the editor.
+        const used = [
+          catByEntity.all(entityId).flatMap((c) => J(c.images, [])).join(' '),
+          sitesByEntity.all(entityId).map((s) => s.owl_avatar || '').join(' '),
+        ].join(' ');
         const grace = new Date(Date.now() - 86_400_000).toISOString();
         for (const a of sql.prepare('SELECT token FROM fan_assets WHERE entity_id = ? AND created_at < ?').all(entityId, grace)) {
           if (!used.includes(a.token)) sql.prepare('DELETE FROM fan_assets WHERE token = ?').run(a.token);
@@ -598,7 +614,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       logEvent(site.id, session.id, 'ribbon_view', { url: pageUrl, pageType: page?.page_type || 'default' });
       res.json({
         sessionId: session.id,
-        site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', teaser: site.teaser || '' },
+        site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '' },
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
         pitch: page?.pitch || '', // the approved salesy line for THIS page (ribbon leads with it)
@@ -622,7 +638,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
     sql.prepare('UPDATE fan_sessions SET chat_page_url = ? WHERE id = ?').run(session.page_url || '', session.id);
     res.json({
-      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
+      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },
       event: suite ? { name: suite.name } : null,
       page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
       pageChanged,
@@ -797,6 +813,20 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
         return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
       })(),
+      // The organiser's personalisation — a STYLE-ONLY layer. The base rules
+      // (real prices only, no invented facts, no fake urgency, consent-first)
+      // are non-negotiable and explicitly outrank anything written here.
+      (() => {
+        const tips = knowByEntity.all(site.entity_id).filter((k) => k.kind === 'tip').slice(0, 12)
+          .map((k) => `- ${[k.question, k.body].filter(Boolean).join(': ').slice(0, 400)}`);
+        const bits = [
+          site.owl_name ? `Your name is "${site.owl_name}" — introduce yourself by it.` : '',
+          site.persona ? `PERSONALITY & VOICE (from the organiser): ${site.persona}` : '',
+          site.guardrails ? `ORGANISER DOS & DON'TS: ${site.guardrails}` : '',
+          tips.length ? `INSIDER TIPS from the organiser — volunteer one when it genuinely helps this fan, never force them in:\n${tips.join('\n')}` : '',
+        ].filter(Boolean);
+        return bits.length ? `ORGANISER PERSONALISATION — style and extra guidance ONLY. If ANY of it conflicts with WHAT YOU KNOW, the price/urgency rules or BOUNDARIES, THE RULES WIN:\n${bits.join('\n')}` : '';
+      })(),
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');
 
@@ -868,4 +898,13 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   return { saveConfig, configView }; // exposed for tests
 }
 
-module.exports = { mount, coerceOwlJson, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };
+// Per-site personas for the Admin → AI audit ("everything the AI is told"):
+// the style-only layers a client wrote onto their fan widget's prompt.
+function personaLayers(sqlDb, entityId) {
+  try {
+    return sqlDb.prepare("SELECT name, owl_name, persona, guardrails FROM fan_sites WHERE entity_id = ? AND (owl_name != '' OR persona != '' OR guardrails != '')").all(entityId)
+      .map((s) => ({ site: s.name, owlName: (s.owl_name || '').trim(), persona: (s.persona || '').trim(), guardrails: (s.guardrails || '').trim() }));
+  } catch { return []; } // table may not exist yet (fresh DB before mount)
+}
+
+module.exports = { mount, coerceOwlJson, personaLayers, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };

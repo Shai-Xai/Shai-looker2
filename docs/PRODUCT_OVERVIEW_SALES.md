@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-13 (🦉 Fan Owl: in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-13 (🦉 Fan Owl: per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -200,6 +200,11 @@ ticket like a well-informed friend who's already going.
   that page and continues the chat in its context.
 - **Offer cards with real photos** — upload images per ticket/add-on straight from
   the editor (or paste URLs); fans swipe through them on the offer card.
+- **Every Owl is the client's own** — per site, the client uploads its face,
+  names it, writes its personality ("cheeky, proudly local"), sets house dos &
+  don'ts, and adds 💡 insider tips the Owl volunteers when they help
+  ("the east gate has no queue after 6pm"). Personality is style-only: the hard
+  rules (real prices, nothing invented, no fake urgency) always win.
 - **Answers like the organiser would** — FAQs, refund policy, what's included:
   answered ONLY from the knowledge base the promoter writes (never invented), with
   prices only ever from the configured catalogue. Urgency only from real
@@ -1026,6 +1031,13 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-13** — **Fan Owl: per-site personality** 🧪: each site's Owl is now
+  personalisable by the client — uploaded face (avatar), name, intro line, voice
+  brief, house dos & don'ts, and 💡 insider-tip knowledge entries the Owl
+  volunteers when relevant. Style-only by design (the no-invented-facts /
+  no-fake-urgency rules always outrank the persona); surfaced in the Admin → AI
+  audit. New 🪄 Personality tab on both the admin and client Fan Owl editors.
 
 - **2026-07-13** — **Fan Owl: site navigation + image uploads** 🧪: the chat now
   shows the page the fan is on and the Owl can take them to any mapped page of the

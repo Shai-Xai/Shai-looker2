@@ -151,9 +151,11 @@ export default function FanOwlEmbedPage() {
     <div style={S.shell}>
       <header style={{ ...S.header, background: brand }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <span style={{ fontSize: 20 }}>🦉</span>
+          {boot.site?.owlAvatar
+            ? <img src={boot.site.owlAvatar} alt="" style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', flex: '0 0 auto' }} />
+            : <span style={{ fontSize: 20 }}>🦉</span>}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{boot.event?.name || boot.site?.name || 'Event guide'}</div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{boot.site?.owlName || boot.event?.name || boot.site?.name || 'Event guide'}</div>
             <div style={{ fontSize: 11.5, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {boot.page ? <>📍 {pageLabel(boot.page)}</> : 'Your ticket guide'}
             </div>
@@ -168,8 +170,10 @@ export default function FanOwlEmbedPage() {
       <div ref={scroller} style={S.scroll}>
         {!messages.length && (
           <div style={S.hello}>
-            <div style={{ fontSize: 30, marginBottom: 6 }}>🦉</div>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Hey! I know this event inside out.</div>
+            {boot.site?.owlAvatar
+              ? <img src={boot.site.owlAvatar} alt="" style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', marginBottom: 6 }} />
+              : <div style={{ fontSize: 30, marginBottom: 6 }}>🦉</div>}
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{boot.site?.owlIntro || `Hey! I'm ${boot.site?.owlName || 'the Owl'} — I know this event inside out.`}</div>
             <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || 'Ask me anything — which ticket you need, what’s included, how to add extras.'}</div>
             {boot.offer && (
               <div style={{ ...S.offerCard, marginTop: 14 }}>

@@ -136,7 +136,12 @@
     }, root);
     launcher.type = 'button';
     launcher.setAttribute('aria-label', 'Ask about tickets');
-    launcher.textContent = '🦉';
+    if (ctx.site && ctx.site.owlAvatar) {
+      // The client's own face for their Owl (uploaded in Pulse → Fan Owl → Personality).
+      launcher.style.padding = '0'; launcher.style.overflow = 'hidden';
+      var avatar = el('img', { width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: '50%' }, launcher);
+      avatar.src = ctx.site.owlAvatar; avatar.alt = '';
+    } else launcher.textContent = '🦉';
     launcher.addEventListener('click', function () { openPanel(); });
 
     // Arriving from an Owl-driven page hop? Reopen the chat straight away so the

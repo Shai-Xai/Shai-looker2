@@ -27,7 +27,8 @@ before(async () => {
 after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
-  sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live', pages: [
+  sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live',
+    owlName: 'Kappa Guide', owlAvatar: 'https://fest.example/owl.png', owlIntro: 'Ciao! Ask me anything', persona: 'cheeky, proudly local', guardrails: 'always mention the waiting list when sold out', pages: [
     { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'], pitch: 'Catch every artist with a Weekend Pass' },
   ], ...site }],
   catalogue: [
@@ -39,6 +40,7 @@ const CONFIG = (site = {}) => ({
   knowledge: [
     { kind: 'policy', question: 'What is the refund policy?', body: 'Tickets are refundable until 30 days before the event.' },
     { kind: 'faq', question: 'Can I bring kids?', body: 'Under-12s enter free with a ticketed adult.' },
+    { kind: 'tip', question: 'East gate', body: 'The east gate has no queue after 6pm.' },
   ],
 });
 
@@ -70,7 +72,16 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.equal(r.body.catalogue.find((c) => c.label === 'Crew comp').public, false);
   assert.equal(r.body.catalogue.find((c) => c.label === 'Glamping Pod').kind, 'accommodation'); // new kinds round-trip
   assert.equal(site.pages[0].pitch, 'Catch every artist with a Weekend Pass'); // pitch round-trips
-  assert.equal(r.body.knowledge.length, 2);
+  assert.equal(r.body.knowledge.length, 3);
+  assert.equal(r.body.knowledge.find((k) => k.kind === 'tip').body, 'The east gate has no queue after 6pm.'); // tips are knowledge entries
+  // Personality round-trips; a non-URL avatar is dropped, not stored.
+  assert.equal(site.owlName, 'Kappa Guide');
+  assert.equal(site.owlAvatar, 'https://fest.example/owl.png');
+  assert.equal(site.owlIntro, 'Ciao! Ask me anything');
+  assert.equal(site.persona, 'cheeky, proudly local');
+  assert.equal(site.guardrails, 'always mention the waiting list when sold out');
+  const junk = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, owlAvatar: 'javascript:alert(1)' }] } });
+  assert.equal(junk.body.sites[0].owlAvatar, '');
   // Saving again with the same site id keeps the key stable.
   const r2 = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, name: 'Renamed' }] } });
   assert.equal(r2.body.sites[0].siteKey, site.siteKey);
@@ -99,6 +110,8 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.ok(r.body.sessionId);
   assert.equal(r.body.offer.label, 'Weekend Pass'); // unmapped page → catalogue order, public only
   assert.equal(r.body.site.teaser, 'Tickets are live');
+  assert.equal(r.body.site.owlName, 'Kappa Guide'); // persona rides the public payloads
+  assert.equal(r.body.site.owlAvatar, 'https://fest.example/owl.png');
   // Page mapping wins on a matching URL (and the wildcard matches).
   const r2 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x' }, headers: ORIGIN });
   assert.equal(r2.body.pageType, 'artist');
@@ -118,6 +131,7 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.deepEqual(boot.body.offer.images, ['https://fest.example/img/camp1.jpg']);
   // The "you are here" pill: boot names the matched page; unmatched pages carry none.
   assert.deepEqual(boot.body.page, { pageType: 'artist', note: 'artist pages', urlPattern: '/artists/*' });
+  assert.equal(boot.body.site.owlIntro, 'Ciao! Ask me anything');
   const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
   const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
   assert.equal(bootHome.body.page, null);

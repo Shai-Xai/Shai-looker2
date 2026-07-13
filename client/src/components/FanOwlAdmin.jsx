@@ -36,7 +36,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [tab, setTab] = useState('sites');
   const [imgBusy, setImgBusy] = useState(-1); // catalogue index mid-upload
   const [imgNote, setImgNote] = useState(null); // { i, text }
-  const TABS = [['sites', '🌐 Sites'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
+  const [avBusy, setAvBusy] = useState(-1); // site index mid-avatar-upload
+  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
     let on = true;
@@ -84,6 +85,20 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       setImgNote({ i, text: `Uploaded ${urls.length} image${urls.length === 1 ? '' : 's'} ✓ — remember to Save.` });
     } catch (e) { setImgNote({ i, text: `⚠️ ${e.message}` }); }
     finally { setImgBusy(-1); }
+  }
+
+  // The Owl's face: one square-ish image per site, downscaled small and hosted
+  // like any catalogue image; the URL rides the site's owlAvatar field.
+  async function uploadAvatar(i, file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    setAvBusy(i);
+    try {
+      const r = await fetch(`${base}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: await downscaleImage(file, 512, 0.85) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Upload failed — try again.');
+      setCfg((c) => ({ ...c, sites: c.sites.map((x, j) => (j === i ? { ...x, owlAvatar: d.url } : x)) }));
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setAvBusy(-1); }
   }
 
   async function save() {
@@ -230,8 +245,57 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', pages: [] }] })}>+ Add site</button>
           {saveBar}
+        </>
+      )}
+
+      {tab === 'persona' && (
+        <>
+          <p style={small}>Make each site's Owl your own: its face, name, voice and house rules. Personality shapes HOW it speaks — the hard rules (real prices only, nothing invented, no fake urgency) always win. 💡 Special tips live under FAQs as the “tip” kind — the Owl volunteers them when they genuinely help.</p>
+          {!cfg.sites.length && <p style={small}>Add a site first (Sites section) — the personality belongs to a site.</p>}
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              {cfg.sites.length > 1 && <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{s.name || 'Untitled site'}</div>}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+                {s.owlAvatar
+                  ? <img src={s.owlAvatar} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover' }} />
+                  : <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🦉</div>}
+                <label style={{ ...btn, display: 'inline-flex', alignItems: 'center', fontWeight: 700, opacity: avBusy === i ? 0.6 : 1 }}>
+                  {avBusy === i ? 'Uploading…' : (s.owlAvatar ? 'Change face' : '📷 Upload a face')}
+                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={avBusy !== -1}
+                    onChange={(e) => { uploadAvatar(i, e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+                {s.owlAvatar && <button type="button" style={btn} onClick={() => setSite(i, { owlAvatar: '' })}>Back to 🦉</button>}
+                <span style={{ ...small, margin: 0 }}>Shows on the launcher button and in the chat header.</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: 8 }}>
+                <div>
+                  <div style={small}>Owl's name (the chat header title)</div>
+                  <input style={input} value={s.owlName || ''} maxLength={40} placeholder="e.g. Kappa Guide" onChange={(e) => setSite(i, { owlName: e.target.value })} />
+                </div>
+                <div>
+                  <div style={small}>Intro line (the first thing fans read when the chat opens)</div>
+                  <input style={input} value={s.owlIntro || ''} maxLength={200} placeholder="e.g. Ciao! I'm your festival insider — ask me anything 🎶" onChange={(e) => setSite(i, { owlIntro: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
+                placeholder="e.g. Warm and cheeky, proudly local, first-name basis, loves music puns, answers in the fan's language, keeps it short."
+                onChange={(e) => setSite(i, { persona: e.target.value })} />
+              <div style={{ ...small, marginTop: 8 }}>Dos & don'ts — house rules for this Owl</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.guardrails || ''} maxLength={2000}
+                placeholder="e.g. Always mention the waiting list when something's sold out. Don't recommend camping to families. Never discuss other festivals."
+                onChange={(e) => setSite(i, { guardrails: e.target.value })} />
+              {s.siteKey && (
+                <div style={{ marginTop: 10 }}>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview this personality</a>
+                  <span style={{ ...small, marginLeft: 8 }}>Save first — the preview reads the saved config.</span>
+                </div>
+              )}
+            </div>
+          ))}
+          {cfg.sites.length > 0 && saveBar}
         </>
       )}
 
@@ -375,7 +439,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
 
       {tab === 'knowledge' && (
         <>
-          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports.</p>
+          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports. 💡 The <strong>tip</strong> kind is insider gold the Owl may volunteer unprompted when relevant ("the east gate has no queue after 6pm").</p>
           {cfg.knowledge.map((k, i) => (
             <details key={k.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!k.question && !k.body}>
               <summary style={summaryStyle}>
@@ -384,7 +448,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </summary>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>
                 <select style={input} value={k.kind} onChange={(e) => setKnow(i, { kind: e.target.value })}>
-                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option>
+                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option><option value="tip">💡 tip</option>
                 </select>
                 <input style={input} value={k.question} placeholder="Question (e.g. What's the refund policy?)" onChange={(e) => setKnow(i, { question: e.target.value })} />
               </div>
