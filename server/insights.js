@@ -36,10 +36,14 @@ The reader may then ask follow-up questions about this tile. Answer them directl
 
 // Render a tile's rows as a compact pipe table using rendered (formatted)
 // values. Shared by single-tile and whole-dashboard prompts.
+// Over-cap tables keep the START and the END with the omission marker in the
+// MIDDLE — a head-only slice dropped the latest rows of long time-series tiles
+// (date-ascending charts), so the model read a stale mid-series cumulative as
+// the current position (the "R11.2m month-to-date when it was R18.5m" digest bug).
 function compactTable(fields, rows, maxRows = MAX_ROWS) {
   const cols = [...(fields?.dimensions || []), ...(fields?.measures || []), ...(fields?.table_calculations || [])];
   const header = cols.map((c) => c.label_short || c.label || c.name).join(' | ');
-  const body = (rows || []).slice(0, maxRows).map((row) =>
+  const render = (row) =>
     cols.map((c) => {
       const cell = row[c.name];
       if (cell == null) return '';
@@ -48,11 +52,17 @@ function compactTable(fields, rows, maxRows = MAX_ROWS) {
         return Object.entries(cell).map(([k, v]) => `${k}:${v?.rendered ?? v?.value ?? ''}`).join(' ');
       }
       return cell.rendered ?? cell.value ?? '';
-    }).join(' | ')
-  );
-  const out = [header, ...body];
-  if ((rows || []).length > maxRows) out.push(`… (${rows.length - maxRows} more rows omitted)`);
-  return out.join('\n');
+    }).join(' | ');
+  const all = rows || [];
+  if (all.length <= maxRows) return [header, ...all.map(render)].join('\n');
+  const headN = Math.max(3, Math.floor(maxRows / 3)); // keep the start (baseline / top of a ranked table)…
+  const tailN = maxRows - headN;                      // …and weight the cap toward the end (the latest rows)
+  return [
+    header,
+    ...all.slice(0, headN).map(render),
+    `… (${all.length - maxRows} middle rows omitted — the table's true final rows follow) …`,
+    ...all.slice(-tailN).map(render),
+  ].join('\n');
 }
 
 // Turn the tile + data into a compact text prompt.
@@ -104,107 +114,12 @@ function requireClient(apiKey) {
   return c;
 }
 
-// ─── Tolerant JSON parsing for model output ─────────────────────────────────────
-// Models occasionally emit slightly invalid JSON (raw newlines inside strings,
-// trailing commas, a missing comma between array elements). Try the raw parse, then
-// a few safe static repairs; the caller can fall back to a model "fix this JSON" pass.
-function escapeCtrlInStrings(s) {
-  let out = ''; let inStr = false; let esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (esc) { out += ch; esc = false; continue; }
-    if (ch === '\\') { out += ch; esc = true; continue; }
-    if (ch === '"') { inStr = !inStr; out += ch; continue; }
-    if (inStr && (ch === '\n' || ch === '\r' || ch === '\t')) { out += ch === '\n' ? '\\n' : ch === '\r' ? '\\r' : '\\t'; continue; }
-    out += ch;
-  }
-  return out;
-}
-// String-state-aware missing-comma repair: insert a comma between a value that
-// ENDS ("/}/]) and the next value that STARTS ("/{/[) when only whitespace
-// separates them (a comma already present, or a `:`/other token, is left alone).
-// Tracks string state + escapes so it never touches content inside strings — the
-// common "Expected ',' or ']' after array element" model slip, anywhere (not just
-// at line breaks like the cheaper regex below).
-function insertMissingCommas(s) {
-  let out = ''; let inStr = false; let esc = false;
-  const startsValue = (ch) => ch === '"' || ch === '{' || ch === '[';
-  const nextNonWs = (from) => { let j = from; while (j < s.length && /\s/.test(s[j])) j++; return s[j]; };
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    out += ch;
-    if (esc) { esc = false; continue; }
-    if (ch === '\\') { esc = true; continue; }
-    if (ch === '"') {
-      if (inStr) { inStr = false; if (startsValue(nextNonWs(i + 1))) out += ','; }
-      else inStr = true;
-      continue;
-    }
-    if (!inStr && (ch === '}' || ch === ']')) { if (startsValue(nextNonWs(i + 1))) out += ','; }
-  }
-  return out;
-}
-// Last-ditch repair for a TRUNCATED response (the model hit its token cap
-// mid-document): drop any incomplete trailing token, then close open strings,
-// arrays and objects so the salvageable head still parses. Best-effort — only
-// reached when every other fix has failed, so a rough recovery beats an error.
-function closeTruncatedJson(s) {
-  let inStr = false; let esc = false; const stack = [];
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (esc) { esc = false; continue; }
-    if (ch === '\\') { esc = true; continue; }
-    if (inStr) { if (ch === '"') inStr = false; continue; }
-    if (ch === '"') { inStr = true; continue; }
-    if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
-    else if (ch === '}' || ch === ']') stack.pop();
-  }
-  let out = s;
-  if (inStr) out += '"';                 // close a string cut mid-value (keep the partial text)
-  out = out.replace(/[,:]\s*$/, '');     // drop a dangling comma or colon
-  // Drop a dangling KEY with no value left at the very end ({"k"  or ,"k").
-  out = out.replace(/([{,])\s*"[^"]*"\s*$/, (_m, p) => (p === '{' ? '{' : ''));
-  out = out.replace(/,\s*$/, '');        // tidy any comma the above left behind
-  for (let i = stack.length - 1; i >= 0; i--) out += stack[i];
-  return out;
-}
-function parseModelJson(text, what = 'response') {
-  let s = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-  const a = s.indexOf('{');
-  if (a < 0) throw new Error(`AI did not return JSON for the ${what}`);
-  const b = s.lastIndexOf('}');
-  // Prefer the full object; if truncated (no closing brace), keep from the first '{' so closeTruncatedJson can salvage it.
-  s = b > a ? s.slice(a, b + 1) : s.slice(a);
-  const noTrailingCommas = (x) => x.replace(/,(\s*[}\]])/g, '$1');
-  const missingCommas = (x) => x.replace(/(["\]}])\s*\n(\s*)(["{[])/g, '$1,\n$2$3'); // value\n value → value,\n value
-  const fixes = [
-    (x) => x,
-    noTrailingCommas,
-    escapeCtrlInStrings,
-    (x) => noTrailingCommas(escapeCtrlInStrings(x)),
-    (x) => noTrailingCommas(escapeCtrlInStrings(missingCommas(x))),
-    (x) => noTrailingCommas(insertMissingCommas(escapeCtrlInStrings(x))),
-    (x) => noTrailingCommas(insertMissingCommas(closeTruncatedJson(escapeCtrlInStrings(x)))),
-  ];
-  let lastErr;
-  for (const fix of fixes) { try { return JSON.parse(fix(s)); } catch (e) { lastErr = e; } }
-  throw lastErr;
-}
-// Last-resort: ask the model to repair its own malformed JSON (only on parse failure).
-const JSON_REPAIR_SYSTEM = `You fix malformed JSON. Return ONLY the corrected, valid JSON — no prose, no markdown fences. Preserve all content and keys; fix only syntax (missing commas, unescaped quotes/newlines, trailing commas).`;
-async function repairJsonViaModel(c, broken) {
-  const resp = await c.messages.create({
-    model: MODEL, max_tokens: 8192, output_config: { effort: 'low' },
-    system: JSON_REPAIR_SYSTEM,
-    messages: [{ role: 'user', content: String(broken || '').slice(0, 24000) }],
-  });
-  return (resp.content || []).filter((bk) => bk.type === 'text').map((bk) => bk.text).join('');
-}
-// Parse model JSON with static repairs, then a single model-repair fallback.
-async function parseModelJsonResilient(c, text, what) {
-  try { return parseModelJson(text, what); }
-  catch { return parseModelJson(await repairJsonViaModel(c, text), what); }
-}
+// ─── Tolerant JSON parsing for model output → server/aiJson.js ─────────────────
+// Extracted, self-contained salvage layer (static repairs + one model-repair
+// fallback). Re-exported below so callers/tests keep importing it from here.
+const aiJson = require('./aiJson');
+const { parseModelJson, JSON_REPAIR_SYSTEM } = aiJson;
+const parseModelJsonResilient = (c, text, what) => aiJson.parseModelJsonResilient(c, text, what, MODEL);
 
 const REQUEST = (messages, system) => ({
   model: MODEL,
@@ -452,6 +367,9 @@ Rules:
 - ALWAYS LEAD with the headline TICKETING numbers as the most important story — tickets sold, gross revenue and orders for the current event are the authoritative sales figures and must anchor the briefing, regardless of which dashboards the reader visits most. Then layer in supporting context (audience, traffic, channels, comparisons). Do NOT lead with a single sales CHANNEL (e.g. reps/agents/promoters), a sub-segment, or an overnight DELTA — those are supporting context, never the headline. The lead is the event's cumulative total tickets sold and gross revenue, even if they barely moved overnight. Cashless/top-ups are also supporting context, not the ticketing lead.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales: never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold — treat GA4 as funnel/interest only. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards.
 - Each tile shows the EVENT its value is for ("· event: …"). A tile with the SAME title but an earlier-dated event is the same-event LAST-TIME comparison — frame it as the year-ago comparison (e.g. "3,297 vs 2,540 last time"), never as a conflicting current figure to reconcile.
+- A tile may show "(filters: …)" — the exact scope its numbers are computed under. A figure computed under a narrowing filter (one currency, region, channel, product or ticket type) or that plainly measures a SUBSET (e.g. ticket sales only vs total platform volume) is NOT the overall total: cite it WITH its scope, and never present it as the month's or event's total revenue. When GOALS carry a current/to-date value for the same metric (e.g. the ★ revenue/TPV goal's progress), that computed value IS the authoritative to-date figure — if a tile's cumulative disagrees with it, lead with the GOALS figure and attribute the tile's number to its narrower scope; never report the smaller number as "revenue to date".
+- TODAY's own row in a daily table is a PARTIAL day while the day is still running: never call it a dip/drop against a full prior day, and leave it out when judging pace — compare completed days only.
+- A table with a "(… rows omitted …)" marker skips its MIDDLE rows: the first and last rows shown are the table's true start and end. Never sum the visible rows into a total, and never infer a trend across the gap.
 - 3-4 bullets, 2-3 suggestions. [FOLLOWED] themes come FIRST: give the reader's picks their bullets BEFORE anything else (an unread MESSAGES flag may still open the briefing). Only after the [FOLLOWED] themes are covered may remaining bullets go to PROFILE favourites or other notable changes. Keep every bullet to one or two sentences — tight and quantitative, never a list of every tile.
 - Be specific and quantitative — cite real values from TILES verbatim, and call out movements/trends from charts and tables (not just headline numbers). If data is sparse, say less rather than padding.
 - dashboardId values MUST come from CATALOGUE. Use null only when no dashboard fits a bullet.
@@ -487,6 +405,9 @@ Rules:
 - A comparison shown against a prior event is aligned to the SAME point in that event's cycle (same days-to-go) when the tile is event-aligned — phrase it as "vs the same point last time", not as a full-event total.
 - 3-6 KPIs, the ones that matter MOST to this role. Values must be real, verbatim from TILES.
 - Each tile shows its source as "— <set> → <dashboard>". Metrics from a web-analytics source (e.g. GA4, Google Analytics — sessions, page views, "conversions", site events) measure TRAFFIC and on-site behaviour, NOT finalised ticket sales. Never report a GA4/analytics "tickets" or "conversions" figure as actual tickets sold. Tickets sold, revenue and attendance/check-ins are authoritative ONLY from the ticketing/event dashboards. If two tiles look similar (e.g. an analytics "Total Tickets" vs a ticketing "Total Tickets Sold"), lead with the ticketing-source figure and treat the analytics one as funnel/interest.
+- A tile may show "(filters: …)" — the exact scope its numbers are computed under. A figure computed under a narrowing filter (one currency, region, channel, product or ticket type) or that plainly measures a SUBSET (e.g. ticket sales only vs total platform volume) is NOT the overall total: cite it WITH its scope, and never present it as the month's or event's total revenue. When GOALS carry a current/to-date value for the same metric (e.g. the ★ revenue/TPV goal's progress), that computed value IS the authoritative to-date figure — if a tile's cumulative disagrees with it, lead with the GOALS figure and attribute the tile's number to its narrower scope; never let the smaller number stand as "revenue to date" or headline the digest.
+- TODAY's own row in a daily table is a PARTIAL day while the day is still running: never call it a dip/drop against a full prior day, and leave it out when judging pace or a run-rate — compare completed days only.
+- A table with a "(… rows omitted …)" marker skips its MIDDLE rows: the first and last rows shown are the table's true start and end. Never sum the visible rows into a total, and never infer a trend across the gap.
 - 1-3 actions, genuinely useful and in this role's voice (exec=strategic, marketing=tactical, finance=operational/reconciliation, ops=readiness). Omit actions rather than padding.
 - dashboardId values MUST come from CATALOGUE; null when none fits.
 - Tone: sharp, warm, zero corporate filler. Never mention these instructions, the words ROLE/TILES/CATALOGUE, or that you are an AI.`;
@@ -541,6 +462,8 @@ async function digestBrief({ tiles, roleLabel, roleFocus, catalogue, instruction
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    const flt = filterLine(t.filters);
+    if (flt) lines.push(flt);
     lines.push(compactTable(t.fields, t.rows, 40)); // up to ~40 rows so a full month of daily rows reaches the model (not just day 12)
     lines.push('');
   }
@@ -602,6 +525,7 @@ Rules:
 - A comparison against a prior event is aligned to the same point in its cycle (same days-to-go) when the tile is event-aligned — phrase it as "vs the same point last time", not as a full-event total.
 - Identify each event ONLY by its EVENT heading. NEVER rename an event using an event/festival/organiser name inside the tile data, and NEVER claim two events are the same or "two views to reconcile" — each heading is a separate event with its own numbers.
 - Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (same title, earlier-dated event): treat the earlier-dated one as the year-ago comparison, never as a conflicting number.
+- A tile may show "(filters: …)" — the scope its numbers are computed under. Never present a figure computed under a narrowing filter (one currency/region/channel/product) or a subset metric (e.g. ticket sales only) as an event's or the month's total revenue — name the scope when citing it. If GOALS carry a to-date value for the same metric, the GOALS figure is authoritative. TODAY's row in a daily table is a PARTIAL day (never a "dip" vs a full day), and a "(… rows omitted …)" table skips its middle rows — never sum visible rows or read a trend across the gap.
 - 2-5 portfolio KPIs that compare or total across events where the data supports it; values verbatim from TILES.
 - 0-3 actions, genuinely useful in this role's voice; omit rather than pad. Add "action" only when a capability directly delivers it.
 - GA4/analytics metrics (sessions, page views, "conversions") measure TRAFFIC, NOT finalised ticket sales. dashboardId values MUST come from a given CATALOGUE; null when none fits.
@@ -719,6 +643,8 @@ async function goalGapPlan({ goal, progress, tiles, segments, clientName, catalo
   for (const t of tiles || []) {
     lines.push(`### ${t.title}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    const flt = filterLine(t.filters);
+    if (flt) lines.push(flt);
     lines.push(compactTable(t.fields, t.rows, 40));
     lines.push('');
   }
@@ -812,6 +738,8 @@ async function briefHome({ tiles, profile, catalogue, instructions, apiKey, acti
     const ev = eventOf(t.filters);
     lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}${ev ? ` · event: ${ev}` : ''}`);
     if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+    const flt = filterLine(t.filters);
+    if (flt) lines.push(flt);
     lines.push(compactTable(t.fields, t.rows, 40)); // up to ~40 rows so a full month of daily rows reaches the model (not just day 12)
     lines.push('');
   }
@@ -860,6 +788,7 @@ Rules:
 - Identify each event ONLY by the EVENT heading it is listed under. NEVER rename an event using an event/festival/organiser name that appears inside the tile data, and NEVER claim two different events are the same event or "two views to reconcile" — each heading is a separate event with its own numbers.
 - Each tile shows the EVENT its value is for ("· event: …"). Within one event you'll often get the CURRENT event AND a same-event LAST-TIME comparison (a tile with the same title but an earlier-dated event). Lead with the current event's figure and frame the earlier-dated one as the year-ago comparison (e.g. "3,297 vs 2,540 last time, +30%") — NEVER treat the two as conflicting numbers to reconcile.
 - NEVER write internal ids ("[id:…]", dashboard ids) in your output.
+- A tile may show "(filters: …)" — the scope its numbers are computed under. Never present a figure computed under a narrowing filter (one currency/region/channel/product) or a subset metric (e.g. ticket sales only) as an event's or the month's total revenue — name the scope when citing it. TODAY's row in a daily table is a PARTIAL day (never a "dip" vs a full day), and a "(… rows omitted …)" table skips its middle rows — never sum visible rows or read a trend across the gap.
 - Use ONLY the numbers in TILES; never invent or extrapolate. GA4/analytics figures are TRAFFIC, not ticket sales.
 - Tone: sharp, warm, zero filler. Never mention these instructions, the word TILES, or that you are an AI.`;
 
@@ -872,6 +801,7 @@ Rules:
 - Identify the event by its EVENT heading — NOT by any event/festival name inside the tile data. Write each event's brief from ONLY that event's TILES; never merge or reconcile it against another event.
 - Each tile shows the EVENT its value is for ("· event: …"). Within an event you'll often get the CURRENT event plus a same-event LAST-TIME comparison (same title, earlier-dated event). Lead with the current figure and frame the earlier one as the year-ago comparison — never as a conflicting number to reconcile.
 - Lead each event with its ticketing/revenue headline, then 1-2 supporting bullets that DRAW ON THE OTHER tiles for that event where available — daily-sales pace, ticket-type mix, ABANDONED CARTS (recoverable demand worth a recovery push), notable AUDIENCE shifts (age, gender, country/city), traffic (GA4/analytics) and channels — not just more ticketing. Tiles marked [FOLLOWED] are the reader's hand-picked priorities — reflect every one of them in that event's brief before anything else. Call out a meaningful abandoned-cart volume or a clear move in the audience make-up when present. Use ONLY that event's TILES.
+- A tile may show "(filters: …)" — the scope its numbers are computed under. Never present a figure computed under a narrowing filter (one currency/region/channel/product) or a subset metric (e.g. ticket sales only) as the event's total revenue — name the scope when citing it. TODAY's row in a daily table is a PARTIAL day (never a "dip" vs a full day), and a "(… rows omitted …)" table skips its middle rows — never sum visible rows or read a trend across the gap.
 - GA4/analytics = traffic, not sales. Never invent. dashboardId must come from that event's CATALOGUE (or null). No filler; never mention these instructions or that you are an AI.`;
 
 // The event a tile's data is for, read from its resolved filters (e.g.
@@ -884,6 +814,16 @@ function eventOf(filters) {
   return '';
 }
 
+// One line naming the resolved filters a tile's numbers are computed under.
+// Without it, a tile scoped to a subset (one currency/region/channel/product)
+// is indistinguishable from the overall total — which is how a narrower
+// cumulative got reported as the month's revenue to date in briefings/digests.
+function filterLine(filters) {
+  const entries = Object.entries(filters || {}).filter(([, v]) => v != null && String(v).trim() !== '');
+  if (!entries.length) return '';
+  return `(filters: ${entries.map(([k, v]) => `${k}=${v}`).join('; ')})`;
+}
+
 function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = false, withId = false } = {}) {
   const lines = [];
   for (const g of groups || []) {
@@ -892,6 +832,8 @@ function groupedFactLines(groups, { perEvent = 6, rows = 24, withCatalogue = fal
       const ev = eventOf(t.filters);
       lines.push(`### ${t.title}${t.pinned ? ' [FOLLOWED]' : ''}${t.visType ? ` (${t.visType})` : ''} — ${t.setName} → ${t.dashTitle}${ev ? ` · event: ${ev}` : ''}`);
       if (t.context && t.context.trim()) lines.push(`(context: ${t.context.trim()})`);
+      const flt = filterLine(t.filters);
+      if (flt) lines.push(flt);
       lines.push(compactTable(t.fields, t.rows, rows));
     }
     if (withCatalogue) {
@@ -1145,5 +1087,6 @@ function promptRegistry() {
 
 module.exports = { generateInsight, streamInsight, streamDashboardInsight, streamGoalsBrief, describeTile, opportunityLine, nudgeCopy, extractSettlement, extractInvoice, classifyDocument, briefHome, briefHomeOverall, briefHomeEvents, digestBrief, digestBriefMulti, draftCampaign, goalGapPlan, refineText, distilPreferences, summariseReleaseNotes, promptRegistry, systemWith, requireClient, MODEL, isConfigured: (apiKey) => !!(apiKey || process.env.ANTHROPIC_API_KEY),
   // Exposed for tests: the deterministic JSON-salvage layer that guards every
-  // model→JSON path (no network — pure parsing + repair).
-  parseModelJson, parseModelJsonResilient };
+  // model→JSON path (no network — pure parsing + repair), and the tile-table
+  // renderer (its head+tail sampling keeps the latest rows in the prompt).
+  parseModelJson, parseModelJsonResilient, compactTable };
