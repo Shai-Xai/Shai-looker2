@@ -13,6 +13,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'accommodation', 'sponsors', 'faq', 'other'];
 const ITEM_KINDS = ['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise'];
 const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
+const LANGS = [['', "Auto — fan's device language, else English"], ['en', 'English'], ['af', 'Afrikaans'], ['it', 'Italiano'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['nl', 'Nederlands']];
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card, #fff)', color: 'var(--text)' };
 const small = { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 4px' };
 const btn = { padding: '8px 14px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, cursor: 'pointer', minHeight: 36 };
@@ -245,7 +246,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -278,6 +279,12 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <div style={small}>Intro line (the first thing fans read when the chat opens)</div>
                   <input style={input} value={s.owlIntro || ''} maxLength={200} placeholder="e.g. Ciao! I'm your festival insider — ask me anything 🎶" onChange={(e) => setSite(i, { owlIntro: e.target.value })} />
                 </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <div style={small}>Default language — the Owl greets in the fan's phone/browser language when it can tell; this is the fallback (it always answers in whatever language the fan writes)</div>
+                <select style={input} value={s.defaultLang || ''} onChange={(e) => setSite(i, { defaultLang: e.target.value })}>
+                  {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
               <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}

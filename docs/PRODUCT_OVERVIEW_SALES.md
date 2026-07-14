@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-13 (🦉 Fan Owl: per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-13 (🦉 Fan Owl: fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -205,6 +205,10 @@ ticket like a well-informed friend who's already going.
   don'ts, and adds 💡 insider tips the Owl volunteers when they help
   ("the east gate has no queue after 6pm"). Personality is style-only: the hard
   rules (real prices, nothing invented, no fake urgency) always win.
+- **Speaks the fan's language** — the Owl opens in the fan's own phone/browser
+  language (and always answers in whatever language the fan writes); the widget's
+  buttons and prompts localise too (EN·AF·IT·ES·FR·DE·PT·NL), with a per-site
+  default language as the fallback.
 - **Answers like the organiser would** — FAQs, refund policy, what's included:
   answered ONLY from the knowledge base the promoter writes (never invented), with
   prices only ever from the configured catalogue. Urgency only from real
@@ -1032,6 +1036,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-13** — **Fan Owl: fan-language auto-switch + default language** 🧪:
+  the Owl now detects the fan's device language and opens in it — chat replies,
+  greeting and the widget's own buttons/prompts (EN·AF·IT·ES·FR·DE·PT·NL) — and
+  always mirrors whatever language the fan writes. Each site sets a default
+  language as the fallback (Fan Owl → Personality).
 - **2026-07-13** — **Fan Owl: per-site personality** 🧪: each site's Owl is now
   personalisable by the client — uploaded face (avatar), name, intro line, voice
   brief, house dos & don'ts, and 💡 insider-tip knowledge entries the Owl
