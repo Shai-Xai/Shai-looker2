@@ -20,9 +20,14 @@ const actionTemplates = require('./actionTemplates');
 const MAX_NODES = 14; const MAX_DEPTH = 2;
 function inferWhen(label) {
   const l = String(label || '').toLowerCase();
-  if (/bought|purchas|convert|paid|complete/.test(l)) return 'bought';
-  if (/click/.test(l) && /(didn|not|no |never)/.test(l) === false) return 'clicked';
-  if (/open/.test(l) && /(didn|not|no |never)/.test(l) === false) return 'opened';
+  // Negation applies to the NEAREST behaviour word, not the whole label — so
+  // "Clicked but didn't buy" is 'clicked' (the buy is the contrast, handled by
+  // the bought branch's precedence), "Opened, no click" is 'opened', while
+  // "didn't open" / "no response" fall through to 'timeout'. Severity high→low.
+  const negated = (kw) => new RegExp(`(did\\s?n.?t|does\\s?n.?t|not|no|never|without)\\s+\\w*\\s*${kw}`).test(l);
+  if (/(bought|buy|purchas|convert|paid|order)/.test(l) && !negated('(buy|bought|purchas|paid|order|convert)')) return 'bought';
+  if (/click/.test(l) && !negated('click')) return 'clicked';
+  if (/open/.test(l) && !negated('open')) return 'opened';
   return 'timeout'; // "no response" / "didn't open" / "otherwise" — the catch-all
 }
 function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }) {
