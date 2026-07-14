@@ -305,6 +305,10 @@ async function processAction(a, deps) {
       if (!waitUntil || e.node_id !== n.id) waitUntil = new Date(Date.now() + (n.waitHours || 48) * 3600e3).toISOString(); // just arrived — open the window
       const sig = signalsFor(e.email); sig.expired = now() >= waitUntil;
       const b = pickBranch(n, sig);
+      // A purchase ALWAYS exits — never keep selling to someone who bought. If the
+      // author gave a 'bought' branch, pickBranch chose it (a thank-you, then
+      // convert below); otherwise exit silently as converted rather than nurturing.
+      if (sig.bought && !(b && b.when === 'bought')) { upd(e, { status: 'converted', node_id: '' }); converted += 1; break; }
       if (!b) { upd(e, { node_id: n.id, wait_until: waitUntil, next_at: new Date(Date.now() + POLL_MS).toISOString() }); break; } // keep waiting, poll next tick
       if (b.when === 'bought') boughtRouted = true;
       id = (b.nodes[0] && b.nodes[0].id) || cur.nextId; waitUntil = '';
