@@ -28,7 +28,7 @@ after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
   sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live',
-    owlName: 'Kappa Guide', owlAvatar: 'https://fest.example/owl.png', owlIntro: 'Ciao! Ask me anything', persona: 'cheeky, proudly local', guardrails: 'always mention the waiting list when sold out', pages: [
+    owlName: 'Kappa Guide', owlAvatar: 'https://fest.example/owl.png', owlIntro: 'Ciao! Ask me anything', persona: 'cheeky, proudly local', guardrails: 'always mention the waiting list when sold out', defaultLang: 'it', pages: [
     { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'], pitch: 'Catch every artist with a Weekend Pass' },
   ], ...site }],
   catalogue: [
@@ -80,8 +80,10 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.equal(site.owlIntro, 'Ciao! Ask me anything');
   assert.equal(site.persona, 'cheeky, proudly local');
   assert.equal(site.guardrails, 'always mention the waiting list when sold out');
-  const junk = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, owlAvatar: 'javascript:alert(1)' }] } });
+  assert.equal(site.defaultLang, 'it');
+  const junk = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, owlAvatar: 'javascript:alert(1)', defaultLang: 'x!!' }] } });
   assert.equal(junk.body.sites[0].owlAvatar, '');
+  assert.equal(junk.body.sites[0].defaultLang, ''); // junk codes dropped
   // Saving again with the same site id keeps the key stable.
   const r2 = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, name: 'Renamed' }] } });
   assert.equal(r2.body.sites[0].siteKey, site.siteKey);
@@ -135,6 +137,13 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
   const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
   assert.equal(bootHome.body.page, null);
+  // Language: no device language → the site default; a device language (sent by
+  // the loader from navigator.language) wins; unmapped pages send no starters
+  // (the widget localises its own generic ones).
+  assert.equal(bootHome.body.lang, 'it');
+  assert.deepEqual(bootHome.body.starters, []);
+  const rDe = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', lang: 'de-DE' }, headers: ORIGIN });
+  assert.equal((await app.req('GET', `/api/fan/boot?sid=${rDe.body.sessionId}`)).body.lang, 'de-de');
   // pageChanged: first boot no (nothing to compare), reopening on the SAME page
   // no, reopening after moving to another page yes → the widget re-surfaces
   // the new page's pitch/offer/starters.

@@ -27,6 +27,22 @@ function splitAnswer(raw) {
 }
 const lastStatus = (raw) => { let m; let s = ''; STATUS_RE.lastIndex = 0; while ((m = STATUS_RE.exec(raw))) s = m[1]; return s; };
 
+// ── Widget UI strings, localised. The chat itself follows the fan's language via
+// the model; these are the deterministic bits around it. Picked from the fan's
+// device language, else the site's configured default, else English. Promoter-
+// written content (pitch, intro, starters, FAQs) is never machine-translated.
+const LOCALES = {
+  en: { guide: 'Your ticket guide', hello: "Hey! I'm {name} — I know this event inside out.", helloSub: 'Ask me anything — which ticket you need, what’s included, how to add extras.', owl: 'the Owl', seeTickets: 'See tickets', tellMore: 'Tell me more', getTickets: 'Get tickets ↗', takeMe: 'Take me there →', nowOn: 'You’re now on {page} — ask me anything about it', ask: 'Ask about tickets…', starters: ['Which ticket do I need?', 'What’s included?', 'Refund policy?'], keepPosted: 'Keep me posted', namePh: 'Your name (optional)', emailPh: 'Your email', consent: 'Email me updates and offers about this event. You can unsubscribe any time.', save: 'Save', saved: '✅ You’re on the list — we’ll keep you posted.' },
+  af: { guide: 'Jou kaartjiegids', hello: 'Haai! Ek is {name} — ek ken hierdie geleentheid deur en deur.', helloSub: 'Vra my enigiets — watter kaartjie jy nodig het, wat ingesluit is, hoe om ekstras by te voeg.', owl: 'die Uil', seeTickets: 'Sien kaartjies', tellMore: 'Vertel my meer', getTickets: 'Kry kaartjies ↗', takeMe: 'Vat my soontoe →', nowOn: 'Jy is nou op {page} — vra my enigiets daaroor', ask: 'Vra oor kaartjies…', starters: ['Watter kaartjie het ek nodig?', 'Wat is ingesluit?', 'Terugbetalingsbeleid?'], keepPosted: 'Hou my op hoogte', namePh: 'Jou naam (opsioneel)', emailPh: 'Jou e-pos', consent: 'E-pos my opdaterings en aanbiedinge oor hierdie geleentheid. Jy kan enige tyd uitteken.', save: 'Stoor', saved: '✅ Jy is op die lys — ons hou jou op hoogte.' },
+  it: { guide: 'La tua guida ai biglietti', hello: 'Ciao! Sono {name} — conosco questo evento alla perfezione.', helloSub: 'Chiedimi qualsiasi cosa — quale biglietto ti serve, cosa è incluso, come aggiungere extra.', owl: 'il Gufo', seeTickets: 'Vedi i biglietti', tellMore: 'Dimmi di più', getTickets: 'Prendi i biglietti ↗', takeMe: 'Portami lì →', nowOn: 'Ora sei su {page} — chiedimi quello che vuoi', ask: 'Chiedi sui biglietti…', starters: ['Quale biglietto mi serve?', 'Cosa è incluso?', 'Politica di rimborso?'], keepPosted: 'Tienimi aggiornato', namePh: 'Il tuo nome (facoltativo)', emailPh: 'La tua email', consent: 'Inviami aggiornamenti e offerte su questo evento via email. Puoi disiscriverti in qualsiasi momento.', save: 'Salva', saved: '✅ Sei in lista — ti terremo aggiornato.' },
+  es: { guide: 'Tu guía de entradas', hello: '¡Hola! Soy {name} — conozco este evento al dedillo.', helloSub: 'Pregúntame lo que sea — qué entrada necesitas, qué incluye, cómo añadir extras.', owl: 'el Búho', seeTickets: 'Ver entradas', tellMore: 'Cuéntame más', getTickets: 'Comprar entradas ↗', takeMe: 'Llévame allí →', nowOn: 'Ahora estás en {page} — pregúntame lo que quieras', ask: 'Pregunta sobre entradas…', starters: ['¿Qué entrada necesito?', '¿Qué incluye?', '¿Política de reembolso?'], keepPosted: 'Mantenme informado', namePh: 'Tu nombre (opcional)', emailPh: 'Tu email', consent: 'Envíame novedades y ofertas de este evento por email. Puedes darte de baja cuando quieras.', save: 'Guardar', saved: '✅ Estás en la lista — te mantendremos informado.' },
+  fr: { guide: 'Votre guide billetterie', hello: 'Salut ! Je suis {name} — je connais cet événement par cœur.', helloSub: 'Demandez-moi tout — quel billet il vous faut, ce qui est inclus, comment ajouter des extras.', owl: 'le Hibou', seeTickets: 'Voir les billets', tellMore: 'Dites-m’en plus', getTickets: 'Obtenir des billets ↗', takeMe: 'Emmenez-moi →', nowOn: 'Vous êtes maintenant sur {page} — posez-moi vos questions', ask: 'Une question billets ?…', starters: ['Quel billet me faut-il ?', 'Qu’est-ce qui est inclus ?', 'Politique de remboursement ?'], keepPosted: 'Tenez-moi informé', namePh: 'Votre nom (facultatif)', emailPh: 'Votre email', consent: 'Envoyez-moi des nouvelles et offres de cet événement par email. Désinscription possible à tout moment.', save: 'Enregistrer', saved: '✅ Vous êtes sur la liste — on vous tient au courant.' },
+  de: { guide: 'Dein Ticket-Guide', hello: 'Hey! Ich bin {name} — ich kenne dieses Event in- und auswendig.', helloSub: 'Frag mich alles — welches Ticket du brauchst, was enthalten ist, wie du Extras dazubuchst.', owl: 'die Eule', seeTickets: 'Tickets ansehen', tellMore: 'Erzähl mir mehr', getTickets: 'Tickets holen ↗', takeMe: 'Bring mich hin →', nowOn: 'Du bist jetzt auf {page} — frag mich alles dazu', ask: 'Frag zu Tickets…', starters: ['Welches Ticket brauche ich?', 'Was ist enthalten?', 'Rückerstattung?'], keepPosted: 'Halt mich auf dem Laufenden', namePh: 'Dein Name (optional)', emailPh: 'Deine E-Mail', consent: 'Schick mir Updates und Angebote zu diesem Event per E-Mail. Jederzeit abbestellbar.', save: 'Speichern', saved: '✅ Du bist auf der Liste — wir halten dich auf dem Laufenden.' },
+  pt: { guide: 'O seu guia de bilhetes', hello: 'Olá! Sou {name} — conheço este evento de trás para a frente.', helloSub: 'Pergunte-me qualquer coisa — que bilhete precisa, o que está incluído, como juntar extras.', owl: 'o Mocho', seeTickets: 'Ver bilhetes', tellMore: 'Conte-me mais', getTickets: 'Comprar bilhetes ↗', takeMe: 'Leva-me lá →', nowOn: 'Está agora em {page} — pergunte-me o que quiser', ask: 'Pergunte sobre bilhetes…', starters: ['Que bilhete preciso?', 'O que está incluído?', 'Política de reembolso?'], keepPosted: 'Mantenha-me informado', namePh: 'O seu nome (opcional)', emailPh: 'O seu email', consent: 'Envie-me novidades e ofertas deste evento por email. Pode cancelar a qualquer momento.', save: 'Guardar', saved: '✅ Está na lista — vamos mantê-lo informado.' },
+  nl: { guide: 'Jouw ticketgids', hello: 'Hoi! Ik ben {name} — ik ken dit evenement door en door.', helloSub: 'Vraag me alles — welk ticket je nodig hebt, wat inbegrepen is, hoe je extra’s toevoegt.', owl: 'de Uil', seeTickets: 'Bekijk tickets', tellMore: 'Vertel me meer', getTickets: 'Koop tickets ↗', takeMe: 'Breng me erheen →', nowOn: 'Je bent nu op {page} — vraag me er alles over', ask: 'Vraag over tickets…', starters: ['Welk ticket heb ik nodig?', 'Wat is inbegrepen?', 'Terugbetalingsbeleid?'], keepPosted: 'Houd me op de hoogte', namePh: 'Je naam (optioneel)', emailPh: 'Je e-mail', consent: 'Mail me updates en aanbiedingen over dit evenement. Je kunt je altijd uitschrijven.', save: 'Opslaan', saved: '✅ Je staat op de lijst — we houden je op de hoogte.' },
+};
+const localeFor = (bootLang) => LOCALES[(navigator.language || '').slice(0, 2).toLowerCase()] || LOCALES[String(bootLang || '').slice(0, 2).toLowerCase()] || LOCALES.en;
+
 export default function FanOwlEmbedPage() {
   const [sid] = useState(() => (/[#&]sid=([^&]+)/.exec(window.location.hash || '') || [])[1] || '');
   // "You've moved pages" — greet the fan with the NEW page's context (pill,
@@ -57,6 +73,7 @@ export default function FanOwlEmbedPage() {
   useEffect(() => { scroller.current?.scrollTo({ top: 1e9, behavior: 'smooth' }); }, [messages, busy]);
 
   const brand = boot?.site?.brandColor || '#111';
+  const T = localeFor(boot?.lang); // widget UI strings in the fan's language
   // Scrollable image strip on an offer card (image URLs the promoter supplied).
   const ImageStrip = ({ images }) => {
     const safe = (images || []).filter((u) => /^https?:\/\//i.test(u));
@@ -143,9 +160,10 @@ export default function FanOwlEmbedPage() {
   // Suggested pills are ALWAYS on offer: right after an Owl reply its follow-ups
   // lead; any other time (fresh open, reopened thread, page hop) the CURRENT
   // page's starters show, so every page invites its own questions.
+  const pageChips = (boot.starters || []).length ? boot.starters : T.starters;
   const chips = busy ? []
-    : (navArrived ? (boot.starters || [])
-      : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : (boot.starters || [])));
+    : (navArrived ? pageChips
+      : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : pageChips));
 
   return (
     <div style={S.shell}>
@@ -157,7 +175,7 @@ export default function FanOwlEmbedPage() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{boot.site?.owlName || boot.event?.name || boot.site?.name || 'Event guide'}</div>
             <div style={{ fontSize: 11.5, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {boot.page ? <>📍 {pageLabel(boot.page)}</> : 'Your ticket guide'}
+              {boot.page ? <>📍 {pageLabel(boot.page)}</> : T.guide}
             </div>
           </div>
         </div>
@@ -173,17 +191,17 @@ export default function FanOwlEmbedPage() {
             {boot.site?.owlAvatar
               ? <img src={boot.site.owlAvatar} alt="" style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', marginBottom: 6 }} />
               : <div style={{ fontSize: 30, marginBottom: 6 }}>🦉</div>}
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>{boot.site?.owlIntro || `Hey! I'm ${boot.site?.owlName || 'the Owl'} — I know this event inside out.`}</div>
-            <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || 'Ask me anything — which ticket you need, what’s included, how to add extras.'}</div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{boot.site?.owlIntro || T.hello.replace('{name}', boot.site?.owlName || T.owl)}</div>
+            <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || T.helloSub}</div>
             {boot.offer && (
               <div style={{ ...S.offerCard, marginTop: 14 }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
-                  {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : 'See tickets'}
+                  {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
                   {boot.offer.availability ? ` · ${boot.offer.availability}` : ''}
                 </div>
                 <ImageStrip images={boot.offer.images} />
-                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>Tell me more</button>
+                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>{T.tellMore}</button>
               </div>
             )}
           </div>
@@ -201,14 +219,14 @@ export default function FanOwlEmbedPage() {
                   {o.availability ? ` · ${o.availability}` : ''}
                 </div>
                 <ImageStrip images={o.images} />
-                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => clickOffer(o)}>Get tickets ↗</button>
+                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => clickOffer(o)}>{T.getTickets}</button>
               </div>
             ))}
             {m.nav && !m.streaming && (
               <div style={S.offerCard}>
                 <div style={{ fontWeight: 700 }}>📍 {pageLabel(m.nav)}</div>
                 {m.nav.note && <div style={{ fontSize: 13, opacity: 0.8 }}>{m.nav.path}</div>}
-                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>Take me there →</button>
+                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>{T.takeMe}</button>
               </div>
             )}
           </div>
@@ -216,18 +234,18 @@ export default function FanOwlEmbedPage() {
         {navArrived && boot.page && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
             <div style={{ alignSelf: 'center', fontSize: 12.5, color: '#888', padding: '2px 8px' }}>
-              📍 You’re now on {pageLabel(boot.page)} — ask me anything about it
+              📍 {T.nowOn.replace('{page}', pageLabel(boot.page))}
             </div>
             {boot.pitch && <div style={{ ...S.bubble, ...S.theirs }}>{boot.pitch}</div>}
             {boot.offer && (
               <div style={S.offerCard}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
-                  {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : 'See tickets'}
+                  {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
                   {boot.offer.availability ? ` · ${boot.offer.availability}` : ''}
                 </div>
                 <ImageStrip images={boot.offer.images} />
-                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>Tell me more</button>
+                <button type="button" style={{ ...S.cta, background: brand }} onClick={() => send(`Tell me about ${boot.offer.label}`)}>{T.tellMore}</button>
               </div>
             )}
           </div>
@@ -241,9 +259,9 @@ export default function FanOwlEmbedPage() {
         )}
       </div>
 
-      {lead === 'open' && <LeadSheet brand={brand} onSave={saveLead} onClose={() => setLead(null)} />}
+      {lead === 'open' && <LeadSheet brand={brand} T={T} onSave={saveLead} onClose={() => setLead(null)} />}
       {lead === 'saved' && (
-        <div style={S.savedNote}>✅ You’re on the list — we’ll keep you posted.</div>
+        <div style={S.savedNote}>{T.saved}</div>
       )}
 
       <form
@@ -254,7 +272,7 @@ export default function FanOwlEmbedPage() {
           style={S.input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about tickets…"
+          placeholder={T.ask}
           aria-label="Message"
         />
         <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
@@ -266,7 +284,7 @@ export default function FanOwlEmbedPage() {
 
 // The consent form: explicit, unticked-by-default marketing opt-in (POPIA/GDPR —
 // spec §6b). The chat works fully without it; this is only ever a favour.
-function LeadSheet({ brand, onSave, onClose }) {
+function LeadSheet({ brand, T, onSave, onClose }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [consent, setConsent] = useState(false);
@@ -274,17 +292,17 @@ function LeadSheet({ brand, onSave, onClose }) {
   return (
     <div style={S.sheet}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <strong style={{ fontSize: 14.5 }}>Keep me posted</strong>
+        <strong style={{ fontSize: 14.5 }}>{T.keepPosted}</strong>
         <button type="button" style={{ ...S.hBtn, color: '#666' }} aria-label="Close" onClick={onClose}>✕</button>
       </div>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ name, email, marketingConsent: consent }); } finally { setBusy(false); } }}>
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} placeholder="Your name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} type="email" required placeholder="Your email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} placeholder={T.namePh} value={name} onChange={(e) => setName(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} type="email" required placeholder={T.emailPh} value={email} onChange={(e) => setEmail(e.target.value)} />
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.45, marginBottom: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
-          <span>Email me updates and offers about this event. You can unsubscribe any time.</span>
+          <span>{T.consent}</span>
         </label>
-        <button type="submit" disabled={busy || !email} style={{ ...S.cta, background: brand, width: '100%', opacity: busy || !email ? 0.6 : 1 }}>Save</button>
+        <button type="submit" disabled={busy || !email} style={{ ...S.cta, background: brand, width: '100%', opacity: busy || !email ? 0.6 : 1 }}>{T.save}</button>
       </form>
     </div>
   );

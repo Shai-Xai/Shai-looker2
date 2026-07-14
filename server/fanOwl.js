@@ -176,6 +176,12 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   for (const col of ["owl_name TEXT NOT NULL DEFAULT ''", "owl_avatar TEXT NOT NULL DEFAULT ''", "owl_intro TEXT NOT NULL DEFAULT ''", "persona TEXT NOT NULL DEFAULT ''", "guardrails TEXT NOT NULL DEFAULT ''"]) {
     try { sql.exec(`ALTER TABLE fan_sites ADD COLUMN ${col}`); } catch { /* already present */ }
   }
+  // Migration: language — the site's default (what the Owl leads with) and the
+  // fan's device language (navigator.language, sent by the loader): the Owl opens
+  // in the fan's language when known and always mirrors what the fan writes.
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN default_lang TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN lang TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  const cleanLang = (v) => (/^[a-z]{2}(-[a-z0-9]{2,4})?$/i.test(String(v || '').trim()) ? String(v).trim().toLowerCase() : '');
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -204,7 +210,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '',
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '',
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -227,15 +233,15 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           // Personalisation: avatar must be a hosted URL (usually our own
           // /fan-owl-assets upload); persona/guardrails are style-only text layers.
           const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
-          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000)];
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=? WHERE id=?')
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=? WHERE id=?')
               .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
               .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
@@ -597,16 +603,17 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       const pageUrl = String(b.url || '').slice(0, 500);
       // One session per loader boot; the anon id (loader-side localStorage) threads a
       // returning fan's visits together without any identity.
+      const lang = cleanLang(b.lang); // the fan's device language (navigator.language)
       let session = b.sessionId ? getSession.get(String(b.sessionId)) : null;
       if (!session || session.site_id !== site.id) {
         const sid = uid();
-        sql.prepare('INSERT INTO fan_sessions (id,site_id,anon_id,page_url,created_at) VALUES (?,?,?,?,?)')
-          .run(sid, site.id, String(b.anonId || '').slice(0, 60), pageUrl, now());
+        sql.prepare('INSERT INTO fan_sessions (id,site_id,anon_id,page_url,lang,created_at) VALUES (?,?,?,?,?,?)')
+          .run(sid, site.id, String(b.anonId || '').slice(0, 60), pageUrl, lang, now());
         session = getSession.get(sid);
-      } else if (pageUrl && session.page_url !== pageUrl) {
-        // The fan moved to another page — track it so the ribbon AND the chat
-        // (which reads session.page_url per message) follow their context.
-        sql.prepare('UPDATE fan_sessions SET page_url = ? WHERE id = ?').run(pageUrl, session.id);
+      } else if ((pageUrl && session.page_url !== pageUrl) || (lang && session.lang !== lang)) {
+        // The fan moved to another page (or their device language changed) — track
+        // it so the ribbon AND the chat (which read the session per message) follow.
+        sql.prepare('UPDATE fan_sessions SET page_url = ?, lang = ? WHERE id = ?').run(pageUrl || session.page_url, lang || session.lang, session.id);
         session = getSession.get(session.id);
       }
       const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
@@ -638,7 +645,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
     sql.prepare('UPDATE fan_sessions SET chat_page_url = ? WHERE id = ?').run(session.page_url || '', session.id);
     res.json({
-      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },
+      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '', defaultLang: site.default_lang || '' },
+      lang: session.lang || site.default_lang || '', // fan's device language, else the site default — drives the widget's UI strings
       event: suite ? { name: suite.name } : null,
       page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
       pageChanged,
@@ -646,7 +654,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
-      starters: pageStarters.length ? pageStarters.slice(0, 4) : ['Which ticket do I need?', "What's included?", 'Refund policy?'],
+      // Unconfigured pages send NO starters — the widget fills in generic ones in
+      // the fan's own language (it knows the locale; we only know the codes).
+      starters: pageStarters.slice(0, 4),
       consentVersion: CONSENT_WORDING_VERSION,
     });
   });
@@ -806,6 +816,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const instructions = [
       `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
+      (site.default_lang || session.lang)
+        ? `LANGUAGE: ${site.default_lang ? `the organiser's default language is "${site.default_lang}"` : ''}${site.default_lang && session.lang ? ' and ' : ''}${session.lang ? `the fan's device is set to "${session.lang}"` : ''}. Open in the fan's device language when known (otherwise the default), and ALWAYS switch to mirror whatever language the fan actually writes in.`
+        : '',
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       memory,
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,

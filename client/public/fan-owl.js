@@ -196,7 +196,7 @@
   // (same session), and refresh the ribbon. The chat follows automatically: the
   // server tracks the session's current page per context call.
   function onNavigate() {
-    post('/api/fan/context', { siteKey: siteKey, url: window.location.href, anonId: anonId, sessionId: ctx && ctx.sessionId })
+    post('/api/fan/context', { siteKey: siteKey, url: window.location.href, anonId: anonId, sessionId: ctx && ctx.sessionId, lang: navigator.language || '' })
       .then(function (r) { ctx = r; sstore(false, SS_SESSION, r.sessionId); if (root) updateTeaser(); })
       .catch(function () { /* keep the old ribbon */ });
   }
@@ -214,6 +214,8 @@
     siteKey: siteKey,
     url: window.location.href,
     anonId: anonId,
+    lang: navigator.language || '', // the fan's device language — the Owl opens in it
+
     sessionId: sstore(true, SS_SESSION) || undefined,
   }).then(function (r) {
     ctx = r;
