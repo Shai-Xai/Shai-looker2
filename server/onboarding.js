@@ -22,7 +22,7 @@ function mount(app, { db, auth, mailer, os }) {
   const sql = db.db;
   sql.exec(`CREATE TABLE IF NOT EXISTS onboarding_state (
     entity_id  TEXT NOT NULL,
-    key        TEXT NOT NULL,          -- a step key, or '__dismissed'
+    key        TEXT NOT NULL,          -- a step key (dismissal is a per-user setting, not stored here)
     done       INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (entity_id, key)
@@ -116,7 +116,14 @@ function mount(app, { db, auth, mailer, os }) {
   // Bonus points the gamification layer awards on top of steps.
   const PHASE_BONUS = 250; const ACTIVATED_BONUS = 500;
 
-  function progress(entityId) {
+  // Dismissal is PER-USER (each teammate hides the card for themselves), not
+  // per-client — so one person dismissing doesn't hide it for the whole team.
+  // Step completion stays client-wide (a step done by anyone is done for all).
+  const dismissKey = (userId, entityId) => `onboarding_dismissed:${userId}:${entityId}`;
+  const isDismissed = (userId, entityId) => (userId ? db.getSetting(dismissKey(userId, entityId), '') === '1' : false);
+  const setDismissed = (userId, entityId, on) => db.setSetting(dismissKey(userId, entityId), on ? '1' : '0');
+
+  function progress(entityId, userId = null) {
     const manual = {};
     try { for (const r of sql.prepare('SELECT key, done FROM onboarding_state WHERE entity_id=?').all(entityId)) manual[r.key] = r.done; } catch { /* table new */ }
     const steps = STEPS.map((s) => {
@@ -136,7 +143,7 @@ function mount(app, { db, auth, mailer, os }) {
     // full-activation bonus). Activity-badge points ride on top in gamify.js.
     const points = steps.filter((s) => s.done).reduce((n, s) => n + s.pts, 0)
       + phases.filter((p) => p.complete).length * PHASE_BONUS + (complete ? ACTIVATED_BONUS : 0);
-    return { steps, phases, currentPhase: current ? current.key : null, done, total: steps.length, points, complete, dismissed: manual.__dismissed === 1 };
+    return { steps, phases, currentPhase: current ? current.key : null, done, total: steps.length, points, complete, dismissed: isDismissed(userId, entityId) };
   }
   const setState = (entityId, key, done) => sql.prepare('INSERT INTO onboarding_state (entity_id,key,done,updated_at) VALUES (?,?,?,?) ON CONFLICT(entity_id,key) DO UPDATE SET done=excluded.done, updated_at=excluded.updated_at').run(entityId, key, done ? 1 : 0, new Date().toISOString());
 
@@ -284,7 +291,14 @@ function mount(app, { db, auth, mailer, os }) {
 
   app.get('/api/my/onboarding/:entityId', auth.requireAuth, (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
-    res.json(progress(req.params.entityId));
+    res.json(progress(req.params.entityId, req.user.id));
+  });
+  // Dismiss (hide) or restore the checklist — for THIS user only. MUST precede the
+  // generic /:key route below, or Express matches "dismiss" as a step key and 400s.
+  app.post('/api/my/onboarding/:entityId/dismiss', auth.requireAuth, (req, res) => {
+    if (!guard(req, res, req.params.entityId)) return;
+    setDismissed(req.user.id, req.params.entityId, (req.body && req.body.dismissed) !== false);
+    res.json(progress(req.params.entityId, req.user.id));
   });
   // Tick / untick a manual step (auto steps ignore this — they reflect real state).
   app.post('/api/my/onboarding/:entityId/:key', auth.requireAuth, (req, res) => {
@@ -292,13 +306,7 @@ function mount(app, { db, auth, mailer, os }) {
     const valid = STEPS.some((s) => s.key === req.params.key);
     if (!valid) return res.status(400).json({ error: 'Unknown step' });
     setState(req.params.entityId, req.params.key, !!(req.body && req.body.done));
-    res.json(progress(req.params.entityId));
-  });
-  // Dismiss (hide) or restore the whole checklist.
-  app.post('/api/my/onboarding/:entityId/dismiss', auth.requireAuth, (req, res) => {
-    if (!guard(req, res, req.params.entityId)) return;
-    setState(req.params.entityId, '__dismissed', (req.body && req.body.dismissed) !== false);
-    res.json(progress(req.params.entityId));
+    res.json(progress(req.params.entityId, req.user.id));
   });
 
   // ── Admin: read + manage any client's journey (the AM cockpit seed) ─────────

@@ -54,6 +54,30 @@ test('journey exposes four phases, ticks manual steps, and guards the tenant bou
   await app.close();
 });
 
+test('dismiss hides the checklist for that user only, not the whole client team', async () => {
+  const stubs = makeStubs();
+  const app = await startApp(mountWith(stubs));
+  reset();
+  const e = h.makeEntity('Dismissy', 'Dismissy Org');
+  const a = h.makeClient('a@dismissy.test', [e.id]);
+  const b = h.makeClient('b@dismissy.test', [e.id]); // teammate on the SAME client
+
+  // A dismisses → A sees it dismissed, B does not.
+  let r = await app.req('POST', `/api/my/onboarding/${e.id}/dismiss`, { as: a, body: { dismissed: true } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.dismissed, true, 'A now sees it dismissed');
+  r = await app.req('GET', `/api/my/onboarding/${e.id}`, { as: b });
+  assert.equal(r.body.dismissed, false, "teammate B is unaffected");
+  r = await app.req('GET', `/api/my/onboarding/${e.id}`, { as: a });
+  assert.equal(r.body.dismissed, true, 'A stays dismissed on reload');
+
+  // A can restore it for themselves.
+  r = await app.req('POST', `/api/my/onboarding/${e.id}/dismiss`, { as: a, body: { dismissed: false } });
+  assert.equal(r.body.dismissed, false, 'A restored the checklist');
+
+  await app.close();
+});
+
 test('welcome pack sends once when the first login exists; phase completion follows with the next phase', async () => {
   const stubs = makeStubs();
   const app = await startApp(mountWith(stubs));
