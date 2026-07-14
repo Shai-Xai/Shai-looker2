@@ -21,6 +21,7 @@ function convertDashboard({ dashboard, elements, filters, layouts }) {
     const pos = posByElement[String(el.id)];
     return {
       id: cryptoId(),
+      sourceElementId: el.id != null ? String(el.id) : '', // stable Looker element id → lets a later re-sync match this tile
       type: isText ? 'text' : 'vis',
       title: el.title || '',
       body_text: el.body_text || '',

@@ -87,6 +87,24 @@ export default function HomePage() {
     } catch (e) { alert('Could not update: ' + (e.message || e)); }
   }
 
+  // Re-sync every imported dashboard in this folder from Looker. Dry-run → confirm
+  // → apply. Pulse edits are preserved (see server/resync.js).
+  const [resyncing, setResyncing] = useState(false);
+  async function resyncFolder() {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      const dry = await api.resyncFolder(path, false);
+      const t = dry.totals || {};
+      if (!dry.dashboards) { alert(`No Looker-imported dashboards found in “${path}”.`); return; }
+      if (!t.updated && !t.added && !t.removedInLooker) { alert(`All ${dry.dashboards} dashboard${dry.dashboards === 1 ? '' : 's'} in “${path}” are already up to date with Looker.`); return; }
+      if (!confirm(`Re-sync ${dry.dashboards} dashboard${dry.dashboards === 1 ? '' : 's'} in “${path}” (and subfolders) from Looker?\n\n• ${t.updated} tiles refreshed\n• ${t.added} added\n• ${t.removedInLooker} no longer in Looker (kept)\n\nYour Pulse edits are preserved.`)) return;
+      const done = await api.resyncFolder(path, true);
+      alert(`Re-synced ${done.dashboards} dashboard${done.dashboards === 1 ? '' : 's'}.${done.failed?.length ? `\n\n${done.failed.length} failed — check the folder.` : ''}`);
+    } catch (e) { alert('Could not re-sync: ' + (e.message || e)); }
+    finally { setResyncing(false); }
+  }
+
   async function previewFolder() {
     if (!lookerFolderId.trim()) return;
     setFolderBusy(true);
@@ -258,6 +276,7 @@ export default function HomePage() {
               📌 Imported filters: {folderKeepOn ? 'On' : 'Off'}
             </button>
             <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={comparisonSortDesc} title="Set comparison-events charts in this folder (and subfolders) to sort events descending (most recent first). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Desc</button>
+            <button style={{ ...miniBtnOutline, fontSize: 12 }} onClick={resyncFolder} disabled={resyncing} title="Pull the latest from Looker for every imported dashboard in this folder (and subfolders) — refreshes tile queries/visuals, adds new tiles, flags removed ones, and keeps all your Pulse edits.">{resyncing ? '↻ Re-syncing…' : '↻ Re-sync from Looker'}</button>
             <button
               style={{ ...miniBtnOutline, fontSize: 12, ...(folderDaysMap[path]?.mode && folderDaysMap[path].mode !== 'off' ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff' } : null) }}
               onClick={() => setShowDaysSync(true)}
