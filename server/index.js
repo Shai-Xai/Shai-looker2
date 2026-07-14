@@ -38,7 +38,7 @@ const { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesA
 const {
   PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults,
   clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority,
-  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles,
+  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel,
 } = require('./briefing')({ db, store, query });
 
 const app = express();
@@ -1824,7 +1824,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     return {
       diag: selected.map((id) => {
         const g = gById[id];
-        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) };
+        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), filters: t.filters || {} })) };
       }),
       dropped: (dropped || []).slice(0, 50),
     };
@@ -2234,25 +2234,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // EXCLUDED and why (scope blocked vs no rows vs error) — so a missing source
   // (e.g. GA4) isn't a black box. Only attached when explicitly requested.
   if (debug) {
-    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
     out.dropped = dropped;
   }
   return out;
 }
 
-// Best display value for a fact tile (first measure → table calc → dimension of
-// the first row), preferring Looker's rendered string. Used by the digest
-// facts inspector to show what each tile resolved to.
-function factValueLabel(t) {
-  const row = (t.rows || [])[0];
-  if (!row) return '—';
-  const fields = [...(t.fields?.measures || []), ...(t.fields?.table_calculations || []), ...(t.fields?.dimensions || [])];
-  for (const f of fields) {
-    const cell = row[f.name];
-    if (cell && (cell.rendered != null || cell.value != null)) return String(cell.rendered != null ? cell.rendered : cell.value);
-  }
-  return '—';
-}
+// factValueLabel / factSpanLabel (the digest facts-inspector helpers) live in
+// server/briefing.js with the rest of the fact-tile layer.
 
 // Selectable tiles per client, grouped by dashboard — drives the curated
 // digest picker. Only data tiles (with fields, not text) can be chosen.

@@ -265,7 +265,7 @@ export default function ClientHome() {
                               <div style={{ fontWeight: 800 }}>{g.suiteName}{!g.tiles.length ? ' — no tiles returned data' : ''}</div>
                               {g.tiles.map((t, i) => (
                                 <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
-                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
+                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>{t.span ? `· data ${t.span} (${t.rows} rows) ` : t.rows > 1 ? `· ${t.rows} rows ` : ''}· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
                                 </div>
                               ))}
                             </div>
