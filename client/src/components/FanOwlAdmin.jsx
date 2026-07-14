@@ -246,7 +246,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <input style={input} value={s.teaser} onChange={(e) => setSite(i, { teaser: e.target.value })} placeholder="e.g. Tickets are live — ask me anything" />
                 </div>
                 <div>
-                  <div style={small}>Brand colour (hex)</div>
+                  <div style={small}>Brand colour (hex — blank adopts your Pulse branding; also editable under 🪄 Personality)</div>
                   <input style={input} value={s.brandColor} onChange={(e) => setSite(i, { brandColor: e.target.value })} placeholder="#111111" />
                 </div>
                 <div>
@@ -271,7 +271,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', navStyle: '', pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -309,6 +309,33 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                 <div style={small}>Default language — the Owl greets in the fan's phone/browser language when it can tell; this is the fallback (it always answers in whatever language the fan writes)</div>
                 <select style={input} value={s.defaultLang || ''} onChange={(e) => setSite(i, { defaultLang: e.target.value })}>
                   {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8, marginTop: 8 }}>
+                <div>
+                  <div style={small}>Widget colour — launcher, header & buttons (hex)</div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span aria-hidden style={{ width: 26, height: 26, borderRadius: 8, flex: '0 0 auto', border: '1px solid var(--hairline)', background: s.brandColor || cfg.inherited?.brandColor || '#111' }} />
+                    <input style={input} value={s.brandColor || ''} placeholder={cfg.inherited?.brandColor || '#111111'} onChange={(e) => setSite(i, { brandColor: e.target.value })} />
+                  </div>
+                  <div style={small}>Blank = adopts your Pulse brand{cfg.inherited?.brandColor ? ` (${cfg.inherited.brandColor})` : ''} — set one here if that clashes with this website.</div>
+                </div>
+                <div>
+                  <div style={small}>Widget theme — the chat surface</div>
+                  <select style={input} value={s.widgetTheme || ''} onChange={(e) => setSite(i, { widgetTheme: e.target.value })}>
+                    <option value="">Auto — follow the fan's device</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <div style={small}>🧭 Quick-nav buttons — one per mapped page (📄 Pages tab); fans tap them to hop around your site from the chat. Pick where they live:</div>
+                <select style={input} value={s.navStyle || ''} onChange={(e) => setSite(i, { navStyle: e.target.value })}>
+                  <option value="">Icon strip under the header (default)</option>
+                  <option value="plus">＋ menu next to the message box</option>
+                  <option value="pills">Labelled pills above the message box (centred)</option>
+                  <option value="off">Off — chat only</option>
                 </select>
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>

@@ -43,6 +43,28 @@ const LOCALES = {
 };
 const localeFor = (bootLang) => LOCALES[(navigator.language || '').slice(0, 2).toLowerCase()] || LOCALES[String(bootLang || '').slice(0, 2).toLowerCase()] || LOCALES.en;
 
+// ── Quick-nav buttons (per-site nav styles: top strip / + menu / pills). One
+// icon + short label per page type; the button list itself comes from boot.nav.
+const NAV_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
+const NAV_PATHS = {
+  home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /></>,
+  tickets: <><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4Z" /><path d="M13.5 6v2m0 3v2m0 3v2" strokeDasharray="1.5 3" /></>,
+  lineup: <><path d="M9 18V6l10-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></>,
+  artist: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c1.2-3.4 3.8-5 7-5s5.8 1.6 7 5" /></>,
+  venue: <><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Z" /><circle cx="12" cy="10" r="2.5" /></>,
+  accommodation: <><path d="M12 4 3 18h18L12 4Z" /><path d="M12 10 8.5 18h7L12 10Z" /></>,
+  attraction: <path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2L12 3Z" />,
+  sponsors: <><circle cx="12" cy="12" r="8" /><path d="M8.5 12h7M12 8.5v7" /></>,
+  faq: <><circle cx="12" cy="12" r="8" /><path d="M9.5 9.5c.4-1.2 1.3-2 2.5-2 1.4 0 2.5 1 2.5 2.3 0 1.6-2 1.9-2 3.2" /><circle cx="12" cy="16.6" r=".4" fill="currentColor" /></>,
+  other: <><circle cx="5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="19" cy="12" r="1.4" fill="currentColor" /></>,
+};
+const NavIcon = ({ t, size = 19 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {NAV_PATHS[t] || NAV_PATHS.other}
+  </svg>
+);
+const navLabel = (n) => NAV_LABELS[n.pageType] || NAV_LABELS.other;
+
 export default function FanOwlEmbedPage() {
   const [sid] = useState(() => (/[#&]sid=([^&]+)/.exec(window.location.hash || '') || [])[1] || '');
   // "You've moved pages" — greet the fan with the NEW page's context (pill,
@@ -57,6 +79,7 @@ export default function FanOwlEmbedPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [lead, setLead] = useState(null); // null | 'open' | 'saved'
+  const [navOpen, setNavOpen] = useState(false); // the + menu (navStyle 'plus')
   const scroller = useRef(null);
 
   useEffect(() => {
@@ -74,6 +97,12 @@ export default function FanOwlEmbedPage() {
 
   const brand = boot?.site?.brandColor || '#111';
   const T = localeFor(boot?.lang); // widget UI strings in the fan's language
+  // Widget theme: the site's explicit choice, else the fan's device preference.
+  const dark = boot?.site?.theme === 'dark'
+    || (boot?.site?.theme !== 'light' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const C = dark
+    ? { bg: '#141417', ink: '#ececf0', muted: '#94949c', theirs: '#232329', card: '#1d1d22', line: '#2c2c31', chipBg: '#1d1d22', chipLine: '#3b3b41', inputBg: '#1a1a1e', savedBg: '#12241a', savedLine: '#1e3a2a', savedInk: '#7fd49a', sheetBg: '#18181c' }
+    : { bg: '#fff', ink: '#141414', muted: '#999', theirs: '#f2f2f4', card: '#fff', line: '#eee', chipBg: '#fff', chipLine: '#ddd', inputBg: '#fff', savedBg: '#f0faf2', savedLine: '#d8eedd', savedInk: '#1d6b34', sheetBg: '#fafafa' };
   // Scrollable image strip on an offer card (image URLs the promoter supplied).
   const ImageStrip = ({ images }) => {
     const safe = (images || []).filter((u) => /^https?:\/\//i.test(u));
@@ -161,12 +190,19 @@ export default function FanOwlEmbedPage() {
   // lead; any other time (fresh open, reopened thread, page hop) the CURRENT
   // page's starters show, so every page invites its own questions.
   const pageChips = (boot.starters || []).length ? boot.starters : T.starters;
+  const nav = boot.nav || [];
+  const navStyle = nav.length ? (boot.navStyle === 'top' || !boot.navStyle ? 'top' : boot.navStyle) : 'off';
+  const navBtnStyle = (n, size = 40) => ({
+    width: size, height: size, borderRadius: '50%', flex: '0 0 auto', cursor: 'pointer',
+    border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg,
+    color: n.active ? '#fff' : C.ink, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  });
   const chips = busy ? []
     : (navArrived ? pageChips
       : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : pageChips));
 
   return (
-    <div style={S.shell}>
+    <div style={{ ...S.shell, background: C.bg, color: C.ink }}>
       <header style={{ ...S.header, background: brand }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {boot.site?.owlAvatar
@@ -185,6 +221,17 @@ export default function FanOwlEmbedPage() {
         </div>
       </header>
 
+      {navStyle === 'top' && (
+        <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${C.line}`, background: C.sheetBg, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {nav.map((n) => (
+            <button key={n.path} type="button" title={n.note || navLabel(n)} aria-label={navLabel(n)}
+              style={navBtnStyle(n)} onClick={() => goTo(n)}>
+              <NavIcon t={n.pageType} />
+            </button>
+          ))}
+        </div>
+      )}
+
       <div ref={scroller} style={S.scroll}>
         {!messages.length && (
           <div style={S.hello}>
@@ -194,7 +241,7 @@ export default function FanOwlEmbedPage() {
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{boot.site?.owlIntro || T.hello.replace('{name}', boot.site?.owlName || T.owl)}</div>
             <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || T.helloSub}</div>
             {boot.offer && (
-              <div style={{ ...S.offerCard, marginTop: 14 }}>
+              <div style={{ ...S.offerCard, marginTop: 14, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
@@ -208,11 +255,11 @@ export default function FanOwlEmbedPage() {
         )}
         {messages.map((m, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div style={m.role === 'user' ? { ...S.bubble, ...S.mine, background: brand } : { ...S.bubble, ...S.theirs }}>
+            <div style={m.role === 'user' ? { ...S.bubble, ...S.mine, background: brand } : { ...S.bubble, ...S.theirs, background: C.theirs }}>
               {m.text || (m.streaming ? <span style={{ opacity: 0.6 }}>{status || 'Thinking…'}</span> : '')}
             </div>
             {(m.offers || []).map((o) => (
-              <div key={o.id} style={S.offerCard}>
+              <div key={o.id} style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{o.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {o.price ? `${o.currency} ${o.price}` : ''}
@@ -223,7 +270,7 @@ export default function FanOwlEmbedPage() {
               </div>
             ))}
             {m.nav && !m.streaming && (
-              <div style={S.offerCard}>
+              <div style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>📍 {pageLabel(m.nav)}</div>
                 {m.nav.note && <div style={{ fontSize: 13, opacity: 0.8 }}>{m.nav.path}</div>}
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>{T.takeMe}</button>
@@ -236,9 +283,9 @@ export default function FanOwlEmbedPage() {
             <div style={{ alignSelf: 'center', fontSize: 12.5, color: '#888', padding: '2px 8px' }}>
               📍 {T.nowOn.replace('{page}', pageLabel(boot.page))}
             </div>
-            {boot.pitch && <div style={{ ...S.bubble, ...S.theirs }}>{boot.pitch}</div>}
+            {boot.pitch && <div style={{ ...S.bubble, ...S.theirs, background: C.theirs }}>{boot.pitch}</div>}
             {boot.offer && (
-              <div style={S.offerCard}>
+              <div style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
@@ -253,23 +300,49 @@ export default function FanOwlEmbedPage() {
         {chips.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {chips.map((c) => (
-              <button key={c} type="button" style={S.chip} onClick={() => send(c)}>{c}</button>
+              <button key={c} type="button" style={{ ...S.chip, background: C.chipBg, border: `1px solid ${C.chipLine}`, color: C.ink }} onClick={() => send(c)}>{c}</button>
             ))}
           </div>
         )}
       </div>
 
-      {lead === 'open' && <LeadSheet brand={brand} T={T} onSave={saveLead} onClose={() => setLead(null)} />}
+      {lead === 'open' && <LeadSheet brand={brand} T={T} C={C} onSave={saveLead} onClose={() => setLead(null)} />}
       {lead === 'saved' && (
-        <div style={S.savedNote}>{T.saved}</div>
+        <div style={{ ...S.savedNote, background: C.savedBg, borderTop: `1px solid ${C.savedLine}`, color: C.savedInk }}>{T.saved}</div>
       )}
 
+      {navStyle === 'pills' && (
+        <div style={{ display: 'flex', gap: 8, padding: '8px 12px 0', justifyContent: 'center', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {nav.map((n) => (
+            <button key={n.path} type="button" title={n.note || navLabel(n)} onClick={() => goTo(n)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg, color: n.active ? '#fff' : C.ink, borderRadius: 999, padding: '8px 13px', fontSize: 12.5, fontWeight: 600, minHeight: 36 }}>
+              <NavIcon t={n.pageType} size={15} />{navLabel(n)}
+            </button>
+          ))}
+        </div>
+      )}
       <form
-        style={S.composer}
+        style={{ ...S.composer, borderTop: `1px solid ${C.line}`, position: 'relative' }}
         onSubmit={(e) => { e.preventDefault(); send(input); }}
       >
+        {navStyle === 'plus' && navOpen && (
+          <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 10, right: 10, maxWidth: 340, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 6, boxShadow: '0 14px 40px rgba(0,0,0,.25)', zIndex: 5 }}>
+            {nav.map((n) => (
+              <button key={n.path} type="button" onClick={() => { setNavOpen(false); goTo(n); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', textAlign: 'left', border: 0, background: 'transparent', color: C.ink, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
+                <span style={navBtnStyle(n, 32)}><NavIcon t={n.pageType} size={15} /></span>
+                {navLabel(n)}
+                {n.note && <span style={{ fontWeight: 400, color: C.muted, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.note}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {navStyle === 'plus' && (
+          <button type="button" aria-label="Site navigation" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}
+            style={{ width: 42, height: 42, borderRadius: 12, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${C.chipLine}`, background: navOpen ? brand : C.chipBg, color: navOpen ? '#fff' : C.ink, fontSize: 20, fontWeight: 300, lineHeight: 1 }}>+</button>
+        )}
         <input
-          style={S.input}
+          style={{ ...S.input, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={T.ask}
@@ -277,27 +350,27 @@ export default function FanOwlEmbedPage() {
         />
         <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
       </form>
-      <div style={S.foot}>Powered by Howler 🦉</div>
+      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler 🦉</div>
     </div>
   );
 }
 
 // The consent form: explicit, unticked-by-default marketing opt-in (POPIA/GDPR —
 // spec §6b). The chat works fully without it; this is only ever a favour.
-function LeadSheet({ brand, T, onSave, onClose }) {
+function LeadSheet({ brand, T, C, onSave, onClose }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <div style={S.sheet}>
+    <div style={{ ...S.sheet, background: C.sheetBg, borderTop: `1px solid ${C.line}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <strong style={{ fontSize: 14.5 }}>{T.keepPosted}</strong>
-        <button type="button" style={{ ...S.hBtn, color: '#666' }} aria-label="Close" onClick={onClose}>✕</button>
+        <button type="button" style={{ ...S.hBtn, color: C.muted, background: 'transparent' }} aria-label="Close" onClick={onClose}>✕</button>
       </div>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ name, email, marketingConsent: consent }); } finally { setBusy(false); } }}>
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} placeholder={T.namePh} value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} type="email" required placeholder={T.emailPh} value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }} placeholder={T.namePh} value={name} onChange={(e) => setName(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }} type="email" required placeholder={T.emailPh} value={email} onChange={(e) => setEmail(e.target.value)} />
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.45, marginBottom: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
           <span>{T.consent}</span>
