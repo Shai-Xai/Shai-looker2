@@ -38,6 +38,9 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [imgBusy, setImgBusy] = useState(-1); // catalogue index mid-upload
   const [imgNote, setImgNote] = useState(null); // { i, text }
   const [avBusy, setAvBusy] = useState(-1); // site index mid-avatar-upload
+  const [ticketUrl, setTicketUrl] = useState('');
+  const [catIngesting, setCatIngesting] = useState(false);
+  const [catNote, setCatNote] = useState('');
   const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
@@ -86,6 +89,28 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       setImgNote({ i, text: `Uploaded ${urls.length} image${urls.length === 1 ? '' : 's'} ✓ — remember to Save.` });
     } catch (e) { setImgNote({ i, text: `⚠️ ${e.message}` }); }
     finally { setImgBusy(-1); }
+  }
+
+  // "Read the ticket site": crawl the shop → AI-suggested catalogue items merged
+  // into the UNSAVED editor state (existing items never touched; dedupe by
+  // label) — review prices & links, then Save. Interim until the Howler API feed.
+  async function ingestCatalogue() {
+    const url = ticketUrl.trim();
+    if (!url) { setCatNote('Enter the ticket-shop URL first (https://…).'); return; }
+    setCatIngesting(true); setCatNote('Reading the ticket site — this takes ~30–60s…');
+    try {
+      const r = await fetch(`${base}/ingest-catalogue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: /^https?:\/\//i.test(url) ? url : `https://${url}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The read failed — try again.');
+      setCfg((c) => {
+        const have = new Set(c.catalogue.map((x) => String(x.label || '').toLowerCase().trim()));
+        const fresh = (d.items || []).filter((x) => !have.has(x.label.toLowerCase().trim()));
+        const skipped = (d.items || []).length - fresh.length;
+        setCatNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${fresh.length} new item${fresh.length === 1 ? '' : 's'}${skipped ? ` (${skipped} already in the catalogue — left untouched)` : ''}. Check every price, link and image, then Save.`);
+        return { ...c, catalogue: [...c.catalogue, ...fresh] };
+      });
+    } catch (e) { setCatNote(`⚠️ ${e.message}`); }
+    finally { setCatIngesting(false); }
   }
 
   // The Owl's face: one square-ish image per site, downscaled small and hosted
@@ -382,6 +407,15 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       {tab === 'catalogue' && (
         <>
           <p style={small}>Tickets, add-ons & bundles — the Owl's ONLY price/product facts, and the only links it can hand out. Paste the Howler checkout link per item (Pulse adds tracking automatically). Images show as a scrollable strip on the offer card.</p>
+          <details style={{ marginBottom: 6 }}>
+            <summary style={summaryStyle}>🔮 Read the ticket site — draft the catalogue automatically</summary>
+            <p style={small}>Point the Owl at the event's ticket shop (e.g. the Howler event page) — it reads the tickets, prices, buy links and images and SUGGESTS catalogue items. Existing items are never touched; nothing goes live until you review and Save. (Interim tool — this will pull straight from Howler via API later.)</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ticketUrl} placeholder="https://howler.co.za/events/…" onChange={(e) => setTicketUrl(e.target.value)} />
+              <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={catIngesting} onClick={ingestCatalogue}>{catIngesting ? 'Reading…' : 'Read & suggest'}</button>
+            </div>
+            {catNote && <p style={{ ...small, marginTop: 6 }}>{catNote}</p>}
+          </details>
           {cfg.catalogue.map((c, i) => (
             <details key={c.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!c.label}>
               <summary style={summaryStyle}>
