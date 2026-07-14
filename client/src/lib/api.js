@@ -485,6 +485,9 @@ export const api = {
   getFolderSettings: () => fetch('/api/dashboards/folder-settings').then(json),
   setFolderKeepImported: (folder, on) => fetch('/api/dashboards/folder/keep-imported', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, on }) }).then(json),
   comparisonSortDesc: (scope, apply = false) => fetch('/api/admin/comparison-sort-desc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...(typeof scope === 'string' ? { folder: scope } : scope), apply }) }).then(json),
+  // Re-sync an imported dashboard (or a whole folder) from its Looker source.
+  resyncDashboard: (id, apply = false) => fetch(`/api/admin/dashboards/${id}/resync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }) }).then(json),
+  resyncFolder: (folder, apply = false) => fetch('/api/admin/folders/resync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, apply }) }).then(json),
   folderDaysSyncs: () => fetch('/api/dashboards/folder/days-sync').then(json),
   setFolderDaysSync: (folder, sync) => fetch('/api/dashboards/folder/days-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder, sync }) }).then(json),
   importDashboard: (lookerDashboardId, title, folder, keepImportedFilters = false) =>
