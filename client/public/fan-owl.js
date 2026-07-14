@@ -83,8 +83,11 @@
       position: 'fixed', right: '20px', bottom: '20px', width: '380px', height: 'min(640px, calc(100vh - 40px))',
       zIndex: '2147483000', borderRadius: '18px', overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,.35)',
     }, root);
+    var frameDark = (ctx.site && ctx.site.theme === 'dark') ||
+      ((!ctx.site || ctx.site.theme !== 'light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     frame = el('iframe', {
-      width: '100%', height: '100%', border: '0', display: 'block', background: '#fff',
+      width: '100%', height: '100%', border: '0', display: 'block',
+      background: frameDark ? '#141417' : '#fff', // match the embed's theme so opening doesn't flash
       borderRadius: MOBILE() ? '0' : '18px',
     }, frameWrap);
     frame.setAttribute('title', 'Event assistant');
@@ -188,6 +191,11 @@
     }
     teaserTitle.textContent = (ctx.event && ctx.event.name) || (ctx.site && ctx.site.name) || 'Tickets';
     teaserBody.textContent = line;
+    // Theme: the site's explicit choice, else the fan's device preference.
+    var dark = (ctx.site && ctx.site.theme === 'dark') ||
+      ((!ctx.site || ctx.site.theme !== 'light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    teaser.style.background = dark ? '#1d1d22' : '#fff';
+    teaser.style.color = dark ? '#f1f1f3' : '#111';
     teaser.style.display = 'block';
   }
 

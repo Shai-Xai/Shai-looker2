@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-13 (🦉 Fan Owl: ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-13 (🦉 Fan Owl: widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -208,6 +208,9 @@ ticket like a well-informed friend who's already going.
 - **Reads the ticket shop for you** — point the Owl at the event's ticket page
   and it drafts the whole catalogue (names, prices, buy links, images) as
   suggestions to review and save. Interim until the direct Howler catalogue feed.
+- **Dresses in the client's colours** — the widget adopts the client's Pulse
+  brand colour automatically, with a per-site override when that clashes with the
+  website, plus a light/dark/auto chat theme that can follow the fan's device.
 - **Speaks the fan's language** — the Owl opens in the fan's own phone/browser
   language (and always answers in whatever language the fan writes); the widget's
   buttons and prompts localise too (EN·AF·IT·ES·FR·DE·PT·NL), with a per-site
@@ -1039,6 +1042,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-13** — **Fan Owl: widget theming** 🧪: the widget's colours now layer
+  like the rest of Pulse — blank site colour adopts the client's Pulse brand
+  colour, an explicit per-site colour overrides it when it clashes with the
+  website, and a new widget theme (auto/light/dark) restyles the whole chat
+  surface (auto follows the fan's device). Set under Fan Owl → 🪄 Personality.
 - **2026-07-13** — **Fan Owl: ticket-site reader** 🧪: "Read the ticket site" on
   the Catalogue tab crawls the event's ticket shop and drafts catalogue items —
   labels, prices, currencies, availability, real buy links and item images — as

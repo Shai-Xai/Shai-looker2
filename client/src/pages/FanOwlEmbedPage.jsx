@@ -74,6 +74,12 @@ export default function FanOwlEmbedPage() {
 
   const brand = boot?.site?.brandColor || '#111';
   const T = localeFor(boot?.lang); // widget UI strings in the fan's language
+  // Widget theme: the site's explicit choice, else the fan's device preference.
+  const dark = boot?.site?.theme === 'dark'
+    || (boot?.site?.theme !== 'light' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const C = dark
+    ? { bg: '#141417', ink: '#ececf0', muted: '#94949c', theirs: '#232329', card: '#1d1d22', line: '#2c2c31', chipBg: '#1d1d22', chipLine: '#3b3b41', inputBg: '#1a1a1e', savedBg: '#12241a', savedLine: '#1e3a2a', savedInk: '#7fd49a', sheetBg: '#18181c' }
+    : { bg: '#fff', ink: '#141414', muted: '#999', theirs: '#f2f2f4', card: '#fff', line: '#eee', chipBg: '#fff', chipLine: '#ddd', inputBg: '#fff', savedBg: '#f0faf2', savedLine: '#d8eedd', savedInk: '#1d6b34', sheetBg: '#fafafa' };
   // Scrollable image strip on an offer card (image URLs the promoter supplied).
   const ImageStrip = ({ images }) => {
     const safe = (images || []).filter((u) => /^https?:\/\//i.test(u));
@@ -166,7 +172,7 @@ export default function FanOwlEmbedPage() {
       : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : pageChips));
 
   return (
-    <div style={S.shell}>
+    <div style={{ ...S.shell, background: C.bg, color: C.ink }}>
       <header style={{ ...S.header, background: brand }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {boot.site?.owlAvatar
@@ -194,7 +200,7 @@ export default function FanOwlEmbedPage() {
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{boot.site?.owlIntro || T.hello.replace('{name}', boot.site?.owlName || T.owl)}</div>
             <div style={{ fontSize: 13.5, opacity: 0.75 }}>{boot.pitch || T.helloSub}</div>
             {boot.offer && (
-              <div style={{ ...S.offerCard, marginTop: 14 }}>
+              <div style={{ ...S.offerCard, marginTop: 14, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
@@ -208,11 +214,11 @@ export default function FanOwlEmbedPage() {
         )}
         {messages.map((m, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div style={m.role === 'user' ? { ...S.bubble, ...S.mine, background: brand } : { ...S.bubble, ...S.theirs }}>
+            <div style={m.role === 'user' ? { ...S.bubble, ...S.mine, background: brand } : { ...S.bubble, ...S.theirs, background: C.theirs }}>
               {m.text || (m.streaming ? <span style={{ opacity: 0.6 }}>{status || 'Thinking…'}</span> : '')}
             </div>
             {(m.offers || []).map((o) => (
-              <div key={o.id} style={S.offerCard}>
+              <div key={o.id} style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{o.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {o.price ? `${o.currency} ${o.price}` : ''}
@@ -223,7 +229,7 @@ export default function FanOwlEmbedPage() {
               </div>
             ))}
             {m.nav && !m.streaming && (
-              <div style={S.offerCard}>
+              <div style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>📍 {pageLabel(m.nav)}</div>
                 {m.nav.note && <div style={{ fontSize: 13, opacity: 0.8 }}>{m.nav.path}</div>}
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>{T.takeMe}</button>
@@ -236,9 +242,9 @@ export default function FanOwlEmbedPage() {
             <div style={{ alignSelf: 'center', fontSize: 12.5, color: '#888', padding: '2px 8px' }}>
               📍 {T.nowOn.replace('{page}', pageLabel(boot.page))}
             </div>
-            {boot.pitch && <div style={{ ...S.bubble, ...S.theirs }}>{boot.pitch}</div>}
+            {boot.pitch && <div style={{ ...S.bubble, ...S.theirs, background: C.theirs }}>{boot.pitch}</div>}
             {boot.offer && (
-              <div style={S.offerCard}>
+              <div style={{ ...S.offerCard, background: C.card, border: `1px solid ${C.line}` }}>
                 <div style={{ fontWeight: 700 }}>{boot.offer.label}</div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {boot.offer.price ? `${boot.offer.currency} ${boot.offer.price}` : T.seeTickets}
@@ -253,23 +259,23 @@ export default function FanOwlEmbedPage() {
         {chips.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {chips.map((c) => (
-              <button key={c} type="button" style={S.chip} onClick={() => send(c)}>{c}</button>
+              <button key={c} type="button" style={{ ...S.chip, background: C.chipBg, border: `1px solid ${C.chipLine}`, color: C.ink }} onClick={() => send(c)}>{c}</button>
             ))}
           </div>
         )}
       </div>
 
-      {lead === 'open' && <LeadSheet brand={brand} T={T} onSave={saveLead} onClose={() => setLead(null)} />}
+      {lead === 'open' && <LeadSheet brand={brand} T={T} C={C} onSave={saveLead} onClose={() => setLead(null)} />}
       {lead === 'saved' && (
-        <div style={S.savedNote}>{T.saved}</div>
+        <div style={{ ...S.savedNote, background: C.savedBg, borderTop: `1px solid ${C.savedLine}`, color: C.savedInk }}>{T.saved}</div>
       )}
 
       <form
-        style={S.composer}
+        style={{ ...S.composer, borderTop: `1px solid ${C.line}` }}
         onSubmit={(e) => { e.preventDefault(); send(input); }}
       >
         <input
-          style={S.input}
+          style={{ ...S.input, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={T.ask}
@@ -277,27 +283,27 @@ export default function FanOwlEmbedPage() {
         />
         <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
       </form>
-      <div style={S.foot}>Powered by Howler 🦉</div>
+      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler 🦉</div>
     </div>
   );
 }
 
 // The consent form: explicit, unticked-by-default marketing opt-in (POPIA/GDPR —
 // spec §6b). The chat works fully without it; this is only ever a favour.
-function LeadSheet({ brand, T, onSave, onClose }) {
+function LeadSheet({ brand, T, C, onSave, onClose }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <div style={S.sheet}>
+    <div style={{ ...S.sheet, background: C.sheetBg, borderTop: `1px solid ${C.line}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <strong style={{ fontSize: 14.5 }}>{T.keepPosted}</strong>
-        <button type="button" style={{ ...S.hBtn, color: '#666' }} aria-label="Close" onClick={onClose}>✕</button>
+        <button type="button" style={{ ...S.hBtn, color: C.muted, background: 'transparent' }} aria-label="Close" onClick={onClose}>✕</button>
       </div>
       <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ name, email, marketingConsent: consent }); } finally { setBusy(false); } }}>
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} placeholder={T.namePh} value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={{ ...S.input, width: '100%', marginBottom: 8 }} type="email" required placeholder={T.emailPh} value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }} placeholder={T.namePh} value={name} onChange={(e) => setName(e.target.value)} />
+        <input style={{ ...S.input, width: '100%', marginBottom: 8, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }} type="email" required placeholder={T.emailPh} value={email} onChange={(e) => setEmail(e.target.value)} />
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, lineHeight: 1.45, marginBottom: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 2, width: 16, height: 16 }} />
           <span>{T.consent}</span>

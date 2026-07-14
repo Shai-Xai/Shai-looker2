@@ -28,7 +28,7 @@ after(async () => { if (app) await app.close(); });
 
 const CONFIG = (site = {}) => ({
   sites: [{ name: 'Test site', enabled: true, domains: ['fest.example'], teaser: 'Tickets are live',
-    owlName: 'Kappa Guide', owlAvatar: 'https://fest.example/owl.png', owlIntro: 'Ciao! Ask me anything', persona: 'cheeky, proudly local', guardrails: 'always mention the waiting list when sold out', defaultLang: 'it', pages: [
+    owlName: 'Kappa Guide', owlAvatar: 'https://fest.example/owl.png', owlIntro: 'Ciao! Ask me anything', persona: 'cheeky, proudly local', guardrails: 'always mention the waiting list when sold out', defaultLang: 'it', widgetTheme: 'dark', pages: [
     { urlPattern: '/artists/*', pageType: 'artist', itemIds: [], note: 'artist pages', content: 'Artists play across two stages; day passes cover that day only.', starters: ['Who plays Saturday?'], pitch: 'Catch every artist with a Weekend Pass' },
   ], ...site }],
   catalogue: [
@@ -81,9 +81,12 @@ test('save: site key minted server-side, domains normalised, public flag + non-p
   assert.equal(site.persona, 'cheeky, proudly local');
   assert.equal(site.guardrails, 'always mention the waiting list when sold out');
   assert.equal(site.defaultLang, 'it');
-  const junk = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, owlAvatar: 'javascript:alert(1)', defaultLang: 'x!!' }] } });
+  assert.equal(site.widgetTheme, 'dark');
+  assert.ok(r.body.inherited.brandColor); // the editor's "blank adopts your brand" hint
+  const junk = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, owlAvatar: 'javascript:alert(1)', defaultLang: 'x!!', widgetTheme: 'neon' }] } });
   assert.equal(junk.body.sites[0].owlAvatar, '');
   assert.equal(junk.body.sites[0].defaultLang, ''); // junk codes dropped
+  assert.equal(junk.body.sites[0].widgetTheme, ''); // unknown theme → auto
   // Saving again with the same site id keeps the key stable.
   const r2 = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, name: 'Renamed' }] } });
   assert.equal(r2.body.sites[0].siteKey, site.siteKey);
@@ -114,6 +117,9 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.equal(r.body.site.teaser, 'Tickets are live');
   assert.equal(r.body.site.owlName, 'Kappa Guide'); // persona rides the public payloads
   assert.equal(r.body.site.owlAvatar, 'https://fest.example/owl.png');
+  assert.equal(r.body.site.theme, 'dark');
+  // No site colour set → the widget adopts the client's Pulse brand colour.
+  assert.ok(/^#[0-9a-fA-F]{6}$/.test(r.body.site.brandColor));
   // Page mapping wins on a matching URL (and the wildcard matches).
   const r2 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x' }, headers: ORIGIN });
   assert.equal(r2.body.pageType, 'artist');
