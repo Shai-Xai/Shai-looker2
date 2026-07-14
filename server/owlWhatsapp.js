@@ -125,6 +125,18 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
   const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 800), now()); } catch { /* ignore */ } };
+  // A one-line, human-readable summary of the QUERY behind an answer — the exact
+  // measure(s), group-bys, filters and row count of every data tool call. This is
+  // what makes a WhatsApp answer's figures auditable ("did it use count or
+  // sold_tickets?") from the admin panel.
+  const traceOfTrail = (trail) => (trail || []).map((t) => {
+    const i = t.input || {}; const r = t.result || {};
+    if (!/^(askData|queryDashboard|ask_)/.test(t.name)) return `${t.name}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ''}`;
+    const meas = [i.measure, ...(Array.isArray(i.measures) ? i.measures : [])].filter(Boolean).join(', ');
+    const dims = (Array.isArray(i.dimensions) ? i.dimensions : []).join(', ');
+    const filt = Object.entries(i.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    return `${t.name}: ${meas || '?'}${dims ? ` by [${dims}]` : ''}${i.dateRange ? ` range="${i.dateRange}"` : ''}${filt ? ` where {${filt}}` : ''}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ` → ${r.count != null ? `${r.count} rows` : 'ok'}`}`;
+  }).join(' | ');
 
   // Last follow-up suggestions per number, so a bare "1"/"2"/"3" reply (the numbered
   // fallback when interactive buttons aren't available) maps back to its question.
@@ -490,6 +502,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     const followups = parseFollowups(out);
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
+    // Provenance: log the EXACT query behind this answer (measure(s) + group-bys +
+    // filters + row count per tool call) so a "the number looks wrong" report is
+    // investigable straight from the Recent-inbound panel — no guessing which measure
+    // the Owl chose (e.g. core_tickets.count vs core_tickets.sold_tickets).
+    if (trail.length) logEvent(msisdn, 'query', traceOfTrail(trail));
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     // Log the Clickatell message id with the reply — 'replied' only means Clickatell
     // ACCEPTED it; the id is what you trace in their portal / status callbacks when a
