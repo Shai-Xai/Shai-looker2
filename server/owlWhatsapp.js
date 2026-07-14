@@ -14,24 +14,29 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn, personaOf } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 
-// Pull the EVENT-NAME lock values out of a suite's lockedFilters map. A suite is
+// Pull the CURRENT-edition event names out of a suite's lockedFilters map. A suite is
 // an EDITION and may span several event records (e.g. KFF26 = "Kappa FuturFestival
 // 2026" + "Kappa FuturFestival 2026 - Carte Cultura"); this is how the WhatsApp Owl
-// (which has no suite picker) learns the full event set for an edition, straight
-// from the suite lock — one source of truth. Handles the three lock-key shapes:
-// a direct `core_events.name`, a combined `__or__:op:f1|f2` key that includes it,
-// and a by-name preset title ("Event Name" / "Current Event") resolved via
-// `resolveField`. Comma-separated values (Looker OR) are split out.
+// (which has no suite picker) learns the full event set for an edition, straight from
+// the suite lock — one source of truth.
+//
+// CRITICAL: take ONLY the current-event lock. "Past Event" / "Comparison Events" also
+// resolve to core_events.name (they hold the PRIOR edition — 2025 — for YoY), so
+// scooping every event-name lock would fold last year into this year. We whitelist the
+// current-edition lock shapes: the raw `core_events.name` field, a combined
+// `__or__:op:…core_events.name…` key (the current event × cashless multi-field lock),
+// or the "Current Event" / "Event Name" by-name presets. Comma lists (Looker OR) split.
 const EVENT_NAME_FIELD = 'core_events.name';
-function eventLockValues(lockedFilters, resolveField) {
+const CURRENT_EVENT_TITLES = new Set(['current event', 'event name']);
+function eventLockValues(lockedFilters) {
   const vals = new Set();
   for (const [k, v] of Object.entries(lockedFilters || {})) {
     if (v == null || String(v).trim() === '') continue;
-    let fields;
-    if (k.startsWith('__or__:')) fields = (k.split(':')[2] || '').split('|');
-    else if (k.includes('.')) fields = [k];
-    else { let f = null; try { f = resolveField && resolveField(k); } catch { f = null; } fields = f ? [f] : []; }
-    if (fields.includes(EVENT_NAME_FIELD)) String(v).split(',').map((s) => s.trim()).filter(Boolean).forEach((x) => vals.add(x));
+    let isCurrent = false;
+    if (k === EVENT_NAME_FIELD) isCurrent = true;                                   // raw current-event field
+    else if (k.startsWith('__or__:')) isCurrent = (k.split(':')[2] || '').split('|').includes(EVENT_NAME_FIELD); // combined current lock
+    else if (!k.includes('.')) isCurrent = CURRENT_EVENT_TITLES.has(k.toLowerCase()); // by-name preset (NOT "Past Event")
+    if (isCurrent) String(v).split(',').map((s) => s.trim()).filter(Boolean).forEach((x) => vals.add(x));
   }
   return [...vals];
 }
@@ -289,7 +294,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     // and both web (suite selected) and WhatsApp scope to the full set.
     try {
       const suites = db.listSuitesForEntity ? (db.listSuitesForEntity(entityId) || []) : [];
-      const editions = suites.map((s) => ({ name: s.name, events: eventLockValues(s.lockedFilters, (k) => auth.filterNameToField && auth.filterNameToField(k)) }))
+      const editions = suites.map((s) => ({ name: s.name, events: eventLockValues(s.lockedFilters) }))
         .filter((e) => e.events.length);
       if (editions.length) parts.push(`EVENT EDITIONS (the client's saved groupings — AUTHORITATIVE; an edition may span MORE THAN ONE event record): ${editions.map((e) => `"${e.name}" = ${e.events.map((n) => `"${n}"`).join(' + ')}`).join('; ')}. When the client asks about an edition by its name or an obvious shorthand (e.g. "KFF26" → "KFF 26"), filter core_events.name to ALL of that edition's event names (comma-separated) — never just one, or the total is undercounted.`);
     } catch { /* ignore */ }
