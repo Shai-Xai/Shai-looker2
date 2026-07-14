@@ -20,6 +20,20 @@ test('verifyCredentials accepts the right password and rejects the wrong one', a
   assert.equal(await h.db.verifyCredentials('nobody@test.local', 'whatever'), null, 'unknown user rejected');
 });
 
+test('email-invite: a random temp password creates the account, and the reset token round-trips', () => {
+  // Mirrors what the team-invite / admin-add-user routes do when no password is typed:
+  // create with a random policy-passing password, then email a single-use 'reset'
+  // token the user consumes to set their own password.
+  const pw = require('crypto').randomBytes(18).toString('base64url');
+  assert.ok(pw.length >= 8, 'generated temp password satisfies the 8-char policy');
+  const u = h.db.createUser({ email: `invite-${Date.now()}@test.local`, password: pw, role: 'client' });
+
+  const token = h.db.createAuthToken(u.id, 'reset', 7 * 24 * 3600_000);
+  assert.equal(h.db.consumeAuthToken(token, 'reset'), u.id, 'the emailed link resolves to this user');
+  assert.equal(h.db.consumeAuthToken(token, 'reset'), null, 'the link is single-use');
+  assert.equal(h.db.consumeAuthToken(token, 'magic'), null, 'a reset token is not valid for magic sign-in');
+});
+
 test('an admin has every permission on any entity', () => {
   const admin = h.makeAdmin('perms-admin@test.local');
   const ent = h.makeEntity('Any Co', 'org');
