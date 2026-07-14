@@ -6,7 +6,7 @@
 //   node scripts/journeySim.js
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { SCENARIOS, simulate } = require('../scripts/journeySim');
+const { SCENARIOS, simulate, personaOk } = require('../scripts/journeySim');
 
 for (const scn of SCENARIOS) {
   test(`journey simulation: ${scn.name}`, async () => {
@@ -14,6 +14,7 @@ for (const scn of SCENARIOS) {
     for (const p of results) {
       assert.equal(p.status, p.expect.status, `${p.name} (${p.behaviour}) ended '${p.status}', expected '${p.expect.status}'`);
       assert.deepEqual(p.got.map((s) => s.subject), p.expect.got, `${p.name} (${p.behaviour}) received the wrong messages / order`);
+      if (p.expect.syncs) assert.ok(personaOk(p), `${p.name} (${p.behaviour}) triggered the wrong ad-audience syncs: got ${JSON.stringify(p.syncs)}, expected ${JSON.stringify(p.expect.syncs)}`);
     }
   });
 }
