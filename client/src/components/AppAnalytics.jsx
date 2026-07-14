@@ -1293,6 +1293,8 @@ function AudienceMatchCard({ entityId, scope, events = [], isMobile }) {
 
 function PeopleSection({ loader, win, ticketsLoader, exportUrl }) {
   const [exporting, setExporting] = useState(false);
+  // 🎟 ticket filter: '' = everyone, 'with'/'without' = joined against Looker holders
+  const [tf, setTf] = useState('');
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
@@ -1320,10 +1322,10 @@ function PeopleSection({ loader, win, ticketsLoader, exportUrl }) {
   };
   // Fresh list (new search) or append the next page. Most-active ranking lives
   // in its own TopUsersCard — this list stays most-recent-first.
-  const load = async (term, { append = false } = {}) => {
+  const load = async (term, { append = false, ticketMode = tf } = {}) => {
     setBusy(true); setError('');
     try {
-      const r = await loader({ q: term, offset: append ? (rows?.length || 0) : 0 });
+      const r = await loader({ q: term, offset: append ? (rows?.length || 0) : 0, tickets: ticketMode });
       setRows(append ? [...(rows || []), ...(r.people || [])] : (r.people || []));
       setHasMore(!!r.hasMore);
     } catch (e) { setError(e.message); }
@@ -1334,7 +1336,7 @@ function PeopleSection({ loader, win, ticketsLoader, exportUrl }) {
   const exportCsv = async () => {
     setExporting(true); setError('');
     try {
-      const r = await fetch(exportUrl(q));
+      const r = await fetch(`${exportUrl(q)}&tickets=${tf}`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Export failed.');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(await r.blob());
@@ -1355,10 +1357,17 @@ function PeopleSection({ loader, win, ticketsLoader, exportUrl }) {
         <button type="button" style={btn} onClick={() => { setOpen(true); load(''); }}>Load app users</button>
       ) : (
         <>
-          <form style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); load(q); }}>
+          <form style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }} onSubmit={(e) => { e.preventDefault(); load(q); }}>
             <input style={{ ...input, flex: 1, minWidth: 180 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email or mobile…" />
             <button type="submit" style={ghostBtn} disabled={busy}>{busy ? '…' : 'Search'}</button>
           </form>
+          {ticketsLoader && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+              {[['', 'Everyone'], ['with', '🎟 With tickets'], ['without', 'Without tickets']].map(([m, label]) => (
+                <Chip key={m || 'all'} on={tf === m} onClick={() => { if (tf !== m) { setTf(m); load(q, { ticketMode: m }); } }}>{label}</Chip>
+              ))}
+            </div>
+          )}
           {error && <div style={errBox}>{error}</div>}
           {busy && !rows && <p style={mutedTxt}>Loading…</p>}
           {rows && rows.length === 0 && <p style={sub}>No app users found in this window.</p>}

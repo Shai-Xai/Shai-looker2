@@ -256,6 +256,43 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     return out;
   }
 
+  // EVERY ticket holding in the client's scope in ONE query — email → their
+  // events + ticket types. Powers the App-users ticket FILTER and the full CSV
+  // export (the per-email batch above caps at 200 for on-screen rows). Cached
+  // like the identity sets; null = couldn't resolve (fail closed upstream).
+  async function holdingsForScope(entityId, user) {
+    const key = `hold:${entityId}`;
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_MS) return hit.sets;
+    const eventIds = await posthog.eventIdsForEntity(entityId);
+    if (!eventIds.length) return null;
+    const body = {
+      model: cat.model, view: cat.explore,
+      fields: [ID_EMAIL, 'core_events.name', 'core_ticket_types.name', 'core_tickets.count'],
+      filters: { 'core_events.id': eventIds.join(',') }, limit: 500000,
+    };
+    const allowed = await query.applyScope(body, user, null);
+    if (allowed === false) return null;
+    const locks = auth.accessibleOrgFilters ? auth.accessibleOrgFilters(user, entityId) : null;
+    if (locks && locks[ORG]) body.filters = { ...body.filters, ...locks };
+    else if (!body.filters[ORG]) return null; // fail closed — never cross-client
+    const rows = await query.runLookerQuery('/queries/run/json', body);
+    const byEmail = new Map();
+    for (const r of (rows || [])) {
+      const em = String(r[ID_EMAIL] || '').trim().toLowerCase();
+      const n = Number(r['core_tickets.count']) || 0;
+      if (!em || !n) continue;
+      const arr = byEmail.get(em) || [];
+      arr.push({ event: String(r['core_events.name'] || ''), type: String(r['core_ticket_types.name'] || ''), tickets: n });
+      byEmail.set(em, arr);
+    }
+    for (const arr of byEmail.values()) arr.sort((a, b) => b.tickets - a.tickets);
+    const sets = { byEmail, set: new Set(byEmail.keys()) };
+    if (cache.size > 100) cache.clear();
+    cache.set(key, { at: Date.now(), sets });
+    return sets;
+  }
+
   // ── the same surface twice (dual-surface rule) ──
   const myEntity = (req, res, next) => {
     const eid = req.params.entityId;
@@ -294,7 +331,7 @@ function mount(app, { db, auth, posthog, queryEngine, catalogue, segments }) {
     res.json(await ticketSummary(req.params.id, req.user, { event: String(req.query.event || '') }));
   }));
 
-  return { overlap, ticketsByEmail, createGroupSegment, groupEmails, ticketSummary };
+  return { overlap, ticketsByEmail, holdingsForScope, createGroupSegment, groupEmails, ticketSummary };
 }
 
 module.exports = { mount };

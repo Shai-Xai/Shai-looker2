@@ -206,7 +206,7 @@ const DEFAULT_MAP = {
   ],
 };
 
-function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true }) {
+function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true, tickets: ticketHoldings }) {
   const sql = db.db;
   const doFetch = fetchImpl || fetch;
   const now = () => new Date().toISOString();
@@ -879,7 +879,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   // email addresses so staff testing doesn't rank as a fan.
   // exportAll lifts the page caps for the CSV download — one big bounded query
   // (PostHog accepts large LIMITs; OFFSET stays forbidden either way).
-  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent', excludeStaff = false, exportAll = false } = {}) {
+  async function people({ ids = null, days, from, to, q = '', limit = 200, offset = 0, orderBy = 'recent', excludeStaff = false, exportAll = false, ticketFilter = null } = {}) {
     const w = win({ days, from, to });
     const L = Math.min(Math.max(Number(limit) || 200, 1), exportAll ? 50000 : 500);
     const off = Math.min(Math.max(Number(offset) || 0, 0), 1800);
@@ -896,13 +896,17 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     // Personal API keys forbid OFFSET (PostHog HTTP 400) — fetch up to the end of
     // the requested page in one bounded query and slice the page out locally.
     const fetchN = Math.min(off + L + 1, exportAll ? 50001 : 2000);
-    const rows = await hogql(`
+    let rows = await hogql(`
       SELECT any(toString(${personProp(p.email)})) AS email, any(toString(${personProp(p.firstName)})) AS firstName,
              any(toString(${personProp(p.lastName)})) AS lastName, any(toString(${personProp(p.phone)})) AS phone,
              max(timestamp) AS lastSeen, count() AS interactions,
              groupUniqArray(5)(toString(${prop(c.eventNameProp)})) AS eventNames
       FROM events WHERE ${tsWin(w)}${scope}${search}${staff}
       GROUP BY person_id ORDER BY ${order} LIMIT ${fetchN}`, { ttl: PEOPLE_TTL });
+    // 🎟 with/without-tickets filter: membership in the Looker holder set,
+    // applied BEFORE the page slice on the same deterministic fetch — paging
+    // stays consistent across Load-more calls.
+    if (ticketFilter?.set) rows = rows.filter((r) => ticketFilter.set.has(String(r.email || '').trim().toLowerCase()) === (ticketFilter.mode === 'with'));
     return {
       days: w.days, offset: off, orderBy: orderBy === 'active' ? 'active' : 'recent', hasMore: rows.length > off + L,
       people: rows.slice(off, off + L).map((r) => ({ ...r, eventNames: (r.eventNames || []).filter(Boolean) })),
@@ -1275,7 +1279,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
-    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1' }));
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1', ticketFilter: await ticketFilterFor(req, eid) }));
   }));
   app.get('/api/admin/app-analytics/breakdown', auth.requireAdmin, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
@@ -1314,7 +1318,9 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     const eid = String(req.query.entityId || '');
     const ids = eid ? await eventIdsForEntity(eid) : null;
     if (eid && !ids.length) throw new HttpError(400, 'No app data is scoped to this client yet.');
-    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1' });
+    let holdings = null;
+    try { holdings = ticketHoldings && eid ? await ticketHoldings(eid, req.user) : null; } catch { /* export still serves without ticket columns */ }
+    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1', ticketFilter: await ticketFilterFor(req, eid) }, holdings);
   }));
   app.get('/api/admin/app-analytics/moments', auth.requireAdmin, (req, res) => {
     const eid = String(req.query.entityId || '') || null;
@@ -1348,7 +1354,7 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/my/app-analytics/:entityId/people', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) return res.json({ days: win(winQ(req)).days, people: [], scoped: false });
-    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1' }));
+    res.json(await people({ ids, ...winQ(req), q: req.query.q, limit: req.query.limit, offset: req.query.offset, orderBy: req.query.orderBy, excludeStaff: req.query.excludeStaff === '1', ticketFilter: await ticketFilterFor(req, req.params.entityId) }));
   }));
   app.get('/api/my/app-analytics/:entityId/breakdown', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const key = breakdownKeyOrThrow(req);
@@ -1400,14 +1406,27 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
     if (!refs.length) return res.json({ days: win(winQ(req)).days, events: [], series: [] });
     res.json(await eventSeries(refs.slice(0, 12), winQ(req)));
   }));
+  // ?tickets=with|without → a filter object for people(), resolved via the
+  // appMatch holdings join. Requires an entity scope; silently absent when the
+  // join can't resolve (fail-soft — the list still serves, unfiltered).
+  async function ticketFilterFor(req, entityId) {
+    const mode = req.query.tickets === 'with' ? 'with' : req.query.tickets === 'without' ? 'without' : '';
+    if (!mode || !ticketHoldings || !entityId) return null;
+    try { const h = await ticketHoldings(entityId, req.user); return h?.set ? { mode, set: h.set } : null; } catch { return null; }
+  }
   // 📄 Full CSV export — EVERY app user in the window (the on-screen list pages
   // at 2000 because PostHog forbids OFFSET; the export runs ONE big bounded
   // query instead). BOM so Excel opens UTF-8 correctly.
   const csvEsc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  async function sendPeopleCsv(res, opts) {
+  async function sendPeopleCsv(res, opts, holdings = null) {
     const out = await people({ ...opts, limit: 50000, offset: 0, orderBy: 'recent', exportAll: true });
-    const lines = [['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events'].map(csvEsc).join(',')];
-    for (const p of out.people) lines.push([p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; ')].map(csvEsc).join(','));
+    const holdingLine = (em) => (holdings?.byEmail?.get(String(em || '').trim().toLowerCase()) || [])
+      .map((t) => `${t.event}${t.type ? ` — ${t.type}` : ''}${t.tickets > 1 ? ` ×${t.tickets}` : ''}`).join('; ');
+    const lines = [['First name', 'Surname', 'Email', 'Mobile', 'Last seen', 'Interactions', 'Events', ...(holdings ? ['Has ticket', 'Tickets (event — type)'] : [])].map(csvEsc).join(',')];
+    for (const p of out.people) {
+      const h = holdings ? holdingLine(p.email) : '';
+      lines.push([p.firstName, p.lastName, p.email, p.phone, p.lastSeen, p.interactions, (p.eventNames || []).join('; '), ...(holdings ? [h ? 'yes' : 'no', h] : [])].map(csvEsc).join(','));
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="app-users.csv"');
     res.send(`\ufeff${lines.join('\n')}`);
@@ -1415,7 +1434,9 @@ function mount(app, { db, auth, runLookerQuery, ai, fetchImpl, startTimer = true
   app.get('/api/my/app-analytics/:entityId/people.csv', auth.requireAuth, myEntity, asyncHandler(async (req, res) => {
     const ids = await eventIdsForEntity(req.params.entityId);
     if (!ids.length) throw new HttpError(400, 'No app data is scoped to this client yet.');
-    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1' });
+    let holdings = null;
+    try { holdings = ticketHoldings ? await ticketHoldings(req.params.entityId, req.user) : null; } catch { /* export still serves without ticket columns */ }
+    await sendPeopleCsv(res, { ids, ...winQ(req), q: req.query.q, excludeStaff: req.query.excludeStaff === '1', ticketFilter: await ticketFilterFor(req, req.params.entityId) }, holdings);
   }));
   app.get('/api/my/app-analytics/:entityId/moments', auth.requireAuth, myEntity, (req, res) => {
     res.json({ moments: moments(req.params.entityId, winQ(req)), linkClicks: linkClicks(req.params.entityId, winQ(req)) });
