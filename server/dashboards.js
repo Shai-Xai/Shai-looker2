@@ -9,7 +9,7 @@
 // boundary across the whole app (see server/query.js). collectFolderTree is
 // private to this module.
 
-const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
+const { serverError, asyncHandler } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
 
 function mount(app, {
@@ -17,6 +17,8 @@ function mount(app, {
   convertDashboard, fetchDashboard, parseDrillUrl,
   runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache, folderDaysSync,
 }) {
+  // Re-sync an imported dashboard from its Looker source (merge, preserving Pulse edits).
+  const resync = require('./resync')({ looker, fetchDashboard, convertDashboard });
 // Admin: hard-wipe the server's query cache (all dashboards). The client's
 // "Clear cache" refresh calls this first, then re-fetches its tiles live.
 app.post('/api/admin/clear-query-cache', auth.requireAdmin, (req, res) => {
@@ -246,6 +248,42 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
     serverError(res, err);
   }
 });
+
+// Re-sync ONE dashboard from its Looker source. Dry-run by default (returns a
+// summary of what would change); with { apply:true } it merges + saves. The merge
+// refreshes Looker content but keeps every Pulse customization (see server/resync.js).
+app.post('/api/admin/dashboards/:id/resync', auth.requireAdmin, asyncHandler(async (req, res) => {
+  const cur = store.get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Dashboard not found' });
+  if (!(cur.source && cur.source.lookerDashboardId)) return res.status(400).json({ error: 'This dashboard was not imported from Looker, so there is nothing to re-sync.' });
+  const { def, summary } = await resync.resync(cur);
+  if (!(req.body || {}).apply) return res.json({ applied: false, summary });
+  def.source = { ...(def.source || {}), lastSyncedAt: new Date().toISOString() };
+  const saved = store.update(cur.id, def);
+  try { db.harvestDashboardTiles(saved, { sourceDashboardId: saved.id }); } catch (e) { console.error('[resync harvest]', e.message); }
+  res.json({ applied: true, summary });
+}));
+
+// Re-sync EVERY imported dashboard in a folder (and subfolders). Dry-run returns a
+// per-dashboard summary; { apply:true } merges + saves each. Skips dashboards with
+// no Looker origin. Sequential — a big folder can take a while.
+app.post('/api/admin/folders/resync', auth.requireAdmin, asyncHandler(async (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const apply = !!(req.body || {}).apply;
+  const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
+  const defs = db.listDashboards().filter((m) => inFolder(m.folder) && m.source && m.source.lookerDashboardId).map((m) => store.get(m.id)).filter(Boolean);
+  const results = []; const failed = [];
+  let updated = 0; let added = 0; let removedInLooker = 0;
+  for (const cur of defs) {
+    try {
+      const { def, summary } = await resync.resync(cur);
+      updated += summary.updated; added += summary.added; removedInLooker += summary.removedInLooker;
+      if (apply) { def.source = { ...(def.source || {}), lastSyncedAt: new Date().toISOString() }; const saved = store.update(cur.id, def); try { db.harvestDashboardTiles(saved, { sourceDashboardId: saved.id }); } catch { /* best-effort */ } }
+      results.push({ id: cur.id, title: cur.title, ...summary });
+    } catch (e) { failed.push({ id: cur.id, title: cur.title, error: e.message }); }
+  }
+  res.json({ folder, apply, dashboards: results.length, totals: { updated, added, removedInLooker }, failed, results: results.slice(0, 300) });
+}));
 
 // Backfill folders: for already-imported dashboards with no folder, look up
 // their source Looker dashboard's folder name and file them under it.

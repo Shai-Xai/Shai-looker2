@@ -114,10 +114,10 @@ s.addText('“Ask your data anything, in plain language, your own analyst, in yo
 /* ---------- 6 · CHANNELS (hub) ---------- */
 s = contentSlide('One brain. Every channel.', 'the Owl at the centre, the doors your team already uses around it', ORANGE, 6);
 const hubCards = [
-  ['📱 The Howler Pulse app', 'Installs like a native app; pushes a nudge even when closed, tap it and you’re in the right place to act.', 0.5, 1.75],
-  ['💬 WhatsApp', 'Message the Owl like a colleague: answers, charts as images, daily updates, event-night reports.', 0.5, 4.35],
-  ['🤖 ChatGPT', 'Connect Pulse to ChatGPT (incl. Deep Research) and ask about your events from the tool you already have open.', 9.03, 1.75],
-  ['✳️ Claude', 'The same connector plugs your event data into Claude, read-only, per-client keys you control.', 9.03, 4.35],
+  ['The Howler Pulse app', 'Installs like a native app; pushes a nudge even when closed, tap it and you’re in the right place to act.', 0.5, 1.75, 'howler-logo.png'],
+  ['WhatsApp', 'Message the Owl like a colleague: answers, charts as images, daily updates, event-night reports.', 0.5, 4.35, 'whatsapp-logo.png'],
+  ['ChatGPT', 'Connect Pulse to ChatGPT (incl. Deep Research) and ask about your events from the tool you already have open.', 9.03, 1.75, 'chatgpt-logo.png'],
+  ['Claude', 'The same connector plugs your event data into Claude, read-only, per-client keys you control.', 9.03, 4.35, 'claude-logo.png'],
 ];
 // connector lines first (behind cards)
 [[4.3, 2.7], [4.3, 5.3], [9.03, 2.7], [9.03, 5.3]].forEach(pt => {
@@ -125,7 +125,8 @@ const hubCards = [
 });
 hubCards.forEach(c => {
   s.addShape('roundRect', { x: c[2], y: c[3], w: 3.8, h: 1.9, rectRadius: 0.12, fill: { color: LIGHT }, line: { color: 'ECE9F5', width: 1 } });
-  s.addText(c[0], { x: c[2] + 0.18, y: c[3] + 0.1, w: 3.45, h: 0.42, fontSize: 14, bold: true, color: NAVY, fontFace: F });
+  s.addImage({ path: c[4], x: c[2] + 0.18, y: c[3] + 0.14, w: 0.34, h: 0.34 });
+  s.addText(c[0], { x: c[2] + 0.58, y: c[3] + 0.1, w: 3.05, h: 0.42, fontSize: 14, bold: true, color: NAVY, fontFace: F });
   s.addText(c[1], { x: c[2] + 0.18, y: c[3] + 0.55, w: 3.45, h: 1.25, fontSize: 10.5, color: GREY, fontFace: F, lineSpacing: 14, valign: 'top' });
 });
 // central owl, the real mark
@@ -165,7 +166,7 @@ s.addShape('roundRect', { x: 0.5, y: 5.95, w: 12.4, h: 0.9, rectRadius: 0.1, fil
 s.addText('“From seeing a cohort to a live journey, an ad audience and tracked revenue, without exporting a single CSV.”', { x: 0.8, y: 5.95, w: 11.8, h: 0.9, fontSize: 15, bold: true, italic: true, color: PURPLE, align: 'center', valign: 'middle', fontFace: F });
 
 /* ---------- 9 · RUN / EVENT OPS ---------- */
-s = contentSlide('🎪  RUN · Event Ops, your operations command centre', 'the gates, the bars, the devices, the data itself, one live board', CYAN, 9);
+s = contentSlide('🎪  RUN · the Event Ops command centre', 'the gates, the bars, the devices, the data itself, one live board', CYAN, 9);
 feat(s, 0.5, 1.5, 5.9, 'The live site map', null, 'your venue’s own plan with every station pinned: heat shows where the crowd is spending right now; a dark station is flagged the moment its data stops.');
 feat(s, 0.5, 2.62, 5.9, 'Bar & operator performance', null, 'every bar and every bartender, live: sales and rands-per-hour per operator, who is flying and which till has gone quiet. The River view turns the night into flowing lanes.');
 feat(s, 0.5, 3.74, 5.9, 'Every device tracked', null, 'scan to move between store and stations; append-only audit trail; every device accounted for at event close.');
@@ -196,12 +197,15 @@ const rows = [
   ['Email + WhatsApp threads', 'Approvals, settlements and “did you see this?” get lost.', 'One inbox with read/ack trails; settlements that file themselves.'],
   ['Gut feel on event night', 'You find out about problems when the queue does.', 'Alerts + live mini-reports every 30 minutes, on your phone.'],
 ];
-s.addTable(rows.map(r => r.map(c => (typeof c === 'string' ? { text: c, options: { color: GREY } } : c))), {
+s.addTable(rows.map((r, ri) => r.map(c => {
+  const base = typeof c === 'string' ? { text: c, options: { color: GREY } } : { text: c.text, options: { ...c.options } };
+  if (ri === 0) base.options.fill = 'F6F1FF';
+  return base;
+})), {
   x: 0.5, y: 1.6, w: 12.4, colW: [2.9, 4.75, 4.75], fontSize: 13, fontFace: F,
   border: { type: 'solid', color: 'EFECF8', pt: 1 }, fill: { color: 'FFFFFF' },
   rowH: 0.8, valign: 'middle', margin: 0.12, autoPage: false,
 });
-s.addShape('rect', { x: 0.5, y: 1.6, w: 12.4, h: 0.5, fill: { color: 'F6F1FF', transparency: 40 }, line: { color: PURPLE, width: 1.5 } });
 s.addText('Pulse isn’t another tool on the pile, it replaces the pile with a loop.', { x: 0.5, y: 6.15, w: 12.4, h: 0.5, fontSize: 16, bold: true, italic: true, color: RED, align: 'center', fontFace: F });
 
 /* ---------- 12 · HOWLER ONE STACK ---------- */
@@ -225,7 +229,7 @@ s.addText([
   { text: 'Pulse: the brain of the stack.  ', options: { bold: true, fontSize: 15, color: 'FFFFFF' } },
   { text: 'Every ticket scanned, every tap at a bar, every SuperApp session and every VIP booking flows into one governed dataset, where the Owl reads it, your team acts on it, and the results come back measured.', options: { fontSize: 11.5, color: 'D8D4F0' } },
 ], { x: 1.85, y: 4.05, w: 10.8, h: 1.05, fontFace: F, valign: 'middle', lineSpacing: 16 });
-s.addText('ONE STACK  ·  ONE DATASET  ·  ONE BRAND EXPERIENCE  ·  ONE PARTNER', { x: 0.5, y: 5.32, w: 12.4, h: 0.4, fontSize: 12, bold: true, color: NAVY2, align: 'center', charSpacing: 2, fontFace: F });
+s.addText('ONE STACK  ·  ONE DATASET  ·  ONE BRAND EXPERIENCE  ·  ONE PARTNER', { x: 0.5, y: 5.24, w: 12.4, h: 0.38, fontSize: 12, bold: true, color: NAVY2, align: 'center', charSpacing: 2, fontFace: F });
 const bt = [
   ['The bar', 'Cashless spots the Main Bar spiking; the heat map shows the hotspot; the Owl suggests moving two devices, while the night is young.', RED],
   ['The fan', 'Ticket + top-ups + bar spend stitched into one picture, your next campaign targets big spenders who haven’t rebought yet.', ORANGE],
@@ -233,8 +237,8 @@ const bt = [
 ];
 bt.forEach((c, i) => {
   const x = 0.5 + i * 4.2;
-  s.addShape('roundRect', { x, y: 5.85, w: 4.0, h: 1.35, rectRadius: 0.1, fill: { color: c[2] } });
-  s.addText([{ text: 'Better together: ' + c[0] + '\n', options: { bold: true, fontSize: 11 } }, { text: c[1], options: { fontSize: 9, transparency: 6 } }], { x: x + 0.15, y: 5.92, w: 3.7, h: 1.2, color: 'FFFFFF', fontFace: F, valign: 'top', lineSpacing: 11.5 });
+  s.addShape('roundRect', { x, y: 5.68, w: 4.0, h: 1.24, rectRadius: 0.1, fill: { color: c[2] } });
+  s.addText([{ text: 'Better together: ' + c[0] + '\n', options: { bold: true, fontSize: 10.5 } }, { text: c[1], options: { fontSize: 8.6, transparency: 6 } }], { x: x + 0.15, y: 5.74, w: 3.72, h: 1.14, color: 'FFFFFF', fontFace: F, valign: 'top', lineSpacing: 10.8 });
 });
 
 /* ---------- 13 · CTA ---------- */

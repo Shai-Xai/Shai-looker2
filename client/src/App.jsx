@@ -30,6 +30,7 @@ const SettlementViewPage = lazy(() => import('./pages/SettlementViewPage.jsx'));
 const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
 const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
 const SocialPage = lazy(() => import('./pages/SocialPage.jsx'));
+const AppAnalyticsPage = lazy(() => import('./pages/AppAnalyticsPage.jsx'));
 const InventiveAskPage = lazy(() => import('./pages/InventiveAskPage.jsx'));
 const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
 const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
@@ -315,6 +316,7 @@ function Shell() {
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/social" element={<SocialPage />} />
+                <Route path="/app-analytics" element={<AppAnalyticsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
@@ -346,6 +348,7 @@ function Shell() {
                 <Route path="/goals" element={<GoalsPage />} />
                 <Route path="/alerts" element={<AlertsPage />} />
                 <Route path="/social" element={<SocialPage />} />
+                <Route path="/app-analytics" element={<AppAnalyticsPage />} />
                 <Route path="/settlements" element={<SettlementsPage />} />
                 <Route path="/settlements/:id" element={<SettlementViewPage />} />
                 <Route path="/documents/:id" element={<DocumentViewPage />} />

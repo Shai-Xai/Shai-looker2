@@ -130,8 +130,9 @@ export default function ClientIntegrationsPage() {
                 pixelEntityId={activeItem.entityId}
                 onPixelStatus={() => api.myPixelStatus(activeItem.entityId)}
                 onCreatePixelAudiences={(channel) => api.myCreatePixelAudiences(activeItem.entityId, channel)}
+                showSocialPlus
                 canManageLock={isAdmin || role === 'owner'}
-                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
+                lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
                 locks={activeItem.locks || {}}
                 onTestSlack={() => api.testMySlack(activeItem.entityId)}
                 onToggleLock={async (key, locked) => {

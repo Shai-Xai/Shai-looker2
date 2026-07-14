@@ -30,7 +30,17 @@ test('server/index.js boots and serves HTTP', { timeout: 30_000 }, async () => {
       child.stdout.on('data', () => { if (/running on http/i.test(out)) { clearTimeout(t); resolve(); } });
       child.on('exit', (code) => { clearTimeout(t); reject(new Error(`server exited (code ${code}) before listening.\n--- output ---\n${out}`)); });
     });
-    const res = await fetch(`http://127.0.0.1:${port}/`);
+    // The "running on http" log line can race the socket actually accepting on
+    // a slow CI runner — a single immediate fetch flakes with 'fetch failed'.
+    // Retry briefly; only a server that never answers should fail the test.
+    let res;
+    for (let i = 0; ; i++) {
+      try { res = await fetch(`http://127.0.0.1:${port}/`); break; }
+      catch (e) {
+        if (i >= 19) throw new Error(`server reported listening but never answered: ${e.message}\n--- output ---\n${out}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
     assert.equal(res.status, 200, 'the booted server must answer /');
   } finally {
     child.kill('SIGTERM');

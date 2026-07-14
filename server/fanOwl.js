@@ -1,6 +1,7 @@
 // ─── Fan Owl — the consumer-facing booking guide on promoters' event sites ─────
 // SELF-CONTAINED, DISPOSABLE MODULE. Owns the fan_* tables and all /api/fan/*,
-// /api/admin/entities/:id/fan-owl and /api/my/fan-owl/:id routes. Mounted from
+// /api/admin/entities/:id/fan-owl, /api/my/fan-owl/:id and /fan-owl-assets/*
+// (uploaded catalogue images, public) routes. Mounted from
 // index.js with one line; remove that line + this file (+ the /embed/fan client
 // page and client/public/fan-owl.js) to uninstall. Spec: docs/specs/FAN_OWL_SPEC.md.
 //
@@ -44,6 +45,7 @@ TOOLS:
 - getOffer → the tickets/add-ons relevant to the page the fan is on (plus the full public catalogue). Call it before recommending.
 - searchKnowledge → the organiser's FAQs/policies/info. Call it for ANY question about rules, logistics, inclusions or policies.
 - getCheckoutLink → the buy link for ONE catalogue item. Call it when the fan is ready to buy (or asks where to buy); the app renders it as a button — do NOT paste raw URLs into your reply text.
+- goToPage → send the fan to another page of THIS website (pick a urlPattern from the pages list in your instructions). Call it when the fan asks to see or go somewhere — the lineup, the tickets page, accommodation… The app shows a "Take me there" button under your reply; say you're pointing them there, never paste the URL.
 - captureLead → save the fan's name/email ONLY when the fan has explicitly given them AND agreed to be contacted. Never ask more than once, never require it, never invent consent. Offer it only as a favour ("want me to send you this / give you a heads-up before it sells out?").
 - logInterest → note what the fan cares about (a topic like "camping", "VIP", "kids") whenever real interest or an unanswerable question shows — this is how organisers learn what fans want.
 
@@ -95,6 +97,22 @@ Rules:
 - Grounded ONLY in the given info and items. NEVER invent prices, discounts, dates, or urgency; availability words like "selling fast" may be used ONLY if given on an item.
 - Lead with the concrete thing the page is about (the item name, the experience) — e.g. "Glamping pods from ZAR 1,500 — wake up at the festival 🌙".
 - At most one emoji, only where natural. No exclamation-mark pileups, no "don't miss out" clichés.`;
+
+// "Read the ticket site" — the catalogue's suggest-then-confirm reader: crawls
+// the event's ticket shop and drafts catalogue items (label/price/link/images)
+// for the promoter to review. An INTERIM tool until the Howler catalogue API
+// feeds this directly. Registered in insights.promptRegistry() for the AI audit.
+const FAN_CATALOGUE_SYSTEM = `You read the text of an event's ticket-shop pages and produce SUGGESTED catalogue items for that event's website ticket assistant, for a human to review and edit before anything goes live. Each page's text comes with two lists extracted from its HTML: LINKS (anchor text → URL) and IMAGES (URLs).
+
+Respond with ONLY strict JSON (no markdown fences): {"items":[{"label":"…","kind":"ticket"|"addon"|"bundle"|"accommodation"|"transport"|"merchandise","price":"…","currency":"…","availability":""|"selling fast"|"last few"|"sold out","description":"…","deepLink":"…","images":["…"]}]}
+
+Rules:
+- Ground EVERYTHING in the given text and lists. NEVER invent an item, price, currency or availability that isn't shown. Fewer accurate items beat many guessed ones.
+- One entry per distinct purchasable thing (max 30). label exactly as the shop names it. price as plain digits (e.g. "950" or "117.50"), no symbols or thousands separators. currency as the code/symbol's ISO form (R/ZAR → ZAR, € → EUR, £ → GBP, $ → USD unless the page says otherwise).
+- availability ONLY when the page explicitly says so (sold out, last few, selling fast); otherwise "".
+- description: one short line — what it includes / who it's for, closely following the page's own wording.
+- deepLink: the URL from LINKS that buys or opens THAT item; "" if none is clearly it. NEVER construct, guess or modify URLs.
+- images: up to 3 URLs from IMAGES that clearly belong to that item; [] when unsure — never decorative logos/banners.`;
 
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
 
@@ -148,6 +166,11 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_fan_events_site ON fan_events(site_id, created_at);
+    CREATE TABLE IF NOT EXISTS fan_assets (
+      token TEXT PRIMARY KEY, entity_id TEXT NOT NULL, mime TEXT NOT NULL,
+      bytes BLOB NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fan_assets_entity ON fan_assets(entity_id);
   `);
   // Migration: page mappings gained long-form "page info" — the organiser-approved
   // content the Owl serves for that page (general FAQs stay in fan_knowledge).
@@ -159,6 +182,22 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   try { sql.exec("ALTER TABLE fan_pages ADD COLUMN pitch TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   // Migration: catalogue items gained images (URLs; a scrollable strip on offer cards).
   try { sql.exec("ALTER TABLE fan_catalogue ADD COLUMN images TEXT NOT NULL DEFAULT '[]'"); } catch { /* already present */ }
+  // Migration: where the chat was last OPENED (vs page_url = where the fan is now) —
+  // lets boot flag "you've moved pages" so the widget re-surfaces the new page's info.
+  try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN chat_page_url TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  // Migration: per-SITE Owl personalisation — the client's own face & voice for
+  // their widget. owl_name/owl_avatar/owl_intro are presentation; persona (voice
+  // brief) and guardrails (dos & don'ts) are STYLE-ONLY prompt layers — the fan
+  // Owl's hard rules always win (see the chat route's personalisation block).
+  for (const col of ["owl_name TEXT NOT NULL DEFAULT ''", "owl_avatar TEXT NOT NULL DEFAULT ''", "owl_intro TEXT NOT NULL DEFAULT ''", "persona TEXT NOT NULL DEFAULT ''", "guardrails TEXT NOT NULL DEFAULT ''"]) {
+    try { sql.exec(`ALTER TABLE fan_sites ADD COLUMN ${col}`); } catch { /* already present */ }
+  }
+  // Migration: language — the site's default (what the Owl leads with) and the
+  // fan's device language (navigator.language, sent by the loader): the Owl opens
+  // in the fan's language when known and always mirrors what the fan writes.
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN default_lang TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  try { sql.exec("ALTER TABLE fan_sessions ADD COLUMN lang TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  const cleanLang = (v) => (/^[a-z]{2}(-[a-z0-9]{2,4})?$/i.test(String(v || '').trim()) ? String(v).trim().toLowerCase() : '');
   const now = () => new Date().toISOString();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
@@ -187,6 +226,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '',
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -197,7 +237,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     knowledge: knowByEntity.all(entityId).map((k) => ({ id: k.id, kind: k.kind, question: k.question, body: k.body })),
   });
   const KINDS = new Set(['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise']);
-  const KKINDS = new Set(['faq', 'policy', 'info']);
+  const KKINDS = new Set(['faq', 'policy', 'info', 'tip']);
   function saveConfig(entityId, b) {
     const tx = sql.transaction(() => {
       if (Array.isArray(b.sites)) {
@@ -206,15 +246,19 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           const id = s.id && siteById.get(s.id)?.entity_id === entityId ? s.id : uid();
           keep.add(id);
           const domains = JSON.stringify([...new Set((s.domains || []).map((d) => String(d).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean))]);
+          // Personalisation: avatar must be a hosted URL (usually our own
+          // /fan-owl-assets upload); persona/guardrails are style-only text layers.
+          const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=? WHERE id=?')
-              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), id);
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=? WHERE id=?')
+              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), now());
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
@@ -236,6 +280,17 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
             .run(c.id || uid(), entityId, String(c.suiteId || ''), KINDS.has(c.kind) ? c.kind : 'ticket', String(c.label).trim().slice(0, 120), String(c.description || '').slice(0, 500), String(c.price || '').slice(0, 30), String(c.currency || 'ZAR').slice(0, 8), String(c.deepLink || '').trim().slice(0, 600), String(c.availability || '').slice(0, 40), c.public === false ? 0 : 1, i,
               JSON.stringify((c.images || []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 8)));
         });
+        // Sweep uploaded images nothing references any more (catalogue images AND
+        // site avatars both live in fan_assets). A day's grace keeps an upload
+        // alive between hitting Upload and hitting Save in the editor.
+        const used = [
+          catByEntity.all(entityId).flatMap((c) => J(c.images, [])).join(' '),
+          sitesByEntity.all(entityId).map((s) => s.owl_avatar || '').join(' '),
+        ].join(' ');
+        const grace = new Date(Date.now() - 86_400_000).toISOString();
+        for (const a of sql.prepare('SELECT token FROM fan_assets WHERE entity_id = ? AND created_at < ?').all(entityId, grace)) {
+          if (!used.includes(a.token)) sql.prepare('DELETE FROM fan_assets WHERE token = ?').run(a.token);
+        }
       }
       if (Array.isArray(b.knowledge)) {
         sql.prepare('DELETE FROM fan_knowledge WHERE entity_id = ?').run(entityId);
@@ -270,6 +325,36 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   app.put('/api/admin/entities/:entityId/fan-owl', auth.requireAdmin, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
   app.get('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(configView(req.params.entityId)));
   app.put('/api/my/fan-owl/:entityId', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(saveConfig(req.params.entityId, req.body || {})));
+
+  // ── Catalogue image uploads ────────────────────────────────────────────────
+  // The editor downscales the picked file and sends a data-URL; we store the bytes
+  // (fan_assets) and hand back a hosted, unguessable URL that rides the item's
+  // images array like any pasted URL. Served publicly below with a long cache —
+  // these are fan-facing offer images by definition. Uploads a save no longer
+  // references are swept in saveConfig.
+  const IMG_CAP = 2 * 1024 * 1024; // bytes, post-downscale (the editor resizes to ≤1600px JPEG)
+  const imageHandler = asyncHandler(async (req, res) => {
+    const m = String((req.body || {}).dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/);
+    if (!m) throw new HttpError(400, 'Upload a JPEG, PNG, WebP or GIF image.');
+    const bytes = Buffer.from(m[2], 'base64');
+    if (!bytes.length) throw new HttpError(400, 'That image came through empty — try again.');
+    if (bytes.length > IMG_CAP) throw new HttpError(400, 'Images can be up to 2MB.');
+    const token = crypto.randomBytes(16).toString('hex');
+    sql.prepare('INSERT INTO fan_assets (token,entity_id,mime,bytes,created_at) VALUES (?,?,?,?,?)')
+      .run(token, req.params.entityId, m[1], bytes, now());
+    // Absolute URL: the catalogue save + the embed's image strip only accept https?://.
+    res.json({ url: `${req.protocol}://${req.get('host')}/fan-owl-assets/${token}` });
+  });
+  const imageLimit = rateLimit({ windowMs: 60_000, max: 30, by: 'user', scope: 'fan-image' });
+  app.post('/api/admin/entities/:entityId/fan-owl/images', auth.requireAdmin, requireManager, imageLimit, imageHandler);
+  app.post('/api/my/fan-owl/:entityId/images', auth.requireAuth, requireMyEntity, requireManager, imageLimit, imageHandler);
+  app.get('/fan-owl-assets/:token', (req, res) => {
+    const a = sql.prepare('SELECT mime, bytes FROM fan_assets WHERE token = ?').get(String(req.params.token || ''));
+    if (!a) return res.status(404).end();
+    res.set('Content-Type', a.mime);
+    res.set('Cache-Control', 'public, max-age=2592000, immutable'); // bytes never change per token
+    res.send(Buffer.isBuffer(a.bytes) ? a.bytes : Buffer.from(a.bytes));
+  });
 
   // Insight flywheel (spec §6): interaction funnel + FAQ gaps + interest topics, per
   // site — the promoter-facing read; same payload on both surfaces.
@@ -402,6 +487,88 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   app.post('/api/admin/entities/:entityId/fan-owl/pitches', auth.requireAdmin, requireManager, pitchLimit, pitchHandler);
   app.post('/api/my/fan-owl/:entityId/pitches', auth.requireAuth, requireMyEntity, requireManager, pitchLimit, pitchHandler);
 
+  // ── "Read the ticket site" — crawl the shop → AI-suggest catalogue items, for
+  // human review (same suggest-then-confirm pattern as the website reader; the
+  // editor merges results UNSAVED and never overwrites existing items). Interim
+  // until the Howler catalogue API feeds the catalogue directly. Unlike the
+  // website reader, the model also gets each page's LINKS + IMAGES so it can
+  // attach real buy links and item photos — never constructed ones.
+  const linksOf = (html, baseUrl, cap) => {
+    const out = []; const seen = new Set();
+    for (const m of String(html).matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      let u; try { u = new URL(m[1], baseUrl); } catch { continue; }
+      if (!/^https?:$/.test(u.protocol)) continue;
+      u.hash = '';
+      const key = u.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ text: stripHtml(m[2]).slice(0, 80), url: key.slice(0, 600) });
+      if (out.length >= cap) break;
+    }
+    return out;
+  };
+  const imgsOf = (html, baseUrl, cap) => {
+    const out = new Set();
+    for (const m of String(html).matchAll(/<img\b[^>]*src=["']([^"']+)["']/gi)) {
+      let u; try { u = new URL(m[1], baseUrl); } catch { continue; }
+      if (!/^https?:$/.test(u.protocol) || !/\.(png|jpe?g|webp|gif)([?#]|$)/i.test(u.pathname)) continue;
+      out.add(u.toString().slice(0, 600));
+      if (out.size >= cap) break;
+    }
+    return [...out];
+  };
+  const AVAIL = new Set(['selling fast', 'last few', 'sold out']);
+  const catIngestHandler = asyncHandler(async (req, res) => {
+    const entityId = req.params.entityId;
+    const url = String((req.body || {}).url || '').trim();
+    if (!/^https?:\/\/.+\..+/i.test(url)) throw new HttpError(400, 'Give the full ticket-shop URL (https://…).');
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new HttpError(400, 'AI is not configured for this client — set an Anthropic key in Admin → Integrations first.');
+    const first = await safeGetText(url, { timeoutMs: 15000, maxBytes: 3 * 1024 * 1024, allowHttp: true }).catch((e) => { throw new HttpError(400, `Couldn’t read that page: ${e.message}`); });
+    const pages = [{ url, html: first }];
+    // Shops often split per-ticket/per-package pages — follow a few same-site links.
+    for (const link of sameSiteLinks(first, url, 5)) {
+      try { pages.push({ url: link, html: await safeGetText(link, { timeoutMs: 12000, maxBytes: 3 * 1024 * 1024, allowHttp: true }) }); } catch { /* skip unreadable pages */ }
+    }
+    const corpus = pages.map((p) => [
+      `=== PAGE: ${p.url} ===`, stripHtml(p.html).slice(0, 7000),
+      `LINKS:\n${linksOf(p.html, p.url, 40).map((l) => `- ${l.text || '(no text)'} → ${l.url}`).join('\n')}`,
+      `IMAGES:\n${imgsOf(p.html, p.url, 20).join('\n')}`,
+    ].join('\n')).join('\n\n').slice(0, 45000);
+    const client = insights.requireClient(apiKey);
+    const msg = await require('./aiUsage').run({ entityId, kind: 'fan_owl' }, () => client.messages.create({
+      model: insights.MODEL, max_tokens: 4000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system: FAN_CATALOGUE_SYSTEM, messages: [{ role: 'user', content: corpus }],
+    }));
+    const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    let parsed = {};
+    try { parsed = coerceOwlJson(rawText); }
+    catch {
+      throw new HttpError(502, msg.stop_reason === 'max_tokens'
+        ? 'That shop was too large to read in one pass — point the Owl at the specific tickets page.'
+        : 'The Owl’s suggestions came back malformed — try again.');
+    }
+    res.json({
+      crawled: pages.map((p) => p.url),
+      items: (Array.isArray(parsed.items) ? parsed.items : []).slice(0, 30)
+        .filter((c) => String(c.label || '').trim())
+        .map((c) => ({
+          label: String(c.label).trim().slice(0, 120),
+          kind: KINDS.has(c.kind) ? c.kind : 'ticket',
+          price: String(c.price || '').replace(/[^\d.]/g, '').slice(0, 30),
+          currency: String(c.currency || '').trim().toUpperCase().slice(0, 8),
+          availability: AVAIL.has(String(c.availability || '').toLowerCase()) ? String(c.availability).toLowerCase() : '',
+          description: String(c.description || '').slice(0, 500),
+          deepLink: /^https?:\/\//i.test(String(c.deepLink || '').trim()) ? String(c.deepLink).trim().slice(0, 600) : '',
+          images: (Array.isArray(c.images) ? c.images : []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3),
+          public: true,
+        })),
+    });
+  });
+  const catIngestLimit = rateLimit({ windowMs: 5 * 60_000, max: 4, by: 'user', scope: 'fan-cat-ingest', message: 'Give the ticket-site reader a few minutes between runs.' });
+  app.post('/api/admin/entities/:entityId/fan-owl/ingest-catalogue', auth.requireAdmin, requireManager, catIngestLimit, catIngestHandler);
+  app.post('/api/my/fan-owl/:entityId/ingest-catalogue', auth.requireAuth, requireMyEntity, requireManager, catIngestLimit, catIngestHandler);
+
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls
   // /api/fan/context directly. CORS reflects the caller's origin — safe because
@@ -487,6 +654,16 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return best;
   }
   const publicItem = (c) => ({ id: c.id, kind: c.kind, label: c.label, description: c.description, price: c.price, currency: c.currency, availability: c.availability, images: J(c.images, []) });
+  // A mapping's navigable path: the pattern minus wildcards/junk (same derivation
+  // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
+  // the loader, so the Owl can only ever send fans within the promoter's own site.
+  const navPath = (pattern) => {
+    const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+    // Root-relative, always: "lineup" must land on /lineup, not resolve against
+    // whatever sub-path the fan happens to be on.
+    return !frag || frag.startsWith('/') ? frag : `/${frag}`;
+  };
+  const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
     const page = matchPage(site, url);
@@ -524,16 +701,17 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       const pageUrl = String(b.url || '').slice(0, 500);
       // One session per loader boot; the anon id (loader-side localStorage) threads a
       // returning fan's visits together without any identity.
+      const lang = cleanLang(b.lang); // the fan's device language (navigator.language)
       let session = b.sessionId ? getSession.get(String(b.sessionId)) : null;
       if (!session || session.site_id !== site.id) {
         const sid = uid();
-        sql.prepare('INSERT INTO fan_sessions (id,site_id,anon_id,page_url,created_at) VALUES (?,?,?,?,?)')
-          .run(sid, site.id, String(b.anonId || '').slice(0, 60), pageUrl, now());
+        sql.prepare('INSERT INTO fan_sessions (id,site_id,anon_id,page_url,lang,created_at) VALUES (?,?,?,?,?,?)')
+          .run(sid, site.id, String(b.anonId || '').slice(0, 60), pageUrl, lang, now());
         session = getSession.get(sid);
-      } else if (pageUrl && session.page_url !== pageUrl) {
-        // The fan moved to another page — track it so the ribbon AND the chat
-        // (which reads session.page_url per message) follow their context.
-        sql.prepare('UPDATE fan_sessions SET page_url = ? WHERE id = ?').run(pageUrl, session.id);
+      } else if ((pageUrl && session.page_url !== pageUrl) || (lang && session.lang !== lang)) {
+        // The fan moved to another page (or their device language changed) — track
+        // it so the ribbon AND the chat (which read the session per message) follow.
+        sql.prepare('UPDATE fan_sessions SET page_url = ?, lang = ? WHERE id = ?').run(pageUrl || session.page_url, lang || session.lang, session.id);
         session = getSession.get(session.id);
       }
       const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
@@ -541,7 +719,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       logEvent(site.id, session.id, 'ribbon_view', { url: pageUrl, pageType: page?.page_type || 'default' });
       res.json({
         sessionId: session.id,
-        site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', teaser: site.teaser || '' },
+        site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '' },
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
         pitch: page?.pitch || '', // the approved salesy line for THIS page (ribbon leads with it)
@@ -560,14 +738,23 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     // Chips: the current page's configured starters (set by hand or drafted by the
     // website reader) win; otherwise sensible generic defaults.
     const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
+    // Has the fan moved pages since the chat was last open? Then the widget leads
+    // with THIS page's info (pitch/offer/starters), not just the old thread.
+    const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
+    sql.prepare('UPDATE fan_sessions SET chat_page_url = ? WHERE id = ?').run(session.page_url || '', session.id);
     res.json({
-      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '' },
+      site: { name: site.name || suite?.name || '', brandColor: site.brand_color || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '', defaultLang: site.default_lang || '' },
+      lang: session.lang || site.default_lang || '', // fan's device language, else the site default — drives the widget's UI strings
       event: suite ? { name: suite.name } : null,
+      page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
+      pageChanged,
       pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
       items: items.slice(0, 6).map(publicItem),
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
-      starters: pageStarters.length ? pageStarters.slice(0, 4) : ['Which ticket do I need?', "What's included?", 'Refund policy?'],
+      // Unconfigured pages send NO starters — the widget fills in generic ones in
+      // the fan's own language (it knows the locale; we only know the codes).
+      starters: pageStarters.slice(0, 4),
       consentVersion: CONSENT_WORDING_VERSION,
     });
   });
@@ -620,6 +807,18 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         schema: { name: 'logInterest', description: 'Note a topic the fan showed real interest in, or a question you could not answer — organisers learn from these.', input_schema: { type: 'object', properties: { topic: { type: 'string' }, detail: { type: 'string' } }, required: ['topic'] } },
         run: async ({ topic, detail }) => { logEvent(site.id, session.id, 'interest', { topic: String(topic || '').slice(0, 120), detail: String(detail || '').slice(0, 300) }); return { ok: true }; },
       },
+      goToPage: {
+        schema: { name: 'goToPage', description: 'Take the fan to another page of THIS event website — pick a urlPattern from the pages list in your instructions. The app shows a "Take me there" button under your reply; the button does the moving and the chat reopens there.', input_schema: { type: 'object', properties: { urlPattern: { type: 'string', description: 'the target page\'s urlPattern, exactly as listed in your instructions' } }, required: ['urlPattern'] } },
+        run: async ({ urlPattern }) => {
+          const want = String(urlPattern || '').trim().toLowerCase();
+          const pages = pagesBySite.all(site.id).filter((x) => navPath(x.url_pattern));
+          const p = pages.find((x) => x.url_pattern.toLowerCase() === want)
+            || (want && pages.find((x) => x.url_pattern.toLowerCase().includes(want) || want.includes(navPath(x.url_pattern).toLowerCase())));
+          if (!p) return { ok: false, reason: 'unknown_page', message: 'That page isn’t in the site’s page list — offer the fan the pages you do have.' };
+          logEvent(site.id, session.id, 'nav_issued', { pattern: p.url_pattern });
+          return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
+        },
+      },
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -660,7 +859,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
 
   // POST /api/fan/event — interaction beacons from the widget (deep-link clicks
   // etc.), the funnel's client-side half. Whitelisted kinds only.
-  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close']);
+  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close', 'nav_click']);
   app.post('/api/fan/event', rateLimit({ windowMs: 60_000, max: 60, by: 'ip', scope: 'fan-event' }), (req, res) => {
     const b = req.body || {};
     const session = getSession.get(String(b.sessionId || ''));
@@ -674,6 +873,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
   const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
   const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
+  const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
   const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
   app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
     const b = req.body || {};
@@ -714,9 +914,30 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const instructions = [
       `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
+      (site.default_lang || session.lang)
+        ? `LANGUAGE: ${site.default_lang ? `the organiser's default language is "${site.default_lang}"` : ''}${site.default_lang && session.lang ? ' and ' : ''}${session.lang ? `the fan's device is set to "${session.lang}"` : ''}. Open in the fan's device language when known (otherwise the default), and ALWAYS switch to mirror whatever language the fan actually writes in.`
+        : '',
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       memory,
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
+      (() => {
+        const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
+        return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
+      })(),
+      // The organiser's personalisation — a STYLE-ONLY layer. The base rules
+      // (real prices only, no invented facts, no fake urgency, consent-first)
+      // are non-negotiable and explicitly outrank anything written here.
+      (() => {
+        const tips = knowByEntity.all(site.entity_id).filter((k) => k.kind === 'tip').slice(0, 12)
+          .map((k) => `- ${[k.question, k.body].filter(Boolean).join(': ').slice(0, 400)}`);
+        const bits = [
+          site.owl_name ? `Your name is "${site.owl_name}" — introduce yourself by it.` : '',
+          site.persona ? `PERSONALITY & VOICE (from the organiser): ${site.persona}` : '',
+          site.guardrails ? `ORGANISER DOS & DON'TS: ${site.guardrails}` : '',
+          tips.length ? `INSIDER TIPS from the organiser — volunteer one when it genuinely helps this fan, never force them in:\n${tips.join('\n')}` : '',
+        ].filter(Boolean);
+        return bits.length ? `ORGANISER PERSONALISATION — style and extra guidance ONLY. If ANY of it conflicts with WHAT YOU KNOW, the price/urgency rules or BOUNDARIES, THE RULES WIN:\n${bits.join('\n')}` : '';
+      })(),
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');
 
@@ -773,6 +994,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Offer cards: any buy links issued this turn (label + price + button URL).
       const offers = trail.filter((t) => t.name === 'getCheckoutLink' && t.result?.ok).map((t) => ({ ...t.result.item, url: t.result.url }));
       if (offers.length) res.write(OFFERS_MARK + JSON.stringify(offers));
+      // Navigation card: the last goToPage this turn (one destination per reply).
+      const navs = trail.filter((t) => t.name === 'goToPage' && t.result?.ok).map((t) => t.result.page);
+      if (navs.length) res.write(NAV_MARK + JSON.stringify(navs[navs.length - 1]));
       res.end();
     } catch (err) {
       console.error('[POST /api/fan/chat]', err.message);
@@ -785,4 +1009,13 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   return { saveConfig, configView }; // exposed for tests
 }
 
-module.exports = { mount, coerceOwlJson, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };
+// Per-site personas for the Admin → AI audit ("everything the AI is told"):
+// the style-only layers a client wrote onto their fan widget's prompt.
+function personaLayers(sqlDb, entityId) {
+  try {
+    return sqlDb.prepare("SELECT name, owl_name, persona, guardrails FROM fan_sites WHERE entity_id = ? AND (owl_name != '' OR persona != '' OR guardrails != '')").all(entityId)
+      .map((s) => ({ site: s.name, owlName: (s.owl_name || '').trim(), persona: (s.persona || '').trim(), guardrails: (s.guardrails || '').trim() }));
+  } catch { return []; } // table may not exist yet (fresh DB before mount)
+}
+
+module.exports = { mount, coerceOwlJson, personaLayers, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, FAN_CATALOGUE_SYSTEM, CONSENT_WORDING_VERSION };

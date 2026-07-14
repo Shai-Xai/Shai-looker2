@@ -15,6 +15,8 @@ import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
 import QueueItCard from '../components/QueueItCard.jsx';
+import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
+import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
@@ -153,6 +155,7 @@ const ADMIN_NAV = [
   ['settlements', 'Settlements', '💰'],
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
+  ['appanalytics', 'App analytics', '📲'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['datahealth', 'Data health', '📡'],
@@ -178,6 +181,7 @@ export default function AdminPage() {
       {tab === 'settlements' && <Settlements />}
       {tab === 'billing' && <Billing />}
       {tab === 'integrations' && <AdminIntegrations />}
+      {tab === 'appanalytics' && <AppAnalyticsAdmin />}
       {tab === 'email' && <MailLog />}
       {tab === 'status' && <StatusNoticesAdmin />}
       {tab === 'datahealth' && <DataHealthAdmin />}
@@ -1170,7 +1174,7 @@ const WIZARD_DEFAULTS = [
     blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
   { kind: 'builtin', key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
     req: 'at least one login', lock: 'Add (or link) at least one login to continue', does: 'Creates the people who can sign in.',
-    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients. Heads-up: once the first login exists, the client’s branded welcome pack email goes out automatically (manage it in the client’s Setup checklist → Client onboarding journey).' },
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Leave the password blank and they’ll be emailed a link to set their own; or set a temporary one to share directly. You can also link an existing login if someone works across several clients. Heads-up: once the first login exists, the client’s branded welcome pack email goes out automatically (manage it in the client’s Setup checklist → Client onboarding journey).' },
   { kind: 'builtin', key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true, does: 'Opens the per-client branding editor (logo, colours, sender).',
     blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
 ];
@@ -1617,7 +1621,7 @@ const SUITES_TOUR = [
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
 ];
 const LOGINS_TOUR = [
-  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name, email and a temporary password. They’ll be prompted to change it the first time they sign in.' },
+  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name and email. Leave the password blank to email them a set-password link, or set a temporary one to share directly.' },
   { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
   { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
 ];
@@ -2359,7 +2363,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const isClient = accountType === 'client';
-  const canSubmit = form.email.trim() && form.password && (!isClient || entityIds.length > 0);
+  const canSubmit = form.email.trim() && (!isClient || entityIds.length > 0); // password optional → email-invite
 
   const submit = async () => {
     setError(''); setBusy(true);
@@ -2398,7 +2402,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
           <Field label="Surname"><input style={{ ...input, minWidth: 0 }} value={form.lastName} onChange={set('lastName')} /></Field>
           <Field label="Email"><input style={{ ...input, minWidth: 0 }} value={form.email} onChange={set('email')} autoComplete="off" /></Field>
           <Field label="Mobile"><input style={{ ...input, minWidth: 0 }} value={form.mobile} onChange={set('mobile')} placeholder="+27…" /></Field>
-          <Field label="Temp password"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} placeholder="they can change it" autoComplete="off" /></Field>
+          <Field label="Temp password (optional)"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} placeholder="blank → email a set-password link" autoComplete="off" /></Field>
         </div>
         {isClient ? (
           <>
@@ -2883,7 +2887,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
       api.getEntityIntegrations(entity.id).catch(() => null),
-      Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
+      Promise.all(suites.map((su) => api.suiteGoals(su.id, true).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
       Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
     ]).then(([mt, digests, prog, integ, goalsArr, suiteMtArr, alertsArr]) => {
@@ -5177,7 +5181,12 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showChottu showQueueit showSocialPlus clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit', 'socialplus']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="📱 PostHog — app analytics">
+        <p style={hint}>One platform connection to Howler's PostHog project. Powers the 📲 App analytics tab and every client's App page (scoped to their events by the <code>eventID</code> property). Event/metric mapping lives on the App analytics tab.</p>
+        <PosthogSettingsCard />
+        <PosthogFeedCard />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5487,8 +5496,9 @@ function ClientIntegrations({ entity }) {
         pixelEntityId={entity.id}
         onPixelStatus={() => api.getPixelStatus(entity.id)}
         onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
+        showSocialPlus
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
@@ -5497,6 +5507,7 @@ function ClientIntegrations({ entity }) {
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
       <MetaConnectCard entityId={entity.id} scope="admin-client" />
       <QueueItCard entityId={entity.id} scope="admin-client" />
+      <SocialPlusPanel entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );

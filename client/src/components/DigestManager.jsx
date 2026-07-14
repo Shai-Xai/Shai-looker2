@@ -416,6 +416,12 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fct.title}</div>
                           <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>{[fct.suiteName, fct.dashTitle, fct.setName].filter(Boolean).join(' › ')}</div>
+                          {/* Data range the tile actually served — a stale or wrong-month span is the #1 "digest says June in July" tell. */}
+                          {(fct.span || fct.rows > 1) && (
+                            <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 1 }}>
+                              {fct.rows > 1 ? `${fct.rows} rows` : ''}{fct.rows > 1 && fct.span ? ' · ' : ''}{fct.span ? `data: ${fct.span}` : ''}
+                            </div>
+                          )}
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brand)', whiteSpace: 'nowrap' }}>{fct.value}</div>
                       </div>

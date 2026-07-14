@@ -26,9 +26,23 @@ export default function TextTile({ tile }) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // Only render a real <a> when the URL scheme is safe; otherwise show the link
+    // text as plain text (no href) so `[x](javascript:…)` can't execute on click.
+    .replace(/\[(.+?)\]\((.+?)\)/g, (_m, text, url) => {
+      const safe = safeUrl(url);
+      return safe ? `<a href="${safe}" target="_blank" rel="noopener noreferrer">${text}</a>` : text;
+    })
     .replace(/\n/g, '<br/>');
   return <div style={containerStyle} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+// Allow only benign link schemes (http/https/mailto) or relative URLs; reject
+// javascript:, data:, vbscript:, etc. Returns a safe href string or '' if unsafe.
+function safeUrl(url) {
+  const raw = String(url || '').trim();
+  if (/^(https?:|mailto:)/i.test(raw)) return raw;
+  if (/^[/#?]/.test(raw) || /^[\w./-]+$/.test(raw)) return raw; // relative / anchor
+  return '';
 }
 
 function looksLikeSlate(tile) {
@@ -59,8 +73,12 @@ function renderNode(node, key) {
     case 'h2':
     case 'h3':
       return <div key={key} style={{ ...style, fontSize: HEADING_SIZE[node.type], fontWeight: 700, lineHeight: 1.2 }}>{children}</div>;
-    case 'link':
-      return <a key={key} href={node.url} target="_blank" rel="noopener" style={style}>{children}</a>;
+    case 'link': {
+      const safe = safeUrl(node.url);
+      return safe
+        ? <a key={key} href={safe} target="_blank" rel="noopener noreferrer" style={style}>{children}</a>
+        : <span key={key} style={style}>{children}</span>;
+    }
     case 'block-quote':
       return <blockquote key={key} style={{ ...style, borderLeft: '3px solid #ddd', paddingLeft: 10, color: '#666' }}>{children}</blockquote>;
     default:
@@ -68,12 +86,19 @@ function renderNode(node, key) {
   }
 }
 
-// Minimal sanitizer: drop <script>/<style> blocks and inline event handlers.
+// Best-effort sanitizer for the raw-HTML branch (Looker-authored logos/images).
+// Regex sanitizing is inherently limited — this is defense-in-depth on top of the
+// fact that only privileged/Looker authors can write tile HTML. It drops active
+// content (script/style/iframe/object/embed/link/meta), strips inline event
+// handlers, and neutralizes dangerous URL schemes in href/src (keeping data: for
+// embedded image logos). A future hardening is a real DOM sanitizer (DOMPurify).
 function sanitize(html) {
-  return html
-    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+  return String(html || '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?\s*>/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
+    .replace(/(href|src|xlink:href)\s*=\s*("|')\s*(javascript|vbscript|data:text\/html)[^"']*\2/gi, '$1="#"')
+    .replace(/(javascript|vbscript)\s*:/gi, '');
 }
 
 const containerStyle = {

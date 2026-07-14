@@ -2273,7 +2273,7 @@ export function SignalBoard({ monitors, apiBase = '/api/my/data-health', trailin
       )}
 
       {view === 'map' && (
-        <VenueMapView key={'m' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} day={day} onSelect={setSel} />
+        <VenueMapView key={'m·' + picks.join('|') + '·' + stPicks.join('|') + '·' + statusFilter} rows={statusRows} apiBase={apiBase} suiteId={((open.find((m) => m.suiteId) || {}).suiteId) || ''} day={day} onSelect={setSel} />
       )}
 
       {/* key on the filter set: changing chips while drilled into a station's devices

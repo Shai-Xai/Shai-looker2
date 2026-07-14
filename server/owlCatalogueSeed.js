@@ -29,13 +29,17 @@ module.exports = {
   eventDateDimension: 'core_events.start_date',
 
   // ── Measures ────────────────────────────────────────────────────────────────
-  // "Tickets sold" = core_tickets.count (distinct active ticket records). NB the
-  // explore's base ticket view is `core_tickets`, so this is THE ticket count.
+  // "Tickets sold" = core_tickets.sold_tickets — tickets actually SOLD, EXCLUDING
+  // complimentary/comp tickets (Howler policy; matches the dashboards). The raw
+  // record count (core_tickets.count) INCLUDES comps and is the "incl. comps"
+  // variant, offered only when explicitly asked. Getting this right matters: the
+  // WhatsApp Owl once reported 56,404 (incl. ~1,854 comps) vs the dashboard's
+  // excl-comps figure — same label, wrong measure.
   measures: [
-    { name: 'core_tickets.count',                label: 'Tickets Sold',         type: 'count_distinct', default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets', 'number of tickets', 'ticket count'] },
+    { name: 'core_tickets.sold_tickets',         label: 'Tickets Sold',         type: 'sum_distinct',   default: true,  aka: ['tickets sold', 'sold', 'sales volume', 'how many tickets', 'number of tickets', 'ticket count', 'net sold', 'paid tickets', 'sold excluding complimentary'] },
     { name: 'core_tickets.sum_revenue_decimal',  label: 'Total Revenue',        type: 'sum_distinct',   default: true,  unit: 'ZAR', aka: ['revenue', 'sales', 'gross', 'money', 'turnover'] },
     { name: 'core_tickets.Average_ticket_price', label: 'Average Ticket Price', type: 'average_distinct', default: true, unit: 'ZAR', aka: ['average price', 'avg ticket price', 'price per ticket'] },
-    { name: 'core_tickets.sold_tickets',         label: 'Tickets Sold (excl. comps)', type: 'sum_distinct', default: false, aka: ['net sold', 'paid tickets', 'sold excluding complimentary'] },
+    { name: 'core_tickets.count',                label: 'Tickets Sold (incl. comps)', type: 'count_distinct', default: false, aka: ['tickets incl comps', 'including complimentary', 'all ticket records', 'issued count'] },
     { name: 'core_tickets.issued_tickets',       label: 'Issued Tickets',       type: 'count_distinct', default: false, aka: ['issued'] },
     { name: 'core_tickets.complimentary_tickets',label: 'Complimentary Tickets',type: 'sum_distinct',   default: false, aka: ['comps', 'complimentary', 'free tickets'] },
     { name: 'core_tickets.sum_fee_decimal',      label: 'Total Ticket Fee',     type: 'sum_distinct',   default: false, unit: 'ZAR', aka: ['fees', 'booking fees'] },
@@ -96,8 +100,8 @@ module.exports = {
 
   // ── Grounding notes for the prompt ──────────────────────────────────────────
   notes: [
-    '"Tickets sold" = core_tickets.count (distinct active/purchased ticket records — the realistic sold number). core_tickets.sold_tickets EXCLUDES complimentary tickets; use only when asked for paid/net sold.',
-    'IMPORTANT — core_tickets.count and revenue INCLUDE add-on products (drink packs, lockers, shuttles, WC, etc.). When asked for tickets sold or revenue, ALWAYS split genuine entry tickets from add-ons: group by or filter core_ticket_types.is_addonable ("No" = entry ticket, "Yes" = add-on) and report them as SEPARATE lines (e.g. "48,615 tickets sold, plus 7,728 add-ons"). Treat the headline "tickets sold" as entry tickets (is_addonable = No) unless the user explicitly asks for the combined total.',
+    '"Tickets sold" = core_tickets.sold_tickets — tickets actually SOLD, which EXCLUDE complimentary/comp tickets. This is the canonical sold number (it matches the dashboards). NEVER use core_tickets.count for "tickets sold": that COUNTS comps too and overstates the figure. Only use core_tickets.count ("incl. comps") if the user explicitly asks to include complimentary/comps, or asks for issued/all ticket records.',
+    'IMPORTANT — the sold/revenue measures INCLUDE add-on products (drink packs, lockers, shuttles, WC, etc.). When asked for tickets sold or revenue, ALWAYS split genuine entry tickets from add-ons: group by or filter core_ticket_types.is_addonable ("No" = entry ticket, "Yes" = add-on) and report them as SEPARATE lines (e.g. "48,615 tickets sold, plus 7,728 add-ons"). Treat the headline "tickets sold" as entry tickets (is_addonable = No) unless the user explicitly asks for the combined total.',
     '"Revenue" = core_tickets.sum_revenue_decimal (gross, in the client\'s reporting currency). Fees and cost are separate measures.',
     'This explore is ACTIVE/PURCHASED tickets — refunded/cancelled tickets are excluded, and fully sponsored/free events read 0. Say so if a total looks unexpectedly low for a free event.',
     '"City" is ambiguous — default to Event City (core_sa_city_location.city_name); use Buyer City only when the question is about where customers are from.',

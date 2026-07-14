@@ -49,6 +49,9 @@ const REGISTRY = [
     { key: 'engage.links', name: 'Links', def: true, beta: true, desc: 'ChottuLink short links into the Howler app — created from Pulse, click-tracked. OFF hides the tab + removes the Owl link tools.' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
+  { key: 'appanalytics', emoji: '📱', name: 'App analytics', def: false, beta: true, desc: 'Howler-app engagement on the client\'s events, live from PostHog — views, CTAs, purchases, app users.', kids: [
+    { key: 'appanalytics.socialplus', name: 'Community (Social+)', def: true, beta: true, desc: 'The client\'s in-app communities & chats from Social+ — members, messages, posts & reactions, as a tab on the App page. Needs communities linked to the client.' },
+  ] },
   { key: 'digests', emoji: '🗓', name: 'Digests', def: true, desc: 'Scheduled role-based briefing emails.' },
   { key: 'settlements', emoji: '🧾', name: 'Settlements', def: true, desc: 'Settlements, invoices and documents.', kids: [
     { key: 'settlements.settlements', name: 'Settlements', def: true, desc: 'Interactive settlement views.' },
@@ -105,6 +108,7 @@ const OWL_TOOL_FLAGS = {
   draftReport: 'owl.save_reports',
   createLink: 'engage.links',
   applyLinkTemplate: 'engage.links',
+  getAppAnalytics: 'appanalytics', // flag off = the tool is never offered to the model
 };
 
 // Client-route prefixes → the flag that must be ON (admins always pass).
@@ -124,6 +128,10 @@ const GATES = [
   ['/api/owl/act/apply-chottu-template', 'engage.links'],
   ['/api/my/onboarding', 'yourjourney'],
   ['/api/my/suite-categories', 'navcategories'],
+  ['/api/my/app-analytics', 'appanalytics'],
+  ['/api/my/app-audience', 'appanalytics'],
+  ['/api/my/app-tickets', 'appanalytics'],
+  ['/api/my/socialplus', 'appanalytics.socialplus'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

@@ -14,6 +14,28 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn, personaOf } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 
+// Pull the EVENT-NAME lock values out of a suite's lockedFilters map. A suite is
+// an EDITION and may span several event records (e.g. KFF26 = "Kappa FuturFestival
+// 2026" + "Kappa FuturFestival 2026 - Carte Cultura"); this is how the WhatsApp Owl
+// (which has no suite picker) learns the full event set for an edition, straight
+// from the suite lock — one source of truth. Handles the three lock-key shapes:
+// a direct `core_events.name`, a combined `__or__:op:f1|f2` key that includes it,
+// and a by-name preset title ("Event Name" / "Current Event") resolved via
+// `resolveField`. Comma-separated values (Looker OR) are split out.
+const EVENT_NAME_FIELD = 'core_events.name';
+function eventLockValues(lockedFilters, resolveField) {
+  const vals = new Set();
+  for (const [k, v] of Object.entries(lockedFilters || {})) {
+    if (v == null || String(v).trim() === '') continue;
+    let fields;
+    if (k.startsWith('__or__:')) fields = (k.split(':')[2] || '').split('|');
+    else if (k.includes('.')) fields = [k];
+    else { let f = null; try { f = resolveField && resolveField(k); } catch { f = null; } fields = f ? [f] : []; }
+    if (fields.includes(EVENT_NAME_FIELD)) String(v).split(',').map((s) => s.trim()).filter(Boolean).forEach((x) => vals.add(x));
+  }
+  return [...vals];
+}
+
 // WhatsApp-tuned depth layers (the web Analyst/Operator briefs mention Markdown tables,
 // which we forbid on WhatsApp — so these say the same thing in chat-friendly terms).
 const WA_DEEP_LAYER = 'DEEPER READ: pull a couple of supporting cuts (the trend, a key breakdown, a comparison to a prior period or event), then give the answer + what\'s driving it + one recommended next step. Stay plain WhatsApp text — a few short lines, no tables, no walls of text.';
@@ -125,6 +147,18 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
   const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 800), now()); } catch { /* ignore */ } };
+  // A one-line, human-readable summary of the QUERY behind an answer — the exact
+  // measure(s), group-bys, filters and row count of every data tool call. This is
+  // what makes a WhatsApp answer's figures auditable ("did it use count or
+  // sold_tickets?") from the admin panel.
+  const traceOfTrail = (trail) => (trail || []).map((t) => {
+    const i = t.input || {}; const r = t.result || {};
+    if (!/^(askData|queryDashboard|ask_)/.test(t.name)) return `${t.name}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ''}`;
+    const meas = [i.measure, ...(Array.isArray(i.measures) ? i.measures : [])].filter(Boolean).join(', ');
+    const dims = (Array.isArray(i.dimensions) ? i.dimensions : []).join(', ');
+    const filt = Object.entries(i.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    return `${t.name}: ${meas || '?'}${dims ? ` by [${dims}]` : ''}${i.dateRange ? ` range="${i.dateRange}"` : ''}${filt ? ` where {${filt}}` : ''}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ` → ${r.count != null ? `${r.count} rows` : 'ok'}`}`;
+  }).join(' | ');
 
   // Last follow-up suggestions per number, so a bare "1"/"2"/"3" reply (the numbered
   // fallback when interactive buttons aren't available) maps back to its question.
@@ -248,6 +282,17 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     }
     const cat = getOwlTools().catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // EDITIONS: WhatsApp has no suite picker, so an edition that spans several event
+    // records (KFF26 = the festival + its Carte Cultura channel) would be undercounted
+    // if the model filtered a single name. Surface each suite's event-lock set as the
+    // authoritative event list for that edition — configure it once in the suite lock,
+    // and both web (suite selected) and WhatsApp scope to the full set.
+    try {
+      const suites = db.listSuitesForEntity ? (db.listSuitesForEntity(entityId) || []) : [];
+      const editions = suites.map((s) => ({ name: s.name, events: eventLockValues(s.lockedFilters, (k) => auth.filterNameToField && auth.filterNameToField(k)) }))
+        .filter((e) => e.events.length);
+      if (editions.length) parts.push(`EVENT EDITIONS (the client's saved groupings — AUTHORITATIVE; an edition may span MORE THAN ONE event record): ${editions.map((e) => `"${e.name}" = ${e.events.map((n) => `"${n}"`).join(' + ')}`).join('; ')}. When the client asks about an edition by its name or an obvious shorthand (e.g. "KFF26" → "KFF 26"), filter core_events.name to ALL of that edition's event names (comma-separated) — never just one, or the total is undercounted.`);
+    } catch { /* ignore */ }
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Durable client memory (facts confirmed over time) — same source as the web Owl.
     try { const mem = owlMemory.memoryNote(db, entityId, '', userId); if (mem) parts.push(mem); } catch { /* ignore */ }
@@ -490,6 +535,11 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     const followups = parseFollowups(out);
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
+    // Provenance: log the EXACT query behind this answer (measure(s) + group-bys +
+    // filters + row count per tool call) so a "the number looks wrong" report is
+    // investigable straight from the Recent-inbound panel — no guessing which measure
+    // the Owl chose (e.g. core_tickets.count vs core_tickets.sold_tickets).
+    if (trail.length) logEvent(msisdn, 'query', traceOfTrail(trail));
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
     // Log the Clickatell message id with the reply — 'replied' only means Clickatell
     // ACCEPTED it; the id is what you trace in their portal / status callbacks when a
@@ -839,4 +889,4 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   console.log('[owlWhatsapp] WhatsApp door mounted (POST /api/whatsapp/inbound)');
 }
 
-module.exports = { mount };
+module.exports = { mount, eventLockValues };

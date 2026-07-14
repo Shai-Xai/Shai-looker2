@@ -534,12 +534,46 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     return { tiles, catalogue, dropped, timing, focusDiag };
   }
 
-  // Current calendar date in the client's timezone, e.g. "Tuesday, 16 June 2026".
-  // Passed to the AI so the digest/briefing anchor "today/yesterday/month-to-date"
-  // to the SEND date — not the latest (possibly lagging) date in the data.
+  // Current calendar date in the client's timezone, e.g.
+  // "Tuesday, 16 June 2026 (ISO 2026-06-16)". Passed to the AI so the digest/
+  // briefing anchor "today/yesterday/month-to-date" to the SEND date — not the
+  // latest (possibly lagging) date in the data. The ISO form gives the model an
+  // exact YYYY-MM to match against date/month pivot keys, so a tile that spans
+  // several months can't have a completed PRIOR month read as "this month"
+  // (a June cumulative was headlined as the month's revenue on 14 July).
   function todayLabel(tz = 'Africa/Johannesburg') {
-    try { return new Date().toLocaleDateString('en-ZA', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
-    catch { return new Date().toISOString().slice(0, 10); }
+    try {
+      const d = new Date();
+      const pretty = d.toLocaleDateString('en-ZA', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      const iso = d.toLocaleDateString('en-CA', { timeZone: tz }); // en-CA renders YYYY-MM-DD
+      return `${pretty} (ISO ${iso})`;
+    } catch { return new Date().toISOString().slice(0, 10); }
+  }
+
+  // Best display value for a fact tile (first measure → table calc → dimension of
+  // the first row), preferring Looker's rendered string. Used by the digest/
+  // briefing facts inspectors to show what each tile resolved to.
+  function factValueLabel(t) {
+    const row = (t.rows || [])[0];
+    if (!row) return '—';
+    const fields = [...(t.fields?.measures || []), ...(t.fields?.table_calculations || []), ...(t.fields?.dimensions || [])];
+    for (const f of fields) {
+      const cell = row[f.name];
+      if (cell && (cell.rendered != null || cell.value != null)) return String(cell.rendered != null ? cell.rendered : cell.value);
+    }
+    return '—';
+  }
+  // The tile's data RANGE: first row's → last row's first-dimension value (e.g.
+  // "2026-06-01 → 2026-07-14"), so the facts inspectors show at a glance WHICH
+  // period a tile actually served — a stale month, a wrong-month series or a
+  // truncated range is visible without opening the dashboard.
+  function factSpanLabel(t) {
+    const rows = t.rows || [];
+    const dim = (t.fields?.dimensions || [])[0];
+    if (rows.length < 2 || !dim) return '';
+    const val = (row) => { const c = row[dim.name]; return c == null ? '' : String(c.rendered ?? c.value ?? ''); };
+    const a = val(rows[0]); const b = val(rows[rows.length - 1]);
+    return a && b && a !== b ? `${a} → ${b}` : '';
   }
 
   // Curated mode: fetch a specific set of tiles (by dashboard+tile id) instead of
@@ -597,5 +631,5 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     return { tiles: out, catalogue, dropped };
   }
 
-  return { PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults, clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority, BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles };
+  return { PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults, clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority, BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel };
 };

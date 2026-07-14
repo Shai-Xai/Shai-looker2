@@ -13,6 +13,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue', 'accommodation', 'sponsors', 'faq', 'other'];
 const ITEM_KINDS = ['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise'];
 const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
+const LANGS = [['', "Auto — fan's device language, else English"], ['en', 'English'], ['af', 'Afrikaans'], ['it', 'Italiano'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['nl', 'Nederlands']];
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card, #fff)', color: 'var(--text)' };
 const small = { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 4px' };
 const btn = { padding: '8px 14px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, cursor: 'pointer', minHeight: 36 };
@@ -34,7 +35,13 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [ingesting, setIngesting] = useState(false);
   const [ingestNote, setIngestNote] = useState('');
   const [tab, setTab] = useState('sites');
-  const TABS = [['sites', '🌐 Sites'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
+  const [imgBusy, setImgBusy] = useState(-1); // catalogue index mid-upload
+  const [imgNote, setImgNote] = useState(null); // { i, text }
+  const [avBusy, setAvBusy] = useState(-1); // site index mid-avatar-upload
+  const [ticketUrl, setTicketUrl] = useState('');
+  const [catIngesting, setCatIngesting] = useState(false);
+  const [catNote, setCatNote] = useState('');
+  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
     let on = true;
@@ -61,6 +68,64 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
     pages.splice(to, 0, x);
     setSite(i, { pages });
   };
+
+  // Upload catalogue images: downscale in the browser (≤1600px JPEG), POST the
+  // data-URL, and drop the returned hosted URL into the item's images like any
+  // pasted URL. Nothing goes live until Save.
+  async function uploadImages(i, files) {
+    const room = 8 - (cfg.catalogue[i].images || []).length;
+    const picked = [...files].filter((f) => f.type.startsWith('image/')).slice(0, Math.max(0, room));
+    if (!picked.length) { setImgNote({ i, text: room <= 0 ? 'This item already has 8 images — remove one first.' : 'Pick an image file (JPEG/PNG/WebP).' }); return; }
+    setImgBusy(i); setImgNote(null);
+    try {
+      const urls = [];
+      for (const f of picked) {
+        const r = await fetch(`${base}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: await downscaleImage(f) }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Upload failed — try again.');
+        urls.push(d.url);
+      }
+      setCfg((c) => ({ ...c, catalogue: c.catalogue.map((x, j) => (j === i ? { ...x, images: [...(x.images || []), ...urls].slice(0, 8) } : x)) }));
+      setImgNote({ i, text: `Uploaded ${urls.length} image${urls.length === 1 ? '' : 's'} ✓ — remember to Save.` });
+    } catch (e) { setImgNote({ i, text: `⚠️ ${e.message}` }); }
+    finally { setImgBusy(-1); }
+  }
+
+  // "Read the ticket site": crawl the shop → AI-suggested catalogue items merged
+  // into the UNSAVED editor state (existing items never touched; dedupe by
+  // label) — review prices & links, then Save. Interim until the Howler API feed.
+  async function ingestCatalogue() {
+    const url = ticketUrl.trim();
+    if (!url) { setCatNote('Enter the ticket-shop URL first (https://…).'); return; }
+    setCatIngesting(true); setCatNote('Reading the ticket site — this takes ~30–60s…');
+    try {
+      const r = await fetch(`${base}/ingest-catalogue`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: /^https?:\/\//i.test(url) ? url : `https://${url}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The read failed — try again.');
+      setCfg((c) => {
+        const have = new Set(c.catalogue.map((x) => String(x.label || '').toLowerCase().trim()));
+        const fresh = (d.items || []).filter((x) => !have.has(x.label.toLowerCase().trim()));
+        const skipped = (d.items || []).length - fresh.length;
+        setCatNote(`Read ${d.crawled.length} page${d.crawled.length === 1 ? '' : 's'} → suggested ${fresh.length} new item${fresh.length === 1 ? '' : 's'}${skipped ? ` (${skipped} already in the catalogue — left untouched)` : ''}. Check every price, link and image, then Save.`);
+        return { ...c, catalogue: [...c.catalogue, ...fresh] };
+      });
+    } catch (e) { setCatNote(`⚠️ ${e.message}`); }
+    finally { setCatIngesting(false); }
+  }
+
+  // The Owl's face: one square-ish image per site, downscaled small and hosted
+  // like any catalogue image; the URL rides the site's owlAvatar field.
+  async function uploadAvatar(i, file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    setAvBusy(i);
+    try {
+      const r = await fetch(`${base}/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl: await downscaleImage(file, 512, 0.85) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Upload failed — try again.');
+      setCfg((c) => ({ ...c, sites: c.sites.map((x, j) => (j === i ? { ...x, owlAvatar: d.url } : x)) }));
+    } catch (e) { setIngestNote(`⚠️ ${e.message}`); }
+    finally { setAvBusy(-1); }
+  }
 
   async function save() {
     setSaving(true);
@@ -206,8 +271,63 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', pages: [] }] })}>+ Add site</button>
           {saveBar}
+        </>
+      )}
+
+      {tab === 'persona' && (
+        <>
+          <p style={small}>Make each site's Owl your own: its face, name, voice and house rules. Personality shapes HOW it speaks — the hard rules (real prices only, nothing invented, no fake urgency) always win. 💡 Special tips live under FAQs as the “tip” kind — the Owl volunteers them when they genuinely help.</p>
+          {!cfg.sites.length && <p style={small}>Add a site first (Sites section) — the personality belongs to a site.</p>}
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              {cfg.sites.length > 1 && <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{s.name || 'Untitled site'}</div>}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+                {s.owlAvatar
+                  ? <img src={s.owlAvatar} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover' }} />
+                  : <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>🦉</div>}
+                <label style={{ ...btn, display: 'inline-flex', alignItems: 'center', fontWeight: 700, opacity: avBusy === i ? 0.6 : 1 }}>
+                  {avBusy === i ? 'Uploading…' : (s.owlAvatar ? 'Change face' : '📷 Upload a face')}
+                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={avBusy !== -1}
+                    onChange={(e) => { uploadAvatar(i, e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+                {s.owlAvatar && <button type="button" style={btn} onClick={() => setSite(i, { owlAvatar: '' })}>Back to 🦉</button>}
+                <span style={{ ...small, margin: 0 }}>Shows on the launcher button and in the chat header.</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: 8 }}>
+                <div>
+                  <div style={small}>Owl's name (the chat header title)</div>
+                  <input style={input} value={s.owlName || ''} maxLength={40} placeholder="e.g. Kappa Guide" onChange={(e) => setSite(i, { owlName: e.target.value })} />
+                </div>
+                <div>
+                  <div style={small}>Intro line (the first thing fans read when the chat opens)</div>
+                  <input style={input} value={s.owlIntro || ''} maxLength={200} placeholder="e.g. Ciao! I'm your festival insider — ask me anything 🎶" onChange={(e) => setSite(i, { owlIntro: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <div style={small}>Default language — the Owl greets in the fan's phone/browser language when it can tell; this is the fallback (it always answers in whatever language the fan writes)</div>
+                <select style={input} value={s.defaultLang || ''} onChange={(e) => setSite(i, { defaultLang: e.target.value })}>
+                  {LANGS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
+                placeholder="e.g. Warm and cheeky, proudly local, first-name basis, loves music puns, answers in the fan's language, keeps it short."
+                onChange={(e) => setSite(i, { persona: e.target.value })} />
+              <div style={{ ...small, marginTop: 8 }}>Dos & don'ts — house rules for this Owl</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.guardrails || ''} maxLength={2000}
+                placeholder="e.g. Always mention the waiting list when something's sold out. Don't recommend camping to families. Never discuss other festivals."
+                onChange={(e) => setSite(i, { guardrails: e.target.value })} />
+              {s.siteKey && (
+                <div style={{ marginTop: 10 }}>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview this personality</a>
+                  <span style={{ ...small, marginLeft: 8 }}>Save first — the preview reads the saved config.</span>
+                </div>
+              )}
+            </div>
+          ))}
+          {cfg.sites.length > 0 && saveBar}
         </>
       )}
 
@@ -287,6 +407,15 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       {tab === 'catalogue' && (
         <>
           <p style={small}>Tickets, add-ons & bundles — the Owl's ONLY price/product facts, and the only links it can hand out. Paste the Howler checkout link per item (Pulse adds tracking automatically). Images show as a scrollable strip on the offer card.</p>
+          <details style={{ marginBottom: 6 }}>
+            <summary style={summaryStyle}>🔮 Read the ticket site — draft the catalogue automatically</summary>
+            <p style={small}>Point the Owl at the event's ticket shop (e.g. the Howler event page) — it reads the tickets, prices, buy links and images and SUGGESTS catalogue items. Existing items are never touched; nothing goes live until you review and Save. (Interim tool — this will pull straight from Howler via API later.)</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input style={{ ...input, flex: '1 1 220px', width: 'auto' }} value={ticketUrl} placeholder="https://howler.co.za/events/…" onChange={(e) => setTicketUrl(e.target.value)} />
+              <button type="button" style={{ ...btn, fontWeight: 700 }} disabled={catIngesting} onClick={ingestCatalogue}>{catIngesting ? 'Reading…' : 'Read & suggest'}</button>
+            </div>
+            {catNote && <p style={{ ...small, marginTop: 6 }}>{catNote}</p>}
+          </details>
           {cfg.catalogue.map((c, i) => (
             <details key={c.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!c.label}>
               <summary style={summaryStyle}>
@@ -308,14 +437,33 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
               <input style={{ ...input, marginTop: 6 }} value={c.deepLink} placeholder="Howler checkout link (https://…)" onChange={(e) => setCat(i, { deepLink: e.target.value })} />
               <input style={{ ...input, marginTop: 6 }} value={c.description} placeholder="One-liner the Owl can use (what's included, who it's for)" onChange={(e) => setCat(i, { description: e.target.value })} />
-              <input style={{ ...input, marginTop: 6 }} value={(c.images || []).join(', ')}
-                placeholder="Image URLs, comma-separated (https://… — fans scroll through them on the offer card)"
-                onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                <label style={{ ...btn, display: 'inline-flex', alignItems: 'center', fontWeight: 700, opacity: imgBusy === i ? 0.6 : 1 }}>
+                  {imgBusy === i ? 'Uploading…' : '📷 Upload images'}
+                  <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={imgBusy !== -1}
+                    onChange={(e) => { uploadImages(i, e.target.files); e.target.value = ''; }} />
+                </label>
+                <span style={{ ...small, margin: 0 }}>Up to 8 — fans scroll through them on the offer card.</span>
+              </div>
+              {imgNote && imgNote.i === i && <p style={{ ...small, marginTop: 6 }}>{imgNote.text}</p>}
               {(c.images || []).filter((u) => /^https?:\/\//i.test(u)).length > 0 && (
-                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginTop: 6 }}>
-                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => <img key={u} src={u} alt="" style={{ height: 54, borderRadius: 8, flex: '0 0 auto', objectFit: 'cover' }} />)}
+                <div style={{ display: 'flex', gap: 10, overflowX: 'auto', marginTop: 6, paddingTop: 8 }}>
+                  {c.images.filter((u) => /^https?:\/\//i.test(u)).map((u) => (
+                    <div key={u} style={{ position: 'relative', flex: '0 0 auto' }}>
+                      <img src={u} alt="" style={{ height: 54, borderRadius: 8, objectFit: 'cover', display: 'block' }} />
+                      <button type="button" aria-label="Remove image" title="Remove image"
+                        onClick={() => setCat(i, { images: c.images.filter((x) => x !== u) })}
+                        style={{ position: 'absolute', top: -8, right: -8, width: 24, height: 24, borderRadius: 12, border: 0, background: 'var(--text)', color: 'var(--bg, #fff)', fontSize: 12, lineHeight: '24px', padding: 0, cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
                 </div>
               )}
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ ...small, cursor: 'pointer', listStyle: 'none' }}>Paste image URLs instead…</summary>
+                <input style={{ ...input, marginTop: 4 }} value={(c.images || []).join(', ')}
+                  placeholder="Image URLs, comma-separated (https://…)"
+                  onChange={(e) => setCat(i, { images: e.target.value.split(',').map((u) => u.trim()).filter(Boolean).slice(0, 8) })} />
+              </details>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
                   <input type="checkbox" checked={c.public !== false} onChange={(e) => setCat(i, { public: e.target.checked })} style={{ width: 16, height: 16 }} />
@@ -332,7 +480,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
 
       {tab === 'knowledge' && (
         <>
-          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports.</p>
+          <p style={small}>Event-wide FAQs & policies that apply everywhere (refunds, age limits, what's allowed in…). Page-specific detail belongs in that page's info box under Sites & pages. Together these are the ONLY sources the Owl may quote — anything not covered gets an honest "I don't know" and logs the gap in Reports. 💡 The <strong>tip</strong> kind is insider gold the Owl may volunteer unprompted when relevant ("the east gate has no queue after 6pm").</p>
           {cfg.knowledge.map((k, i) => (
             <details key={k.id || i} style={{ ...card, paddingTop: 4, paddingBottom: 8 }} open={!k.question && !k.body}>
               <summary style={summaryStyle}>
@@ -341,7 +489,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </summary>
               <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 3fr', gap: 8 }}>
                 <select style={input} value={k.kind} onChange={(e) => setKnow(i, { kind: e.target.value })}>
-                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option>
+                  <option value="faq">FAQ</option><option value="policy">policy</option><option value="info">info</option><option value="tip">💡 tip</option>
                 </select>
                 <input style={input} value={k.question} placeholder="Question (e.g. What's the refund policy?)" onChange={(e) => setKnow(i, { question: e.target.value })} />
               </div>
@@ -362,6 +510,28 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       )}
     </div>
   );
+}
+
+// Downscale a picked image to a phone-friendly JPEG data-URL before upload
+// (same approach as ReportForm) — keeps the payload under the server's 2MB cap.
+function downscaleImage(file, max = 1600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('That file doesn’t look like an image.'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('Couldn’t read that file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function Flywheel({ stats, leads, loadLeads }) {

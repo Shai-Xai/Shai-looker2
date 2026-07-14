@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pulse — Every feature</title>
-<meta name="description" content="The complete, living feature index of Pulse — the Experience OS for live events by Howler.">
+<title>Pulse: Every feature</title>
+<meta name="description" content="The complete, living feature index of Pulse, the Experience OS for live events by Howler.">
 <style>
 :root{
   --brand:#FF385C;
@@ -33,33 +33,15 @@ main{max-width:1060px;margin:0 auto;padding:20px 22px 90px;}
 .head h1 .grad{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
 .head p{color:var(--muted);font-size:14.5px;margin-top:8px;max-width:560px;margin-left:auto;margin-right:auto;}
 .legend{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:18px 0 26px;}
-.grid{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}
+.grid{display:grid;grid-template-columns:1fr;gap:16px;}
 @media(min-width:700px){.grid{grid-template-columns:1fr 1fr;}}
-.sec{border:1px solid var(--line);border-radius:18px;padding:6px 20px;background:#fff;box-shadow:0 10px 30px -24px rgba(29,29,31,.25);}
-/* Each section is a collapsible card, closed by default: the header row (emoji,
-   title, feature count, chevron) toggles the list. Tap-friendly, no hover needed. */
-.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:14px 0;min-height:44px;}
-.sec>summary::-webkit-details-marker{display:none;}
-.sec h3{font-size:17px;letter-spacing:-.01em;font-weight:800;display:flex;align-items:center;gap:9px;flex:1;text-align:left;}
+.sec{border:1px solid var(--line);border-radius:18px;padding:20px;background:#fff;box-shadow:0 10px 30px -24px rgba(29,29,31,.25);}
+.sec h3{font-size:17px;letter-spacing:-.01em;font-weight:800;display:flex;align-items:center;gap:9px;}
 .sec h3 .e{font-size:20px;}
-.sec .count{font-size:11.5px;font-weight:700;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;}
-.sec .chev{flex:none;width:16px;height:16px;color:var(--muted);transition:transform .22s ease;}
-.sec[open]>summary .chev{transform:rotate(90deg);}
-@media(prefers-reduced-motion:reduce){.sec .chev{transition:none;}}
-.sec p.blurb{font-size:13.5px;color:var(--muted);margin:-6px 0 12px;}
-.sec ul{list-style:none;padding-bottom:10px;}
-.sec li{border-top:1px solid var(--soft);}
-/* …and each feature inside it expands to the plain-language "what it does for
-   you" + a demo CTA. */
-.sec li details{width:100%;}
-.sec li summary,.sec li.plain{list-style:none;display:flex;align-items:center;gap:9px;padding:8px 0;font-size:13.5px;color:#2c2c30;min-height:40px;}
-.sec li summary{cursor:pointer;}
-.sec li summary::-webkit-details-marker{display:none;}
-.sec li .fname{flex:1;font-weight:550;}
-.sec .idot{flex:none;width:16px;height:16px;border-radius:50%;border:1.3px solid #b9b9c0;color:#8e8e95;font-size:10px;font-weight:700;display:grid;place-items:center;font-style:normal;}
-.sec details[open] .idot{border-color:var(--brand);color:var(--brand);}
-.sec .fdesc{font-size:12.5px;color:var(--muted);padding:0 0 11px;line-height:1.55;}
-.sec .fdesc a{color:var(--brand);font-weight:700;text-decoration:none;}
+.sec p.blurb{font-size:13.5px;color:var(--muted);margin:7px 0 12px;}
+.sec ul{list-style:none;}
+.sec li{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:13.5px;color:#2c2c30;border-top:1px solid var(--soft);}
+.sec li:first-child{border-top:none;}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:980px;font-size:10.5px;font-weight:750;white-space:nowrap;flex:none;margin-top:1px;}
 .badge.live{color:#1a8a4a;background:rgba(26,138,74,.12);}
 .badge.setup{color:#9a6a00;background:rgba(214,158,46,.16);}
@@ -96,9 +78,8 @@ footer a{color:var(--muted);}
 <main>
   <div class="head">
     <h1>Every feature, <span class="grad">honestly labelled.</span></h1>
-    <p>The complete, living index of what Pulse does — updated as features ship. Tap any feature
-    to see what it actually does for you. For the short version, read
-    <a href="/sales" style="color:var(--brand);text-decoration:none;font-weight:700;">the story</a> first.</p>
+    <p>The complete, living index of what Pulse does, updated as features ship. For the short
+    version, read <a href="/sales" style="color:var(--brand);text-decoration:none;font-weight:700;">the story</a> first.</p>
   </div>
   <div class="legend" id="legend" hidden>
     <span class="badge live">✅ Live</span>
@@ -136,22 +117,15 @@ footer a{color:var(--muted);}
     const res = await fetch('/api/product/site', { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const chev = '<svg class="chev" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3.5 L10.5 8 L6 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     grid.innerHTML = (data.sections || []).map((s) => (
-      '<details class="sec">' +
-        '<summary><h3><span class="e">' + esc(s.emoji || '•') + '</span>' + esc(s.title) + '</h3>' +
-          '<span class="count">' + s.features.length + '</span>' + chev + '</summary>' +
+      '<section class="sec">' +
+        '<h3><span class="e">' + esc(s.emoji || '•') + '</span>' + esc(s.title) + '</h3>' +
         (s.blurb ? '<p class="blurb">' + esc(s.blurb) + '</p>' : '') +
         '<ul>' + s.features.map((f) => {
           const [cls, label] = BADGE[f.status] || BADGE.live;
-          const row = '<span class="badge ' + cls + '">' + label + '</span><span class="fname">' + esc(f.label) + '</span>';
-          if (!f.desc) return '<li class="plain">' + row + '</li>'; // nothing to expand — plain row
-          const ask = 'mailto:support@howler.co.za?subject=' + encodeURIComponent('Pulse demo — ' + f.label.split(' — ')[0]);
-          return '<li><details><summary>' + row + '<i class="idot">i</i></summary>' +
-            '<div class="fdesc">' + esc(f.desc) + ' <a href="' + ask + '">Ask about this in your demo →</a></div>' +
-          '</details></li>';
+          return '<li><span class="badge ' + cls + '">' + label + '</span><span>' + esc(f.label) + '</span></li>';
         }).join('') + '</ul>' +
-      '</details>'
+      '</section>'
     )).join('');
     document.getElementById('legend').hidden = false;
     if (data.updatedAt) {
@@ -159,7 +133,7 @@ footer a{color:var(--muted);}
       if (!isNaN(d)) document.getElementById('updated').textContent = 'feature map updated ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     }
   } catch (e) {
-    grid.innerHTML = '<div class="state" style="grid-column:1/-1;"><div>Couldn’t load the feature map — please refresh.</div></div>';
+    grid.innerHTML = '<div class="state" style="grid-column:1/-1;"><div>Couldn’t load the feature map. Please refresh.</div></div>';
   }
 })();
 </script>

@@ -72,6 +72,20 @@ test('middleware ignores unauthenticated, failed (4xx) and unmapped requests', a
   } finally { await app.close(); }
 });
 
+test('a background (?bg=1) view is not recorded as an action', async () => {
+  const u = db.createUser({ email: `bg-${Date.now()}@t.com`, password: 'pw123456', role: 'client' });
+  const user = db.getUser(u.id);
+  const app = await startApp(mountAudit);
+  try {
+    await app.req('GET', '/api/my/digest-history/ent-3/dig-9?bg=1', { as: user }); // widget fetch
+    await tick();
+    assert.equal(db.listActionsForUser(user.id).filter((a) => a.action === 'digest.view').length, 0, 'background view not logged');
+    await app.req('GET', '/api/my/digest-history/ent-3/dig-9', { as: user }); // deliberate view
+    await tick();
+    assert.equal(db.listActionsForUser(user.id).filter((a) => a.action === 'digest.view').length, 1, 'deliberate view still logged');
+  } finally { await app.close(); }
+});
+
 test('view rules are throttled — repeated views collapse to one row', async () => {
   const u = db.createUser({ email: `view-${Date.now()}@t.com`, password: 'pw123456', role: 'client' });
   const user = db.getUser(u.id);

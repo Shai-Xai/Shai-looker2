@@ -18,6 +18,7 @@ const insights = require('./insights');
 const { asyncHandler, errorMiddleware, serverError, allowInlineScripts } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
+const roles = require('./roles'); // role catalog — required early so early mounts (team.js) can use it
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
 // unchanged. See server/query.js.
@@ -38,7 +39,7 @@ const { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesA
 const {
   PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults,
   clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority,
-  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles,
+  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel,
 } = require('./briefing')({ db, store, query });
 
 const app = express();
@@ -160,7 +161,7 @@ const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEn
 let osApi, waDigestFor, staffInboundFn = null; // waDigestFor set when digests mount; staffInboundFn set when staffAlerts mounts (lets the WhatsApp Owl intercept staff numbers before they reach it)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, getPosthogApi: () => posthogApi, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
 require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getChottuApi: () => chottuApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
@@ -193,7 +194,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); // 🚩 per-client feature flags + 👁 view-as-user — mounts EARLY so its route gates register before the feature modules → server/flags.js
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, tickets: (eid, user) => appMatchApi.holdingsForScope(eid, user), ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); const appAudienceFor = async (eid) => { try { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(eid).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } }; // 📲 app-audience fact for briefing + digest (flag-gated, fail-soft) · 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -217,57 +218,11 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id), matrix: db.getNotifyMatrix(req.user.id) });
 });
 
-// ─── Client self-service team management (team.manage) ─────────────────────────
-// A client Owner manages their own team's logins + roles, scoped to their
-// entity. Mirror of the admin Logins tab. Howler-staff logins are never exposed
-// or editable here; a client can only ever touch its own members.
-function teamMembers(entityId) {
-  return db.listUsers()
-    .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
-    .map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, firstName: u.firstName, lastName: u.lastName, mobile: u.mobile, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
-}
-const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
-
-// The client's Howler support contacts — the admins assigned to the account,
-// shown to the client as "Your Howler Support" with each one's job title + email.
-function howlerSupportFor(entityId) {
-  const ent = db.getEntity(entityId);
-  return (ent?.howlerSupportIds || [])
-    .map((id) => db.getUser(id))
-    .filter((u) => u && u.role === 'admin')
-    .map((u) => ({ id: u.id, name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' }));
-}
-
-app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog(), support: howlerSupportFor(req.params.entityId) });
-});
-app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { email, password, role, firstName, lastName, mobile } = req.body || {};
-  if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
-  try {
-    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId], firstName, lastName, mobile });
-    db.setMembershipRole(u.id, req.params.entityId, role);
-    res.status(201).json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.put('/api/my/team/:entityId/:userId/role', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const role = String((req.body || {}).role || '');
-  if (!roles.ROLE_KEYS.includes(role)) return res.status(400).json({ error: 'Unknown role' });
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && role !== 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.setMembershipRole(userId, entityId, role);
-  res.json({ ok: true, role });
-});
-app.delete('/api/my/team/:entityId/:userId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.removeMembership(userId, entityId);
-  res.status(204).end();
-});
+// ─── Client self-service team management (team.manage) → server/team.js ────────
+// A client Owner manages their own team's logins + roles, scoped to their entity.
+// Also owns the first-time "set your password" invite email, reused below by the
+// admin add-user route. Disposable module; remove this line + server/team.js.
+const team = require('./team').mount(app, { auth, db, roles, mailer });
 
 // ─── Backup / restore (full data export & import) ──────────────────────────────
 app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
@@ -275,18 +230,17 @@ app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="pulse-backup-${new Date().toISOString().slice(0, 10)}.json"`);
   res.send(JSON.stringify(db.exportAll()));
 });
-// Large limit: a full export (with logo/icon data-URLs + dashboard defs) can be big.
-app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => {
+app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => { // large limit: a full export (logos/defs) is big
   const data = req.body;
   if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
     return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
   }
   try {
     const counts = db.importAll(data);
+    try { db.recordAction({ userId: req.user.id, action: 'admin.import', label: `Imported backup (${Object.keys(counts).length} tables)`, method: 'POST', path: req.path }); } catch { /* audit best-effort: a full import can inject users/roles, so record WHO did it */ }
     res.json({ ok: true, counts });
   } catch (err) {
-    console.error('[POST /api/admin/import]', err.message);
-    serverError(res, err);
+    serverError(res, err, 'POST /api/admin/import'); // logs full detail + ops-pages; generic message to the browser
   }
 });
 
@@ -315,8 +269,14 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
   }));
 });
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
-  try { res.status(201).json(auth.createUser(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const b = req.body || {};
+    // No password typed → email the new user a set-password link (email-invite).
+    const emailInvite = !(b.password && String(b.password).trim());
+    const u = auth.createUser({ ...b, password: emailInvite ? team.randomTempPassword() : b.password });
+    if (emailInvite) team.emailSetPasswordInvite(u, { invitedBy: req.user.firstName || 'Howler' });
+    res.status(201).json({ ...u, invited: emailInvite });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.put('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   try {
@@ -348,8 +308,7 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Role catalog (for the role pickers).
-const roles = require('./roles');
+// Role catalog (for the role pickers). `roles` is required up top so early mounts can use it.
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog(), howlerRoles: roles.HOWLER_ROLES }));
 // Platform-wide user activity summary (active users, top users / dashboards /
 // features) for the admin Users console.
@@ -1016,7 +975,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes, skills: skillsByEntity[ent.id] || [] };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes, skills: skillsByEntity[ent.id] || [], fanOwlPersonas: require('./fanOwl').personaLayers(db.db, ent.id) };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).
@@ -1090,8 +1049,8 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
   if (locks.chottu !== false) delete body.chottu;
-  if (locks.queueit !== false) delete body.queueit;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key' };
+  if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
   applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
@@ -1366,9 +1325,9 @@ app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, re
 app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   const clients = [];
   for (const e of db.listEntities()) {
-    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id);
-    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount)) continue;
-    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s } });
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id); const sp = socialplus.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount || sp.configured)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s, socialplus: sp } });
   }
   // Most recently active (or failing) clients first.
   clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
@@ -1777,7 +1736,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey, app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1789,7 +1748,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 5).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text), /* 5th slot = the app-audience point */
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => {
@@ -1824,7 +1783,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     return {
       diag: selected.map((id) => {
         const g = gById[id];
-        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) };
+        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), filters: t.filters || {} })) };
       }),
       dropped: (dropped || []).slice(0, 50),
     };
@@ -1908,7 +1867,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
@@ -1919,7 +1878,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       available: true,
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4)
+      bullets: (raw.bullets || []).slice(0, 5) // 5th slot = the app-audience point when the flag is on
         .map((b) => ({ text: clipWords(b.text, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
@@ -2147,7 +2106,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // The single-pass (flat) digest over all the facts — used for single-event
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
-    const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const digestApp = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: digestApp }));
     // A single-event digest scopes all its links/actions to that one event; the
     // multi-event fallback (flat over several) has no single event to assert.
     const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
@@ -2180,7 +2139,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
       for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
       const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
       const today = todayLabel();
-      const acts = actionsSummaryFor(entityId);
+      const acts = actionsSummaryFor(entityId); const digestApp = await appAudienceFor(entityId); // 📲 one app-audience block for the portfolio overview
       // Followed-tile visuals, grouped into the event each tile belongs to.
       const visualsBySuite = {};
       if (followedVisual && followedFacts.length) {
@@ -2188,7 +2147,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
       const [ovRaw, evRaws] = await aiUsage.run({ entityId, kind: 'digest' }, () => Promise.all([
-        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
+        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today, app: digestApp }),
         Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
           .then((r) => ({ g, r }))
           .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
@@ -2234,25 +2193,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // EXCLUDED and why (scope blocked vs no rows vs error) — so a missing source
   // (e.g. GA4) isn't a black box. Only attached when explicitly requested.
   if (debug) {
-    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
     out.dropped = dropped;
   }
   return out;
 }
 
-// Best display value for a fact tile (first measure → table calc → dimension of
-// the first row), preferring Looker's rendered string. Used by the digest
-// facts inspector to show what each tile resolved to.
-function factValueLabel(t) {
-  const row = (t.rows || [])[0];
-  if (!row) return '—';
-  const fields = [...(t.fields?.measures || []), ...(t.fields?.table_calculations || []), ...(t.fields?.dimensions || [])];
-  for (const f of fields) {
-    const cell = row[f.name];
-    if (cell && (cell.rendered != null || cell.value != null)) return String(cell.rendered != null ? cell.rendered : cell.value);
-  }
-  return '—';
-}
+// factValueLabel / factSpanLabel (the digest facts-inspector helpers) live in
+// server/briefing.js with the rest of the fact-tile layer.
 
 // Selectable tiles per client, grouped by dashboard — drives the curated
 // digest picker. Only data tiles (with fields, not text) can be chosen.
@@ -2530,7 +2478,7 @@ const billing = require('./billing').mount(app, { db, auth });
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os, billing,
+  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi,
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {
@@ -2932,8 +2880,8 @@ const PORT = process.env.PORT || 3045;
 const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
-  // Pull organic social stats once a day for every connected client (best-effort).
-  socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+  // Pull organic social stats + Social+ community analytics once a day (best-effort).
+  socialMetrics.startDailySync({ listEntities: () => db.listEntities() }); socialplus.startDailySync({ listEntities: () => db.listEntities() });
 });
 
 // Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new
