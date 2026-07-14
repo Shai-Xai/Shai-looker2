@@ -335,6 +335,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <option value="">Icon strip under the header (default)</option>
                   <option value="plus">＋ menu next to the message box</option>
                   <option value="pills">Labelled pills above the message box (centred)</option>
+                  <option value="below">Labelled pills below the message box (centred)</option>
                   <option value="off">Off — chat only</option>
                 </select>
               </div>

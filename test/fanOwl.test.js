@@ -131,6 +131,11 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   const r3 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna-x', sessionId: r.body.sessionId }, headers: ORIGIN });
   assert.equal(r3.body.sessionId, r.body.sessionId);
   assert.equal(r3.body.offer.label, 'Camping');
+  // Owl-driven hops land with the path percent-encoded in the query — the page
+  // must still match (the preview page navigates as ?path=%2Fartists%2F…).
+  const rEnc = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/fan-owl-test?k=x&path=%2Fartists%2Fluna-x' }, headers: ORIGIN });
+  assert.equal(rEnc.body.pageType, 'artist');
+  assert.equal(rEnc.body.offer.label, 'Camping');
   const r4 = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets', sessionId: r.body.sessionId }, headers: ORIGIN });
   assert.equal(r4.body.sessionId, r.body.sessionId);
   assert.equal(r4.body.offer.label, 'Weekend Pass');
