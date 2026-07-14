@@ -18,6 +18,7 @@ const insights = require('./insights');
 const { asyncHandler, errorMiddleware, serverError, allowInlineScripts } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
+const roles = require('./roles'); // role catalog — required early so early mounts (team.js) can use it
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
 // unchanged. See server/query.js.
@@ -217,57 +218,11 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id), matrix: db.getNotifyMatrix(req.user.id) });
 });
 
-// ─── Client self-service team management (team.manage) ─────────────────────────
-// A client Owner manages their own team's logins + roles, scoped to their
-// entity. Mirror of the admin Logins tab. Howler-staff logins are never exposed
-// or editable here; a client can only ever touch its own members.
-function teamMembers(entityId) {
-  return db.listUsers()
-    .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
-    .map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, firstName: u.firstName, lastName: u.lastName, mobile: u.mobile, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
-}
-const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
-
-// The client's Howler support contacts — the admins assigned to the account,
-// shown to the client as "Your Howler Support" with each one's job title + email.
-function howlerSupportFor(entityId) {
-  const ent = db.getEntity(entityId);
-  return (ent?.howlerSupportIds || [])
-    .map((id) => db.getUser(id))
-    .filter((u) => u && u.role === 'admin')
-    .map((u) => ({ id: u.id, name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' }));
-}
-
-app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog(), support: howlerSupportFor(req.params.entityId) });
-});
-app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { email, password, role, firstName, lastName, mobile } = req.body || {};
-  if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
-  try {
-    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId], firstName, lastName, mobile });
-    db.setMembershipRole(u.id, req.params.entityId, role);
-    res.status(201).json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.put('/api/my/team/:entityId/:userId/role', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const role = String((req.body || {}).role || '');
-  if (!roles.ROLE_KEYS.includes(role)) return res.status(400).json({ error: 'Unknown role' });
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && role !== 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.setMembershipRole(userId, entityId, role);
-  res.json({ ok: true, role });
-});
-app.delete('/api/my/team/:entityId/:userId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.removeMembership(userId, entityId);
-  res.status(204).end();
-});
+// ─── Client self-service team management (team.manage) → server/team.js ────────
+// A client Owner manages their own team's logins + roles, scoped to their entity.
+// Also owns the first-time "set your password" invite email, reused below by the
+// admin add-user route. Disposable module; remove this line + server/team.js.
+const team = require('./team').mount(app, { auth, db, roles, mailer });
 
 // ─── Backup / restore (full data export & import) ──────────────────────────────
 app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
@@ -314,8 +269,14 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
   }));
 });
 app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
-  try { res.status(201).json(auth.createUser(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const b = req.body || {};
+    // No password typed → email the new user a set-password link (email-invite).
+    const emailInvite = !(b.password && String(b.password).trim());
+    const u = auth.createUser({ ...b, password: emailInvite ? team.randomTempPassword() : b.password });
+    if (emailInvite) team.emailSetPasswordInvite(u, { invitedBy: req.user.firstName || 'Howler' });
+    res.status(201).json({ ...u, invited: emailInvite });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.put('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
   try {
@@ -347,8 +308,7 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Role catalog (for the role pickers).
-const roles = require('./roles');
+// Role catalog (for the role pickers). `roles` is required up top so early mounts can use it.
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog(), howlerRoles: roles.HOWLER_ROLES }));
 // Platform-wide user activity summary (active users, top users / dashboards /
 // features) for the admin Users console.

@@ -140,13 +140,13 @@ function AddUserModal({ entityId, entityName, roles, onClose, onAdded }) {
           <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: 1 }}>Add a user</h2>
           <button onClick={onClose} aria-label="Close" style={{ border: 'none', background: 'transparent', fontSize: 20, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>✕</button>
         </div>
-        <p style={hint}>They’ll join {entityName || 'this client'}. Share the temporary password — they can change it after signing in.</p>
+        <p style={hint}>They’ll join {entityName || 'this client'}. Leave the password blank and we’ll email them a link to set their own — or set a temporary one to share directly.</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Field label="First name"><input style={inp} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></Field>
           <Field label="Surname"><input style={inp} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></Field>
           <Field label="Email" span><input style={inp} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="teammate@company.com" /></Field>
           <Field label="Mobile"><input style={inp} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+27…" /></Field>
-          <Field label="Temp password"><input style={inp} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="they can change it" /></Field>
+          <Field label="Temp password (optional)"><input style={inp} type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="blank → email them a set-password link" /></Field>
           <Field label="Role" span>
             <select style={sel} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select>
           </Field>
@@ -155,7 +155,7 @@ function AddUserModal({ entityId, entityName, roles, onClose, onAdded }) {
         {error && <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 8 }}>{error}</div>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
           <button style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
-          <button style={addBtn} onClick={submit} disabled={busy || !form.email || !form.password}>{busy ? 'Adding…' : '+ Add user'}</button>
+          <button style={addBtn} onClick={submit} disabled={busy || !form.email}>{busy ? 'Adding…' : '+ Add user'}</button>
         </div>
       </div>
     </div>
