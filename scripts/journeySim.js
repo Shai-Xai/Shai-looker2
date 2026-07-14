@@ -33,6 +33,7 @@ class Sim {
     this.emailByPhone = {};          // phone -> email (SMS sends arrive keyed by phone)
     this.sup = new Set();            // unsubscribed emails
     this.sends = [];                 // { to, channel, subject, tick }
+    this.syncs = [];                 // { platform, audienceName, action, emails, tick }
     this.tick = '';
     this.action = { id: 'sim', entityId: 'e1', title: journey.name, config: { journey }, results: {} };
     const self = this;
@@ -46,6 +47,7 @@ class Sim {
       saveResults: () => {},
       sysUser: { role: 'admin' },
       audienceFor: async (eid, cfg) => ({ list: [...(self.segSets[cfg.audience?.segmentId] || [])].map((e) => ({ email: e })) }),
+      syncAudience: async ({ platform, audienceName, action, members }) => { self.syncs.push({ platform, audienceName, action, emails: members.map((m) => m.email), tick: self.tick }); return { ok: true }; },
     };
   }
   enrol(email, { name = email, phone, ticket = '', attributes = {} } = {}) {
@@ -72,6 +74,7 @@ class Sim {
   status(email) { return this.sql.prepare("SELECT status FROM action_enrollments WHERE action_id='sim' AND email=?").get(email)?.status; }
   // Match both email sends (keyed by email) and SMS sends (keyed by phone).
   received(email) { return this.sends.filter((s) => s.to === email || this.emailByPhone[s.to] === email); }
+  syncedFor(email) { return this.syncs.filter((s) => s.emails.includes(email)).map((s) => ({ platform: s.platform, action: s.action, audience: s.audienceName })); }
 }
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -291,6 +294,41 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['opener', 'last chance'] } },
     ],
   },
+  {
+    name: 'Ad-audience sync from a branch (Meta + TikTok)',
+    flow: [
+      '✉  opener  →  ◆ bought after 2 days?',
+      '   ├─ Bought      → 🎯 REMOVE from "FF27 retargeting" (Meta+TikTok) → ✉ Thanks',
+      '   └─ No response → 🎯 ADD to "FF27 retargeting" (Meta+TikTok)    → 💬 Last call',
+      '   (stop paying to retarget a buyer; start retargeting the silent)',
+    ],
+    journey: {
+      name: 'Retargeting sync',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [
+            { type: 'sync', platform: 'both', action: 'remove', audienceName: 'FF27 retargeting' },
+            msg({ subject: 'Thanks — see you there!' }),
+          ] },
+          { label: 'No response', nodes: [
+            { type: 'sync', platform: 'both', action: 'add', audienceName: 'FF27 retargeting' },
+            msg({ channel: 'sms', body: 'Last call — grab your ticket' }),
+          ] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Bea', email: 'bea@x.com', behaviour: 'buys → removed from retargeting on both platforms, thanked',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks — see you there!'],
+          syncs: [{ platform: 'meta', action: 'remove', audience: 'FF27 retargeting' }, { platform: 'tiktok', action: 'remove', audience: 'FF27 retargeting' }] } },
+      { name: 'Cy', email: 'cy@x.com', behaviour: 'ghosts → added to retargeting on both platforms',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Last call — grab your ticket'],
+          syncs: [{ platform: 'meta', action: 'add', audience: 'FF27 retargeting' }, { platform: 'tiktok', action: 'add', audience: 'FF27 retargeting' }] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
@@ -306,7 +344,20 @@ async function simulate(scn) {
   for (const p of scn.personas) for (const step of p.drive) step(sim, p.email); // inject behaviours
   await sim.run('In-window · reacted');           // early-advancers route immediately
   await sim.run('Window closed', { expire: true }); // the silent take the timeout branch
-  return scn.personas.map((p) => ({ ...p, status: sim.status(p.email), got: sim.received(p.email) }));
+  return scn.personas.map((p) => ({ ...p, status: sim.status(p.email), got: sim.received(p.email), syncs: sim.syncedFor(p.email) }));
+}
+
+// Did a persona land exactly where expected — status, the messages received (in
+// order), and (if specified) the ad-audience syncs it triggered? Shared by the
+// report and the CI test.
+function personaOk(p) {
+  if (p.status !== p.expect.status) return false;
+  if (JSON.stringify(p.got.map((s) => s.subject)) !== JSON.stringify(p.expect.got)) return false;
+  if (p.expect.syncs) {
+    const norm = (a) => JSON.stringify([...a].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
+    if (norm(p.syncs) !== norm(p.expect.syncs)) return false;
+  }
+  return true;
 }
 
 // ── Pretty report (only when run directly) ────────────────────────────────────
@@ -325,22 +376,20 @@ async function report() {
     console.log('');
     const results = await simulate(scn);
     for (const p of results) {
-      const gotSubs = p.got.map((s) => s.subject);
-      const okStatus = p.status === p.expect.status;
-      const okMsgs = JSON.stringify(gotSubs) === JSON.stringify(p.expect.got);
-      const ok = okStatus && okMsgs;
+      const ok = personaOk(p);
       allOk = allOk && ok;
       console.log(`  👤 ${C.b(p.name)} ${C.dim('— ' + p.behaviour)}`);
       for (const s of p.got) console.log(`       ${C.dim(s.tick.padEnd(20))} ${s.channel === 'sms' ? '💬' : '✉ '}  ${s.subject}`);
+      for (const y of p.syncs) console.log(`       ${C.dim(''.padEnd(20))} 🎯  ${y.action === 'remove' ? 'remove from' : 'add to'} “${y.audience}” · ${y.platform}`);
       const exitTxt = p.status === 'converted' ? C.g('CONVERTED ✔') : `ended: ${p.status}`;
-      console.log(`       ${ok ? C.g('✓ ' + exitTxt) : C.r('✗ ' + exitTxt + ` — expected ${p.expect.status} / ${p.expect.got.join(', ')}`)}\n`);
+      console.log(`       ${ok ? C.g('✓ ' + exitTxt) : C.r('✗ ' + exitTxt + ` — expected ${p.expect.status} / ${p.expect.got.join(', ')}${p.expect.syncs ? ' / syncs ' + JSON.stringify(p.expect.syncs) : ''}`)}\n`);
     }
-    const pass = results.filter((p) => p.status === p.expect.status && JSON.stringify(p.got.map((s) => s.subject)) === JSON.stringify(p.expect.got)).length;
+    const pass = results.filter(personaOk).length;
     console.log(`  ${pass === results.length ? C.g(`RESULT: ${pass}/${results.length} routed exactly as expected ✓`) : C.r(`RESULT: ${pass}/${results.length} — see ✗ above`)}`);
   }
   console.log(`\n${allOk ? C.g(C.b('ALL SIMULATIONS PASSED ✓')) : C.r(C.b('SOME SIMULATIONS FAILED ✗'))}\n`);
   return allOk;
 }
 
-module.exports = { SCENARIOS, simulate, Sim };
+module.exports = { SCENARIOS, simulate, Sim, personaOk };
 if (require.main === module) report().then((ok) => process.exit(ok ? 0 : 1)).catch((e) => { console.error(e); process.exit(1); });
