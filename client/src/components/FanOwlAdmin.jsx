@@ -271,7 +271,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', navStyle: '', pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -328,6 +328,15 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                     <option value="dark">Dark</option>
                   </select>
                 </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <div style={small}>🧭 Quick-nav buttons — one per mapped page (📄 Pages tab); fans tap them to hop around your site from the chat. Pick where they live:</div>
+                <select style={input} value={s.navStyle || ''} onChange={(e) => setSite(i, { navStyle: e.target.value })}>
+                  <option value="">Icon strip under the header (default)</option>
+                  <option value="plus">＋ menu next to the message box</option>
+                  <option value="pills">Labelled pills above the message box (centred)</option>
+                  <option value="off">Off — chat only</option>
+                </select>
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
               <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}

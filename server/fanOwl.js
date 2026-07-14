@@ -202,6 +202,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // adopts the existing brand by default and can diverge when it clashes.
   try { sql.exec("ALTER TABLE fan_sites ADD COLUMN widget_theme TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const WTHEMES = new Set(['', 'light', 'dark']);
+  // Migration: nav style — where the quick-nav buttons live in the widget.
+  // '' = 'top' (icon strip under the header); also 'plus' (a + menu by the
+  // composer), 'pills' (labelled pills above the composer) and 'off'. The
+  // buttons themselves derive from the site's page mappings — one per mapping
+  // with a navigable path — so different modes are pure presentation.
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN nav_style TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  const NAV_STYLES = new Set(['', 'top', 'plus', 'pills', 'off']);
   const inheritedBrandColor = (entityId) => {
     try { return require('./mailer').resolveBranding(entityId).brandColor || ''; } catch { return ''; }
   };
@@ -236,7 +243,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '',
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', navStyle: s.nav_style || '',
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -262,15 +269,15 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           // Personalisation: avatar must be a hosted URL (usually our own
           // /fan-owl-assets upload); persona/guardrails are style-only text layers.
           const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
-          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : ''];
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', NAV_STYLES.has(s.navStyle) ? s.navStyle : ''];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=? WHERE id=?')
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, nav_style=? WHERE id=?')
               .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,nav_style,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
               .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
@@ -677,6 +684,20 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return !frag || frag.startsWith('/') ? frag : `/${frag}`;
   };
   const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
+  // The quick-nav buttons: one per page mapping with a navigable path, in the
+  // promoter's page order, deduped by path, capped at 8. The nav styles (top
+  // strip / + menu / pills) are different clothes on this same list.
+  const navButtons = (site, currentPage) => {
+    const seen = new Set(); const out = [];
+    for (const p of pagesBySite.all(site.id)) {
+      const path = navPath(p.url_pattern);
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      out.push({ pageType: p.page_type, path, note: String(p.note || '').slice(0, 60), active: !!currentPage && currentPage.id === p.id });
+      if (out.length >= 8) break;
+    }
+    return out;
+  };
   function offerFor(site, url) {
     const all = catByEntity.all(site.entity_id).filter((c) => c.public && (!c.suite_id || !site.suite_id || c.suite_id === site.suite_id));
     const page = matchPage(site, url);
@@ -760,6 +781,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       lang: session.lang || site.default_lang || '', // fan's device language, else the site default — drives the widget's UI strings
       event: suite ? { name: suite.name } : null,
       page: page ? pagePill(page) : null, // the "you are here" pill in the chat header
+      nav: navButtons(site, page), // quick-nav buttons (from page mappings)
+      navStyle: site.nav_style || 'top', // where they render: top | plus | pills | off
       pageChanged,
       pitch: page?.pitch || '',
       offer: primary ? publicItem(primary) : null,
