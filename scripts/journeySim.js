@@ -31,12 +31,13 @@ class Sim {
     this.convSet = new Set();        // explicit conversion source = "bought"
     this.segSets = {};               // segmentId -> Set(email) for in_segment branches
     this.emailByPhone = {};          // phone -> email (SMS sends arrive keyed by phone)
+    this.sup = new Set();            // unsubscribed emails
     this.sends = [];                 // { to, channel, subject, tick }
     this.tick = '';
     this.action = { id: 'sim', entityId: 'e1', title: journey.name, config: { journey }, results: {} };
     const self = this;
     this.deps = {
-      sql: this.sql, now: () => new Date().toISOString(), reachable: this.reachable, convSet: this.convSet, sup: new Set(),
+      sql: this.sql, now: () => new Date().toISOString(), reachable: this.reachable, convSet: this.convSet, sup: this.sup,
       renderFor: (a, r, node) => ({ html: '<p>x</p>', text: node.body, subject: node.subject }),
       renderSmsFor: (a, r, node) => node.body,
       mailer: { send: async ({ to, subject }) => { self.sends.push({ to, channel: 'email', subject, tick: self.tick }); return { ok: true }; } },
@@ -57,6 +58,8 @@ class Sim {
   open(email) { this.sql.prepare("INSERT INTO action_opens (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   click(email) { this.open(email); this.sql.prepare("INSERT INTO action_clicks (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   buy(email) { this.convSet.add(email.toLowerCase()); }
+  unsub(email) { this.sup.add(email); }
+  consent(email, patch) { this.reachable.set(email, { ...this.reachable.get(email), ...patch }); }
   addToSegment(segId, email) { (this.segSets[segId] = this.segSets[segId] || new Set()).add(email.toLowerCase()); }
   // Advance to the next due moment: everyone active becomes due, and (optionally)
   // any open wait window expires — then run one real engine tick.
@@ -173,6 +176,121 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['Early-bird is open', 'Last chance for early-bird'] } },
     ],
   },
+  {
+    name: 'Severity — a purchase beats a click beats an open',
+    flow: [
+      '✉  opener  →  ◆ what did they do?   (all four signals can be true at once)',
+      '   Purchased ‹ Clicked ‹ Opened ‹ No response   — the FIRST match wins',
+    ],
+    journey: {
+      name: 'Severity check',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'What did they do?', waitHours: 48, branches: [
+          { label: 'Purchased', nodes: [msg({ subject: 'You’re in! 🎉' })] },
+          { label: 'Clicked, no buy', nodes: [msg({ subject: 'Still thinking?' })] },
+          { label: 'Opened, no click', nodes: [msg({ subject: 'One more nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'We’ll miss you' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Whale', email: 'whale@x.com', behaviour: 'opens AND clicks AND buys (all at once)',
+        drive: [(s, e) => { s.click(e); s.buy(e); }],
+        expect: { status: 'converted', got: ['opener', 'You’re in! 🎉'] } },
+      { name: 'Ivy', email: 'ivy@x.com', behaviour: 'opens AND clicks, no buy',
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'Still thinking?'] } },
+    ],
+  },
+  {
+    name: 'Nested decisions (a decision inside a branch)',
+    flow: [
+      '✉  opener  →  ◆ Opened?',
+      '   ├─ Opened → ◆ Clicked?  →  ├─ Clicked → ✉ "See you there"',
+      '   │                          └─ No      → ✉ "Last nudge"',
+      '   └─ Didn’t open           →  ✉ "Did you get our email?"',
+    ],
+    journey: {
+      name: 'Nested',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Opened it?', waitHours: 48, branches: [
+          { label: 'Opened', nodes: [
+            { type: 'decision', question: 'Clicked?', waitHours: 24, branches: [
+              { label: 'Clicked', nodes: [msg({ subject: 'See you there' })] },
+              { label: 'No response', nodes: [msg({ subject: 'Last nudge' })] },
+            ] },
+          ] },
+          { label: 'Didn’t open', nodes: [msg({ subject: 'Did you get our email?' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Cleo', email: 'cleo@x.com', behaviour: 'opens, then clicks',
+        drive: [(s, e) => s.open(e), (s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'See you there'] } },
+      { name: 'Dan', email: 'dan@x.com', behaviour: 'opens but never clicks',
+        drive: [(s, e) => s.open(e)],
+        expect: { status: 'done', got: ['opener', 'Last nudge'] } },
+      { name: 'Eve', email: 'eve@x.com', behaviour: 'never opens',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Did you get our email?'] } },
+    ],
+  },
+  {
+    name: 'Safety net — consent gating & unsubscribe',
+    flow: [
+      '✉  opener  →  ◆ after 2 days  →  💬 "Last call" (SMS)',
+      '   • no SMS consent → the SMS is skipped, the journey still completes',
+      '   • unsubscribed   → ejected, no further messages',
+    ],
+    journey: {
+      name: 'Safety net',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Reacted after 2 days?', waitHours: 48, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'Nice one' })] },
+          { label: 'No response', nodes: [msg({ channel: 'sms', body: 'Last call — tap here' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Pia', email: 'pia@x.com', behaviour: 'ghosts, but has NO SMS consent',
+        consent: { smsOk: false },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener'] } }, // SMS node reached but skipped — no stall
+      { name: 'Rob', email: 'rob@x.com', behaviour: 'unsubscribes after the opener',
+        drive: [(s, e) => s.unsub(e)],
+        expect: { status: 'unsubscribed', got: ['opener'] } },
+    ],
+  },
+  {
+    name: 'A purchase exits even with NO “bought” branch',
+    flow: [
+      '✉  opener  →  ◆ Clicked?  →  ├─ Clicked → ✉ nudge',
+      '                              └─ No      → ✉ last chance',
+      '   (no Purchased branch) — someone who BUYS should still stop, not get nurtured',
+    ],
+    journey: {
+      name: 'Buyer exit',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked?', waitHours: 48, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Gus', email: 'gus@x.com', behaviour: 'buys, never clicks (no bought branch exists)',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener'] } }, // exits on purchase, gets no sales nudge
+      { name: 'Hana', email: 'hana@x.com', behaviour: 'ghosts',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'last chance'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
@@ -180,7 +298,10 @@ const SCENARIOS = [
 async function simulate(scn) {
   const journey = j.validateJourney(scn.journey);
   const sim = new Sim(journey);
-  for (const p of scn.personas) sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
+  for (const p of scn.personas) {
+    sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
+    if (p.consent) sim.consent(p.email, p.consent); // e.g. no SMS consent
+  }
   await sim.run('Day 0 · sent');                 // openers + everyone parks at the first wait
   for (const p of scn.personas) for (const step of p.drive) step(sim, p.email); // inject behaviours
   await sim.run('In-window · reacted');           // early-advancers route immediately
