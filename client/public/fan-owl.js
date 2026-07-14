@@ -65,13 +65,21 @@
   var frameSeq = 0;   // cache-buster so re-setting src forces a fresh boot
   function frameSrc(afterNav) {
     frameSeq += 1;
-    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '');
+    // &m=1 marks the mobile fullscreen frame (the embed hides its expand button there).
+    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '') + (MOBILE() ? '&m=1' : '');
+  }
+  // Desktop wide view: the embed's ⤢ button asks us to grow the panel (the
+  // iframe can't resize itself). No-op on mobile — it's already fullscreen.
+  function applyExpand(on) {
+    if (!frameWrap || MOBILE()) return;
+    if (on) { frameWrap.style.top = '20px'; frameWrap.style.height = 'auto'; frameWrap.style.width = 'min(760px, calc(100vw - 40px))'; }
+    else { frameWrap.style.top = 'auto'; frameWrap.style.height = 'min(640px, calc(100vh - 40px))'; frameWrap.style.width = '380px'; }
   }
   function openPanel(afterNav) {
     if (frameWrap) {
       // Reopening on a DIFFERENT page (SPA navigations keep this iframe alive):
       // reload it so the chat boots with THIS page's context, not the stale one.
-      if (window.location.href !== frameHref) { frameHref = window.location.href; frame.src = frameSrc(afterNav); }
+      if (window.location.href !== frameHref) { frameHref = window.location.href; applyExpand(false); frame.src = frameSrc(afterNav); }
       frameWrap.style.display = 'block'; launcher.style.display = 'none';
       if (teaser) teaser.style.display = 'none';
       beacon('widget_open');
@@ -106,6 +114,7 @@
   window.addEventListener('message', function (e) {
     if (e.origin !== base) return;
     if (e.data === 'howler-fan-owl:close') { closePanel(); return; }
+    if (e.data && e.data.t === 'howler-fan-owl:expand') { applyExpand(e.data.on === true); return; }
     // The Owl's "Take me there" button: navigate WITHIN the host site (the path is
     // resolved against this page's own origin — never off-site), flagging the tab
     // so the chat reopens on the new page with its context.

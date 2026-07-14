@@ -80,6 +80,8 @@ export default function FanOwlEmbedPage() {
   const [status, setStatus] = useState('');
   const [lead, setLead] = useState(null); // null | 'open' | 'saved'
   const [navOpen, setNavOpen] = useState(false); // the + menu (navStyle 'plus')
+  const [expanded, setExpanded] = useState(false); // desktop wide view (parent resizes)
+  const isMobileFrame = /[#&]m=1/.test(window.location.hash || '');
   const scroller = useRef(null);
 
   useEffect(() => {
@@ -117,6 +119,11 @@ export default function FanOwlEmbedPage() {
     );
   };
   const close = () => { try { window.parent.postMessage('howler-fan-owl:close', '*'); } catch { /* not framed */ } };
+  const toggleExpand = () => {
+    const on = !expanded;
+    setExpanded(on);
+    try { window.parent.postMessage({ t: 'howler-fan-owl:expand', on }, '*'); } catch { /* not framed */ }
+  };
   // "Take me there": hand the destination path to the parent loader, which
   // resolves it against the HOST site's origin and navigates — the chat reopens
   // on the new page with its context.
@@ -192,6 +199,20 @@ export default function FanOwlEmbedPage() {
   const pageChips = (boot.starters || []).length ? boot.starters : T.starters;
   const nav = boot.nav || [];
   const navStyle = nav.length ? (boot.navStyle === 'top' || !boot.navStyle ? 'top' : boot.navStyle) : 'off';
+  // Centred pills that still scroll fully when they overflow: centring the inner
+  // max-content row (not the scroller itself) keeps the leading pills reachable.
+  const navPillRow = (pad) => (
+    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', padding: pad }}>
+      <div style={{ display: 'flex', gap: 8, width: 'max-content', margin: '0 auto' }}>
+        {nav.map((n) => (
+          <button key={n.path} type="button" title={n.note || navLabel(n)} onClick={() => goTo(n)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg, color: n.active ? '#fff' : C.ink, borderRadius: 999, padding: '8px 13px', fontSize: 12.5, fontWeight: 600, minHeight: 36 }}>
+            <NavIcon t={n.pageType} size={15} />{navLabel(n)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
   const navBtnStyle = (n, size = 40) => ({
     width: size, height: size, borderRadius: '50%', flex: '0 0 auto', cursor: 'pointer',
     border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg,
@@ -216,6 +237,9 @@ export default function FanOwlEmbedPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          {!isMobileFrame && (
+            <button type="button" style={S.hBtn} title={expanded ? 'Smaller' : 'Expand'} aria-label={expanded ? 'Smaller' : 'Expand'} onClick={toggleExpand}>{expanded ? '⤡' : '⤢'}</button>
+          )}
           <button type="button" style={S.hBtn} title="Keep me posted" aria-label="Keep me posted" onClick={() => setLead(lead === 'saved' ? 'saved' : 'open')}>🔔</button>
           <button type="button" style={S.hBtn} aria-label="Close" onClick={close}>✕</button>
         </div>
@@ -233,7 +257,7 @@ export default function FanOwlEmbedPage() {
       )}
 
       <div ref={scroller} style={S.scroll}>
-        {!messages.length && (
+        {!messages.length && !(navArrived && boot.page) && (
           <div style={S.hello}>
             {boot.site?.owlAvatar
               ? <img src={boot.site.owlAvatar} alt="" style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', marginBottom: 6 }} />
@@ -311,16 +335,7 @@ export default function FanOwlEmbedPage() {
         <div style={{ ...S.savedNote, background: C.savedBg, borderTop: `1px solid ${C.savedLine}`, color: C.savedInk }}>{T.saved}</div>
       )}
 
-      {navStyle === 'pills' && (
-        <div style={{ display: 'flex', gap: 8, padding: '8px 12px 0', justifyContent: 'center', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {nav.map((n) => (
-            <button key={n.path} type="button" title={n.note || navLabel(n)} onClick={() => goTo(n)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg, color: n.active ? '#fff' : C.ink, borderRadius: 999, padding: '8px 13px', fontSize: 12.5, fontWeight: 600, minHeight: 36 }}>
-              <NavIcon t={n.pageType} size={15} />{navLabel(n)}
-            </button>
-          ))}
-        </div>
-      )}
+      {navStyle === 'pills' && navPillRow('8px 12px 10px')}
       <form
         style={{ ...S.composer, borderTop: `1px solid ${C.line}`, position: 'relative' }}
         onSubmit={(e) => { e.preventDefault(); send(input); }}
@@ -350,6 +365,7 @@ export default function FanOwlEmbedPage() {
         />
         <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
       </form>
+      {navStyle === 'below' && navPillRow('10px 12px 8px')}
       <div style={{ ...S.foot, color: C.muted }}>Powered by Howler 🦉</div>
     </div>
   );

@@ -1046,11 +1046,17 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-14** — **Fan Owl: nav fixes + desktop expand** 🧪: tapping a nav
+  button now reliably lands with the NEW page's context (welcome note, that
+  page's pitch/offer and starter pills — a URL-encoding bug ate the page match),
+  and the chat gains a ⤢ expand button on desktop (380px panel ↔ 760px wide
+  view). Verified end-to-end with a scripted browser run.
 - **2026-07-13** — **Fan Owl: quick-nav button modes** 🧪: the widget gains
-  site-navigation buttons derived automatically from the page mappings, in four
-  switchable per-site styles (top icon strip · ＋ menu · centred pills · off) so
-  teams can trial which reads best. Tapping one uses the same take-me-there flow:
-  opens the page, reopens the chat with that page's context.
+  site-navigation buttons derived automatically from the page mappings, in five
+  switchable per-site styles (top icon strip · ＋ menu · centred pills above or
+  below the message box · off) so teams can trial which reads best. Tapping one
+  uses the same take-me-there flow: opens the page, reopens the chat with that
+  page's context.
 - **2026-07-13** — **Fan Owl: widget theming** 🧪: the widget's colours now layer
   like the rest of Pulse — blank site colour adopts the client's Pulse brand
   colour, an explicit per-site colour overrides it when it clashes with the

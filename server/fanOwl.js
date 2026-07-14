@@ -208,7 +208,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // buttons themselves derive from the site's page mappings — one per mapping
   // with a navigable path — so different modes are pure presentation.
   try { sql.exec("ALTER TABLE fan_sites ADD COLUMN nav_style TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
-  const NAV_STYLES = new Set(['', 'top', 'plus', 'pills', 'off']);
+  const NAV_STYLES = new Set(['', 'top', 'plus', 'pills', 'below', 'off']); // below = pills under the composer
   const inheritedBrandColor = (entityId) => {
     try { return require('./mailer').resolveBranding(entityId).brandColor || ''; } catch { return ''; }
   };
@@ -664,7 +664,12 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // Page → mapped catalogue items: longest matching url_pattern wins ('*' wildcards
   // allowed); no match → the site default (whole public catalogue, tickets first).
   function matchPage(site, url) {
-    const u = String(url || '').toLowerCase();
+    // Decode first: an Owl-driven hop lands with the path percent-encoded in the
+    // query (?path=%2Flineup), and real sites URL-encode too — '%2Flineup' must
+    // still match the '/lineup' pattern.
+    let raw = String(url || '');
+    try { raw = decodeURIComponent(raw); } catch { /* malformed % — match the raw string */ }
+    const u = raw.toLowerCase();
     let best = null;
     for (const p of pagesBySite.all(site.id)) {
       const pat = p.url_pattern.toLowerCase();
