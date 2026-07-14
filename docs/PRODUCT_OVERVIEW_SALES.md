@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-13 (🦉 Fan Owl: fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-13 (🦉 Fan Owl: ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -205,6 +205,9 @@ ticket like a well-informed friend who's already going.
   don'ts, and adds 💡 insider tips the Owl volunteers when they help
   ("the east gate has no queue after 6pm"). Personality is style-only: the hard
   rules (real prices, nothing invented, no fake urgency) always win.
+- **Reads the ticket shop for you** — point the Owl at the event's ticket page
+  and it drafts the whole catalogue (names, prices, buy links, images) as
+  suggestions to review and save. Interim until the direct Howler catalogue feed.
 - **Speaks the fan's language** — the Owl opens in the fan's own phone/browser
   language (and always answers in whatever language the fan writes); the widget's
   buttons and prompts localise too (EN·AF·IT·ES·FR·DE·PT·NL), with a per-site
@@ -1036,6 +1039,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-13** — **Fan Owl: ticket-site reader** 🧪: "Read the ticket site" on
+  the Catalogue tab crawls the event's ticket shop and drafts catalogue items —
+  labels, prices, currencies, availability, real buy links and item images — as
+  suggestions the promoter reviews and saves (existing items never touched).
+  Interim until the Howler catalogue API feeds this directly.
 - **2026-07-13** — **Fan Owl: fan-language auto-switch + default language** 🧪:
   the Owl now detects the fan's device language and opens in it — chat replies,
   greeting and the widget's own buttons/prompts (EN·AF·IT·ES·FR·DE·PT·NL) — and

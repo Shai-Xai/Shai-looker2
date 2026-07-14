@@ -263,6 +263,19 @@ test('website ingest: gated like config (admin / own entity), needs a real URL +
   assert.match(r.body.error, /AI is not configured/);
 });
 
+test('ticket-site catalogue reader: gated like config, needs a real URL + configured AI', async () => {
+  const e = h.makeEntity('FanCatIngest Co', 'fancating-org');
+  const other = h.makeEntity('FanCatIngOther Co', 'fancating-other-org');
+  const client = h.makeClient('fan-cating@test.local', [e.id], 'owner');
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/ingest-catalogue`, { body: { url: 'https://x.example' } })).status, 401);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${other.id}/ingest-catalogue`, { as: client, body: { url: 'https://x.example' } })).status, 403);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${e.id}/ingest-catalogue`, { as: client, body: { url: 'not a url' } })).status, 400);
+  // Valid URL but no Anthropic key configured → a clear 400, never a crawl.
+  const r = await app.req('POST', `/api/my/fan-owl/${e.id}/ingest-catalogue`, { as: client, body: { url: 'https://example.com/tickets' } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /AI is not configured/);
+});
+
 test('funnel: beacons are whitelisted and roll up in the insights view', async () => {
   const { e, admin, site } = await provision('funnel');
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });

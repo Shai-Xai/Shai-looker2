@@ -98,6 +98,22 @@ Rules:
 - Lead with the concrete thing the page is about (the item name, the experience) — e.g. "Glamping pods from ZAR 1,500 — wake up at the festival 🌙".
 - At most one emoji, only where natural. No exclamation-mark pileups, no "don't miss out" clichés.`;
 
+// "Read the ticket site" — the catalogue's suggest-then-confirm reader: crawls
+// the event's ticket shop and drafts catalogue items (label/price/link/images)
+// for the promoter to review. An INTERIM tool until the Howler catalogue API
+// feeds this directly. Registered in insights.promptRegistry() for the AI audit.
+const FAN_CATALOGUE_SYSTEM = `You read the text of an event's ticket-shop pages and produce SUGGESTED catalogue items for that event's website ticket assistant, for a human to review and edit before anything goes live. Each page's text comes with two lists extracted from its HTML: LINKS (anchor text → URL) and IMAGES (URLs).
+
+Respond with ONLY strict JSON (no markdown fences): {"items":[{"label":"…","kind":"ticket"|"addon"|"bundle"|"accommodation"|"transport"|"merchandise","price":"…","currency":"…","availability":""|"selling fast"|"last few"|"sold out","description":"…","deepLink":"…","images":["…"]}]}
+
+Rules:
+- Ground EVERYTHING in the given text and lists. NEVER invent an item, price, currency or availability that isn't shown. Fewer accurate items beat many guessed ones.
+- One entry per distinct purchasable thing (max 30). label exactly as the shop names it. price as plain digits (e.g. "950" or "117.50"), no symbols or thousands separators. currency as the code/symbol's ISO form (R/ZAR → ZAR, € → EUR, £ → GBP, $ → USD unless the page says otherwise).
+- availability ONLY when the page explicitly says so (sold out, last few, selling fast); otherwise "".
+- description: one short line — what it includes / who it's for, closely following the page's own wording.
+- deepLink: the URL from LINKS that buys or opens THAT item; "" if none is clearly it. NEVER construct, guess or modify URLs.
+- images: up to 3 URLs from IMAGES that clearly belong to that item; [] when unsure — never decorative logos/banners.`;
+
 const CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump when the opt-in copy changes
 
 function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
@@ -470,6 +486,88 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const pitchLimit = rateLimit({ windowMs: 5 * 60_000, max: 6, by: 'user', scope: 'fan-pitch' });
   app.post('/api/admin/entities/:entityId/fan-owl/pitches', auth.requireAdmin, requireManager, pitchLimit, pitchHandler);
   app.post('/api/my/fan-owl/:entityId/pitches', auth.requireAuth, requireMyEntity, requireManager, pitchLimit, pitchHandler);
+
+  // ── "Read the ticket site" — crawl the shop → AI-suggest catalogue items, for
+  // human review (same suggest-then-confirm pattern as the website reader; the
+  // editor merges results UNSAVED and never overwrites existing items). Interim
+  // until the Howler catalogue API feeds the catalogue directly. Unlike the
+  // website reader, the model also gets each page's LINKS + IMAGES so it can
+  // attach real buy links and item photos — never constructed ones.
+  const linksOf = (html, baseUrl, cap) => {
+    const out = []; const seen = new Set();
+    for (const m of String(html).matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      let u; try { u = new URL(m[1], baseUrl); } catch { continue; }
+      if (!/^https?:$/.test(u.protocol)) continue;
+      u.hash = '';
+      const key = u.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ text: stripHtml(m[2]).slice(0, 80), url: key.slice(0, 600) });
+      if (out.length >= cap) break;
+    }
+    return out;
+  };
+  const imgsOf = (html, baseUrl, cap) => {
+    const out = new Set();
+    for (const m of String(html).matchAll(/<img\b[^>]*src=["']([^"']+)["']/gi)) {
+      let u; try { u = new URL(m[1], baseUrl); } catch { continue; }
+      if (!/^https?:$/.test(u.protocol) || !/\.(png|jpe?g|webp|gif)([?#]|$)/i.test(u.pathname)) continue;
+      out.add(u.toString().slice(0, 600));
+      if (out.size >= cap) break;
+    }
+    return [...out];
+  };
+  const AVAIL = new Set(['selling fast', 'last few', 'sold out']);
+  const catIngestHandler = asyncHandler(async (req, res) => {
+    const entityId = req.params.entityId;
+    const url = String((req.body || {}).url || '').trim();
+    if (!/^https?:\/\/.+\..+/i.test(url)) throw new HttpError(400, 'Give the full ticket-shop URL (https://…).');
+    const apiKey = anthropicKeyForEntity(entityId);
+    if (!insights.isConfigured(apiKey)) throw new HttpError(400, 'AI is not configured for this client — set an Anthropic key in Admin → Integrations first.');
+    const first = await safeGetText(url, { timeoutMs: 15000, maxBytes: 3 * 1024 * 1024, allowHttp: true }).catch((e) => { throw new HttpError(400, `Couldn’t read that page: ${e.message}`); });
+    const pages = [{ url, html: first }];
+    // Shops often split per-ticket/per-package pages — follow a few same-site links.
+    for (const link of sameSiteLinks(first, url, 5)) {
+      try { pages.push({ url: link, html: await safeGetText(link, { timeoutMs: 12000, maxBytes: 3 * 1024 * 1024, allowHttp: true }) }); } catch { /* skip unreadable pages */ }
+    }
+    const corpus = pages.map((p) => [
+      `=== PAGE: ${p.url} ===`, stripHtml(p.html).slice(0, 7000),
+      `LINKS:\n${linksOf(p.html, p.url, 40).map((l) => `- ${l.text || '(no text)'} → ${l.url}`).join('\n')}`,
+      `IMAGES:\n${imgsOf(p.html, p.url, 20).join('\n')}`,
+    ].join('\n')).join('\n\n').slice(0, 45000);
+    const client = insights.requireClient(apiKey);
+    const msg = await require('./aiUsage').run({ entityId, kind: 'fan_owl' }, () => client.messages.create({
+      model: insights.MODEL, max_tokens: 4000, thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
+      system: FAN_CATALOGUE_SYSTEM, messages: [{ role: 'user', content: corpus }],
+    }));
+    const rawText = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    let parsed = {};
+    try { parsed = coerceOwlJson(rawText); }
+    catch {
+      throw new HttpError(502, msg.stop_reason === 'max_tokens'
+        ? 'That shop was too large to read in one pass — point the Owl at the specific tickets page.'
+        : 'The Owl’s suggestions came back malformed — try again.');
+    }
+    res.json({
+      crawled: pages.map((p) => p.url),
+      items: (Array.isArray(parsed.items) ? parsed.items : []).slice(0, 30)
+        .filter((c) => String(c.label || '').trim())
+        .map((c) => ({
+          label: String(c.label).trim().slice(0, 120),
+          kind: KINDS.has(c.kind) ? c.kind : 'ticket',
+          price: String(c.price || '').replace(/[^\d.]/g, '').slice(0, 30),
+          currency: String(c.currency || '').trim().toUpperCase().slice(0, 8),
+          availability: AVAIL.has(String(c.availability || '').toLowerCase()) ? String(c.availability).toLowerCase() : '',
+          description: String(c.description || '').slice(0, 500),
+          deepLink: /^https?:\/\//i.test(String(c.deepLink || '').trim()) ? String(c.deepLink).trim().slice(0, 600) : '',
+          images: (Array.isArray(c.images) ? c.images : []).map((u) => String(u).trim().slice(0, 600)).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3),
+          public: true,
+        })),
+    });
+  });
+  const catIngestLimit = rateLimit({ windowMs: 5 * 60_000, max: 4, by: 'user', scope: 'fan-cat-ingest', message: 'Give the ticket-site reader a few minutes between runs.' });
+  app.post('/api/admin/entities/:entityId/fan-owl/ingest-catalogue', auth.requireAdmin, requireManager, catIngestLimit, catIngestHandler);
+  app.post('/api/my/fan-owl/:entityId/ingest-catalogue', auth.requireAuth, requireMyEntity, requireManager, catIngestLimit, catIngestHandler);
 
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls
@@ -920,4 +1018,4 @@ function personaLayers(sqlDb, entityId) {
   } catch { return []; } // table may not exist yet (fresh DB before mount)
 }
 
-module.exports = { mount, coerceOwlJson, personaLayers, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, CONSENT_WORDING_VERSION };
+module.exports = { mount, coerceOwlJson, personaLayers, FAN_OWL_SYSTEM, FAN_INGEST_SYSTEM, FAN_PITCH_SYSTEM, FAN_CATALOGUE_SYSTEM, CONSENT_WORDING_VERSION };
