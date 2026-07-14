@@ -64,7 +64,7 @@ test('zipRows aligns array rows to columns', () => {
 // ── harness ─────────────────────────────────────────────────────────────────────
 const HOGQL = (columns, results) => ({ columns, results });
 
-function makeHarness({ responder, suites = [], locks = {}, dashboards = [], lookerRows = [], configured = true, presetSettings = {} } = {}) {
+function makeHarness({ responder, suites = [], locks = {}, dashboards = [], lookerRows = [], configured = true, presetSettings = {}, tickets = null } = {}) {
   const sqlite = new Database(':memory:');
   const settings = { ...(configured ? { posthog_project_id: '42', posthog_api_key: 'phx_test' } : {}), ...presetSettings };
   const db = {
@@ -95,7 +95,7 @@ function makeHarness({ responder, suites = [], locks = {}, dashboards = [], look
   const routes = {};
   const capture = (m) => (path, ...handlers) => { routes[`${m} ${path}`] = handlers; };
   const app = { get: capture('GET'), post: capture('POST'), put: capture('PUT'), delete: capture('DELETE') };
-  const api = posthog.mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer: false });
+  const api = posthog.mount(app, { db, auth, runLookerQuery, fetchImpl, startTimer: false, tickets });
   async function invoke(key, { params = {}, body = {}, query = {}, user = { id: 'u1', role: 'member', entityIds: ['e1'] } } = {}) {
     const handlers = routes[key];
     assert.ok(handlers, `route ${key} exists`);
@@ -739,6 +739,35 @@ test('history search sweeps event names AND breakdown values over a year, escape
   assert.equal(noQ.status, 400);
   const denied = await h.invoke('GET /api/admin/posthog/search-events', { query: { q: 'x' }, user: { role: 'member' } });
   assert.equal(denied.status, 403);
+});
+
+test('🎟 ticket filter + CSV holdings — joined against the Looker holder set, fail-soft', async () => {
+  const holders = { set: new Set(['fan@x.com']), byEmail: new Map([['fan@x.com', [{ event: 'Winter Fest', type: 'VIP', tickets: 2 }]]]) };
+  const h = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }], locks: { s1: { 'core_events.id': '101' } },
+    tickets: async () => holders,
+    responder: (q) => (q.includes('GROUP BY person_id')
+      ? HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'],
+          [['fan@x.com', 'F', 'A', '', '2026-07-14 10:00:00', 9, ['E']], ['nofan@x.com', 'N', 'B', '', '2026-07-14 09:00:00', 5, ['E']]])
+      : syncResponder(q)),
+  });
+  const withT = await h.invoke('GET /api/my/app-analytics/:entityId/people', { params: { entityId: 'e1' }, query: { tickets: 'with' } });
+  assert.deepEqual(withT.body.people.map((p) => p.email), ['fan@x.com'], 'with = only holder emails');
+  const withoutT = await h.invoke('GET /api/my/app-analytics/:entityId/people', { params: { entityId: 'e1' }, query: { tickets: 'without' } });
+  assert.deepEqual(withoutT.body.people.map((p) => p.email), ['nofan@x.com'], 'without = only non-holders');
+  const csv = await h.invoke('GET /api/my/app-analytics/:entityId/people.csv', { params: { entityId: 'e1' } });
+  assert.equal(csv.status, 200);
+  assert.ok(String(csv.body).includes('"Has ticket","Tickets (event — type)"'), 'holdings columns present');
+  assert.ok(String(csv.body).includes('"yes","Winter Fest — VIP ×2"'), 'ticket types land in the export');
+  assert.ok(String(csv.body).includes('"no",""'), 'non-holders marked no');
+  // no holdings resolver → the export still serves, without the columns
+  const h2 = makeHarness({
+    suites: [{ id: 's1', entityId: 'e1' }], locks: { s1: { 'core_events.id': '101' } },
+    responder: (q) => (q.includes('GROUP BY person_id') ? HOGQL(['email', 'firstName', 'lastName', 'phone', 'lastSeen', 'interactions', 'eventNames'], [['fan@x.com', 'F', 'A', '', '2026-07-14 10:00:00', 9, ['E']]]) : syncResponder(q)),
+  });
+  const plain = await h2.invoke('GET /api/my/app-analytics/:entityId/people.csv', { params: { entityId: 'e1' } });
+  assert.equal(plain.status, 200);
+  assert.ok(!String(plain.body).includes('Has ticket'), 'columns absent when the join is unavailable');
 });
 
 test('people.csv exports EVERY user in one file — page caps lifted, still scoped', async () => {
