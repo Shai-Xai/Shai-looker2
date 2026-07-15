@@ -91,7 +91,7 @@ export default function FanOwlEmbedPage() {
   const isMobileFrame = /[#&]m=1/.test(window.location.hash || '');
   // Bar-mode desktop chats carry &lay= — a main-view ↔ side-panel toggle replaces
   // the ⤢ expand (main view is already wide).
-  const [layout, setLayout] = useState(() => (/[#&]lay=(main|side)/.exec(window.location.hash || '') || [])[1] || '');
+  const [layout, setLayout] = useState(() => (/[#&]lay=(main|side|dock)/.exec(window.location.hash || '') || [])[1] || '');
   const scroller = useRef(null);
 
   useEffect(() => {
@@ -137,8 +137,7 @@ export default function FanOwlEmbedPage() {
     setExpanded(on);
     try { window.parent.postMessage({ t: 'howler-fan-owl:expand', on }, '*'); } catch { /* not framed */ }
   };
-  const toggleLayout = () => {
-    const next = layout === 'main' ? 'side' : 'main';
+  const applyLayoutMode = (next) => {
     setLayout(next);
     try { window.parent.postMessage({ t: 'howler-fan-owl:layout', mode: next }, '*'); } catch { /* not framed */ }
   };
@@ -262,7 +261,11 @@ export default function FanOwlEmbedPage() {
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {!isMobileFrame && (layout
-            ? <button type="button" style={S.hBtn} title={layout === 'main' ? 'Side panel view' : 'Main view'} aria-label={layout === 'main' ? 'Side panel view' : 'Main view'} onClick={toggleLayout}>{layout === 'main' ? '⇥' : '⤢'}</button>
+            ? <>
+              {layout !== 'main' && <button type="button" style={S.hBtn} title="Main view" aria-label="Main view" onClick={() => applyLayoutMode('main')}>⤢</button>}
+              {layout !== 'side' && <button type="button" style={S.hBtn} title="Side panel (floats over the page)" aria-label="Side panel view" onClick={() => applyLayoutMode('side')}>⇥</button>}
+              {layout !== 'dock' && <button type="button" style={S.hBtn} title="Dock to the page (shifts the page over)" aria-label="Docked panel view" onClick={() => applyLayoutMode('dock')}>◨</button>}
+            </>
             : <button type="button" style={S.hBtn} title={expanded ? 'Smaller' : 'Expand'} aria-label={expanded ? 'Smaller' : 'Expand'} onClick={toggleExpand}>{expanded ? '⤡' : '⤢'}</button>
           )}
           <button type="button" style={S.hBtn} title="Keep me posted" aria-label="Keep me posted" onClick={() => setLead(lead === 'saved' ? 'saved' : 'open')}>🔔</button>

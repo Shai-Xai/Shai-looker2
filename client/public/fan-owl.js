@@ -95,14 +95,42 @@
 
   var frameHref = ''; // the host page the iframe was last (re)built on
   var frameSeq = 0;   // cache-buster so re-setting src forces a fresh boot
-  // Desktop chat layout. Bar-mode sites open in MAIN view (wide, centred above
-  // where the bar sits — continuous with the drawer); a header toggle switches
-  // to the classic side panel and back, remembered for the tab session.
+  // Desktop chat layouts: 'main' (wide, centred — bar-mode default), 'side'
+  // (the classic floating overlay panel — launcher default) and 'dock' (a true
+  // right-hand panel: full height, and the PAGE shifts left so the assistant
+  // never covers content). Header toggles switch; remembered per tab session.
   var chatLayout = 'side';
+  var DOCK_W = 'min(420px, 38vw)';
   function isBarMode() { return !!(ctx && ctx.site && ctx.site.widgetStyle === 'bar'); }
-  function initLayout() { chatLayout = isBarMode() ? (sstore(true, SS_LAYOUT) || 'main') : 'side'; }
+  function initLayout() {
+    var saved = sstore(true, SS_LAYOUT);
+    chatLayout = (saved === 'main' || saved === 'side' || saved === 'dock') ? saved : (isBarMode() ? 'main' : 'side');
+  }
+  // Dock shifts the whole page left with an animated margin on <html>. Fixed
+  // site elements don't move — the honest limit of docking from the outside.
+  function pushPage(on) {
+    var de = document.documentElement;
+    if (on) {
+      if (!de.getAttribute('data-howler-pushed')) { de.setAttribute('data-howler-pushed', '1'); de.style.transition = 'margin-right .25s ease'; }
+      de.style.marginRight = DOCK_W;
+    } else if (de.getAttribute('data-howler-pushed')) {
+      de.style.marginRight = '';
+    }
+  }
   function applyLayout() {
     if (!frameWrap || MOBILE()) return;
+    if (chatLayout === 'dock') {
+      frameWrap.style.left = 'auto'; frameWrap.style.right = '0'; frameWrap.style.margin = '0';
+      frameWrap.style.top = '0'; frameWrap.style.bottom = '0';
+      frameWrap.style.width = DOCK_W; frameWrap.style.height = '100%';
+      frameWrap.style.borderRadius = '0';
+      frameWrap.style.boxShadow = '-12px 0 40px rgba(0,0,0,.22)';
+      pushPage(true);
+      return;
+    }
+    pushPage(false);
+    frameWrap.style.borderRadius = '18px';
+    frameWrap.style.boxShadow = '0 18px 60px rgba(0,0,0,.35)';
     if (chatLayout === 'main') {
       frameWrap.style.left = '0'; frameWrap.style.right = '0'; frameWrap.style.margin = '0 auto';
       frameWrap.style.top = 'auto'; frameWrap.style.bottom = '10px';
@@ -118,7 +146,7 @@
     frameSeq += 1;
     // &m=1 marks the mobile fullscreen frame (the embed hides its expand button
     // there); &ask= carries a question typed into the persistent bar.
-    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '') + (MOBILE() ? '&m=1' : '') + (isBarMode() && !MOBILE() ? '&lay=' + chatLayout : '') + (ask ? '&ask=' + encodeURIComponent(String(ask).slice(0, 300)) : '');
+    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '') + (MOBILE() ? '&m=1' : '') + (!MOBILE() ? '&lay=' + chatLayout : '') + (ask ? '&ask=' + encodeURIComponent(String(ask).slice(0, 300)) : '');
   }
   // Desktop wide view: the embed's ⤢ button asks us to grow the panel (the
   // iframe can't resize itself). No-op on mobile — it's already fullscreen.
@@ -134,6 +162,7 @@
       // A typed question always reloads so the embed sends it.
       if (ask || window.location.href !== frameHref) { frameHref = window.location.href; applyLayout(); frame.src = frameSrc(afterNav, ask); }
       frameWrap.style.display = 'block';
+      applyLayout();
       if (launcher) launcher.style.display = 'none';
       if (bar) bar.style.display = 'none';
       if (teaser) teaser.style.display = 'none';
@@ -164,6 +193,7 @@
     beacon('widget_open');
   }
   function closePanel() {
+    pushPage(false);
     if (frameWrap) frameWrap.style.display = 'none';
     if (bar) bar.style.display = 'block';
     else if (launcher) launcher.style.display = 'flex';
@@ -173,7 +203,7 @@
     if (e.origin !== base) return;
     if (e.data === 'howler-fan-owl:close') { closePanel(); return; }
     if (e.data && e.data.t === 'howler-fan-owl:expand') { applyExpand(e.data.on === true); return; }
-    if (e.data && e.data.t === 'howler-fan-owl:layout' && (e.data.mode === 'main' || e.data.mode === 'side')) {
+    if (e.data && e.data.t === 'howler-fan-owl:layout' && (e.data.mode === 'main' || e.data.mode === 'side' || e.data.mode === 'dock')) {
       chatLayout = e.data.mode;
       sstore(false, SS_LAYOUT, chatLayout);
       applyLayout();
