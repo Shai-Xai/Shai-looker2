@@ -1046,6 +1046,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-14** — **Fan Owl: full nav-button editor** 🧪: the Navigation section
+  under 🪄 Personality now matches the design concept — Auto (buttons derive from
+  your mapped pages) or **Custom**: toggle buttons on/off, rename them, give them
+  an emoji icon, reorder, and add custom links to any path on the site. Up to 8
+  show in whichever placement style the site picked.
 - **2026-07-14** — **Fan Owl: nav fixes + desktop expand** 🧪: tapping a nav
   button now reliably lands with the NEW page's context (welcome note, that
   page's pitch/offer and starter pills — a URL-encoding bug ate the page match),

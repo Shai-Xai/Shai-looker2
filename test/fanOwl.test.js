@@ -149,7 +149,7 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.equal(boot.body.site.owlIntro, 'Ciao! Ask me anything');
   // Quick-nav buttons derive from the page mappings; the fan's page is active.
   assert.equal(boot.body.navStyle, 'pills');
-  assert.deepEqual(boot.body.nav, [{ pageType: 'artist', path: '/artists/', note: 'artist pages', active: true }]);
+  assert.deepEqual(boot.body.nav, [{ pageType: 'artist', path: '/artists/', note: 'artist pages', active: true, label: '', emoji: '' }]);
   const rHome = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/tickets' }, headers: ORIGIN });
   const bootHome = await app.req('GET', `/api/fan/boot?sid=${rHome.body.sessionId}`);
   assert.equal(bootHome.body.page, null);
@@ -291,6 +291,27 @@ test('ticket-site catalogue reader: gated like config, needs a real URL + config
   const r = await app.req('POST', `/api/my/fan-owl/${e.id}/ingest-catalogue`, { as: client, body: { url: 'https://example.com/tickets' } });
   assert.equal(r.status, 400);
   assert.match(r.body.error, /AI is not configured/);
+});
+
+test('custom nav buttons: curated list overrides auto (labels, emoji, toggles, custom links)', async () => {
+  const { e, admin, site } = await provision('navcfg');
+  const withNav = { ...site, navButtons: [
+    { kind: 'page', urlPattern: '/artists/*', label: 'Who plays', emoji: '🎤', enabled: true },
+    { kind: 'custom', label: 'Glamping', emoji: '🏕️', path: 'glamping', enabled: true },
+    { kind: 'custom', label: 'Hidden', path: '/hidden', enabled: false },
+  ] };
+  const saved = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [withNav] } });
+  assert.equal(saved.body.sites[0].navButtons.length, 3); // config round-trips (incl. the disabled row)
+  const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna' }, headers: ORIGIN });
+  const boot = await app.req('GET', `/api/fan/boot?sid=${ctx.body.sessionId}`);
+  // Served nav: enabled rows only, page rows resolve their mapping (+ active), customs get a rooted path.
+  assert.deepEqual(boot.body.nav, [
+    { pageType: 'artist', path: '/artists/', note: 'artist pages', active: true, label: 'Who plays', emoji: '🎤' },
+    { pageType: 'other', path: '/glamping', note: '', active: false, label: 'Glamping', emoji: '🏕️' },
+  ]);
+  // Back to auto: null clears the curated list.
+  const back = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...saved.body.sites[0], navButtons: null }] } });
+  assert.equal(back.body.sites[0].navButtons, null);
 });
 
 test('funnel: beacons are whitelisted and roll up in the insights view', async () => {

@@ -209,6 +209,23 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // with a navigable path — so different modes are pure presentation.
   try { sql.exec("ALTER TABLE fan_sites ADD COLUMN nav_style TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const NAV_STYLES = new Set(['', 'top', 'plus', 'pills', 'below', 'off']); // below = pills under the composer
+  // Migration: custom nav-button config (JSON). '' = pure AUTO (one button per
+  // mapped page). Set = the promoter's curated list: page buttons (referenced by
+  // urlPattern) and custom links, each with optional label/emoji overrides,
+  // enabled flags and their own order.
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN nav_json TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  const cleanNavButtons = (v) => {
+    if (!Array.isArray(v)) return '';
+    const rows = v.slice(0, 12).map((b) => ({
+      kind: b.kind === 'custom' ? 'custom' : 'page',
+      urlPattern: String(b.urlPattern || '').slice(0, 300),
+      label: String(b.label || '').slice(0, 24),
+      emoji: String(b.emoji || '').slice(0, 4),
+      path: String(b.path || '').trim().slice(0, 300),
+      enabled: b.enabled !== false,
+    })).filter((b) => (b.kind === 'page' ? b.urlPattern : b.path));
+    return rows.length ? JSON.stringify(rows) : '';
+  };
   const inheritedBrandColor = (entityId) => {
     try { return require('./mailer').resolveBranding(entityId).brandColor || ''; } catch { return ''; }
   };
@@ -243,7 +260,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', navStyle: s.nav_style || '',
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', navStyle: s.nav_style || '', navButtons: J(s.nav_json, null),
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -269,15 +286,15 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           // Personalisation: avatar must be a hosted URL (usually our own
           // /fan-owl-assets upload); persona/guardrails are style-only text layers.
           const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
-          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', NAV_STYLES.has(s.navStyle) ? s.navStyle : ''];
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', NAV_STYLES.has(s.navStyle) ? s.navStyle : '', cleanNavButtons(s.navButtons)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, nav_style=? WHERE id=?')
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, nav_style=?, nav_json=? WHERE id=?')
               .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,nav_style,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,nav_style,nav_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
               .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
@@ -689,17 +706,30 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return !frag || frag.startsWith('/') ? frag : `/${frag}`;
   };
   const pagePill = (p) => ({ pageType: p.page_type, note: p.note || '', urlPattern: p.url_pattern });
-  // The quick-nav buttons: one per page mapping with a navigable path, in the
-  // promoter's page order, deduped by path, capped at 8. The nav styles (top
-  // strip / + menu / pills) are different clothes on this same list.
+  // The quick-nav buttons. AUTO (no nav_json): one per page mapping with a
+  // navigable path, in the promoter's page order. CUSTOM (nav_json set): the
+  // curated list — page buttons by urlPattern + custom links, with label/emoji
+  // overrides and enabled flags. Either way: deduped by path, capped at 8; the
+  // nav styles (top strip / + menu / pills) are different clothes on this list.
   const navButtons = (site, currentPage) => {
     const seen = new Set(); const out = [];
-    for (const p of pagesBySite.all(site.id)) {
-      const path = navPath(p.url_pattern);
-      if (!path || seen.has(path)) continue;
-      seen.add(path);
-      out.push({ pageType: p.page_type, path, note: String(p.note || '').slice(0, 60), active: !!currentPage && currentPage.id === p.id });
-      if (out.length >= 8) break;
+    const push = (b) => { if (b.path && !seen.has(b.path) && out.length < 8) { seen.add(b.path); out.push(b); } };
+    const pages = pagesBySite.all(site.id);
+    const custom = J(site.nav_json, null);
+    if (Array.isArray(custom) && custom.length) {
+      for (const c of custom) {
+        if (c.enabled === false) continue;
+        if (c.kind === 'custom') {
+          push({ pageType: 'other', path: navPath(c.path), note: '', active: false, label: String(c.label || '').slice(0, 24), emoji: String(c.emoji || '').slice(0, 4) });
+        } else {
+          const p = pages.find((x) => x.url_pattern === c.urlPattern);
+          if (p) push({ pageType: p.page_type, path: navPath(p.url_pattern), note: String(p.note || '').slice(0, 60), active: !!currentPage && currentPage.id === p.id, label: String(c.label || '').slice(0, 24), emoji: String(c.emoji || '').slice(0, 4) });
+        }
+      }
+    } else {
+      for (const p of pages) {
+        push({ pageType: p.page_type, path: navPath(p.url_pattern), note: String(p.note || '').slice(0, 60), active: !!currentPage && currentPage.id === p.id, label: '', emoji: '' });
+      }
     }
     return out;
   };
