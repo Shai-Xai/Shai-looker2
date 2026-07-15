@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (🦉 Fan Owl: desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-15 (🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -208,10 +208,11 @@ ticket like a well-informed friend who's already going.
 - **Reads the ticket shop for you** — point the Owl at the event's ticket page
   and it drafts the whole catalogue (names, prices, buy links, images) as
   suggestions to review and save. Interim until the direct Howler catalogue feed.
-- **Main view ↔ side panel on desktop** — bar-mode chats open wide and centred
-  (continuous with the drawer); a header toggle docks the chat to the classic
-  side panel and back, remembered per visit. The bar itself now wears the site's
-  chosen nav style too (icons, pills above/below the input, or the ＋ menu).
+- **Three desktop chat views** — main (wide & centred), side panel (floats over
+  the page) and **docked** (a true right-hand panel that shifts the page over so
+  the assistant never covers content). Header toggles switch live; the fan's
+  choice is remembered per visit. The bar itself wears the site's chosen nav
+  style too (icons, pills above/below the input, or the ＋ menu).
 - **Half-drawer suggestions** — tap the bar's input and a drawer rises with THIS
   page's suggested topics + its lead offer; start typing and it live-filters
   every starter, FAQ and page ("glamp" → the glamping questions + the Stay page).
@@ -1063,6 +1064,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-15** — **Fan Owl: docked side panel** 🧪: a third desktop view — ◨
+  docks the chat as a true right-hand panel (full height) and SHIFTS THE PAGE
+  LEFT (animated margin) so the assistant never covers the site; ❏/⇥ floats it
+  back over, ⤢ returns to main view. Works on both widget styles; the page gets
+  its space back on close; the choice is remembered per visit.
 - **2026-07-15** — **Fan Owl: desktop main view ↔ side panel + the bar wears the
   nav style** 🧪: on desktop, bar-mode chats now open in a wide centred MAIN view
   (continuous with the drawer — no jump to the corner); a header ⇥/⤢ toggle
