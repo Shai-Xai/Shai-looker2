@@ -89,6 +89,9 @@ export default function FanOwlEmbedPage() {
   const askedRef = useRef(false);
   const [expanded, setExpanded] = useState(false); // desktop wide view (parent resizes)
   const isMobileFrame = /[#&]m=1/.test(window.location.hash || '');
+  // Bar-mode desktop chats carry &lay= — a main-view ↔ side-panel toggle replaces
+  // the ⤢ expand (main view is already wide).
+  const [layout, setLayout] = useState(() => (/[#&]lay=(main|side)/.exec(window.location.hash || '') || [])[1] || '');
   const scroller = useRef(null);
 
   useEffect(() => {
@@ -133,6 +136,11 @@ export default function FanOwlEmbedPage() {
     const on = !expanded;
     setExpanded(on);
     try { window.parent.postMessage({ t: 'howler-fan-owl:expand', on }, '*'); } catch { /* not framed */ }
+  };
+  const toggleLayout = () => {
+    const next = layout === 'main' ? 'side' : 'main';
+    setLayout(next);
+    try { window.parent.postMessage({ t: 'howler-fan-owl:layout', mode: next }, '*'); } catch { /* not framed */ }
   };
   // "Take me there": hand the destination path to the parent loader, which
   // resolves it against the HOST site's origin and navigates — the chat reopens
@@ -253,8 +261,9 @@ export default function FanOwlEmbedPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
-          {!isMobileFrame && (
-            <button type="button" style={S.hBtn} title={expanded ? 'Smaller' : 'Expand'} aria-label={expanded ? 'Smaller' : 'Expand'} onClick={toggleExpand}>{expanded ? '⤡' : '⤢'}</button>
+          {!isMobileFrame && (layout
+            ? <button type="button" style={S.hBtn} title={layout === 'main' ? 'Side panel view' : 'Main view'} aria-label={layout === 'main' ? 'Side panel view' : 'Main view'} onClick={toggleLayout}>{layout === 'main' ? '⇥' : '⤢'}</button>
+            : <button type="button" style={S.hBtn} title={expanded ? 'Smaller' : 'Expand'} aria-label={expanded ? 'Smaller' : 'Expand'} onClick={toggleExpand}>{expanded ? '⤡' : '⤢'}</button>
           )}
           <button type="button" style={S.hBtn} title="Keep me posted" aria-label="Keep me posted" onClick={() => setLead(lead === 'saved' ? 'saved' : 'open')}>🔔</button>
           <button type="button" style={S.hBtn} aria-label="Close" onClick={close}>✕</button>
