@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
+import InspectQueryModal from './InspectQueryModal.jsx';
 import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
@@ -25,7 +26,7 @@ import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 // (edit / duplicate / delete) and a drag handle on the title bar.
 export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
-  const { insightsEnabled } = useAuth();
+  const { insightsEnabled, isAdmin } = useAuth();
   const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
   const [showTileLock, setShowTileLock] = useState(false);
   // Admin per-tile lock affordance: only when in a suite, the tile is queryable
@@ -36,6 +37,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
+  const [showInspect, setShowInspect] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
   // Per-user chart zoom ("last N points") — loaded from the user's prefs and
   // saved back on change; a personal lens, never a dashboard edit.
@@ -60,7 +62,23 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
     return f;
   }
 
+  // The query fields whose filter value comes from a live dashboard filter (vs
+  // baked into the tile) — so the Inspect panel can tag each filter's source.
+  function dashboardFilterFields() {
+    const out = [];
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const val = filterValues?.[filterName];
+      if (val && val !== ANY_VALUE && String(val).trim()) out.push(queryField);
+    }
+    return out;
+  }
+
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
+  // Inspect query: available in view mode on any queryable tile. Shown to
+  // everyone (transparency) — staff get the raw-internals view, clients a plain
+  // labelled summary (see InspectQueryModal). Wait for a result so the fields &
+  // filters reflect the exact number on screen.
+  const canInspect = !editable && tile.type !== 'text' && isRunnableQuery(tile.query) && data && !loading && !error;
 
   // "Segment from a tile": offer it (view mode only) when the tile lists people —
   // i.e. its data has an email-like column — and the viewer can manage campaigns.
@@ -133,6 +151,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
           {!editable && (!isMobile || tapped) && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
+          {!editable && (!isMobile || tapped) && canInspect && <InspectButton onClick={() => setShowInspect(true)} isMobile={isMobile} />}
           {!editable && (!isMobile || tapped) && <ShareMenu variant="tile" isMobile={isMobile} heading={tile.title || 'Dashboard tile'} />}
           {!editable && (!isMobile || tapped) && canInsight && (
             <>
@@ -174,6 +193,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
+        {!editable && (!isMobile || tapped) && canInspect && !showHeader && <InspectButton onClick={() => setShowInspect(true)} isMobile={isMobile} corner />}
         {/* Chart zoom: show only the last N points of a long axis (e.g. a
             days-before-event countdown where all the action is the final two
             weeks). Personal + persisted; stays visible while active. */}
@@ -239,6 +259,16 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
       )}
+      {showInspect && (
+        <InspectQueryModal
+          tile={tile}
+          data={data}
+          filters={appliedFilters()}
+          dashboardFields={dashboardFilterFields()}
+          detailed={isAdmin}
+          onClose={() => setShowInspect(false)}
+        />
+      )}
       {showSegment && (
         <CreateSegmentModal
           entityId={entityId}
@@ -303,6 +333,18 @@ function SegmentButton({ onClick, isMobile, corner }) {
   const cornerStyle = corner ? { position: 'absolute', top: 6, left: 6, zIndex: 6 } : null;
   return (
     <button className="no-print" title="Create a reusable segment from this tile" onClick={onClick} style={{ ...base, ...cornerStyle }}>🎯</button>
+  );
+}
+
+// "Inspect query" affordance — audit the tile's dimensions / measures / filters
+// (read-only). Same visual language as the segment/share buttons. Corner variant
+// floats bottom-left on headerless metric tiles (clear of the pin/insight cluster
+// top-right and the segment button top-left).
+function InspectButton({ onClick, isMobile, corner }) {
+  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 13 : 12, lineHeight: 1, width: isMobile ? 28 : 24, height: isMobile ? 28 : 24 };
+  const cornerStyle = corner ? { position: 'absolute', bottom: 6, left: 6, zIndex: 6 } : null;
+  return (
+    <button className="no-print" title="Inspect query — dimensions, measures & filters driving this tile" aria-label="Inspect query" onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ ...base, ...cornerStyle }}>🔍</button>
   );
 }
 
