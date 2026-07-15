@@ -182,6 +182,68 @@ function requireAdmin(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admins only' });
   next();
 }
+// ─── Super Admin gate ─────────────────────────────────────────────────────────
+// The 403 boundary for the highest-risk global controls (billing master rates,
+// integrations, status notices, backup/restore). UI hiding is cosmetic; this is
+// the real check. A generic Howler admin who is NOT a super admin is refused.
+function requireSuperAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (!roles.isSuperAdmin(req.user)) return res.status(403).json({ error: 'Super Admins only' });
+  next();
+}
+// Does this Howler admin administer this specific client? (Account managers are
+// the client's Howler support contacts — howlerSupportIds, which falls back to
+// the creating admin.) Used to delegate CLIENT-LEVEL fee edits without exposing
+// global controls. Super admins administer every client.
+function administersEntity(user, entityId) {
+  if (!user || user.role !== 'admin' || !entityId) return false;
+  if (roles.isSuperAdmin(user)) return true;
+  const e = db.getEntity(entityId);
+  return !!e && (e.howlerSupportIds || []).includes(user.id);
+}
+// Middleware for a client-scoped admin control (e.g. per-client fees): a super
+// admin, or the admin who administers the entity named on the request, passes.
+function requireEntityAdmin(entityFrom) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const entityId = entityFrom ? entityFrom(req) : (req.params.id || req.params.entityId);
+    if (administersEntity(req.user, entityId)) return next();
+    return res.status(403).json({ error: 'You don’t administer this client.' });
+  };
+}
+// Guard against privilege escalation via the user editor: only a super admin may
+// grant or revoke the super_admin tag. For everyone else we pin the tag on the
+// incoming `roles` array to whatever the target currently has (create → stripped),
+// so a generic admin editing a user can't self-elevate or promote a peer.
+function guardSuperAdminTag(req, res, next) {
+  const body = req.body || {};
+  if (!('roles' in body) || roles.isSuperAdmin(req.user)) return next();
+  const incoming = Array.isArray(body.roles) ? body.roles : [];
+  const target = req.params.id ? db.getUser(req.params.id) : null;
+  const had = !!(target && (target.roles || []).includes(roles.SUPER_ADMIN));
+  const without = incoming.filter((r) => r !== roles.SUPER_ADMIN);
+  body.roles = had ? [...without, roles.SUPER_ADMIN] : without;
+  next();
+}
+// Boot-time bootstrap of the initial super admins. Idempotent. Grants the tag to
+// any admin whose email is listed in SUPER_ADMIN_EMAILS (comma-separated). If the
+// system still has NO super admin afterwards (fresh deploy, env unset), it
+// promotes the oldest admin so the platform's global controls are never locked
+// out — logged loudly. Existing admins otherwise keep exactly what they had.
+function ensureSuperAdmins() {
+  const grant = (u) => {
+    if (!u || u.role !== 'admin' || (u.roles || []).includes(roles.SUPER_ADMIN)) return;
+    updateUser(u.id, { roles: [...(u.roles || []), roles.SUPER_ADMIN] });
+    console.log(`[roles] granted Super Admin to ${u.email}`);
+  };
+  const emails = String(process.env.SUPER_ADMIN_EMAILS || '')
+    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const all = db.listUsers();
+  for (const email of emails) grant(all.find((u) => u.email === email));
+  if (db.listUsers().some((u) => roles.isSuperAdmin(u))) return;
+  const admins = db.listUsers().filter((u) => u.role === 'admin').sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  if (admins[0]) { grant(admins[0]); console.warn(`[roles] no Super Admin configured — bootstrapped ${admins[0].email}. Set SUPER_ADMIN_EMAILS and assign the real ones.`); }
+}
 
 // ─── Data scoping ─────────────────────────────────────────────────────────────
 // Only ENTITY-level field locks (organiser) are *forced* onto every query —
@@ -509,6 +571,7 @@ module.exports = {
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
   issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin, invalidateUser,
+  requireSuperAdmin, administersEntity, requireEntityAdmin, guardSuperAdminTag, ensureSuperAdmins,
   issue2faPending, verify2faPending,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
