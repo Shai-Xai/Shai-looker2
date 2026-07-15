@@ -24,7 +24,6 @@
   // the SAME conversation — the Owl remembers what you talked about last visit.
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
-  var SS_REOPEN = 'howler_fan_reopen_' + siteKey.slice(-8); // per-tab: reopen the chat after an Owl-driven page hop
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -115,9 +114,8 @@
     if (e.origin !== base) return;
     if (e.data === 'howler-fan-owl:close') { closePanel(); return; }
     if (e.data && e.data.t === 'howler-fan-owl:expand') { applyExpand(e.data.on === true); return; }
-    // The Owl's "Take me there" button: navigate WITHIN the host site (the path is
-    // resolved against this page's own origin — never off-site), flagging the tab
-    // so the chat reopens on the new page with its context.
+    // The Owl's "Take me there" button: navigate WITHIN the host site (the path
+    // is resolved against this page's own origin — never off-site).
     if (e.data && e.data.t === 'howler-fan-owl:nav' && typeof e.data.path === 'string') {
       var dest;
       try {
@@ -130,7 +128,10 @@
         }
       } catch (err) { return; }
       if (dest.origin !== window.location.origin) return; // same-site only
-      try { window.sessionStorage.setItem(SS_REOPEN, '1'); } catch (err) { /* still navigates; just won't auto-reopen */ }
+      // Just show the page: the chat stays closed so the fan actually SEES where
+      // they asked to go (on mobile a reopened chat covered the whole page). The
+      // ribbon carries the new page's pitch, and reopening the chat greets with
+      // that page's context (boot's pageChanged).
       window.location.href = dest.toString();
     }
   });
@@ -156,12 +157,7 @@
     } else launcher.textContent = '🦉';
     launcher.addEventListener('click', function () { openPanel(); });
 
-    // Arriving from an Owl-driven page hop? Reopen the chat straight away so the
-    // conversation continues on this page's context; otherwise show the teaser.
-    var reopen = null;
-    try { reopen = window.sessionStorage.getItem(SS_REOPEN); if (reopen) window.sessionStorage.removeItem(SS_REOPEN); } catch (e) { /* ignore */ }
-    if (reopen === '1') openPanel(true);
-    else updateTeaser();
+    updateTeaser();
   }
 
   // The teaser: the deterministic ribbon — the page's mapped offer (or the site's

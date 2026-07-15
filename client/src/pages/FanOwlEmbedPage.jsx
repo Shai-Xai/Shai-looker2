@@ -368,7 +368,7 @@ export default function FanOwlEmbedPage() {
         <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
       </form>
       {navStyle === 'below' && navPillRow('10px 12px 8px')}
-      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler 🦉</div>
+      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 12, verticalAlign: -2 }} /></div>
     </div>
   );
 }
