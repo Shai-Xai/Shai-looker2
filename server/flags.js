@@ -72,7 +72,9 @@ const REGISTRY = [
     { key: 'owl.drive', name: 'Google Drive', def: true, desc: 'Owl reads the linked Drive folder.' },
   ] },
   { key: 'waowl', emoji: '💬', name: 'WhatsApp Owl', def: true, beta: true, desc: 'The Owl over WhatsApp (inert until configured; OFF = the Owl stops engaging on WhatsApp).' },
-  { key: 'fanowl', emoji: '🎪', name: 'Fan Owl', def: true, beta: true, desc: 'Public website ticket assistant (inert until a site is set up; OFF = the widget refuses to boot).' },
+  { key: 'fanowl', emoji: '🎪', name: 'Fan Owl', def: true, beta: true, desc: 'Public website ticket assistant (inert until a site is set up; OFF = the widget refuses to boot).', kids: [
+    { key: 'fanowl.loyalty', name: 'Loyalty & verification', def: false, beta: true, desc: 'The identity handshake: fans verify their email (6-digit code) and the Owl guides from their derived purchase history. OFF = verification is never offered.' },
+  ] },
   { key: 'integrations', emoji: '🔌', name: 'Integrations', def: true, desc: 'What reaches Pulse from outside.', kids: [
     { key: 'integrations.looker', name: 'Looker', def: true, legacy: true, desc: 'Client’s OWN Looker credential panel (dashboards run on platform credentials either way).' },
     { key: 'integrations.anthropic', name: 'Anthropic key', def: true, legacy: true, desc: 'Client’s own AI key panel.' },
