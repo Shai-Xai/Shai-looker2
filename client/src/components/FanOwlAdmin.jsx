@@ -297,7 +297,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', heroHome: false, navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -360,6 +360,10 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                     <option value="">Floating launcher (default)</option>
                     <option value="bar">Persistent ask bar — always-on input + nav at the bottom of every page</option>
                   </select>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={!!s.heroHome} onChange={(e) => setSite(i, { heroHome: e.target.checked })} style={{ width: 16, height: 16 }} />
+                    Hero chat on the home page — greet fans with the ask box centred (folds away on scroll or dismiss)
+                  </label>
                 </div>
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>

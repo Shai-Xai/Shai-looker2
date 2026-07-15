@@ -206,6 +206,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // persistent ask bar docked to the bottom of every page (input + nav always on).
   try { sql.exec("ALTER TABLE fan_sites ADD COLUMN widget_style TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
   const WSTYLES = new Set(['', 'launcher', 'bar']);
+  // Migration: hero chat on the home page — the ask box opens centred when a fan
+  // lands on the home mapping (folds into the bar/launcher on dismissal).
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN hero_home INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
   // Migration: nav style — where the quick-nav buttons live in the widget.
   // '' = 'top' (icon strip under the header); also 'plus' (a + menu by the
   // composer), 'pills' (labelled pills above the composer) and 'off'. The
@@ -264,7 +267,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
       domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
-      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', widgetStyle: s.widget_style || '', navStyle: s.nav_style || '', navButtons: J(s.nav_json, null),
+      owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', widgetStyle: s.widget_style || '', heroHome: !!s.hero_home, navStyle: s.nav_style || '', navButtons: J(s.nav_json, null),
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
     catalogue: catByEntity.all(entityId).map((c) => ({
@@ -290,15 +293,15 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           // Personalisation: avatar must be a hosted URL (usually our own
           // /fan-owl-assets upload); persona/guardrails are style-only text layers.
           const owlAvatar = /^https?:\/\//i.test(String(s.owlAvatar || '').trim()) ? String(s.owlAvatar).trim().slice(0, 600) : '';
-          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', WSTYLES.has(s.widgetStyle) ? s.widgetStyle : '', NAV_STYLES.has(s.navStyle) ? s.navStyle : '', cleanNavButtons(s.navButtons)];
+          const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', WSTYLES.has(s.widgetStyle) ? s.widgetStyle : '', s.heroHome === true ? 1 : 0, NAV_STYLES.has(s.navStyle) ? s.navStyle : '', cleanNavButtons(s.navButtons)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, widget_style=?, nav_style=?, nav_json=? WHERE id=?')
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, widget_style=?, hero_home=?, nav_style=?, nav_json=? WHERE id=?')
               .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,widget_style,nav_style,nav_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,widget_style,hero_home,nav_style,nav_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
               .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
@@ -834,7 +837,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       logEvent(site.id, session.id, 'ribbon_view', { url: pageUrl, pageType: page?.page_type || 'default' });
       res.json({
         sessionId: session.id,
-        site: { name: site.name || suite?.name || '', brandColor: effBrandColor(site), theme: site.widget_theme || '', widgetStyle: site.widget_style || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '' },
+        site: { name: site.name || suite?.name || '', brandColor: effBrandColor(site), theme: site.widget_theme || '', widgetStyle: site.widget_style || '', heroHome: !!site.hero_home, navStyle: site.nav_style || 'top', defaultLang: site.default_lang || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },
         nav: navButtons(site, page), // the persistent bar's + menu (and any loader-side nav)
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
