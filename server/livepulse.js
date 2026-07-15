@@ -25,14 +25,15 @@
 //     window, so WhatsApp recipients only get the update if they've messaged the
 //     Owl in the last 24h (checked against owl_wa_msgs); others are skipped.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
 const CHANNELS = ['push', 'email', 'sms', 'whatsapp']; // inbox is always-on (the canonical record)
-const BLOCK_TYPES = ['value', 'top_list', 'eventops'];
+const BLOCK_TYPES = ['value', 'top_list', 'eventops', 'signal'];
 const MAX_BLOCKS = 8;
 
-function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, os, mailer, messaging, eventops }) {
+function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops, push, signalFlow }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -113,6 +114,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       type, label: String(b.label || '').slice(0, 80), icon: String(b.icon || '').slice(0, 8),
     };
     if (type === 'eventops') return out; // reads the EventOps suite summary; nothing else to configure
+    if (type === 'signal') { // scope: '' = whole event · category = one zone · station = one station
+      out.station = String(b.station || '').slice(0, 120);
+      out.category = String(b.category || '').slice(0, 120);
+      out.metric = ['flow', 'online', 'offline', 'both'].includes(b.metric) ? b.metric : 'flow';
+      return out;
+    }
     out.unit = String(b.unit || '').slice(0, 16);
     if (type === 'top_list') {
       // A top-N list reads the TABLE behind a breakdown tile (e.g. "Revenue by bar").
@@ -126,7 +133,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     out.source = b.source === 'metric' ? 'metric' : 'tile';
     out.showDelta = b.showDelta !== false;          // "+612 since 19:30" (on by default)
     out.showRate = !!b.showRate;                    // "~1,220/hr" derived from consecutive snapshots
-    out.compare = !!b.compare;                      // "78% of <last event>"
+    out.compare = !!b.compare;                      // "% of <last event>"
+    // How the comparison is cut: 'final' = the past event's end number; 'same_point' =
+    // LIKE-FOR-LIKE — the past event clipped to the same day-of-event + clock time
+    // (needs a date dimension to clip on; metric source only). Falls back to final.
+    out.compareMode = b.compareMode === 'same_point' ? 'same_point' : 'final';
+    out.compareClipField = String(b.compareClipField || '').slice(0, 200);
     if (out.source === 'metric') {
       out.model = String(b.model || '').slice(0, 120);
       out.view = String(b.view || '').slice(0, 120);
@@ -214,15 +226,18 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   function evalUser(p) {
     return { id: `livepulse:${p.entityId}`, email: p.createdBy || 'livepulse@howler', role: 'client', entityIds: [p.entityId] };
   }
-  async function readValueBlock(p, b, suiteId) {
+  // `live` forces a cache-bypassing read — ON for the current event (a live update
+  // must report the true current figure, not a cached one) and OFF for the
+  // past-event comparison (that number is settled, so cache it).
+  async function readValueBlock(p, b, suiteId, extraFilters, live = false) {
     try {
       if (b.source === 'metric') {
         if (typeof resolveCustomMetric !== 'function') return null;
-        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: b.metricFilters || {}, user: evalUser(p), suiteId });
+        const v = await resolveCustomMetric({ model: b.model, view: b.view, measure: b.measure, filters: { ...(b.metricFilters || {}), ...(extraFilters || {}) }, user: evalUser(p), suiteId, live });
         return v == null ? null : Number(v);
       }
       if (typeof resolveTileValue !== 'function') return null;
-      const v = await resolveTileValue({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId });
+      const v = await resolveTileValue({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId, live });
       return v == null ? null : Number(v);
     } catch (e) { console.error('[livepulse] value read failed', p.id, b.id, e.message); return null; }
   }
@@ -232,7 +247,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   async function readTopListBlock(p, b) {
     try {
       if (typeof resolveTileRows !== 'function') return [];
-      const r = await resolveTileRows({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId: p.suiteId, limit: 200 });
+      const r = await resolveTileRows({ dashboardId: b.dashboardId, tileId: b.tileId, user: evalUser(p), suiteId: p.suiteId, limit: 200, live: true });
       if (!r || !r.fields || r.fields.length < 2) return [];
       const nameF = r.fields[0].name, valF = r.fields[r.fields.length - 1].name;
       return (r.rows || [])
@@ -250,6 +265,60 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
       return { deployed: s.devices.deployed, total: s.devices.total, lost: s.devices.lost, damaged: s.devices.damaged, openIssues: s.openIssues };
     } catch { return null; }
   }
+  // Signal flow off the Data health board: % of roster devices online, overall or
+  // for one station. `b.station` blank = the whole event. Computed live (never a
+  // stored snapshot) so it's the same number the flow meter shows.
+  function readSignalBlock(p, b) {
+    try {
+      if (typeof signalFlow !== 'function') return null;
+      const f = signalFlow(p.suiteId, { station: b.station || '', category: b.category || '' });
+      return f && (f.total || (f.stations && f.stations.length)) ? f : null;
+    } catch (e) { console.error('[livepulse] signal read failed', p.id, b.id, e.message); return null; }
+  }
+  // One compact reading of a signal block, honouring its metric mode (flow % /
+  // online / offline / both). Shared by the message and the preview.
+  function signalText(b, f) {
+    if (!f || f.pct == null) return null;
+    const below = f.target != null && f.pct < f.target ? ` ⚠️ below target ${f.target}%` : '';
+    const m = b.metric || 'flow';
+    if (m === 'online') return `${f.on} online (of ${f.total})`;
+    if (m === 'offline') return `${f.off} offline (of ${f.total})`;
+    if (m === 'both') return `${f.on} online · ${f.off} offline · ${f.pct}%${below}`;
+    return `${f.pct}% online (${f.on}/${f.total})${below}`;
+  }
+
+  // ── like-for-like ("same point in time") comparison ──
+  // Mid-event, "% of last year's FINAL" answers the wrong question — organisers want
+  // "how am I tracking vs last year BY THIS POINT": day N of the event at the same
+  // clock time, which works for single- and multi-day events alike. Both events are
+  // anchored on their Looker start dates (core_events.start_date via
+  // resolveEventDate); we compute how far into THIS event we are (whole local days +
+  // wall-clock HH:MM in the pulse's timezone) and clip the past event's read with a
+  // `before <their day N> <same HH:MM>` filter on the block's date dimension.
+  // Every step fails SOFT to the final-total comparison — a number still lands.
+  const evStartCache = new Map(); // suiteId -> { at, date } (one tiny Looker query; 6h TTL)
+  async function eventStartDate(p, suiteId) {
+    const hit = evStartCache.get(suiteId);
+    if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.date;
+    let date = null;
+    try { if (typeof resolveEventDate === 'function') date = await resolveEventDate({ suiteId, user: evalUser(p) }); } catch { date = null; }
+    evStartCache.set(suiteId, { at: Date.now(), date });
+    return date;
+  }
+  function localYMD(tz, date = new Date()) {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); } catch { return null; }
+  }
+  function addDays(ymd, n) { const d = new Date(Date.parse(`${ymd}T12:00:00Z`)); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  async function samePointClip(p, b) {
+    if (b.source !== 'metric' || (b.compareMode || 'final') !== 'same_point' || !b.compareClipField) return null;
+    const curStart = await eventStartDate(p, p.suiteId);
+    const cmpStart = await eventStartDate(p, p.compareSuiteId);
+    const today = localYMD(p.timezone);
+    const hhmm = localHHMM(p.timezone);
+    if (!curStart || !cmpStart || !today || !hhmm) return null;
+    const dayN = Math.max(0, Math.round((Date.parse(today) - Date.parse(curStart)) / 86400e3));
+    return { [b.compareClipField]: `before ${addDays(cmpStart, dayN)} ${hhmm}` };
+  }
 
   // One full snapshot: every block's current reading (+ the comparison event's
   // reading for blocks that asked for it). Stored on the run so the NEXT run can
@@ -258,16 +327,21 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     const snap = {};
     for (const b of p.blocks || []) {
       if (b.type === 'eventops') { snap[b.id] = { ops: readEventOpsBlock(p) }; continue; }
+      if (b.type === 'signal') { snap[b.id] = { flow: readSignalBlock(p, b) }; continue; }
       if (b.type === 'top_list') { snap[b.id] = { rows: await readTopListBlock(p, b) }; continue; }
-      const cur = { value: await readValueBlock(p, b, p.suiteId) };
-      if (b.compare && p.compareSuiteId) cur.compare = await readValueBlock(p, b, p.compareSuiteId);
+      const cur = { value: await readValueBlock(p, b, p.suiteId, undefined, true) }; // current event → cache-bypassing live read
+      if (b.compare && p.compareSuiteId) {
+        const clip = await samePointClip(p, b);
+        cur.compare = await readValueBlock(p, b, p.compareSuiteId, clip || undefined); // past event → cached (settled)
+        cur.compareMode = clip ? 'same_point' : 'final';
+      }
       snap[b.id] = cur;
     }
     return snap;
   }
 
   // ── the wording: one compact, phone-first text block ──
-  const BLOCK_ICON = { value: '📊', top_list: '🏆', eventops: '🎛' };
+  const BLOCK_ICON = { value: '📊', top_list: '🏆', eventops: '🎛', signal: '📶' };
   function composeMessage(p, snap, prevRun) {
     const sym = moneySymFor(p);
     const prev = prevRun ? parseJson(prevRun.values_json, {}) : {};
@@ -293,6 +367,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
         lines.push(`${icon} ${label}: ${s.rows.map((r) => `${r.name} ${fmtNum(r.value, b.unit, sym)}`).join(' · ')}`);
         continue;
       }
+      if (b.type === 'signal') {
+        const txt = signalText(b, s.flow);
+        if (!txt) continue;
+        const scope = (s.flow && s.flow.scope) || 'all stations';
+        lines.push(`${icon} ${label || 'Signal flow'}${scope ? ` (${scope})` : ''}: ${txt}`);
+        continue;
+      }
       // value block
       if (s.value == null) continue;
       const bits = [fmtNum(s.value, b.unit, sym)];
@@ -306,7 +387,9 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
         bits.push(`(${extra.join(' · ')})`);
       }
       if (b.compare && s.compare != null && Number(s.compare) > 0) {
-        bits.push(`· ${Math.round((s.value / Number(s.compare)) * 100)}% of ${compareName}`);
+        // "by this point" = like-for-like (same day-of-event + clock time); otherwise
+        // the % is against the past event's final number — say which, honestly.
+        bits.push(`· ${Math.round((s.value / Number(s.compare)) * 100)}% of ${compareName}${s.compareMode === 'same_point' ? ' by this point' : ''}`);
       }
       lines.push(`${icon} ${label}: ${bits.join(' ')}`);
     }
@@ -391,6 +474,40 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     return { message, channels, snapshot: snap };
   }
 
+  // ── Preview (setup-time verification) ────────────────────────────────────────
+  // Resolve every block's CURRENT number for a DRAFT config without sending or
+  // saving — so the editor can show "is this pulling the right number?" as you
+  // build. Incomplete blocks (no tile/measure picked yet) are dropped by clean().
+  async function previewDraft(draft, { entityId, suiteId, user }) {
+    const c = clean(draft || {}, entityId, suiteId);
+    const p = { id: 'preview', ...c, entityId, suiteId, createdBy: (user && user.email) || 'preview' };
+    const snap = await buildSnapshot(p);
+    const message = composeMessage(p, snap, null); // no "since last" baseline in a preview
+    const sym = moneySymFor(p);
+    const blocks = (p.blocks || []).map((b) => {
+      const s = snap[b.id] || {};
+      const label = b.label || b.tileName || b.measureLabel || (b.type === 'eventops' ? 'Devices' : 'Metric');
+      if (b.type === 'eventops') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: !!s.ops, ops: s.ops || null };
+      if (b.type === 'signal') { const txt = signalText(b, s.flow); return { id: b.id, type: b.type, label: label === 'Metric' ? 'Signal flow' : label, icon: b.icon || '', ok: !!txt, value: txt, scope: (s.flow && s.flow.scope) || '' }; }
+      if (b.type === 'top_list') return { id: b.id, type: b.type, label, icon: b.icon || '', ok: (s.rows || []).length > 0, rows: (s.rows || []).map((r) => ({ name: r.name, value: fmtNum(r.value, b.unit, sym) })) };
+      return { id: b.id, type: b.type, label, icon: b.icon || '', ok: s.value != null, value: s.value == null ? null : fmtNum(s.value, b.unit, sym), compare: (b.compare && s.compare != null) ? fmtNum(s.compare, b.unit, sym) : null };
+    });
+    return { message, blocks };
+  }
+  // "Send to me" — deliver the preview to the CURRENT user only (their push +
+  // their own email), never the configured recipient list, so setup can be
+  // verified on the phone without pinging the team.
+  async function sendPreviewToMe(draft, { entityId, suiteId, user }) {
+    const { message, blocks } = await previewDraft(draft, { entityId, suiteId, user });
+    const su = db.getSuite(suiteId);
+    const title = `⚡ Preview — ${su ? su.name : 'live update'}`;
+    const link = `${mailer?.baseUrl ? mailer.baseUrl() : ''}/alerts?tab=live`;
+    const delivered = [];
+    try { if (push?.sendToUser && await push.sendToUser(user.id, { title, body: message, url: link })) delivered.push('push'); } catch (e) { console.error('[livepulse] preview push failed', e.message); }
+    try { if (mailer?.send && user.email) { await mailer.send({ to: user.email, subject: title, text: `${message}\n\n${link}`, kind: 'other', entity: entityId }); delivered.push('email'); } } catch (e) { console.error('[livepulse] preview email failed', e.message); }
+    return { message, blocks, delivered };
+  }
+
   // A pulse is "live" when the manual switch is on OR the clock is inside its window.
   function isLiveNow(p, at = now()) {
     if (p.live) return true;
@@ -433,12 +550,18 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    let signalStations = [];
+    try { if (typeof signalFlow === 'function') signalStations = (signalFlow(req.params.suiteId).stations || []).filter((s) => s.name).map((s) => ({ name: s.name, zone: s.zone })); } catch { signalStations = []; }
     res.json({
       pulses: listForSuite(req.params.suiteId).map(decorate),
       canManage: canManage(req.user, req.params.suiteId),
       smsAvailable: !!(messaging?.status?.() || {}).configured,
       whatsappAvailable: !!(messaging?.waConfigured?.()),
       eventopsAvailable: !!(eventops && typeof eventops.suiteSummary === 'function' && eventops.suiteSummary(req.params.suiteId) && (eventops.suiteSummary(req.params.suiteId).devices || {}).total),
+      // The Signal-flow block is offered when the Data health board knows any station.
+      // Each station carries its zone (category) so the picker can group by category.
+      signalAvailable: signalStations.length > 0,
+      signalStations,
     });
   });
 
@@ -503,7 +626,28 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
     if (!p) return res.status(404).json({ error: 'Live update not found' });
     if (!canManage(req.user, p.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     try { const r = await sendUpdate(p, { manual: true }); res.json({ ok: true, message: r.message, channels: r.channels }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
+  });
+
+  // Live preview of the numbers a DRAFT would show (no send, no save) — the editor
+  // calls this to verify each block pulls the right figure while you set it up.
+  app.post('/api/livepulse/suites/:suiteId/preview', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    const su = db.getSuite(req.params.suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found' });
+    if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    try { res.json(await previewDraft(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user })); }
+    catch (e) { serverError(res, e); }
+  });
+
+  // Send the preview to ME (the current user) only — a phone check before going live.
+  app.post('/api/livepulse/suites/:suiteId/preview-send', auth.requireAuth, async (req, res) => {
+    if (!enabled()) return off(res);
+    const su = db.getSuite(req.params.suiteId);
+    if (!su) return res.status(404).json({ error: 'Event not found' });
+    if (!canManage(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
+    try { const r = await sendPreviewToMe(req.body || {}, { entityId: su.entityId, suiteId: su.id, user: req.user }); res.json({ ok: true, ...r }); }
+    catch (e) { serverError(res, e); }
   });
 
   app.get('/api/livepulse/:id/runs', auth.requireAuth, (req, res) => {
@@ -533,7 +677,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustom
   }
 
   console.log('[livepulse] mounted', enabled() ? '(enabled)' : '(disabled — set livepulse_enabled=1)');
-  return { sendUpdate, tick, listForSuite, pulseById, runsFor, isLiveNow, composeMessage, createLivePulse: createLivePulseFor };
+  return { sendUpdate, tick, listForSuite, pulseById, runsFor, isLiveNow, composeMessage, previewDraft, sendPreviewToMe, createLivePulse: createLivePulseFor };
 }
 
 // Option lists exported so the Owl's createLiveUpdate act-tool builds its schema FROM

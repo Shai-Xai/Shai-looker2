@@ -17,6 +17,7 @@ import OwlQuips from '../components/OwlQuips.jsx';
 import TileFrame from '../components/TileFrame.jsx';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { useAccess, PERMS } from '../lib/access.js';
+import { owlNativeChatEnabled } from '../lib/features.js';
 import { fmtR } from '../lib/money.js';
 
 // Personalised landing page (briefing-led): the Owl opens with what changed
@@ -264,7 +265,7 @@ export default function ClientHome() {
                               <div style={{ fontWeight: 800 }}>{g.suiteName}{!g.tiles.length ? ' — no tiles returned data' : ''}</div>
                               {g.tiles.map((t, i) => (
                                 <div key={i} style={{ color: 'var(--muted-2)', marginTop: 2, lineHeight: 1.45 }}>
-                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
+                                  <b>{t.title}</b> = {t.value} <span style={{ color: 'var(--muted)' }}>{t.span ? `· data ${t.span} (${t.rows} rows) ` : t.rows > 1 ? `· ${t.rows} rows ` : ''}· {Object.entries(t.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ') || 'no filters'}</span>
                                 </div>
                               ))}
                             </div>
@@ -383,12 +384,25 @@ export default function ClientHome() {
                       title="Turn this suggestion into a campaign"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Carry the dashboard + event the suggestion pointed at, so the
-                        // campaign editor pre-fills the audience from THAT tile/event.
-                        const q = new URLSearchParams({ goal: `${s.title}${s.reason ? ` — ${s.reason}` : ''}`, type: s.action });
-                        if (s.link?.dashboardId) q.set('dashboard', s.link.dashboardId);
-                        if (s.link?.suiteId) q.set('suite', s.link.suiteId);
-                        vtNavigate(navigate, `/actions?${q.toString()}`);
+                        const goal = `${s.title}${s.reason ? ` — ${s.reason}` : ''}`;
+                        const suite = s.link?.suiteId || '';
+                        // Prefer the Owl builder: it READS the suggestion and builds the
+                        // right audience (segment) for it via draftCampaign — so an
+                        // "over-35 past buyers" idea doesn't get forced into the abandoned-
+                        // cart recipe. Hand it the goal + event; the Owl drafts for review.
+                        if (owlNativeChatEnabled(user)) {
+                          window.dispatchEvent(new CustomEvent('howler:owl-build', { detail: {
+                            prompt: `Build an email campaign for this suggestion and draft the audience it needs (create the segment if there isn't one), then show me the draft to review: "${goal}".${suite ? ` This is for event ${suite}.` : ''}`,
+                            suiteId: suite,
+                          } }));
+                          return;
+                        }
+                        // Fallback (no native Owl): open the campaign editor with the goal
+                        // pre-filled and a BLANK audience — never a wrong recipe. We omit
+                        // ?type on purpose so no recipe (abandoned cart) is auto-selected.
+                        const q = new URLSearchParams({ goal });
+                        if (suite) q.set('suite', suite);
+                        vtNavigate(navigate, `/engage/campaigns?${q.toString()}`);
                       }}
                       style={{ fontSize: 11.5, fontWeight: 700, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', borderRadius: 980, padding: '3px 10px' }}
                     >⚡ Make it happen</span>

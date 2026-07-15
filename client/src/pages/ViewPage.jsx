@@ -17,6 +17,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { combinedBlocksFromLockMap } from '../lib/combinedFilters.js';
+import { setReportTiles } from '../lib/reportContext.js';
 
 // Read-only render of a saved dashboard. When opened inside a Suite
 // (/suite/:suiteId/d/:id) the suite's locked filters are pre-filled + locked and
@@ -188,6 +189,19 @@ export default function ViewPage() {
   useEffect(() => { if (suiteId && id) api.track(suiteId, id); }, [suiteId, id]);
   // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
   useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
+
+  // Publish this dashboard's tiles so the app-wide Report widget can offer a
+  // "which tile is this about?" picker. Cleared on unmount / tab switch so the
+  // picker only shows on a dashboard. Includes tiles inside carousels/sections.
+  useEffect(() => {
+    if (!def) { setReportTiles([]); return; }
+    const list = [];
+    const add = (t) => { if (t?.id && !t.hidden) list.push({ id: t.id, title: (t.title || t.name || '').trim() || 'Untitled tile' }); };
+    for (const t of def.tiles || []) add(t);
+    for (const c of def.carousels || []) for (const t of c.tiles || []) add(t);
+    setReportTiles(list);
+    return () => setReportTiles([]);
+  }, [def]);
 
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).

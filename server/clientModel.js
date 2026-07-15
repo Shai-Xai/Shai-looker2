@@ -9,11 +9,36 @@
 // Remove the mount() line in index.js + this file to uninstall. Lifted VERBATIM
 // out of index.js — its collaborators arrive as injected deps.
 
-module.exports.mount = function mountClientModel(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals }) {
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
+module.exports.mount = function mountClientModel(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, resolveEventDate, suiteHasGoals }) {
   // Phases in which tickets are actively selling (used to flag the "current event
   // on sale" — pre_launch hasn't opened, day_after/post_event are over).
   const ON_SALE_PHASES = new Set(['launch', 'artist_drops', 'mid_campaign', 'build_up', 'event_day']);
   const suiteOnSale = (su) => { try { return resolvePhase ? ON_SALE_PHASES.has(resolvePhase(su.briefing || {}).key) : false; } catch { return false; } };
+  // Upcoming vs past for the nav grouping — from the LIVE Looker event start date
+  // (core_events.start_date, scoped to the suite), NOT the hand-typed briefing
+  // dates. The nav can't run a Looker query per suite on every load, so we cache
+  // per suite and serve stale-while-revalidate: the first load a suite is seen it
+  // returns 'unknown' (client shows a flat list that round) and warms in the
+  // background; every load after is instant from cache. Looker date in the PAST →
+  // 'past'; today/future → 'upcoming'; no resolvable date → 'undated'.
+  const EVDATE_TTL = 12 * 3600 * 1000;
+  const evDate = new Map();       // suiteId -> { date: 'YYYY-MM-DD'|null, at }
+  const evDateInflight = new Set();
+  const warmEventDate = (suiteId, user) => {
+    if (!resolveEventDate || evDateInflight.has(suiteId)) return;
+    evDateInflight.add(suiteId);
+    resolveEventDate({ suiteId, user }).then((d) => evDate.set(suiteId, { date: d || null, at: Date.now() }))
+      .catch(() => evDate.set(suiteId, { date: null, at: Date.now() }))
+      .finally(() => evDateInflight.delete(suiteId));
+  };
+  const suiteTiming = (su, user) => {
+    const c = evDate.get(su.id);
+    if (!c || Date.now() - c.at > EVDATE_TTL) warmEventDate(su.id, user); // refresh in bg
+    if (!c) return 'unknown';       // first sighting — grouped once it resolves
+    if (!c.date) return 'undated';
+    return c.date < new Date().toISOString().slice(0, 10) ? 'past' : 'upcoming';
+  };
   // A client's custom sets + the dashboard pool available to build them with
   // (shared dashboards + this client's own bespoke dashboards).
   app.get('/api/admin/entities/:id/sets', auth.requireAdmin, (req, res) => {
@@ -59,7 +84,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
       res.status(201).json({ dashboard: { id: created.id, title: created.title } });
     } catch (err) {
       console.error('[POST entity dashboards/import]', err.message);
-      res.status(500).json({ error: err.message });
+      serverError(res, err);
     }
   });
 
@@ -67,7 +92,7 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
   function enrichSuite(su) {
     return { ...su, entityName: db.getEntity(su.entityId)?.name || '', dashboardCount: db.dashboardsInSuite(su.id).length };
   }
-  app.get('/api/admin/suites', auth.requireAdmin, (_req, res) => res.json(db.listSuites().map(enrichSuite)));
+  app.get('/api/admin/suites', auth.requireAdmin, (_req, res) => res.json(applySuiteOrder(db.listSuites()).map(enrichSuite)));
   app.post('/api/admin/suites', auth.requireAdmin, (req, res) => res.status(201).json(enrichSuite(db.createSuite(req.body || {}))));
   app.put('/api/admin/suites/:id', auth.requireAdmin, (req, res) => {
     const su = db.updateSuite(req.params.id, req.body || {});
@@ -75,6 +100,14 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
     res.json(enrichSuite(su));
   });
   app.delete('/api/admin/suites/:id', auth.requireAdmin, (req, res) => { db.deleteSuite(req.params.id); res.status(204).end(); });
+  // Duplicate a suite (clone its sets + client-owned dashboards, remap every id)
+  // so an AM can stand up a new event just like an existing one, then repoint it.
+  const { duplicateSuite } = require('./suiteDuplicate')(db);
+  app.post('/api/admin/suites/:id/duplicate', auth.requireAdmin, (req, res) => {
+    const su = duplicateSuite(req.params.id, { name: (req.body || {}).name, entityId: (req.body || {}).entityId });
+    if (!su) return res.status(404).json({ error: 'Suite not found' });
+    res.status(201).json(enrichSuite(su));
+  });
 
   // Distinct filter fields across all dashboards (for the locked-filter editor).
   app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
@@ -143,7 +176,10 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
         id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
         entityName: ent?.name || '', entityLogo: ent?.logo || '',
         setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
-        onSale: suiteOnSale(su), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
+        // One-tap LIVE button target — only surfaced if it's still a dashboard in
+        // the suite (a deleted/removed one silently drops the button).
+        liveDashboardId: (su.liveDashboardId && db.dashboardsInSuite(su.id).some((d) => (d.id || d) === su.liveDashboardId)) ? su.liveDashboardId : '',
+        onSale: suiteOnSale(su), timing: suiteTiming(su, req.user), hasGoals: suiteHasGoals ? suiteHasGoals(su.id) : false,
       };
     }));
   });

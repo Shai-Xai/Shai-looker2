@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, lazy, Suspense, Component } from 'react';
+import { createPortal } from 'react-dom';
 import ReactECharts from 'echarts-for-react/lib/core';
 import echarts from '../lib/echarts.js';
 import { api } from '../lib/api.js';
@@ -13,6 +14,11 @@ const EventOpsScanner = lazy(() => import('./EventOpsScanner.jsx'));
 // 📶 Data health tab: read-only stream monitors for this entity/event — lazy so
 // the console doesn't pay for the Data health module until the tab is opened.
 const DataHealthOps = lazy(() => import('./DataHealthAdmin.jsx').then((m) => ({ default: m.DataHealthOps })));
+// 🎛 Event Signal: the event as a live site board — zones, stations, device ticks.
+const SignalOps = lazy(() => import('./EventSignal.jsx'));
+// 🚨 Staff alerts (🧪): board-station ↔ ops-station bridge + who gets called.
+const StaffAlertsTab = lazy(() => import('./StaffAlertsTab.jsx'));
+const CallsTab = lazy(() => import('./EventOpsCallsTab.jsx'));
 
 const STATE_LABEL = { in_stock: 'Hive', deployed: 'Deployed', returned: 'Returned', lost: 'Lost', damaged: 'Damaged' };
 const STATE_ORDER = ['deployed', 'in_stock', 'returned', 'lost', 'damaged'];
@@ -21,7 +27,25 @@ const STATION_KINDS = ['bar', 'gate', 'booth', 'topup', 'vendor', 'other'];
 const KIND_ICON = { bar: '🍺', gate: '🛂', booth: '🏪', topup: '💳', vendor: '🍔', other: '📍' };
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 const CAT_LABEL = { damaged: 'Damaged', battery: 'Battery', connectivity: 'Connectivity', missing_parts: 'Missing parts', frozen: 'Frozen', wrong_config: 'Wrong config', other: 'Other' };
-const TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity'], ['health', '📶', 'Data health']];
+// 🐝 The Hive holds the on-the-ground ops surfaces; Data health and the
+// Signal board stay top-level. Clicking Hive opens the sub-drawer.
+const HIVE_TABS = [['live', '📡', 'Live'], ['devices', '📟', 'Devices'], ['stations', '📍', 'Stations'], ['map', '🗺️', 'Map'], ['staff', '🧑‍🔧', 'Staff'], ['alerts', '🚨', 'Alerts'], ['calls', '📣', 'Calls'], ['checks', '✅', 'Checks'], ['issues', '⚠️', 'Issues'], ['activity', '🧾', 'Activity']];
+
+// 📱 Mobile bottom drawer for the nav pickers (Hive tabs). Portal, backdrop closes.
+function NavSheet({ title, onClose, children }) {
+  return createPortal(
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1400, display: 'flex', alignItems: 'flex-end' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)', width: '100%', maxHeight: '80dvh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '8px 14px calc(16px + env(safe-area-inset-bottom))', boxShadow: '0 -8px 30px rgba(0,0,0,0.3)' }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--hairline)', margin: '4px auto 12px' }} />
+        {title && <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', marginBottom: 8 }}>{title}</div>}
+        {children}
+      </div>
+    </div>, document.body);
+}
+const sheetRow = (on) => ({ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid var(--hairline)', background: 'transparent', color: on ? 'var(--brand)' : 'var(--text)', fontWeight: on ? 800 : 600, fontSize: 15, padding: '13px 4px', cursor: 'pointer', fontFamily: 'inherit', minHeight: 48 });
+const TOP_TABS = [['health', '📶', 'Data health']];
+// 🎛️ Flow board views — collapse into the left nav like the Hive sub-drawer.
+const SIGNAL_VIEWS = [['board', '🎛️', 'Board'], ['rhythm', '📈', 'Rhythm'], ['stations', '📶', 'Stations'], ['flow', '🌡️', 'Flow'], ['map', '🗺️', 'Map'], ['river', '🌊', 'River'], ['network', '🕸️', 'Network']];
 // Quick-pick resolutions (staff can also type a custom comment).
 const RESOLUTIONS = ['Swapped device', 'Rebooted', 'Battery replaced', 'Reconnected', 'Replaced part', 'Reconfigured', 'Cleared error', 'False alarm'];
 
@@ -31,6 +55,12 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
   const [suiteId, setSuiteId] = useState('');
   const [canManage, setCanManage] = useState(false);
   const [tab, setTab] = useState('live');
+  const [hiveOpen, setHiveOpen] = useState(false); // 🐝 sub-drawer closed until tapped — the landing stays 3 buttons
+  const [hiveSheet, setHiveSheet] = useState(false); // 📱 mobile: Hive opens a bottom drawer instead of an inline sub-drawer
+  const inHive = HIVE_TABS.some(([t]) => t === tab);
+  const [signalView, setSignalView] = useState('board'); // 🎛️ Flow board view, driven from the nav sub-drawer
+  const [signalOpen, setSignalOpen] = useState(false);
+  const inSignal = tab === 'signal';
   const [scan, setScan] = useState(null);        // null | { for: 'move' }
   const [moveFlow, setMoveFlow] = useState(false); // station-first Single/Multiple batch move
   const [actionDevice, setActionDevice] = useState(null); // device shown in the action sheet
@@ -79,30 +109,87 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 
   return (
     <div style={{ position: 'relative', paddingBottom: 88 }}>
-      {/* Event picker */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-        <label style={{ fontSize: 13, color: 'var(--muted)' }}>Event</label>
-        <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={select}>
-          {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </div>
-
-      {/* Desktop: left nav rail (with Scan under it) + full-width content. Mobile: top pills. */}
+      {/* Desktop: left nav rail (Event picker on top, then tabs, Scan/Move) + full-width content. Mobile: top pills. */}
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 24, alignItems: 'flex-start' }}>
         <div style={isMobile ? { display: 'flex', flexDirection: 'column', gap: 10, width: '100%' } : { display: 'flex', flexDirection: 'column', gap: 8, position: 'sticky', top: 8, width: 170, flexShrink: 0 }}>
+          {/* Event picker — desktop: labelled select atop the drawer. Mobile: a compact
+              🎫 pill that rides the SAME row as Hive/Data health/Flow board (no full row). */}
+          {!isMobile && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Event</label>
+              <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} style={{ ...select, width: '100%', boxSizing: 'border-box' }}>
+                {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
           <div style={isMobile ? mobileTabs : leftNav}>
-            {TABS.map(([t, icon, label]) => (
+            {/* Mobile event picker = just the 🎫 icon (a transparent native select over
+                it opens the list) so the whole nav fits one row; long names never wrap it. */}
+            {isMobile && suites.length > 0 && (
+              <span title={(suites.find((s) => s.id === suiteId) || {}).name || 'Event'} style={{ ...tabBtn(false), position: 'relative', border: '1px solid var(--hairline)', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '9px 12px' }}>
+                🎫<span style={{ fontSize: 9, opacity: 0.55 }}>▾</span>
+                <select value={suiteId} onChange={(e) => setSuiteId(e.target.value)} aria-label="Event"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, border: 'none', cursor: 'pointer' }}>
+                  {suites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </span>
+            )}
+            {/* Hive — desktop: inline sub-drawer. Mobile: a bottom drawer like the others. */}
+            <button onClick={() => { if (isMobile) { setHiveSheet(true); return; } if (!inHive) { setTab('live'); setHiveOpen(true); } else setHiveOpen((v) => !v); }}
+              style={isMobile ? tabBtn(inHive) : navItem(inHive)}>
+              <span style={{ fontSize: 15 }}>🐝</span> Hive <span style={{ fontSize: 10, opacity: 0.7 }}>{isMobile ? '▾' : (hiveOpen ? '▾' : '▸')}</span>
+            </button>
+            {hiveOpen && !isMobile && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
+                {HIVE_TABS.map(([t, icon, label]) => (
+                  <button key={t} onClick={() => setTab(t)} style={{ ...navItem(tab === t), fontSize: 12.5 }}>
+                    <span style={{ fontSize: 13 }}>{icon}</span> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {TOP_TABS.map(([t, icon, label]) => (
               <button key={t} onClick={() => setTab(t)} style={isMobile ? tabBtn(tab === t) : navItem(tab === t)}>
                 <span style={{ fontSize: 15 }}>{icon}</span> {label}
               </button>
             ))}
+            {/* 🎛️ Flow board — collapses into its views like the Hive sub-drawer on
+                DESKTOP. On mobile that 7-button grid duplicates the board's own compact
+                expanding view pill, so we skip it: the tab just opens the board. */}
+            <button onClick={() => { if (isMobile) { setTab('signal'); return; } if (!inSignal) { setTab('signal'); setSignalOpen(true); } else setSignalOpen((v) => !v); }}
+              style={isMobile ? tabBtn(inSignal) : navItem(inSignal)}>
+              <span style={{ fontSize: 15 }}>🎛️</span> Flow board {!isMobile && <span style={{ fontSize: 10, opacity: 0.7 }}>{signalOpen ? '▾' : '▸'}</span>}
+            </button>
+            {signalOpen && !isMobile && (
+              <div style={isMobile
+                ? { display: 'flex', gap: 6, flexWrap: 'wrap', width: '100%', padding: '2px 0 4px' }
+                : { display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 14, paddingLeft: 8, borderLeft: '2px solid var(--hairline)' }}>
+                {SIGNAL_VIEWS.map(([v, icon, label]) => (
+                  <button key={v} onClick={() => { setTab('signal'); setSignalView(v); }} style={{ ...(isMobile ? tabBtn(inSignal && signalView === v) : navItem(inSignal && signalView === v)), fontSize: 12.5 }}>
+                    <span style={{ fontSize: 13 }}>{icon}</span> {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {canManage && suiteId && (
+          {isMobile && hiveSheet && (
+            <NavSheet title="🐝 Hive" onClose={() => setHiveSheet(false)}>
+              {HIVE_TABS.map(([t, icon, label]) => (
+                <button key={t} onClick={() => { setTab(t); setHiveSheet(false); }} style={sheetRow(tab === t)}>
+                  <span style={{ fontSize: 17 }}>{icon}</span> {label}
+                  {tab === t && <span style={{ marginLeft: 'auto', color: 'var(--brand)' }}>✓</span>}
+                </button>
+              ))}
+            </NavSheet>
+          )}
+          {/* Scan + Move are Hive (device-ops) tools — keep them off the
+              read-only Data health / Signal board tabs on every screen. */}
+          {canManage && suiteId && inHive && (
             <button onClick={() => setScan({ for: 'move' })} style={navScan} aria-label="Scan a device">
               <span style={{ fontSize: 18 }}>📷</span> Scan
             </button>
           )}
-          {canManage && suiteId && (
+          {canManage && suiteId && inHive && (
             <button onClick={() => setMoveFlow(true)} style={navMove} aria-label="Move devices">
               <span style={{ fontSize: 18 }}>🔀</span> Move devices
             </button>
@@ -114,10 +201,13 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
           {suiteId && tab === 'stations' && <StationsTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onRefresh={refresh} />}
           {suiteId && tab === 'map' && <MapTab suiteId={suiteId} canManage={canManage} isMobile={isMobile} reloadKey={reloadKey} onStation={setStationView} />}
           {suiteId && tab === 'staff' && <StaffTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} onDevice={setActionDevice} />}
+          {suiteId && tab === 'alerts' && <Suspense fallback={null}><StaffAlertsTab suiteId={suiteId} /></Suspense>}
+          {suiteId && tab === 'calls' && <Suspense fallback={null}><CallsTab suiteId={suiteId} canManage={canManage} /></Suspense>}
           {suiteId && tab === 'checks' && <ChecksTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'issues' && <IssuesTab suiteId={suiteId} canManage={canManage} flash={flash} reloadKey={reloadKey} />}
           {suiteId && tab === 'activity' && <ActivityTab suiteId={suiteId} reloadKey={reloadKey} />}
           {suiteId && tab === 'health' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Loading data health…</div>}><DataHealthOps entityId={entityId} suiteId={suiteId} /></Suspense>}
+          {suiteId && tab === 'signal' && <Suspense fallback={<div style={{ padding: 24, color: 'var(--muted)' }}>Raising the board…</div>}><SignalOps entityId={entityId} suiteId={suiteId} view={signalView} onView={setSignalView} /></Suspense>}
         </div>
       </div>
 
@@ -177,6 +267,7 @@ export default function EventOpsConsole({ entityId, scope = 'admin' }) {
 // ───────────────────────────────── Live tab ──────────────────────────────────
 function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
   const [data, setData] = useState(null);
+  const [kind, setKind] = useState(null); // null = show chips only · '' = all cards · 'bar' etc = that kind
   useEffect(() => {
     let alive = true;
     setData(null);
@@ -205,16 +296,30 @@ function LiveTab({ suiteId, isMobile, reloadKey, onStation, onHeldStaff }) {
 
       <Section title="Stations">
         {data.stations.length === 0 ? <Empty>No stations yet.</Empty> : (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
-            {data.stations.map((s) => (
-              <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
-                <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
-                <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
-              </button>
-            ))}
-          </div>
+          <>
+            {/* Chips first — the grid stays collapsed until you pick a type (or
+                Show all). Keeps a 60-station event from flooding the landing. */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: kind === null ? 0 : 10 }}>
+              <Chip on={kind === ''} onClick={() => setKind(kind === '' ? null : '')}>📋 Show all · {data.stations.length}</Chip>
+              {[...new Set(data.stations.map((s) => s.kind))].map((k) => (
+                <Chip key={k} on={kind === k} onClick={() => setKind(kind === k ? null : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {data.stations.filter((s) => s.kind === k).length}</Chip>
+              ))}
+            </div>
+            {kind === null ? (
+              <div style={{ fontSize: 12, color: 'var(--muted)', padding: '2px 2px 0' }}>Pick a type above to see its stations, or Show all.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3,1fr)', gap: 10 }}>
+                {data.stations.filter((s) => kind === '' || s.kind === kind).map((s) => (
+                  <button key={s.id} onClick={() => onStation?.(s)} style={{ ...stationCard, cursor: 'pointer' }} title="See devices here">
+                    <div style={{ fontSize: 20 }}>{KIND_ICON[s.kind] || '📍'}</div>
+                    <div style={{ fontWeight: 650, fontSize: 14 }}>{s.name}</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--brand)' }}>{s.deviceCount}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>device{s.deviceCount === 1 ? '' : 's'} ›</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </Section>
 
@@ -599,6 +704,8 @@ function ManageCategoriesModal({ suiteId, categories, onClose, onChange, flash }
 function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
   const [stations, setStations] = useState(null);
   const [form, setForm] = useState(null); // null | {id?, name, kind}
+  const [q, setQ] = useState(''); // find-a-station filter (name or kind)
+  const [kf, setKf] = useState(''); // station-type chip filter: '' = all
   const load = () => api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => setStations([]));
   useEffect(() => { setStations(null); load(); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -618,9 +725,20 @@ function StationsTab({ suiteId, canManage, flash, reloadKey, onRefresh }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <button onClick={() => setForm({ name: '', kind: 'bar' })} style={primaryBtn}>＋ Add station</button>}
+      {stations.length > 6 && (
+        <>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations — name or kind…`} aria-label="Filter stations" style={{ ...input, minHeight: 40 }} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Chip on={!kf} onClick={() => setKf('')}>All · {stations.length}</Chip>
+            {[...new Set(stations.map((s) => s.kind))].map((k) => (
+              <Chip key={k} on={kf === k} onClick={() => setKf(kf === k ? '' : k)}>{KIND_ICON[k] || '📍'} {k[0].toUpperCase() + k.slice(1)} · {stations.filter((s) => s.kind === k).length}</Chip>
+            ))}
+          </div>
+        </>
+      )}
       {stations.length === 0 ? <Empty>No stations yet.</Empty> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {stations.map((s) => (
+          {stations.filter((s) => (!kf || s.kind === kf) && (!q.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(q.trim().toLowerCase()))).map((s) => (
             <div key={s.id} style={{ ...deviceRow(false), cursor: 'default' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <span style={{ fontSize: 18 }}>{KIND_ICON[s.kind] || '📍'}</span>
@@ -1182,6 +1300,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
   const [devices, setDevices] = useState([]);
   const [stationFilter, setStationFilter] = useState('all'); // all | unassigned | stationId
   const [form, setForm] = useState(null); // null | { id?, name, number, role, stationIds:[] }
+  const [stq, setStq] = useState(''); // filter for the assigned-stations chip picker
   const [heldFor, setHeldFor] = useState(null); // staff whose held devices are being viewed
   const load = () => api.eventopsStaff(suiteId).then((r) => setStaff(r.staff || [])).catch(() => setStaff([]));
   useEffect(() => { setStaff(null); load(); api.eventopsStations(suiteId).then((r) => setStations(r.stations || [])).catch(() => {}); api.eventopsDevices(suiteId).then((r) => setDevices(r.devices || [])).catch(() => {}); }, [suiteId, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1189,7 +1308,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
 
   async function save() {
     try {
-      const body = { name: form.name, number: form.number, role: form.role, stationIds: form.stationIds || [], canMove: !!form.canMove, canCheckpoint: !!form.canCheckpoint };
+      const body = { name: form.name, number: form.number, role: form.role, stationIds: form.stationIds || [], canMove: !!form.canMove, canCheckpoint: !!form.canCheckpoint, alertsOn: form.alertsOn !== false };
       if (form.id) await api.eventopsUpdateStaff(suiteId, form.id, body);
       else await api.eventopsCreateStaff(suiteId, body);
       setForm(null); load(); flash('Staff saved');
@@ -1216,7 +1335,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {canManage && <StaffPortalCard suiteId={suiteId} flash={flash} />}
-      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [], canMove: true, canCheckpoint: false })} style={primaryBtn}>＋ Add staff</button>}
+      {canManage && <button onClick={() => setForm({ name: '', number: '', role: '', stationIds: [], canMove: true, canCheckpoint: false, alertsOn: true })} style={primaryBtn}>＋ Add staff</button>}
       {/* Filter staff by the station they're posted to. */}
       {stations.length > 0 && staff.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1244,7 +1363,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
                 )}
                 {canManage && (
                   <>
-                    <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint })} style={iconBtn}>✏️</button>
+                    <button onClick={() => setForm({ id: s.id, name: s.name, number: s.number, role: s.role, stationIds: s.stationIds || [], canMove: s.canMove !== false, canCheckpoint: !!s.canCheckpoint, alertsOn: s.alertsOn !== false })} style={iconBtn}>✏️</button>
                     <button onClick={() => remove(s)} style={iconBtn}>🗑️</button>
                   </>
                 )}
@@ -1254,7 +1373,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
         </div>
       )}
       {form && (
-        <Modal title={form.id ? 'Edit staff' : 'Add staff'} onClose={() => setForm(null)}>
+        <Modal title={form.id ? 'Edit staff' : 'Add staff'} onClose={() => { setForm(null); setStq(''); }}>
           <div style={fieldCol}>
             <div style={{ display: 'flex', gap: 8 }}>
               <Field label="Staff number"><input style={input} value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} placeholder="e.g. 101" /></Field>
@@ -1263,9 +1382,14 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
             <Field label="Role (optional)"><input style={input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="e.g. Liaison, Warehouse" /></Field>
             <div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Assigned stations (optional — pick any)</div>
+              {/* Long station lists get a filter; picked chips ALWAYS stay
+                  visible so a filtered view can still unpick them. */}
+              {stations.length > 8 && (
+                <input value={stq} onChange={(e) => setStq(e.target.value)} placeholder={`🔎 Filter ${stations.length} stations…`} aria-label="Filter stations" style={{ ...input, minHeight: 38, marginBottom: 6 }} />
+              )}
               {stations.length === 0 ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>No stations yet.</div> : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {stations.map((s) => (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                  {stations.filter((s) => form.stationIds.includes(s.id) || !stq.trim() || `${s.name} ${s.kind}`.toLowerCase().includes(stq.trim().toLowerCase())).map((s) => (
                     <Chip key={s.id} on={form.stationIds.includes(s.id)} onClick={() => toggleStation(s.id)}>{KIND_ICON[s.kind] || '📍'} {s.name}</Chip>
                   ))}
                 </div>
@@ -1276,6 +1400,7 @@ function StaffTab({ suiteId, canManage, flash, reloadKey, onDevice }) {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <Chip on={form.canMove !== false} onClick={() => setForm({ ...form, canMove: form.canMove === false })}>🔀 Can move devices</Chip>
                 <Chip on={!!form.canCheckpoint} onClick={() => setForm({ ...form, canCheckpoint: !form.canCheckpoint })}>✅ Can do checkpoints</Chip>
+                <Chip on={form.alertsOn !== false} onClick={() => setForm({ ...form, alertsOn: form.alertsOn === false })}>🔔 Station alerts</Chip>
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Everyone can log issues. Move &amp; Checkpoint appear in their portal only if enabled here.</div>
             </div>
@@ -1699,7 +1824,8 @@ const stationCard = { ...card, display: 'flex', flexDirection: 'column', alignIt
 const select = { padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, maxWidth: '100%' };
 const input = { width: '100%', boxSizing: 'border-box', padding: '11px 12px', fontSize: 15, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' };
 const fieldCol = { display: 'flex', flexDirection: 'column', gap: 10 };
-const tabBtn = (on) => ({ padding: '9px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
+// Compact so Event · Hive · Data health · Flow board always fit one mobile row.
+const tabBtn = (on) => ({ padding: '8px 10px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: on ? 700 : 500, background: on ? 'var(--brand)' : 'var(--card)', color: on ? '#fff' : 'var(--text)', whiteSpace: 'nowrap' });
 const mobileTabs = { display: 'flex', gap: 6, flexWrap: 'wrap' };
 const leftNav = { display: 'flex', flexDirection: 'column', gap: 3, padding: 6, borderRadius: 14, border: '1px solid var(--hairline)', background: 'var(--card)' };
 const navScan = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '13px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 800, background: 'var(--brand)', color: '#fff', boxShadow: 'var(--shadow-sm)' };

@@ -9,7 +9,7 @@ import GoalsBriefModal from '../components/goals/GoalsBriefModal.jsx';
 import GoalDetail from '../components/goals/GoalDetail.jsx';
 import GapPlanModal from '../components/goals/GapPlanModal.jsx';
 import GoalEditor from '../components/GoalEditor.jsx';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 
 // The dedicated Goals page (the Results pillar, full surface). The home strip is a
 // teaser that links here; this is where goals live in full — grouped by event, with
@@ -197,13 +197,7 @@ export default function GoalsPage() {
 
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '4px 2px 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 12px' }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Results</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your goals</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Results" title="Your goals" />
       <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 14px', lineHeight: 1.5 }}>
         Targets on the numbers that matter — tracked live, the North Star leading. Tap a goal to see its detail, or set a new one.
       </p>

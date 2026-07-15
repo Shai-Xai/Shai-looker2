@@ -63,6 +63,30 @@ function deleteUser(id) { db.deleteUser(id); invalidateUser(id); }
 
 // Seed an admin on first run so the app is usable out of the box.
 function seedAdmin() {
+  // Break-glass: with ADMIN_RESET=1 (+ ADMIN_EMAIL + ADMIN_PASSWORD), on boot
+  // CREATE that admin if missing, or RESET its password if it already exists —
+  // even when other users exist. Recovers a locked-out admin (or a fresh staging
+  // box) without needing the email reset flow (which staging disables).
+  //
+  // Self-disabling: we fingerprint (email+password) and record it. If the env
+  // vars are left set after recovery (easy to forget), we DON'T re-pin the
+  // password on every deploy — a boot whose fingerprint matches the last applied
+  // one is a no-op. Only a *changed* password (a deliberate new reset) acts
+  // again. This removes the "static known credential re-pinned every restart"
+  // risk while keeping the recovery lever. Still: REMOVE ADMIN_RESET once back in.
+  if (process.env.ADMIN_RESET === '1' && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    const email = process.env.ADMIN_EMAIL.trim().toLowerCase();
+    const fp = crypto.createHash('sha256').update(`${email}\n${process.env.ADMIN_PASSWORD}`).digest('hex');
+    if (db.getSetting('admin_reset_fingerprint') === fp) {
+      console.log('[auth] ADMIN_RESET set but already applied for these credentials — skipping (remove ADMIN_RESET to silence).');
+    } else {
+      const existing = db.getUserByEmail(email);
+      if (existing) { db.updateUser(existing.id, { password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ⚠ ADMIN_RESET: reset password for ${email}`); }
+      else { db.createUser({ email, password: process.env.ADMIN_PASSWORD, role: 'admin' }); console.log(`[auth] ⚠ ADMIN_RESET: created admin ${email}`); }
+      db.setSetting('admin_reset_fingerprint', fp);
+    }
+    return;
+  }
   if (db.listUsers().length > 0) return;
   const email = process.env.ADMIN_EMAIL || 'admin@howler.local';
   // Never seed a KNOWN password in production: if ADMIN_PASSWORD is unset there,
@@ -99,6 +123,37 @@ function issueCookie(res, user) {
 }
 function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 
+// ── 👁 View as user (admin impersonation) ───────────────────────────────────────
+// The admin's session cookie is stashed in a return cookie, the main session is
+// swapped for a SHORT (2h) token for the target user carrying an `imp` claim
+// (who's driving), and a NON-httpOnly hint cookie tells the UI to show the
+// banner. The impersonated session is a real client session — admin routes
+// reject it (role client) — and it dies with the target's tokenVersion like any
+// other. Exit verifies the return cookie decodes to a live ADMIN before
+// restoring it, so a forged/expired return can never mint admin access.
+const IMP_RETURN = 'howler_admin_return';
+const IMP_HINT = 'howler_viewing_as'; // read by the client shell (UI banner only — no authority)
+function issueImpersonationCookie(req, res, target, admin) {
+  const adminToken = req.cookies?.[COOKIE] || '';
+  const token = jwt.sign({ sub: target.id, tv: target.tokenVersion || 0, imp: admin.id }, getSecret(), { algorithm: 'HS256', expiresIn: '2h' });
+  res.cookie(IMP_RETURN, adminToken, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 * 1000 });
+  res.cookie(IMP_HINT, encodeURIComponent(target.email || ''), { ...COOKIE_OPTS, httpOnly: false, maxAge: 2 * 60 * 60 * 1000 });
+  res.cookie(COOKIE, token, { ...COOKIE_OPTS, maxAge: 2 * 60 * 60 * 1000 });
+}
+function endImpersonation(req, res) {
+  const ret = req.cookies?.[IMP_RETURN];
+  res.clearCookie(IMP_RETURN, COOKIE_OPTS);
+  res.clearCookie(IMP_HINT, { ...COOKIE_OPTS, httpOnly: false });
+  if (!ret) { clearCookie(res); return null; }
+  try {
+    const { sub, tv, stage, imp } = jwt.verify(ret, getSecret(), { algorithms: ['HS256'] });
+    const admin = cachedUser(sub);
+    if (stage || imp || !admin || admin.role !== 'admin' || (tv || 0) !== (admin.tokenVersion || 0)) { clearCookie(res); return null; }
+    res.cookie(COOKIE, ret, { ...COOKIE_OPTS, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return admin;
+  } catch { clearCookie(res); return null; }
+}
+
 // ─── Embed session tokens (organizer-portal Owl — server/owlEmbed.js) ─────────
 // A short-lived bearer JWT (marked with an `emb` claim) that authenticates the
 // chromeless /embed/owl page WITHOUT a cookie: inside a cross-site iframe the
@@ -108,7 +163,9 @@ function clearCookie(res) { res.clearCookie(COOKIE, COOKIE_OPTS); }
 // attachUser accepts it below and marks the request `req.embedAuth`.
 const EMBED_TOKEN_TTL_S = 2 * 60 * 60; // one working session; the portal mints a fresh one per open
 function issueEmbedToken(user, ttlSeconds = EMBED_TOKEN_TTL_S) {
-  return jwt.sign({ sub: user.id, emb: 1 }, getSecret(), { expiresIn: ttlSeconds });
+  // Carry the password epoch (tv) so a reset revokes outstanding embed tokens too.
+  // HS256 pinned as defence-in-depth against algorithm-confusion (matches the cookie signer).
+  return jwt.sign({ sub: user.id, emb: 1, tv: user.tokenVersion || 0 }, getSecret(), { algorithm: 'HS256', expiresIn: ttlSeconds });
 }
 
 // Short-TTL cache of the authenticated user. A single screen fires 10-20 parallel
@@ -150,8 +207,14 @@ function attachUser(req, _res, next) {
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers?.authorization || '');
     if (m && m[1].split('.').length === 3) {
       try {
-        const p = jwt.verify(m[1], getSecret());
-        if (p.emb) { req.user = cachedUser(p.sub) || null; req.embedAuth = !!req.user; }
+        // HS256 pinned — same algorithm-confusion defence as the session path.
+        const p = jwt.verify(m[1], getSecret(), { algorithms: ['HS256'] });
+        if (p.emb) {
+          const user = cachedUser(p.sub) || null;
+          // Honour the password epoch: an embed token minted before the user's
+          // current tokenVersion (e.g. after a password reset) no longer authenticates.
+          if (user && (p.tv || 0) === (user.tokenVersion || 0)) { req.user = user; req.embedAuth = true; }
+        }
       } catch { /* not an embed token — ignore */ }
     }
   }
@@ -508,7 +571,7 @@ module.exports = {
   // users
   loadUsers, publicUser, createUser, updateUser, deleteUser, getUser, verifyCredentials,
   // session
-  issueCookie, clearCookie, issueEmbedToken, attachUser, requireAuth, requireAdmin, invalidateUser,
+  issueCookie, clearCookie, issueEmbedToken, issueImpersonationCookie, endImpersonation, attachUser, requireAuth, requireAdmin, invalidateUser,
   issue2faPending, verify2faPending,
   // scoping
   scopeFiltersForUser, accessibleOrgFilters, canAccessDashboard,
