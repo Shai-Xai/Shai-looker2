@@ -18,7 +18,10 @@ const msg = (o) => ({ type: 'message', channel: 'email', delayHours: 0, subject:
 
 // A single simulation run over one journey + a cast of personas.
 class Sim {
-  constructor(journey) {
+  // opts.convSource: true (default) = an explicit conversion source (convSet);
+  // false = default mode, where "bought" means leaving the live audience.
+  constructor(journey, opts = {}) {
+    this.convSource = opts.convSource !== false;
     this.sql = new Database(':memory:');
     this.sql.exec(`
       CREATE TABLE action_enrollments (action_id TEXT, email TEXT, name TEXT DEFAULT '', ticket TEXT DEFAULT '', phone TEXT DEFAULT '',
@@ -28,7 +31,7 @@ class Sim {
       CREATE TABLE action_opens (action_id TEXT, email TEXT, at TEXT, step INTEGER DEFAULT -1);
       CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);`);
     this.reachable = new Map();
-    this.convSet = new Set();        // explicit conversion source = "bought"
+    this.convSet = this.convSource ? new Set() : null; // explicit conversion source, or null = "left the audience" mode
     this.segSets = {};               // segmentId -> Set(email) for in_segment branches
     this.emailByPhone = {};          // phone -> email (SMS sends arrive keyed by phone)
     this.sup = new Set();            // unsubscribed emails
@@ -60,6 +63,7 @@ class Sim {
   open(email) { this.sql.prepare("INSERT INTO action_opens (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   click(email) { this.open(email); this.sql.prepare("INSERT INTO action_clicks (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   buy(email) { this.convSet.add(email.toLowerCase()); }
+  leave(email) { this.reachable.delete(email); } // default mode: leaving the live audience = "bought"
   unsub(email) { this.sup.add(email); }
   consent(email, patch) { this.reachable.set(email, { ...this.reachable.get(email), ...patch }); }
   addToSegment(segId, email) { (this.segSets[segId] = this.segSets[segId] || new Set()).add(email.toLowerCase()); }
@@ -329,21 +333,83 @@ const SCENARIOS = [
           syncs: [{ platform: 'meta', action: 'add', audience: 'FF27 retargeting' }, { platform: 'tiktok', action: 'add', audience: 'FF27 retargeting' }] } },
     ],
   },
+  {
+    name: 'Conversion by LEAVING the audience (default mode, no conversion source)',
+    convSource: false, // "bought" = no longer in the live audience (classic abandoned-cart)
+    flow: [
+      '✉  opener  →  ◆ after 2 days, still in the abandoned-cart audience?',
+      '   ├─ Bought (left the audience) → ✉ Thanks  → exits CONVERTED',
+      '   └─ No response                → ✉ Last chance',
+      '   (no separate conversion list — leaving the audience IS the purchase signal)',
+    ],
+    journey: {
+      name: 'Left-audience conversion',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [msg({ subject: 'Thanks!' })] },
+          { label: 'No response', nodes: [msg({ subject: 'Last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Nia', email: 'nia@x.com', behaviour: 'completes checkout → drops out of the abandoned-cart audience',
+        drive: [(s, e) => s.leave(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks!'] } },
+      { name: 'Ola', email: 'ola@x.com', behaviour: 'stays in the audience, never buys',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Last chance'] } },
+    ],
+  },
+  {
+    name: 'A late click after the window closed does NOT re-route',
+    flow: [
+      '✉  opener  →  ◆ clicked in 24h?',
+      '   ├─ Clicked → ✉ hot lead',
+      '   └─ No      → ✉ last chance   ← Uma lands here…',
+      '   …then Uma clicks a day LATE — she must STAY done, not jump to “hot lead”.',
+    ],
+    journey: {
+      name: 'Late click',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked in 24h?', waitHours: 24, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'hot lead' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Uma', email: 'uma@x.com', behaviour: 'ghosts through the window, then clicks a day late',
+        drive: [() => {}],
+        late: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'last chance'] } }, // late click ignored — already finished
+      { name: 'Vic', email: 'vic@x.com', behaviour: 'clicks inside the window',
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'hot lead'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
 // behaviour, then let the windows expire — returning per-persona results.
 async function simulate(scn) {
   const journey = j.validateJourney(scn.journey);
-  const sim = new Sim(journey);
+  const sim = new Sim(journey, { convSource: scn.convSource });
   for (const p of scn.personas) {
     sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
     if (p.consent) sim.consent(p.email, p.consent); // e.g. no SMS consent
   }
   await sim.run('Day 0 · sent');                 // openers + everyone parks at the first wait
-  for (const p of scn.personas) for (const step of p.drive) step(sim, p.email); // inject behaviours
+  for (const p of scn.personas) for (const step of p.drive || []) step(sim, p.email); // inject behaviours
   await sim.run('In-window · reacted');           // early-advancers route immediately
   await sim.run('Window closed', { expire: true }); // the silent take the timeout branch
+  // Optional LATE behaviour (e.g. a click after the window already closed) + one
+  // more tick — proves a finished person is never reprocessed / re-routed.
+  if (scn.personas.some((p) => p.late)) {
+    for (const p of scn.personas) for (const step of p.late || []) step(sim, p.email);
+    await sim.run('Later · stale signal');
+  }
   return scn.personas.map((p) => ({ ...p, status: sim.status(p.email), got: sim.received(p.email), syncs: sim.syncedFor(p.email) }));
 }
 
