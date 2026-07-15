@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (🦉 Fan Owl: homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-15 (🦉 Fan Owl: half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -208,6 +208,11 @@ ticket like a well-informed friend who's already going.
 - **Reads the ticket shop for you** — point the Owl at the event's ticket page
   and it drafts the whole catalogue (names, prices, buy links, images) as
   suggestions to review and save. Interim until the direct Howler catalogue feed.
+- **Half-drawer suggestions** — tap the bar's input and a drawer rises with THIS
+  page's suggested topics + its lead offer; start typing and it live-filters
+  every starter, FAQ and page ("glamp" → the glamping questions + the Stay page).
+  Tap to ask — the drawer grows into the chat. Instant and deterministic, no AI
+  cost until the fan actually asks.
 - **Homepage hero chat** — a per-site toggle: fans landing on the home page get
   the ask box centred like a welcome mat — the Owl's face, greeting, the site's
   nav buttons and the question box. Folds into the bar/launcher on scroll or
@@ -1054,6 +1059,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-15** — **Fan Owl: half-drawer suggestions on the ask bar** 🧪: one
+  input, three altitudes — focusing the persistent bar raises a drawer with the
+  page's suggested topics and lead offer; typing switches to live-filtered
+  matches across all starters, FAQs and pages (current page ranked first, match
+  highlighted, "open page →" rows for matching pages); send or tap grows it into
+  the full chat. Deterministic and instant. Verified end-to-end (6/6 checks).
 - **2026-07-15** — **Fan Owl: homepage hero chat** 🧪: a per-site toggle (next to
   Widget style) opens the ask box centred when fans land on the home page —
   avatar, localised greeting ("where should we begin?"), the nav buttons in the

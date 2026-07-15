@@ -61,7 +61,7 @@
     return n;
   }
 
-  var bar, barMenu, barInput; // the persistent ask bar (widgetStyle 'bar')
+  var bar, barMenu, barInput, drawer; // the persistent ask bar (widgetStyle 'bar') + its half drawer
   // The bar's page-aware placeholder (same strings as the chat composer).
   var BAR_LOC = {
     en: { ask: 'Ask about tickets…', on: 'Ask about {t}…', hi: 'Hey! I’m {name} — where should we begin?', sub: 'Tickets, line-up, getting there — ask me anything.', t: { home: 'the event', tickets: 'tickets', lineup: 'the line-up', artist: 'the artists', venue: 'the venue', accommodation: 'where to stay', attraction: 'what to do', sponsors: 'our partners', faq: 'the details', other: 'this page' } },
@@ -233,6 +233,96 @@
     });
     return menu;
   }
+  // ── The half drawer: two phases in one surface. FOCUS (nothing typed) shows
+  // THIS page's suggested topics + its lead offer; TYPING switches to live
+  // substring-filtered matches across all starters, FAQ/tip questions and pages
+  // (current page ranks first). Tap = ask (opens the chat with it sent) or
+  // navigate. Deterministic, instant, zero AI.
+  function drawerRows(needle) {
+    var sug = ctx.suggest || { topics: [], pool: [] };
+    var rows = [];
+    if (!needle) {
+      (sug.topics.length ? sug.topics : (sug.pool || []).slice(0, 3).map(function (e) { return e.q; })).slice(0, 4)
+        .forEach(function (q) { rows.push({ kind: 'ask', q: q }); });
+      if (ctx.offer) rows.push({ kind: 'offer', offer: ctx.offer });
+      return rows;
+    }
+    var n = needle.toLowerCase();
+    var hits = (sug.pool || []).filter(function (e) { return e.q.toLowerCase().indexOf(n) !== -1; });
+    hits.sort(function (a, b) { return (b.here ? 1 : 0) - (a.here ? 1 : 0); });
+    hits.slice(0, 5).forEach(function (e) { rows.push({ kind: 'ask', q: e.q, faq: e.faq }); });
+    (ctx.nav || []).forEach(function (nv) {
+      if (rows.length >= 7) return;
+      var label = navLabelOf(nv);
+      if (label.toLowerCase().indexOf(n) !== -1 || nv.pageType.indexOf(n) !== -1 || nv.path.toLowerCase().indexOf(n) !== -1) {
+        rows.push({ kind: 'page', nav: nv });
+      }
+    });
+    return rows;
+  }
+  function highlightInto(parent, text, needle, accent) {
+    var i = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+    if (i === -1) { parent.appendChild(document.createTextNode(text)); return; }
+    parent.appendChild(document.createTextNode(text.slice(0, i)));
+    var m = el('span', { color: accent, fontWeight: '700' }, parent);
+    m.textContent = text.slice(i, i + needle.length);
+    parent.appendChild(document.createTextNode(text.slice(i + needle.length)));
+  }
+  function hideDrawer() { if (drawer) drawer.style.display = 'none'; }
+  function renderDrawer() {
+    if (!bar || !barInput) return;
+    var dark = barDark();
+    var color = (ctx.site && ctx.site.brandColor) || '#111';
+    var needle = barInput.value.trim();
+    var rows = drawerRows(needle);
+    if (!rows.length) { hideDrawer(); return; }
+    if (!drawer) {
+      drawer = el('div', {
+        position: 'absolute', bottom: 'calc(100% + 8px)', left: '0', right: '0',
+        background: dark ? 'rgba(17,17,21,.96)' : 'rgba(255,255,255,.98)',
+        color: dark ? '#f2f2f4' : '#141414',
+        border: '1px solid ' + (dark ? 'rgba(255,255,255,.09)' : 'rgba(0,0,0,.08)'),
+        borderRadius: '18px', padding: '8px', boxShadow: '0 14px 44px rgba(0,0,0,.35)',
+        maxHeight: 'min(340px, 46vh)', overflowY: 'auto',
+        backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+      }, bar);
+    }
+    drawer.innerHTML = '';
+    var head = el('div', { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '10.5px', fontWeight: '700', letterSpacing: '.06em', textTransform: 'uppercase', opacity: '.55', padding: '4px 8px 7px' }, drawer);
+    head.textContent = needle ? '💡 Matching “' + needle.slice(0, 30) + '”' : '📍 On this page — tap to ask';
+    rows.forEach(function (row) {
+      var r = el('button', {
+        display: 'flex', alignItems: 'center', gap: '11px', width: '100%', textAlign: 'left', border: '0',
+        background: 'transparent', color: 'inherit', borderRadius: '11px', padding: '11px 10px',
+        cursor: 'pointer', fontSize: '14px', fontWeight: '600', fontFamily: 'inherit', lineHeight: '1.35',
+      }, drawer);
+      r.type = 'button';
+      var icon = el('span', { width: '30px', height: '30px', borderRadius: '50%', background: dark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.06)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto', fontSize: '14px' }, r);
+      var textWrap = el('span', { flex: '1', minWidth: '0' }, r);
+      if (row.kind === 'ask') {
+        icon.textContent = row.faq ? '❓' : '💬';
+        highlightInto(textWrap, row.q, needle, color);
+        r.addEventListener('pointerdown', function (e) { e.preventDefault(); hideDrawer(); openPanel(false, row.q); });
+      } else if (row.kind === 'offer') {
+        icon.textContent = '🎟️';
+        textWrap.textContent = row.offer.label + (row.offer.price ? ' · ' + row.offer.currency + ' ' + row.offer.price : '');
+        var go = el('span', { color: 'inherit', opacity: '.4', fontWeight: '400', fontSize: '12px', flex: '0 0 auto' }, r);
+        go.textContent = 'tell me more →';
+        r.addEventListener('pointerdown', function (e) { e.preventDefault(); hideDrawer(); openPanel(false, 'Tell me about ' + row.offer.label); });
+      } else {
+        icon.innerHTML = navIconHtml(row.nav, 15);
+        highlightInto(textWrap, navLabelOf(row.nav), needle, color);
+        var go2 = el('span', { color: 'inherit', opacity: '.4', fontWeight: '400', fontSize: '12px', flex: '0 0 auto' }, r);
+        go2.textContent = 'open page →';
+        r.addEventListener('pointerdown', function (e) { e.preventDefault(); hideDrawer(); navPick(row.nav); });
+      }
+      r.addEventListener('mouseenter', function () { r.style.background = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.05)'; });
+      r.addEventListener('mouseleave', function () { r.style.background = 'transparent'; });
+    });
+    if (barMenu) barMenu.style.display = 'none';
+    drawer.style.display = 'block';
+  }
+
   function renderBar() {
     var color = (ctx.site && ctx.site.brandColor) || '#111';
     var dark = barDark();
@@ -256,6 +346,7 @@
       }, row);
       plus.type = 'button'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Site navigation');
       plus.addEventListener('click', function () {
+        hideDrawer();
         if (barMenu && barMenu.style.display !== 'none') { barMenu.style.display = 'none'; return; }
         if (!barMenu) barMenu = makeNavMenu(row, dark, navPick);
         barMenu.style.display = 'block';
@@ -263,8 +354,14 @@
     }
     barInput = makeAskPill(row, dark, color, function (q) {
       if (barMenu) barMenu.style.display = 'none';
+      hideDrawer();
       openPanel(false, q || undefined);
     });
+    // The half drawer: focus (empty) = this page's topics; typing = live filter.
+    barInput.addEventListener('focus', renderDrawer);
+    barInput.addEventListener('input', renderDrawer);
+    barInput.addEventListener('blur', function () { setTimeout(hideDrawer, 150); });
+    barInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { hideDrawer(); barInput.blur(); } });
     var foot = el('div', { textAlign: 'center', fontSize: '10.5px', opacity: '.55', padding: '3px 0 2px' }, bar);
     foot.insertAdjacentHTML('beforeend', 'Powered by Howler <img src="' + base + '/email-howler.png" alt="" style="height:11px;width:11px;border-radius:50%;vertical-align:-1.5px">');
   }
@@ -450,9 +547,10 @@
         ctx = r; sstore(false, SS_SESSION, r.sessionId);
         if (!root) return;
         if (bar) {
-          // The bar follows the page: refresh the placeholder + rebuild the ＋ menu.
+          // The bar follows the page: refresh the placeholder + rebuild menu/drawer.
           if (barInput) barInput.placeholder = askPlaceholder();
           if (barMenu) { try { barMenu.parentNode.removeChild(barMenu); } catch (e2) { /* gone */ } barMenu = null; }
+          if (drawer) { try { drawer.parentNode.removeChild(drawer); } catch (e3) { /* gone */ } drawer = null; }
         } else updateTeaser();
       })
       .catch(function () { /* keep the old ribbon */ });

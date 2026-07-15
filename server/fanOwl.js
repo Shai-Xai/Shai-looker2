@@ -801,6 +801,28 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     return { page, items, primary: items[0] || null, all };
   }
 
+  // The bar's half-drawer suggestions: THIS page's starter topics + a site-wide
+  // searchable pool (all pages' starters + FAQ/tip questions), deduped and capped.
+  // Deterministic — the drawer filters client-side as the fan types; no LLM.
+  const buildSuggest = (site, currentPage) => {
+    const seen = new Set();
+    const pool = [];
+    const push = (q, here, faq) => {
+      const t = String(q || '').trim().slice(0, 120);
+      if (!t || seen.has(t.toLowerCase()) || pool.length >= 100) return;
+      seen.add(t.toLowerCase());
+      pool.push({ q: t, here: !!here, faq: !!faq });
+    };
+    for (const p of pagesBySite.all(site.id)) {
+      for (const q of J(p.starters, [])) push(q, currentPage && currentPage.id === p.id, false);
+    }
+    for (const k of knowByEntity.all(site.entity_id)) {
+      if ((k.kind === 'faq' || k.kind === 'tip') && String(k.question || '').trim()) push(k.question, false, true);
+    }
+    const topics = currentPage ? J(currentPage.starters, []).map((q) => String(q).slice(0, 120)).filter(Boolean).slice(0, 4) : [];
+    return { topics, pool };
+  };
+
   // POST /api/fan/context — the loader's boot call (host-page origin): validate the
   // site, mint/reuse a session, return the deterministic ribbon payload. No LLM.
   app.post('/api/fan/context',
@@ -839,6 +861,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         sessionId: session.id,
         site: { name: site.name || suite?.name || '', brandColor: effBrandColor(site), theme: site.widget_theme || '', widgetStyle: site.widget_style || '', heroHome: !!site.hero_home, navStyle: site.nav_style || 'top', defaultLang: site.default_lang || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },
         nav: navButtons(site, page), // the persistent bar's + menu (and any loader-side nav)
+        suggest: (site.widget_style || '') === 'bar' ? buildSuggest(site, page) : undefined, // the bar's half-drawer
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
         pitch: page?.pitch || '', // the approved salesy line for THIS page (ribbon leads with it)
