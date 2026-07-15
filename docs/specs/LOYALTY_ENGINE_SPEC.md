@@ -194,6 +194,14 @@ happens at checkout, not in Pulse) and **uploaded into pools**:
   it fits the existing catalogue/deep-link pattern, redemption is just a
   ticket sale, and it's likely the cheapest reward per conversion (breakage +
   product margin) while lifting on-site spend.
+- **Merch works the same way.** The fan catalogue already carries a
+  `merchandise` kind (`fanOwl.js` KINDS), so an organiser can attach merch to
+  a ticket type as a reward ("buy the VIP pass, the tour tee is on us") —
+  either a ticket+merch bundle item a pool gates, or a merch grant on
+  purchase of a qualifying ticket type (the pool's `rules.ticket_types`
+  already expresses "applies when buying X"). Merch is also a natural wheel
+  slot (§7): high perceived value at product cost, and it walks around the
+  event as marketing afterwards.
 - **Code metadata matters:** min quantity (group codes), applicable ticket
   types, expiry — captured at upload so the Owl only offers a code when the
   fan's intent matches its rules (a group code goes to someone buying for 4,
@@ -226,7 +234,7 @@ prereg_lists        id, entity_id, suite_id, source(howler|csv|pulse),
 prereg_entries      id, list_id, email, phone, registered_at, meta(json)
 promo_pools         id, entity_id, suite_id, name, target(json: tiers[],
                     signals[]),
-                    reward_kind(discount|upgrade|addon|credit_bundle|prize),
+                    reward_kind(discount|upgrade|addon|credit_bundle|merch|prize),
                     value_label, rules(json: min_qty, ticket_types[], expires_at),
                     bundle_item_id?,  -- credit_bundle: the fan_catalogue item it gates
                     wheel_enabled, wheel_weight, terms_url, active, created_at
@@ -250,8 +258,9 @@ revealed to its grantee.
 - `POST /api/fan/spin` → server draws from wheel-enabled pools by weight
   (including explicit "try again next time" weight — losing slots are honest),
   writes the grant, returns the outcome → the widget animates *to* it.
-- Slots come FROM pools: discounts, an upgrade, sponsor giveaway, meet &
-  greet — plus enough small wins that most spins still push toward a purchase.
+- Slots come FROM pools: discounts, an upgrade, merch, sponsor giveaway,
+  meet & greet — plus enough small wins that most spins still push toward a
+  purchase.
 - Every wheel campaign has a `terms_url` (CPA §36 / local equivalents) and a
   published prize list. No fee, no purchase required to spin.
 
