@@ -24,6 +24,7 @@
   // the SAME conversation — the Owl remembers what you talked about last visit.
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
+  var SS_HERO = 'howler_fan_hero_' + siteKey.slice(-8); // per-tab: home-page hero shown/dismissed
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -63,14 +64,14 @@
   var bar, barMenu, barInput; // the persistent ask bar (widgetStyle 'bar')
   // The bar's page-aware placeholder (same strings as the chat composer).
   var BAR_LOC = {
-    en: { ask: 'Ask about tickets…', on: 'Ask about {t}…', t: { home: 'the event', tickets: 'tickets', lineup: 'the line-up', artist: 'the artists', venue: 'the venue', accommodation: 'where to stay', attraction: 'what to do', sponsors: 'our partners', faq: 'the details', other: 'this page' } },
-    af: { ask: 'Vra oor kaartjies…', on: 'Vra oor {t}…', t: { home: 'die geleentheid', tickets: 'kaartjies', lineup: 'die program', artist: 'die kunstenaars', venue: 'die venue', accommodation: 'verblyf', attraction: 'wat om te doen', sponsors: 'ons vennote', faq: 'die besonderhede', other: 'hierdie bladsy' } },
-    it: { ask: 'Chiedi sui biglietti…', on: 'Domande su {t}…', t: { home: 'l’evento', tickets: 'i biglietti', lineup: 'la line-up', artist: 'gli artisti', venue: 'la location', accommodation: 'l’alloggio', attraction: 'cosa fare', sponsors: 'i partner', faq: 'i dettagli', other: 'questa pagina' } },
-    es: { ask: 'Pregunta sobre entradas…', on: 'Pregunta sobre {t}…', t: { home: 'el evento', tickets: 'las entradas', lineup: 'el cartel', artist: 'los artistas', venue: 'el recinto', accommodation: 'dónde alojarte', attraction: 'qué hacer', sponsors: 'nuestros partners', faq: 'los detalles', other: 'esta página' } },
-    fr: { ask: 'Une question billets ?…', on: 'Une question sur {t} ?…', t: { home: 'l’événement', tickets: 'les billets', lineup: 'la programmation', artist: 'les artistes', venue: 'le lieu', accommodation: 'où loger', attraction: 'quoi faire', sponsors: 'nos partenaires', faq: 'les détails', other: 'cette page' } },
-    de: { ask: 'Frag zu Tickets…', on: 'Frag zu {t}…', t: { home: 'dem Event', tickets: 'Tickets', lineup: 'dem Line-up', artist: 'den Artists', venue: 'dem Gelände', accommodation: 'Unterkünften', attraction: 'Aktivitäten', sponsors: 'unseren Partnern', faq: 'den Details', other: 'dieser Seite' } },
-    pt: { ask: 'Pergunte sobre bilhetes…', on: 'Pergunte sobre {t}…', t: { home: 'o evento', tickets: 'bilhetes', lineup: 'o cartaz', artist: 'os artistas', venue: 'o recinto', accommodation: 'onde ficar', attraction: 'o que fazer', sponsors: 'os parceiros', faq: 'os detalhes', other: 'esta página' } },
-    nl: { ask: 'Vraag over tickets…', on: 'Vraag over {t}…', t: { home: 'het evenement', tickets: 'tickets', lineup: 'de line-up', artist: 'de artiesten', venue: 'de locatie', accommodation: 'overnachten', attraction: 'wat te doen', sponsors: 'onze partners', faq: 'de details', other: 'deze pagina' } },
+    en: { ask: 'Ask about tickets…', on: 'Ask about {t}…', hi: 'Hey! I’m {name} — where should we begin?', sub: 'Tickets, line-up, getting there — ask me anything.', t: { home: 'the event', tickets: 'tickets', lineup: 'the line-up', artist: 'the artists', venue: 'the venue', accommodation: 'where to stay', attraction: 'what to do', sponsors: 'our partners', faq: 'the details', other: 'this page' } },
+    af: { ask: 'Vra oor kaartjies…', on: 'Vra oor {t}…', hi: 'Haai! Ek is {name} — waar begin ons?', sub: 'Kaartjies, program, aanwysings — vra my enigiets.', t: { home: 'die geleentheid', tickets: 'kaartjies', lineup: 'die program', artist: 'die kunstenaars', venue: 'die venue', accommodation: 'verblyf', attraction: 'wat om te doen', sponsors: 'ons vennote', faq: 'die besonderhede', other: 'hierdie bladsy' } },
+    it: { ask: 'Chiedi sui biglietti…', on: 'Domande su {t}…', hi: 'Ciao! Sono {name} — da dove iniziamo?', sub: 'Biglietti, line-up, come arrivare — chiedimi qualsiasi cosa.', t: { home: 'l’evento', tickets: 'i biglietti', lineup: 'la line-up', artist: 'gli artisti', venue: 'la location', accommodation: 'l’alloggio', attraction: 'cosa fare', sponsors: 'i partner', faq: 'i dettagli', other: 'questa pagina' } },
+    es: { ask: 'Pregunta sobre entradas…', on: 'Pregunta sobre {t}…', hi: '¡Hola! Soy {name} — ¿por dónde empezamos?', sub: 'Entradas, cartel, cómo llegar — pregúntame lo que sea.', t: { home: 'el evento', tickets: 'las entradas', lineup: 'el cartel', artist: 'los artistas', venue: 'el recinto', accommodation: 'dónde alojarte', attraction: 'qué hacer', sponsors: 'nuestros partners', faq: 'los detalles', other: 'esta página' } },
+    fr: { ask: 'Une question billets ?…', on: 'Une question sur {t} ?…', hi: 'Salut ! Je suis {name} — on commence par quoi ?', sub: 'Billets, programmation, accès — demandez-moi tout.', t: { home: 'l’événement', tickets: 'les billets', lineup: 'la programmation', artist: 'les artistes', venue: 'le lieu', accommodation: 'où loger', attraction: 'quoi faire', sponsors: 'nos partenaires', faq: 'les détails', other: 'cette page' } },
+    de: { ask: 'Frag zu Tickets…', on: 'Frag zu {t}…', hi: 'Hey! Ich bin {name} — womit fangen wir an?', sub: 'Tickets, Line-up, Anfahrt — frag mich alles.', t: { home: 'dem Event', tickets: 'Tickets', lineup: 'dem Line-up', artist: 'den Artists', venue: 'dem Gelände', accommodation: 'Unterkünften', attraction: 'Aktivitäten', sponsors: 'unseren Partnern', faq: 'den Details', other: 'dieser Seite' } },
+    pt: { ask: 'Pergunte sobre bilhetes…', on: 'Pergunte sobre {t}…', hi: 'Olá! Sou {name} — por onde começamos?', sub: 'Bilhetes, cartaz, como chegar — pergunte-me qualquer coisa.', t: { home: 'o evento', tickets: 'bilhetes', lineup: 'o cartaz', artist: 'os artistas', venue: 'o recinto', accommodation: 'onde ficar', attraction: 'o que fazer', sponsors: 'os parceiros', faq: 'os detalhes', other: 'esta página' } },
+    nl: { ask: 'Vraag over tickets…', on: 'Vraag over {t}…', hi: 'Hoi! Ik ben {name} — waar beginnen we?', sub: 'Tickets, line-up, bereikbaarheid — vraag me alles.', t: { home: 'het evenement', tickets: 'tickets', lineup: 'de line-up', artist: 'de artiesten', venue: 'de locatie', accommodation: 'overnachten', attraction: 'wat te doen', sponsors: 'onze partners', faq: 'de details', other: 'deze pagina' } },
   };
   function askPlaceholder() {
     var L = BAR_LOC[(navigator.language || '').slice(0, 2).toLowerCase()] || BAR_LOC[String((ctx.site && ctx.site.defaultLang) || '').slice(0, 2)] || BAR_LOC.en;
@@ -160,12 +161,77 @@
     }
   });
 
-  // ── The persistent ask bar (widgetStyle 'bar'): the live composer, docked to
-  // the bottom of every page — ＋ nav menu, page-aware input, round send. Typing
-  // opens the chat with the question already sent; nav rows navigate directly.
+  // ── The persistent ask bar (widgetStyle 'bar') + the homepage hero: the live
+  // composer as always-on surfaces. Shared builders keep the pill + nav menu
+  // identical everywhere.
   function barDark() {
     return (ctx.site && ctx.site.theme === 'dark') ||
       ((!ctx.site || ctx.site.theme !== 'light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  var NAV_SVG = {
+    home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/>',
+    tickets: '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4Z"/>',
+    lineup: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+    artist: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.4 3.8-5 7-5s5.8 1.6 7 5"/>',
+    venue: '<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
+    accommodation: '<path d="M12 4 3 18h18L12 4Z"/><path d="M12 10 8.5 18h7L12 10Z"/>',
+    attraction: '<path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2L12 3Z"/>',
+    sponsors: '<circle cx="12" cy="12" r="8"/><path d="M8.5 12h7M12 8.5v7"/>',
+    faq: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.5c.4-1.2 1.3-2 2.5-2 1.4 0 2.5 1 2.5 2.3 0 1.6-2 1.9-2 3.2"/><circle cx="12" cy="16.6" r=".4" fill="currentColor"/>',
+    other: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  };
+  var NAV_TYPE_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
+  function navIconHtml(n, size) {
+    if (n.emoji) return '<span style="font-size:' + (size - 3) + 'px;line-height:1" aria-hidden="true">' + n.emoji + '</span>';
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (NAV_SVG[n.pageType] || NAV_SVG.other) + '</svg>';
+  }
+  function navLabelOf(n) { return n.label || NAV_TYPE_LABELS[n.pageType] || NAV_TYPE_LABELS.other; }
+  function navPick(n) {
+    beacon('nav_click', { path: n.path, pageType: n.pageType });
+    navTo(n.path);
+  }
+  // The spark-in-pill ask input with the round send — the live composer.
+  function makeAskPill(parent, dark, color, onSubmit) {
+    var pill = el('div', {
+      flex: '1', minWidth: '0', display: 'flex', alignItems: 'center', gap: '8px',
+      border: '1.5px solid ' + color, borderRadius: '999px', padding: '4px 4px 4px 13px',
+      minHeight: '46px', background: dark ? 'rgba(255,255,255,.06)' : '#fff', boxSizing: 'border-box',
+    }, parent);
+    pill.insertAdjacentHTML('beforeend', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="opacity:.55;flex:0 0 auto" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2m0-12-2 2M8 16l-2 2"/></svg>');
+    var input = el('input', { flex: '1', minWidth: '0', border: '0', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '15px', padding: '8px 0', fontFamily: 'inherit' }, pill);
+    input.placeholder = askPlaceholder();
+    input.setAttribute('aria-label', 'Ask a question');
+    var send = el('button', {
+      width: '36px', height: '36px', borderRadius: '50%', border: '0', flex: '0 0 auto',
+      background: color, color: '#fff', fontSize: '15px', fontWeight: '700', cursor: 'pointer', padding: '0',
+    }, pill);
+    send.type = 'button'; send.textContent = '↑'; send.setAttribute('aria-label', 'Ask');
+    var submit = function () { var q = input.value.trim(); input.value = ''; onSubmit(q); };
+    send.addEventListener('click', submit);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+    return input;
+  }
+  // The nav menu (for ＋ buttons) — anchored above `anchor` inside a positioned parent.
+  function makeNavMenu(parent, dark, onPick) {
+    var menu = el('div', {
+      position: 'absolute', bottom: 'calc(100% + 10px)', left: '0', width: 'min(320px, 92vw)',
+      background: dark ? 'rgba(24,24,30,.98)' : '#fff', color: 'inherit', zIndex: '5',
+      border: '1px solid ' + (dark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.1)'),
+      borderRadius: '14px', padding: '6px', boxShadow: '0 14px 40px rgba(0,0,0,.35)', textAlign: 'left',
+    }, parent);
+    (ctx.nav || []).forEach(function (n) {
+      var r = el('button', {
+        display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', border: '0',
+        background: 'transparent', color: 'inherit', borderRadius: '10px', padding: '10px 10px',
+        cursor: 'pointer', fontSize: '14px', fontWeight: '600', fontFamily: 'inherit',
+      }, menu);
+      r.type = 'button';
+      r.insertAdjacentHTML('beforeend', navIconHtml(n, 16) + '<span style="margin-left:2px">' + navLabelOf(n) + '</span>');
+      r.addEventListener('mouseenter', function () { r.style.background = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.05)'; });
+      r.addEventListener('mouseleave', function () { r.style.background = 'transparent'; });
+      r.addEventListener('click', function () { menu.style.display = 'none'; onPick(n); });
+    });
+    return menu;
   }
   function renderBar() {
     var color = (ctx.site && ctx.site.brandColor) || '#111';
@@ -191,65 +257,123 @@
       plus.type = 'button'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Site navigation');
       plus.addEventListener('click', function () {
         if (barMenu && barMenu.style.display !== 'none') { barMenu.style.display = 'none'; return; }
-        if (!barMenu) {
-          barMenu = el('div', {
-            position: 'absolute', bottom: 'calc(100% + 10px)', left: '0', width: 'min(320px, 92vw)',
-            background: dark ? 'rgba(24,24,30,.98)' : '#fff', color: 'inherit',
-            border: '1px solid ' + (dark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.1)'),
-            borderRadius: '14px', padding: '6px', boxShadow: '0 14px 40px rgba(0,0,0,.35)',
-          }, bar);
-          var TYPE_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
-          (ctx.nav || []).forEach(function (n) {
-            var r = el('button', {
-              display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', border: '0',
-              background: 'transparent', color: 'inherit', borderRadius: '10px', padding: '10px 10px',
-              cursor: 'pointer', fontSize: '14px', fontWeight: '600', fontFamily: 'inherit',
-            }, barMenu);
-            r.type = 'button';
-            r.textContent = (n.emoji ? n.emoji + '  ' : '›  ') + (n.label || TYPE_LABELS[n.pageType] || TYPE_LABELS.other);
-            r.addEventListener('mouseenter', function () { r.style.background = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.05)'; });
-            r.addEventListener('mouseleave', function () { r.style.background = 'transparent'; });
-            r.addEventListener('click', function () {
-              barMenu.style.display = 'none';
-              beacon('nav_click', { path: n.path, pageType: n.pageType });
-              navTo(n.path);
-            });
-          });
-        }
+        if (!barMenu) barMenu = makeNavMenu(row, dark, navPick);
         barMenu.style.display = 'block';
       });
     }
-    var pill = el('div', {
-      flex: '1', minWidth: '0', display: 'flex', alignItems: 'center', gap: '8px',
-      border: '1.5px solid ' + color, borderRadius: '999px', padding: '4px 4px 4px 13px',
-      minHeight: '46px', background: dark ? 'rgba(255,255,255,.06)' : '#fff', boxSizing: 'border-box',
-    }, row);
-    pill.insertAdjacentHTML('beforeend', '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="opacity:.55;flex:0 0 auto" aria-hidden="true"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2m0-12-2 2M8 16l-2 2"/></svg>');
-    barInput = el('input', { flex: '1', minWidth: '0', border: '0', outline: 'none', background: 'transparent', color: 'inherit', fontSize: '15px', padding: '8px 0', fontFamily: 'inherit' }, pill);
-    barInput.placeholder = askPlaceholder();
-    barInput.setAttribute('aria-label', 'Ask a question');
-    var send = el('button', {
-      width: '36px', height: '36px', borderRadius: '50%', border: '0', flex: '0 0 auto',
-      background: color, color: '#fff', fontSize: '15px', fontWeight: '700', cursor: 'pointer', padding: '0',
-    }, pill);
-    send.type = 'button'; send.textContent = '↑'; send.setAttribute('aria-label', 'Ask');
-    var submit = function () {
-      var q = barInput.value.trim();
-      barInput.value = '';
+    barInput = makeAskPill(row, dark, color, function (q) {
       if (barMenu) barMenu.style.display = 'none';
       openPanel(false, q || undefined);
-    };
-    send.addEventListener('click', submit);
-    barInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+    });
     var foot = el('div', { textAlign: 'center', fontSize: '10.5px', opacity: '.55', padding: '3px 0 2px' }, bar);
     foot.insertAdjacentHTML('beforeend', 'Powered by Howler <img src="' + base + '/email-howler.png" alt="" style="height:11px;width:11px;border-radius:50%;vertical-align:-1.5px">');
   }
+
+  // ── The homepage hero: the ask box opens centred when a fan lands on the home
+  // page (per-site toggle). Scroll, ✕ or a click outside folds it back into the
+  // bar/launcher for the rest of the tab session; asking or navigating counts too.
+  var heroWrap;
+  function shouldHero() {
+    if (!(ctx.site && ctx.site.heroHome)) return false;
+    if (sstore(true, SS_HERO) === '1') return false;
+    return ctx.pageType === 'home' || window.location.pathname === '/';
+  }
+  function dismissHero() {
+    sstore(false, SS_HERO, '1');
+    if (heroWrap) heroWrap.style.display = 'none';
+    if (bar) bar.style.display = 'block';
+    else if (launcher) launcher.style.display = 'flex';
+    if (!bar) updateTeaser();
+  }
+  function renderHero() {
+    var color = (ctx.site && ctx.site.brandColor) || '#111';
+    if (bar) bar.style.display = 'none';
+    if (launcher) launcher.style.display = 'none';
+    heroWrap = el('div', {
+      position: 'fixed', inset: '0', zIndex: '2147483001', background: 'rgba(8,6,14,.42)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px',
+      fontFamily: '-apple-system, system-ui, sans-serif',
+    }, root);
+    heroWrap.addEventListener('click', function (e) { if (e.target === heroWrap) dismissHero(); });
+    var card = el('div', {
+      position: 'relative', width: 'min(540px, 100%)', textAlign: 'center', color: '#f4f3f1',
+      background: 'rgba(16,16,20,.9)', border: '1px solid rgba(255,255,255,.09)',
+      borderRadius: '26px', padding: '26px 22px 20px', boxShadow: '0 22px 70px rgba(0,0,0,.45)',
+      backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxSizing: 'border-box',
+    }, heroWrap);
+    var x = el('button', { position: 'absolute', top: '10px', right: '10px', width: '32px', height: '32px', border: '0', borderRadius: '10px', background: 'rgba(255,255,255,.12)', color: '#fff', fontSize: '14px', cursor: 'pointer' }, card);
+    x.type = 'button'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
+    x.addEventListener('click', dismissHero);
+    if (ctx.site && ctx.site.owlAvatar) {
+      var av = el('img', { width: '54px', height: '54px', borderRadius: '50%', objectFit: 'cover', marginBottom: '10px' }, card);
+      av.src = ctx.site.owlAvatar; av.alt = '';
+    } else {
+      var face = el('div', { width: '54px', height: '54px', borderRadius: '50%', background: 'linear-gradient(135deg,' + color + ', #8b2ae7)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', marginBottom: '10px' }, card);
+      face.textContent = '🦉';
+    }
+    var L = BAR_LOC[(navigator.language || '').slice(0, 2).toLowerCase()] || BAR_LOC[String((ctx.site && ctx.site.defaultLang) || '').slice(0, 2)] || BAR_LOC.en;
+    var h = el('div', { fontSize: '21px', fontWeight: '800', letterSpacing: '-.01em', margin: '0 0 4px' }, card);
+    h.textContent = (ctx.site && ctx.site.owlIntro) || L.hi.replace('{name}', (ctx.site && ctx.site.owlName) || (ctx.event && ctx.event.name) || (ctx.site && ctx.site.name) || 'the Owl');
+    var sub = el('div', { fontSize: '13.5px', color: 'rgba(255,255,255,.65)', margin: '0 0 14px' }, card);
+    sub.textContent = L.sub;
+    // Nav in the site's chosen style (off → none; plus → ＋ beside the ask box).
+    var navStyle = (ctx.site && ctx.site.navStyle) || 'top';
+    var hasNav = (ctx.nav || []).length > 0 && navStyle !== 'off';
+    if (hasNav && navStyle !== 'plus') {
+      var navRow = el('div', { display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', margin: '0 0 14px' }, card);
+      (ctx.nav || []).forEach(function (n) {
+        var isIcon = navStyle === 'top';
+        var b = el('button', isIcon ? {
+          width: '44px', height: '44px', borderRadius: '50%', border: '0', cursor: 'pointer',
+          background: 'rgba(255,255,255,.14)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0',
+        } : {
+          display: 'inline-flex', alignItems: 'center', gap: '7px', cursor: 'pointer', minHeight: '38px',
+          border: '1px solid rgba(255,255,255,.22)', background: 'rgba(255,255,255,.08)', color: '#fff',
+          borderRadius: '999px', padding: '8px 14px', fontSize: '12.5px', fontWeight: '600', fontFamily: 'inherit',
+        }, navRow);
+        b.type = 'button';
+        b.title = navLabelOf(n);
+        b.setAttribute('aria-label', navLabelOf(n));
+        b.insertAdjacentHTML('beforeend', navIconHtml(n, isIcon ? 19 : 15) + (isIcon ? '' : '<span>' + navLabelOf(n) + '</span>'));
+        b.addEventListener('click', function () { dismissHero(); navPick(n); });
+      });
+    }
+    var askRow = el('div', { display: 'flex', gap: '9px', alignItems: 'center', position: 'relative' }, card);
+    if (hasNav && navStyle === 'plus') {
+      var hplus = el('button', {
+        width: '44px', height: '44px', borderRadius: '50%', flex: '0 0 auto', cursor: 'pointer',
+        border: '1.5px solid rgba(255,255,255,.28)', background: 'transparent', color: 'inherit',
+        fontSize: '21px', fontWeight: '300', lineHeight: '1', padding: '0',
+      }, askRow);
+      hplus.type = 'button'; hplus.textContent = '+'; hplus.setAttribute('aria-label', 'Site navigation');
+      var heroMenu = null;
+      hplus.addEventListener('click', function () {
+        if (heroMenu && heroMenu.style.display !== 'none') { heroMenu.style.display = 'none'; return; }
+        if (!heroMenu) heroMenu = makeNavMenu(askRow, true, function (n) { dismissHero(); navPick(n); });
+        heroMenu.style.display = 'block';
+      });
+    }
+    makeAskPill(askRow, true, color, function (q) {
+      dismissHero();
+      openPanel(false, q || undefined);
+    });
+    // Scrolling away folds the hero into the bar/launcher.
+    var startY = window.scrollY || 0;
+    var onScroll = function () {
+      if (Math.abs((window.scrollY || 0) - startY) > 60) {
+        window.removeEventListener('scroll', onScroll);
+        dismissHero();
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
+
 
   function render() {
     var color = (ctx.site && ctx.site.brandColor) || '#111';
     root = el('div', {}, document.body);
     root.setAttribute('data-howler-fan-owl', '');
-    if (ctx.site && ctx.site.widgetStyle === 'bar') { renderBar(); return; }
+    if (ctx.site && ctx.site.widgetStyle === 'bar') { renderBar(); if (shouldHero()) renderHero(); return; }
     // The launcher: a round Owl button, thumb-reachable, ≥48px tap target.
     launcher = el('button', {
       position: 'fixed', right: '18px', bottom: '18px', zIndex: '2147483000',
@@ -267,6 +391,7 @@
     } else launcher.textContent = '🦉';
     launcher.addEventListener('click', function () { openPanel(); });
 
+    if (shouldHero()) { renderHero(); return; }
     updateTeaser();
   }
 
