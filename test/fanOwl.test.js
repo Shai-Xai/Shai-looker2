@@ -124,6 +124,13 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.equal(r.body.site.owlAvatar, 'https://fest.example/owl.png');
   assert.equal(r.body.site.theme, 'dark');
   assert.equal(r.body.site.widgetStyle, 'bar'); // the loader picks bar vs launcher from this
+  // The half-drawer suggestions: bar sites get topics (this page) + a site pool.
+  assert.deepEqual(r.body.suggest.topics, []); // /tickets matches no mapping here
+  assert.ok(r.body.suggest.pool.some((e) => e.q === 'Who plays Saturday?'));
+  assert.ok(r.body.suggest.pool.some((e) => e.q === 'Can I bring kids?' && e.faq === true));
+  const rArt = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/artists/luna' }, headers: ORIGIN });
+  assert.deepEqual(rArt.body.suggest.topics, ['Who plays Saturday?']); // the matched page's starters
+  assert.ok(rArt.body.suggest.pool.find((e) => e.q === 'Who plays Saturday?').here); // ranked first while typing
   assert.equal(r.body.site.heroHome, true);
   assert.equal(r.body.site.navStyle, 'pills'); // the hero wears the site's nav style
   assert.equal(r.body.nav.length, 1); // the bar's + menu rides the context payload
