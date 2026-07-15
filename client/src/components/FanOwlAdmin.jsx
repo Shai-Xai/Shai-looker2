@@ -49,7 +49,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [catNote, setCatNote] = useState('');
   const [navBusy, setNavBusy] = useState(false);
   const [navNote, setNavNote] = useState(null); // { i, text }
-  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
+  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['nav', '🧭 Navigation'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
     let on = true;
@@ -355,9 +355,33 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   </select>
                 </div>
               </div>
-              <div style={{ marginTop: 12, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>🧭 Navigation buttons</div>
-                <p style={small}>The quick buttons fans use to hop around your site from the Owl — tap = the Owl takes them there and follows with that page's context.</p>
+              <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
+                placeholder="e.g. Warm and cheeky, proudly local, first-name basis, loves music puns, answers in the fan's language, keeps it short."
+                onChange={(e) => setSite(i, { persona: e.target.value })} />
+              <div style={{ ...small, marginTop: 8 }}>Dos & don'ts — house rules for this Owl</div>
+              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.guardrails || ''} maxLength={2000}
+                placeholder="e.g. Always mention the waiting list when something's sold out. Don't recommend camping to families. Never discuss other festivals."
+                onChange={(e) => setSite(i, { guardrails: e.target.value })} />
+              {s.siteKey && (
+                <div style={{ marginTop: 10 }}>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview this personality</a>
+                  <span style={{ ...small, marginLeft: 8 }}>Save first — the preview reads the saved config.</span>
+                </div>
+              )}
+            </div>
+          ))}
+          {cfg.sites.length > 0 && saveBar}
+        </>
+      )}
+
+      {tab === 'nav' && (
+        <>
+          <p style={small}>The quick buttons fans use to hop around your site from the Owl — tap = the Owl takes them there and follows with that page's context. Buttons come from your 📄 Pages automatically; curate them per site below.</p>
+          {!cfg.sites.length && <p style={small}>Add a site first (Sites section) — the buttons belong to a site.</p>}
+          {cfg.sites.map((s, i) => (
+            <div key={s.id || i} style={card}>
+              {cfg.sites.length > 1 && <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{s.name || 'Untitled site'}</div>}
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
                   <div>
                     <div style={small}>Where they live</div>
@@ -423,18 +447,9 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   </div>
                 )}
                 {navNote && navNote.i === i && <p style={{ ...small, marginTop: 6 }}>{navNote.text}</p>}
-              </div>
-              <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
-              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
-                placeholder="e.g. Warm and cheeky, proudly local, first-name basis, loves music puns, answers in the fan's language, keeps it short."
-                onChange={(e) => setSite(i, { persona: e.target.value })} />
-              <div style={{ ...small, marginTop: 8 }}>Dos & don'ts — house rules for this Owl</div>
-              <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.guardrails || ''} maxLength={2000}
-                placeholder="e.g. Always mention the waiting list when something's sold out. Don't recommend camping to families. Never discuss other festivals."
-                onChange={(e) => setSite(i, { guardrails: e.target.value })} />
               {s.siteKey && (
                 <div style={{ marginTop: 10 }}>
-                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview this personality</a>
+                  <a href={`/fan-owl-test?k=${s.siteKey}`} target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', fontWeight: 700 }}>▶ Preview</a>
                   <span style={{ ...small, marginLeft: 8 }}>Save first — the preview reads the saved config.</span>
                 </div>
               )}
