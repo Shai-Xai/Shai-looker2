@@ -206,9 +206,20 @@ and the Owl can greet it by name with a live early-bird code.
 Codes are **generated in the Howler ticketing system** (discount enforcement
 happens at checkout, not in Pulse) and **uploaded into pools**:
 
-- **Pool** = event (suite) + name + target (tier/signal combination) + reward
-  kind (discount / upgrade / add-on / prize / **credit bundle**) + value +
-  expiry + code stock + optional wheel flag & weight.
+- **Pool** = event (suite) + name + target (tier/signal combination **or a
+  saved segment**) + reward kind (discount / upgrade / add-on / prize /
+  **credit bundle**) + value + expiry + code stock + optional wheel flag &
+  weight.
+- **Segments as targets (decided 2026-07-15).** A pool may target a saved
+  Pulse segment instead of (or alongside) tiers/signals: eligibility = "this
+  verified email is in segment X", checked server-side via the existing
+  segment resolver (`audienceQuery.js` already returns the people list to
+  server-side callers only). This turns EVERY cohort anyone ever saved — a
+  prereg list, an Owl-built cohort, a campaign audience — into a promo
+  target with zero new targeting UI, and it's how external prereg lists can
+  enter without a dedicated importer (upload → segment → pool). Membership
+  is resolved at offer-time and cached briefly (Looker queries are slow);
+  a segment's reach preview doubles as the pool's audience estimate.
 - **Cashless credit rides a bundle, not a voucher.** Topup vouchers cannot be
   issued as codes (confirmed 2026-07-15) — but ticketing CAN bundle tickets +
   credit as a product. So the credit reward is a **ticket+credit bundle**
@@ -258,7 +269,7 @@ prereg_lists        id, entity_id, suite_id, source(howler|csv|pulse),
 prereg_entries      id, list_id, email, phone, registered_at, meta(json)
 promo_pools         id, entity_id, suite_id?,  -- null = portfolio-wide pool (any of the entity's events)
                     name, target(json: tiers[],
-                    signals[]),
+                    signals[], segment_id?),  -- segment: eligibility via the saved-segment resolver
                     reward_kind(discount|upgrade|addon|credit_bundle|merch|prize),
                     value_label, rules(json: min_qty, ticket_types[], expires_at),
                     bundle_item_id?,  -- credit_bundle: the fan_catalogue item it gates
