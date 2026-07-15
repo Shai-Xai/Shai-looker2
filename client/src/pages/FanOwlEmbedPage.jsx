@@ -356,16 +356,23 @@ export default function FanOwlEmbedPage() {
         )}
         {navStyle === 'plus' && (
           <button type="button" aria-label="Site navigation" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}
-            style={{ width: 42, height: 42, borderRadius: 12, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${C.chipLine}`, background: navOpen ? brand : C.chipBg, color: navOpen ? '#fff' : C.ink, fontSize: 20, fontWeight: 300, lineHeight: 1 }}>+</button>
+            style={{ width: 46, height: 46, borderRadius: '50%', flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${C.chipLine}`, background: navOpen ? brand : C.chipBg, color: navOpen ? '#fff' : C.ink, fontSize: 20, fontWeight: 300, lineHeight: 1 }}>+</button>
         )}
-        <input
-          style={{ ...S.input, background: C.inputBg, color: C.ink, border: `1px solid ${C.chipLine}` }}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={T.ask}
-          aria-label="Message"
-        />
-        <button type="submit" disabled={busy || !input.trim()} style={{ ...S.send, background: brand, opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
+        {/* The design's pill composer: accent ring, ✦ spark, round send inside. */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 9, border: `1.5px solid ${brand}`, borderRadius: 999, padding: '4px 4px 4px 14px', background: C.inputBg, minHeight: 46, boxSizing: 'border-box' }}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flex: '0 0 auto' }}>
+            <path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2m0-12-2 2M8 16l-2 2" />
+          </svg>
+          <input
+            style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', color: C.ink, fontSize: 15, padding: '8px 0' }}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={T.ask}
+            aria-label="Message"
+          />
+          <button type="submit" disabled={busy || !input.trim()}
+            style={{ width: 36, height: 36, border: 0, borderRadius: '50%', flex: '0 0 auto', background: brand, color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: busy || !input.trim() ? 0.5 : 1 }}>↑</button>
+        </div>
       </form>
       {navStyle === 'below' && navPillRow('10px 12px 8px')}
       <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 12, verticalAlign: -2 }} /></div>
@@ -414,7 +421,6 @@ const S = {
   chip: { border: '1px solid #ddd', background: '#fff', borderRadius: 999, padding: '8px 13px', fontSize: 13, cursor: 'pointer', minHeight: 36 },
   composer: { display: 'flex', gap: 8, padding: '10px 12px', borderTop: '1px solid #eee' },
   input: { flex: 1, border: '1px solid #ddd', borderRadius: 12, padding: '10px 12px', fontSize: 15, outline: 'none', minHeight: 40, boxSizing: 'border-box' },
-  send: { width: 42, height: 42, border: 0, borderRadius: 12, color: '#fff', fontSize: 18, cursor: 'pointer' },
   foot: { textAlign: 'center', fontSize: 10.5, color: '#999', padding: '0 0 7px' },
   sheet: { borderTop: '1px solid #eee', padding: '12px 14px', background: '#fafafa' },
   savedNote: { padding: '10px 14px', fontSize: 13.5, background: '#f0faf2', borderTop: '1px solid #d8eedd', color: '#1d6b34' },
