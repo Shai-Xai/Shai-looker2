@@ -35,6 +35,7 @@ const MAX_ACTIVE_KEYS = 20; // per entity — plenty for real integrations, boun
 function mount(app, { db, auth, rateLimit }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
+  require('./flags').init(db); // integrations.api backs apiEnabled — order-independent init
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS api_keys (
@@ -66,8 +67,10 @@ function mount(app, { db, auth, rateLimit }) {
   // Master per-client switch (default OFF): Howler enables API access per
   // client, deliberately. Enforced in bearerAuth — the one gate every external
   // call (REST + MCP) passes through — so flipping it off cuts a client's
-  // entire external surface instantly, keys and all.
-  const apiEnabled = (entityId) => db.getSetting(`api_enabled:${entityId}`, '0') === '1';
+  // entire external surface instantly, keys and all. Now backed by the
+  // integrations.api feature flag (old api_enabled:* settings seeded in at
+  // first flags boot); the toggle below writes the flag so both stay one switch.
+  const apiEnabled = (entityId) => require('./flags').enabled(entityId, 'integrations.api');
 
   const hash = (secret) => crypto.createHash('sha256').update(secret).digest('hex');
   const maskHint = (hint) => `••••••${hint}`;
@@ -167,7 +170,10 @@ function mount(app, { db, auth, rateLimit }) {
     res.json({ keys: listKeys(req.params.id), enabled: apiEnabled(req.params.id) });
   });
   app.put('/api/admin/entities/:id/api-access', auth.requireAdmin, (req, res) => {
-    db.setSetting(`api_enabled:${req.params.id}`, req.body?.enabled ? '1' : '0');
+    // Write the flag override (the one source of truth) — same as flipping
+    // integrations.api in Admin → Product → 🚩 Flags.
+    db.db.prepare('INSERT INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(entity_id, flag) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=excluded.updated_at')
+      .run(req.params.id, 'integrations.api', req.body?.enabled ? 'on' : 'off', req.user.email || '', new Date().toISOString());
     res.json({ enabled: apiEnabled(req.params.id) });
   });
   app.post('/api/admin/entities/:id/api-keys', auth.requireAdmin, asyncHandler(async (req, res) => {

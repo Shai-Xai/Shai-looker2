@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import { useProfile } from '../lib/profile.jsx';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import AlertEditor from '../components/AlertEditor.jsx';
 import LivePulsePanel from '../components/LivePulsePanel.jsx';
 
@@ -70,13 +70,7 @@ export default function AlertsPage() {
 
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', padding: '4px 2px 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0 12px' }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Action</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Alerts</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Action" title="Alerts" />
       <p style={{ color: 'var(--muted)', fontSize: 13.5, margin: '0 0 18px', lineHeight: 1.5 }}>
         Get a tap on the shoulder the moment a number matters — a sell-out, a revenue milestone, stock running low.
         Pulse watches the metric for you (checked every few minutes) and tells you on your phone, by email or SMS.

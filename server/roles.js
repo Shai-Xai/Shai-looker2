@@ -66,6 +66,18 @@ const ROLES = [
 const ROLE_KEYS = ROLES.map((r) => r.key);
 const DEFAULT_ROLE = 'owner';               // safe non-breaking default for existing/new memberships
 
+// ─── Super Admin (global designation) ─────────────────────────────────────────
+// Not a per-client role — a GLOBAL tag carried in users.roles (the same array as
+// 'dev'/'portal'). It gates the highest-risk platform controls (global campaign
+// billing, integrations, status notices, backup/restore) to a small trusted set
+// of Howler staff. Only a Howler admin (users.role==='admin') can BE a super
+// admin; a client login carrying the tag is not one. Enforcement always checks
+// isSuperAdmin(), never a role name — see auth.requireSuperAdmin.
+const SUPER_ADMIN = 'super_admin';
+function isSuperAdmin(user) {
+  return !!(user && user.role === 'admin' && (user.roles || []).includes(SUPER_ADMIN));
+}
+
 // Howler-staff job titles — the kind of support a client deals with. Only applies
 // to admin (Howler) logins; shown when creating an admin and surfaced to clients
 // as their "Howler Support" contact.
@@ -85,4 +97,4 @@ function lensForRole(key) { return getRole(key).lens || 'exec'; }
 // Public catalog (no internals) for the admin UI.
 function catalog() { return ROLES.map((r) => ({ key: r.key, label: r.label, description: r.description, lens: r.lens, permissions: r.permissions })); }
 
-module.exports = { PERMISSIONS, ROLES, ROLE_KEYS, DEFAULT_ROLE, getRole, permissionsForRole, lensForRole, catalog, HOWLER_ROLES, HOWLER_ROLE_KEYS, howlerRoleLabel };
+module.exports = { PERMISSIONS, ROLES, ROLE_KEYS, DEFAULT_ROLE, getRole, permissionsForRole, lensForRole, catalog, HOWLER_ROLES, HOWLER_ROLE_KEYS, howlerRoleLabel, SUPER_ADMIN, isSuperAdmin };

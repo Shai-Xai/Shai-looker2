@@ -13,6 +13,7 @@
 // GLOBAL json parser must SKIP these paths — see `parsesOwnBody` in index.js,
 // which still lists /api/admin/settlements* and /api/admin/documents*.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -89,7 +90,7 @@ function mount(app, { db, auth, insights, anthropicKey }) {
       senders: db.getSetting('settlement_ingest_senders', 'howler.co.za'),
     });
   });
-  app.put('/api/admin/owl-ingest', auth.requireAdmin, (req, res) => {
+  app.put('/api/admin/owl-ingest', auth.requireSuperAdmin, (req, res) => {
     if (req.body?.enabled !== undefined) db.setSetting('owl_ingest_enabled', req.body.enabled ? '1' : '0');
     if (req.body?.senders !== undefined) db.setSetting('settlement_ingest_senders', String(req.body.senders || '').slice(0, 2000));
     res.json({
@@ -212,7 +213,7 @@ function mount(app, { db, auth, insights, anthropicKey }) {
       const s = db.createSettlement({ entityId: null, title: data.meta.eventName, status: 'final', settlementDate: data.meta.settlementDate, data });
       res.status(201).json(s);
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      serverError(res, err);
     }
   });
 

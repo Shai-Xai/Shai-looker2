@@ -58,9 +58,14 @@ export function AuthProvider({ children }) {
   }, []);
 
   const isAdmin = user?.role === 'admin';
+  // Super Admin = a Howler admin carrying the global 'super_admin' tag. Gates the
+  // highest-risk platform controls (billing master · integrations · status
+  // notices · backup/restore). Server enforces the same check — this is only for
+  // hiding/disabling controls in the UI.
+  const isSuperAdmin = isAdmin && (user?.roles || []).includes('super_admin');
 
   return (
-    <AuthCtx.Provider value={{ user, loading, isAdmin, insightsEnabled, login, complete2fa, logout, refresh }}>
+    <AuthCtx.Provider value={{ user, loading, isAdmin, isSuperAdmin, insightsEnabled, login, complete2fa, logout, refresh }}>
       {children}
     </AuthCtx.Provider>
   );

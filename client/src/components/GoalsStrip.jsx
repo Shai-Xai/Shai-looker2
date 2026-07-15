@@ -28,7 +28,7 @@ export default function GoalsStrip({ entityId, suites }) {
   const list = suites || [];
   const dragId = useRef(null); // id of the card being dragged
   const loadSuite = useCallback((sid) => {
-    api.suiteGoals(sid).then((r) => setBySuite((m) => ({ ...m, [sid]: r }))).catch(() => {});
+    api.suiteGoals(sid, true).then((r) => setBySuite((m) => ({ ...m, [sid]: r }))).catch(() => {});
   }, []);
 
   // Drag-to-reorder within an event (desktop): move the dragged goal before the

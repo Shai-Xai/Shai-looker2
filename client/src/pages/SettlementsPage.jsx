@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import HomeButton from '../components/HomeButton.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import { useCountUp } from '../lib/useCountUp.js';
@@ -71,10 +71,7 @@ export default function SettlementsPage() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 14 : 26 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-        <HomeButton />
-        <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>Settlements</h1>
-      </div>
+      <PageHeader title="Settlements" />
       <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>Your settlements and invoices, grouped by event — every payout, fee and advance in one interactive view.</p>
       {events.length === 0 ? (
         <Centered>No settlements or invoices yet. They'll appear here, grouped by event, once Howler publishes one for you.</Centered>

@@ -5,6 +5,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { PinProvider } from '../lib/PinContext.jsx';
 import FilterBar, { activeFilterCount } from '../components/FilterBar.jsx';
 import DashboardInsightModal from '../components/DashboardInsightModal.jsx';
+import DashboardPrintHeader from '../components/DashboardPrintHeader.jsx';
 import AiMark from '../components/AiMark.jsx';
 import EditableGrid from '../components/EditableGrid.jsx';
 import BackButton from '../components/BackButton.jsx';
@@ -16,6 +17,7 @@ import { useTheme } from '../lib/theme.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { ScopeProvider } from '../lib/ScopeContext.jsx';
 import { combinedBlocksFromLockMap } from '../lib/combinedFilters.js';
+import { setReportTiles } from '../lib/reportContext.js';
 
 // Read-only render of a saved dashboard. When opened inside a Suite
 // (/suite/:suiteId/d/:id) the suite's locked filters are pre-filled + locked and
@@ -25,7 +27,7 @@ export default function ViewPage() {
   const { id, suiteId } = useParams();
   const navigate = useNavigate();
   const { isAdmin, insightsEnabled, user } = useAuth();
-  const { mode } = useProfile();
+  const { mode, active } = useProfile();
   const { previewEntityId, actionsSlot } = useOutletContext() || {};
   const { theme: appTheme } = useTheme();
   const [def, setDef] = useState(null);
@@ -188,6 +190,19 @@ export default function ViewPage() {
   // Feature-usage signal: a client opened a dashboard (Admin → Onboarding insights).
   useEffect(() => { if (scopeEntityId && id) api.trackUsage(scopeEntityId, { kind: 'feature', name: 'dashboard', event: 'use' }); }, [id, scopeEntityId]);
 
+  // Publish this dashboard's tiles so the app-wide Report widget can offer a
+  // "which tile is this about?" picker. Cleared on unmount / tab switch so the
+  // picker only shows on a dashboard. Includes tiles inside carousels/sections.
+  useEffect(() => {
+    if (!def) { setReportTiles([]); return; }
+    const list = [];
+    const add = (t) => { if (t?.id && !t.hidden) list.push({ id: t.id, title: (t.title || t.name || '').trim() || 'Untitled tile' }); };
+    for (const t of def.tiles || []) add(t);
+    for (const c of def.carousels || []) for (const t of c.tiles || []) add(t);
+    setReportTiles(list);
+    return () => setReportTiles([]);
+  }, [def]);
+
   // Sub-dashboard tabs: if this dashboard is a parent with children — or one of
   // the children — surface the whole family as a tab bar (parent first).
   // Computed from the suite tree (setInfo + id), independent of `def`, so the
@@ -342,7 +357,7 @@ export default function ViewPage() {
         {/* On mobile inside a suite the sticky "☰ Menu" bar already shows the
             context, so skip this header to avoid stacking two titles. */}
         {!(isMobile && suiteId) && (
-          <div style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+          <div className="no-print" style={{ background: 'var(--frost)', backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', borderBottom: '1px solid var(--hairline)', padding: isMobile ? '12px 14px' : '16px 22px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
             <BackButton fallback={backTo} style={homeBtn} />
             <Link to={backTo} title="Home" aria-label="Home" className="btn-key" style={homeBtn}><HomeIcon /></Link>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -413,6 +428,16 @@ export default function ViewPage() {
             // → #root padding-right), so the tiles area needs no extra padding here.
           }}
         >
+          {/* Branded cover — hidden on screen, shown only when printing to PDF
+              (Download PDF → window.print()). Carries the tenant's branding, the
+              title and the active filters/date range into the exported report. */}
+          <DashboardPrintHeader
+            title={headerTitle}
+            suiteName={setInfo?.name || ''}
+            entityName={active?.name || ''}
+            filters={def.filters || []}
+            values={filterValues}
+          />
           {/* Keyed by dashboard id so the grid animates in on each tab switch
               (sliding in the swipe/click direction); dimmed while the next
               dashboard's definition loads. */}
@@ -535,7 +560,7 @@ function ActionsMenu({ suiteId, dashboardId, filterValues, hasFilters, activeCou
               <span style={actionIco}>⤓</span>
               <span style={{ flex: 1, textAlign: 'left' }}>
                 Download PDF
-                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Print-ready copy of this view</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>Branded report — your logo + current filters</span>
               </span>
             </button>
           </div>

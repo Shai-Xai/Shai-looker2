@@ -108,7 +108,13 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
   https://business.facebook.com
 - One Meta **app** of type Business linked to that business:
   https://developers.facebook.com/apps (no app review needed — you only
-  access your own assets).
+  access your own assets). **This is the #1 blocker for new businesses** —
+  without an app in the portfolio, Meta greys out **Generate token** with
+  *"an app must be part of this business portfolio. Please add an app."*
+  To fix: https://developers.facebook.com/apps → **Create app** → type
+  **Business** → name it (e.g. "Pulse") → link it to the business portfolio
+  when prompted. If the app already exists but isn't linked: Business
+  settings → **Accounts → Apps** → Add → Connect an app ID.
 
 ### 2b. Create the system user + token
 1. Business settings: https://business.facebook.com/settings → Users →
@@ -128,6 +134,7 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
 ### 2c. Common blockers (in order of likelihood)
 | Symptom | Cause → fix |
 |---|---|
+| **Generate token** greyed out — "an app must be part of this business portfolio" | No Business app linked to the portfolio → create/link one (2a) |
 | Worked, then 401/"session expired" after a few hours | Graph Explorer token → use the system-user token (2b) |
 | "Unsupported get request" / permission error | Ad account not assigned to the system user (2b step 2) |
 | Insights sync fails | Missing `ads_read` on the token |

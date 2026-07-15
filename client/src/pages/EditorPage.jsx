@@ -117,6 +117,57 @@ export default function EditorPage() {
     }
   }
 
+  // Force comparison-events charts on THIS dashboard to sort events descending.
+  // Dry-run first (counts what would change), confirm, then apply, then reload.
+  async function comparisonSortDesc() {
+    try {
+      const dry = await api.comparisonSortDesc({ dashboardId: id }, false);
+      if (!dry.changed) {
+        const s = dry.skip || {};
+        const bits = [];
+        if (s.offsetAuto) bits.push(`${s.offsetAuto} offset comparison tile${s.offsetAuto === 1 ? '' : 's'} already show the current event first automatically (handled at view time)`);
+        if (s.alreadyDesc) bits.push(`${s.alreadyDesc} already sort events descending`);
+        if (s.notComparison) bits.push(`${s.notComparison} aren't event-comparison tiles`);
+        alert(`Nothing to flip on this dashboard.${bits.length ? `\n\n${bits.join('.\n')}.` : ''}`);
+        return;
+      }
+      if (!window.confirm(`Set ${dry.changed} comparison chart${dry.changed === 1 ? '' : 's'} on this dashboard to sort events descending?`)) return;
+      await api.comparisonSortDesc({ dashboardId: id }, true);
+      const fresh = await api.getDashboard(id);
+      setDef(fresh);
+      alert(`Updated ${dry.changed} tile${dry.changed === 1 ? '' : 's'}.`);
+    } catch (e) { alert('Could not update: ' + (e.message || e)); }
+  }
+
+  // Pull the latest from this dashboard's Looker source. Dry-run → show what would
+  // change (refreshed / added / gone from Looker) → confirm → apply → reload. Pulse
+  // edits (locks, days-to-go, carousels, layout, added tiles) are preserved.
+  const [resyncing, setResyncing] = useState(false);
+  async function resyncFromLooker() {
+    if (resyncing) return;
+    setResyncing(true);
+    try {
+      const dry = await api.resyncDashboard(id, false);
+      const s = dry.summary || {};
+      if (!s.updated && !s.added && !s.removedInLooker && !s.filtersUpdated && !s.filtersAdded) {
+        alert('This dashboard is already up to date with Looker — nothing to change.');
+        return;
+      }
+      const lines = [
+        s.updated ? `• ${s.updated} tile${s.updated === 1 ? '' : 's'} refreshed from Looker` : '',
+        s.added ? `• ${s.added} new tile${s.added === 1 ? '' : 's'} added${s.added_?.length ? `: ${s.added_.slice(0, 6).join(', ')}` : ''}` : '',
+        s.removedInLooker ? `• ${s.removedInLooker} tile${s.removedInLooker === 1 ? '' : 's'} no longer in Looker (kept, not deleted)${s.removed_?.length ? `: ${s.removed_.slice(0, 6).join(', ')}` : ''}` : '',
+        (s.filtersUpdated || s.filtersAdded) ? `• Filters: ${s.filtersUpdated} updated, ${s.filtersAdded} added` : '',
+      ].filter(Boolean).join('\n');
+      if (!window.confirm(`Re-sync from Looker?\n\n${lines}\n\nYour Pulse edits (locks, days-to-go, carousels, layout, added tiles) are preserved.`)) return;
+      await api.resyncDashboard(id, true);
+      const fresh = await api.getDashboard(id);
+      setDef(fresh);
+      alert('Re-synced from Looker.');
+    } catch (e) { alert('Could not re-sync: ' + (e.message || e)); }
+    finally { setResyncing(false); }
+  }
+
   // This dashboard is a shared template (no owner) opened inside a client suite:
   // saving offers a choice between updating the template and forking a client copy.
   const isTemplate = !def?.ownerEntityId;
@@ -372,6 +423,10 @@ export default function EditorPage() {
         <button style={btn} onClick={() => setShowFilters(true)}>Filters ({def.filters?.length || 0})</button>
         <button style={btn} onClick={() => setShowAiContext(true)}>✨ AI context</button>
         <button style={btn} onClick={() => setShowDaysSync(true)}>⏳ Days-to-go{def.daysBeforeSync?.mode && def.daysBeforeSync.mode !== 'off' ? ' ●' : ''}</button>
+        <button style={btn} onClick={comparisonSortDesc} title="Set comparison-events charts on this dashboard to sort events descending (most recent first). Skips offset ‘change’ tiles and measure sorts.">↕ Comparison → Desc</button>
+        {def.source?.lookerDashboardId && (
+          <button style={btn} onClick={resyncFromLooker} disabled={resyncing} title="Pull the latest from this dashboard's Looker source — refreshes tile queries/visuals, adds new tiles and flags removed ones, while keeping all your Pulse edits (locks, days-to-go, carousels, layout, added tiles).">{resyncing ? '↻ Re-syncing…' : '↻ Re-sync from Looker'}</button>
+        )}
         <button
           style={{ ...btn, ...(def.keepImportedFilters ? { background: 'var(--success,#10b981)', borderColor: 'var(--success,#10b981)', color: '#fff' } : null) }}
           onClick={() => mutate((d) => ({ ...d, keepImportedFilters: !d.keepImportedFilters }))}
