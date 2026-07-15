@@ -2831,22 +2831,10 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
 // The sales product-overview page (+ admin-filtered markdown), the curated
 // feature matrix with admin include/exclude, and the public /sales site all
 // live in server/productSite.js.
+// (…including the client/developer API guide at /api-guide and the self-hosted
+// /vendor/md-lite.js renderer both living-doc pages use — all living-doc serving
+// now lives in productSite.js so it stays together and out of this root file.)
 require('./productSite').mount(app, { db, auth });
-
-// The client/developer API guide — same living-doc pattern, shareable at
-// /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).
-const API_GUIDE_HTML = path.join(__dirname, '../docs/client-api-guide.html');
-const API_GUIDE_MD = path.join(__dirname, '../docs/CLIENT_API_GUIDE.md');
-app.get(['/api-guide', '/client-api-guide', '/client-api-guide.html'], (_req, res) => {
-  allowInlineScripts(res); // static doc with its own inline script
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(API_GUIDE_HTML);
-});
-app.get('/client-api-guide.md', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.type('text/markdown; charset=utf-8');
-  res.sendFile(API_GUIDE_MD);
-});
 
 // The Experience OS pitch — a self-contained HTML deck. Served at a clean URL so
 // it's shareable. (Scoped to this one doc; the rest of docs/ stays internal.)
