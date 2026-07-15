@@ -375,7 +375,7 @@ export default function FanOwlEmbedPage() {
         </div>
       </form>
       {navStyle === 'below' && navPillRow('10px 12px 8px')}
-      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 12, verticalAlign: -2 }} /></div>
+      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 13, width: 13, borderRadius: '50%', verticalAlign: -2.5 }} /></div>
     </div>
   );
 }
