@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import InfoTip from './InfoTip.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Admin → 📡 Data health: the BigQuery → Looker stream monitor. Each monitor polls
@@ -11,6 +12,10 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 
 const AREAS = ['Check-in', 'Bar', 'Vendors', 'Cashless', 'Ticketing', 'Other'];
 const STATUS_COLOR = { fresh: '#16a34a', warn: '#d97706', stale: '#dc2626' };
+const SignalBoard = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.SignalBoard })));
+const OwlSummary = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.OwlSummary })));
+const ControlKebab = lazy(() => import('./EventSignal.jsx').then((mod) => ({ default: mod.ControlKebab })));
+const ShareMenuLazy = lazy(() => import('./ShareMenu.jsx'));
 const STATUS_BG = { fresh: 'rgba(22,163,74,0.12)', warn: 'rgba(217,119,6,0.13)', stale: 'rgba(220,38,38,0.13)' };
 
 const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' };
@@ -323,17 +328,22 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
           </select>
         )}
         <span style={{ flex: 1 }} />
-        {[['blocks', '🟩 Blocks'], ['counts', '🔢 Counts'], ['observed', '📡 Offline log'], ['combined', '🚦 Combined']].map(([k, l]) => (
-          <button key={k} style={{ ...ghostBtn, padding: '4px 10px', ...(mode === k ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} onClick={() => setMode(k)}>{l}</button>
-        ))}
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
-        {[['start', '▶ Start'], [12, '12h'], [24, '24h'], [48, '48h']].map(([h, l]) => (
-          <button key={h} style={{ ...ghostBtn, padding: '4px 10px', ...(hours === h ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setHours(h)}>{l}</button>
-        ))}
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--hairline)' }} />
-        {[5, 10, 20, 30, 60].map((m) => (
-          <button key={m} style={{ ...ghostBtn, padding: '4px 8px', ...(interval === m ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }} disabled={busy} onClick={() => setIntervalMin(m)}>{m === 60 ? '1h' : `${m}m`}</button>
-        ))}
+        {/* one dropdown per decision (view · window · block size) beats twelve buttons */}
+        <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          <option value="blocks">🟩 Blocks</option>
+          <option value="counts">🔢 Counts</option>
+          <option value="observed">📡 Offline log</option>
+          <option value="combined">🚦 Combined</option>
+        </select>
+        <select value={String(hours)} disabled={busy} onChange={(e) => setHours(e.target.value === 'start' ? 'start' : Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          <option value="start">▶ From start</option>
+          <option value="12">Last 12h</option>
+          <option value="24">Last 24h</option>
+          <option value="48">Last 48h</option>
+        </select>
+        <select value={interval} disabled={busy} onChange={(e) => setIntervalMin(Number(e.target.value))} style={{ ...input, width: 'auto', padding: '4px 8px', fontSize: 12 }}>
+          {[5, 10, 20, 30, 60].map((n) => <option key={n} value={n}>{n === 60 ? '1h' : `${n}m`} blocks</option>)}
+        </select>
         <button style={{ ...ghostBtn, padding: '4px 10px' }} disabled={busy} onClick={() => load(hours, interval)}>{busy ? '…' : '🔄'}</button>
       </div>
       {data.anchored && data.startAt && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>From the start time — {new Date(data.startAt).toLocaleString('en-ZA', { weekday: 'short', hour: '2-digit', minute: '2-digit' })} to now.</div>}
@@ -387,7 +397,17 @@ function TimelinePanel({ monitorId, base = ADMIN_BASE, stations = [], unit = 'sc
                   </div>
                 );
               })()
-      ) : !data.devices.length ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>No device activity in this window.</div> : mode === 'counts' ? (
+      ) : !data.devices.length ? (
+        <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+          No device activity in this window.
+          {data.sample && <div style={{ marginTop: 6, color: STATUS_COLOR.warn }}>⚠️ Looker returned {data.sample.rows} row{data.sample.rows === 1 ? '' : 's'} but none fit the grid — sample: device “{data.sample.device}”, bucket “{data.sample.bucket}”. Screenshot this for support.</div>}
+          {Array.isArray(data.readPath) && data.readPath.length > 0 && (
+            <div style={{ marginTop: 6, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10.5, lineHeight: 1.7 }}>
+              {data.readPath.map((s, i) => <div key={i}>{s}</div>)}
+            </div>
+          )}
+        </div>
+      ) : mode === 'counts' ? (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse' }}>
             <thead>
@@ -566,9 +586,21 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
   // expanded for), full-height so a big device timeline is fully visible.
   const [expanded, setExpanded] = useState(false);
   const [showHist, setShowHist] = useState(true);
+  const [tools, setTools] = useState(false); // ⚙️ Manage — the everyday buttons, folded away
   const [checkMsg, setCheckMsg] = useState('');
   // Clicking the offline count opens a LIVE offline list split by station.
   const [offPanel, setOffPanel] = useState(null); // null | 'busy' | roster json | {error}
+  // The day chart reads the OBSERVED log directly (online + total per check) so
+  // the offline share is live — the snapshot's frozen coverage lags a re-check.
+  const [obsCov, setObsCov] = useState(null);
+  useEffect(() => {
+    if (!m.rosterField) return undefined;
+    let alive = true;
+    jget(`${base}/monitors/${m.id}/observed?hours=start`)
+      .then((d) => { if (alive && d && d.configured && (d.ticks || []).length) setObsCov(d.ticks.map((t) => ({ t: String(t.at).slice(11, 16), n: t.online || 0, tot: t.total || 0 })).slice(-288)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [m.id, base, m.rosterField]);
   const loadOffline = async (e) => {
     e.stopPropagation();
     if (offPanel) { setOffPanel(null); return; }
@@ -675,17 +707,29 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
         </div>
         {/* The approved tile graph: one bar per stored block, full height,
             grey stubs for zero blocks, SA-time labels at the ends. */}
-        {m.rosterField && (m.rosterSnapshot?.coverage?.length || 0) > 1 && (() => {
-          const cov = m.rosterSnapshot.coverage;
-          const max = Math.max(1, ...cov.map((c) => c.n));
+        {m.rosterField && ((obsCov?.length || 0) > 1 || (m.rosterSnapshot?.coverage?.length || 0) > 1) && (() => {
+          const cov = (obsCov && obsCov.length > 1) ? obsCov : m.rosterSnapshot.coverage;
+          // Stack offline (linked-but-silent) on top of online. tot is the
+          // linked count that block; older snapshots without tot just show green.
+          const off = (c) => Math.max(0, (c.tot ?? c.n) - c.n);
+          const max = Math.max(1, ...cov.map((c) => Math.max(c.n, c.tot ?? c.n)));
+          const H = 52;
           return (
             <div style={{ flex: '0 1 320px', minWidth: 240, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Devices online through the day</div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: cov.length > 24 ? 1 : 3, height: 52 }}>
-                {cov.map((c, i) => (
-                  <span key={i} title={`${saTime(c.t)} SA — ${c.n} of ${max} devices sending`}
-                    style={{ flex: 1, maxWidth: cov.length > 24 ? 8 : 30, borderRadius: cov.length > 24 ? '1px 1px 0 0' : '3px 3px 0 0', height: c.n ? Math.max(3, Math.round((c.n / max) * 52)) : 3, background: c.n ? STATUS_COLOR.fresh : 'var(--hairline)' }} />
-                ))}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: cov.length > 24 ? 1 : 3, height: H }}>
+                {cov.map((c, i) => {
+                  const onH = c.n ? Math.max(2, Math.round((c.n / max) * H)) : 0;
+                  const offH = off(c) ? Math.max(2, Math.round((off(c) / max) * H)) : 0;
+                  const w = cov.length > 24 ? 8 : 30; const r = cov.length > 24 ? 1 : 3;
+                  return (
+                    <span key={i} title={`${saTime(c.t)} SA — ${c.n} sending${off(c) ? ` · ${off(c)} dark` : ''}${c.tot != null ? ` of ${c.tot}` : ''}`}
+                      style={{ flex: 1, maxWidth: w, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: H }}>
+                      {offH > 0 && <i style={{ display: 'block', height: offH, background: STATUS_COLOR.stale, borderRadius: `${r}px ${r}px 0 0` }} />}
+                      <i style={{ display: 'block', height: onH || (offH ? 0 : 3), background: onH ? STATUS_COLOR.fresh : 'var(--hairline)', borderRadius: offH ? 0 : `${r}px ${r}px 0 0` }} />
+                    </span>
+                  );
+                })}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: 'var(--muted)', marginTop: 3 }}>
                 <span>{saTime(cov[0].t)}</span>
@@ -725,6 +769,14 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {!readOnly && <>
           <button style={ghostBtn} disabled={!!busy} onClick={checkNow}>{busy === 'check' ? 'Checking…' : '🔄 Check now'}</button>
+          <button style={{ ...ghostBtn, ...(tools ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
+            title="Edit, duplicate, pause, close, delete — the everyday buttons stay out of the way" onClick={() => setTools((v) => !v)}>⚙️ Manage</button>
+        </>}
+        <DiagnosePanel monitorId={m.id} base={base} />
+        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
+      </div>
+      {!readOnly && tools && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
           <button style={ghostBtn} onClick={() => setShowHist((v) => !v)}>{showHist ? 'Hide log' : '📜 Log'}</button>
           <button style={ghostBtn} onClick={() => onEdit(m)}>✏️ Edit</button>
           <button style={ghostBtn} title="Open the editor pre-filled with this monitor's setup, saved as a new monitor"
@@ -738,11 +790,9 @@ function MonitorCard({ m, entities = [], onChanged, onEdit, base = ADMIN_BASE, r
             {m.status === 'closed' ? '🚪 Reopen' : '🚪 Mark closed'}
           </button>
           <button style={{ ...ghostBtn, color: STATUS_COLOR.stale }} disabled={!!busy}
-            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑</button>
-        </>}
-        <DiagnosePanel monitorId={m.id} base={base} />
-        {checkMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{checkMsg}</span>}
-      </div>
+            onClick={() => { if (window.confirm(`Delete monitor “${m.name}” and its history?`)) run('del', () => api.deleteDataMonitor(m.id)); }}>🗑 Delete</button>
+        </div>
+      )}
       {showHist && <HistoryPanel monitorId={m.id} rosterField={m.rosterField} base={base} stations={m.streams.map((s) => s.station).filter(Boolean)} unit={unitFor(m)} />}
       </>}
     </div>
@@ -860,7 +910,8 @@ function ReportPanel({ url, body, title }) {
 
 // Permanent metrics row: fleet + volume headline computed from the stored
 // snapshots (no live queries) — shown on the Admin page and the client tab.
-function HealthMetrics({ monitors: allMonitors }) {
+function HealthMetrics({ monitors: allMonitors, trailing = null }) {
+  const isMobile = useIsMobile();
   // Closed stations are intentionally shut — their silence must not drag the
   // fleet numbers (devices/online/offline/flow). Their trading DID happen,
   // though, so the volume totals still count their frozen snapshots.
@@ -919,17 +970,25 @@ function HealthMetrics({ monitors: allMonitors }) {
     .map((m) => ({ name: m.name, s: m.rosterSnapshot }));
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {tiles.map(([l, v, c]) => (
-          <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 14px', minWidth: 92 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>{l}</div>
-            <div style={{ fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)' }}>{v}</div>
-          </div>
-        ))}
+      {/* Metrics fill the left and wrap; the page's control cluster (updated · ⓘ ·
+          ⋯) pins to the top-right of the SAME line instead of taking its own row. */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {/* Desktop: compact tiles wrap. Mobile: ONE horizontal carousel (no six 2-up
+            rows), and the control cluster is dropped as noise (refresh is automatic,
+            the Owl Summary is the floating orb). */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, ...(isMobile ? { flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } : { flexWrap: 'wrap' }) }}>
+          {tiles.map(([l, v, c]) => (
+            <div key={l} style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 9, padding: '5px 9px', minWidth: 56, flex: '0 0 auto' }}>
+              <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: 0.2, textTransform: 'uppercase', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{l}</div>
+              <div style={{ fontSize: 15.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c || 'var(--text)', whiteSpace: 'nowrap' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        {trailing && !isMobile && <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{trailing}</div>}
       </div>
       {offenders.length > 0 && (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-          Offline by station:{' '}
+        <div style={{ ...card, fontSize: 12, color: 'var(--muted)', marginTop: 8, padding: '9px 13px' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Offline by station</span><br />{' '}
           {offenders.map(({ name, s: sn }, i) => (
             <span key={name} title={(sn.offlineDevices || []).length ? `${name} offline: ${sn.offlineDevices.map((d) => `${d.device} (${Math.round(d.lagMin)}m)`).join(', ')}${sn.offline > sn.offlineDevices.length ? ` +${sn.offline - sn.offlineDevices.length} more` : ''}` : undefined}
               style={{ cursor: (sn.offlineDevices || []).length ? 'help' : undefined }}>
@@ -947,6 +1006,7 @@ function HealthMetrics({ monitors: allMonitors }) {
 // monitor cards — the platform overview drills down instead of a flat list.
 function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpen, reportBody }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [board, setBoard] = useState(false); // 🎛 the Event Signal site board for this group
   const openMons = monitors.filter((m) => m.status !== 'closed');
   const streams = openMons.flatMap((m) => m.streams);
   const staleN = streams.filter((s) => s.status === 'stale').length + openMons.filter((m) => m.lastError).length;
@@ -966,10 +1026,21 @@ function MonitorGroup({ label, monitors, entities, onChanged, onEdit, defaultOpe
                 : <span>no data yet</span>}
         </span>
         <span style={{ flex: 1 }} />
+        {reportBody && (
+          <button style={{ ...ghostBtn, padding: '4px 10px', ...(board ? { borderColor: 'var(--brand)', color: 'var(--brand)' } : null) }}
+            onClick={(e) => { e.stopPropagation(); setBoard((v) => !v); setOpen(true); }}>🎛️ Board</button>
+        )}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
         <div style={{ marginLeft: 14 }}>
+          {board && (
+            <div style={{ marginBottom: 10 }}>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={monitors} apiBase={ADMIN_BASE} />
+              </Suspense>
+            </div>
+          )}
           {reportBody && <div style={{ marginBottom: 10 }}><ReportPanel url={`${ADMIN_BASE}/report`} body={reportBody} title={`Data health — ${label}`} /></div>}
           {monitors.map((m) => (
             <MonitorCard key={m.id} m={m} entities={entities} onChanged={onChanged} onEdit={onEdit} />
@@ -1121,7 +1192,7 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const [f, setF] = useState(() => ({
     name: '', area: 'Check-in', entityId: '', suiteId: '', model: '', view: '', timeField: '', stationField: '',
     filters: {}, warnMin: 30, staleMin: 60, checkEveryMin: 0, channels: ['push'], notifyRecovery: true, cooldownMin: 60,
-    rosterField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '', rosterAlertPct: 0,
+    rosterField: '', countField: '', rosterBaselineMin: 1440, rosterOnlineMin: 30, rosterStart: '', rosterDaily: '', rosterAlertPct: 0,
     ...(initial || {}),
   }));
   const [models, setModels] = useState(null);
@@ -1172,6 +1243,25 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   const entitySuites = suites.filter((s) => s.entityId === f.entityId);
   const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 };
 
+  // Prefill from a one-tap template (the New-monitor shortcut) — resolves the
+  // explore from the loaded models, drops the template's filter/detail rows and
+  // roster/threshold defaults in, and keeps whatever client/event was picked.
+  const applyTemplate = (tpl) => {
+    const o = exploreOptions.find((x) => x.view === tpl.templateView);
+    setF((p) => ({
+      ...p,
+      name: tpl.name, area: tpl.area,
+      model: o ? o.model : '', view: o ? o.view : '', templateView: o ? '' : tpl.templateView,
+      timeField: tpl.timeField || '', stationField: tpl.stationField || '', rosterField: tpl.rosterField || '',
+      countField: tpl.countField || '', rosterDaily: tpl.rosterDaily || '',
+      rosterOnlineMin: tpl.rosterOnlineMin ?? p.rosterOnlineMin, rosterAlertPct: tpl.rosterAlertPct ?? p.rosterAlertPct,
+      warnMin: tpl.warnMin ?? p.warnMin, staleMin: tpl.staleMin ?? p.staleMin,
+    }));
+    setFilterRows(Object.entries(tpl.filters || {}));
+    setDetailRows(tpl.detailFields || []);
+    setDimValues({});
+  };
+
   const save = async () => {
     setErr('');
     // Filter rows with a dimension but no value yet are kept as "open" filters
@@ -1190,6 +1280,15 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
   return (
     <div style={{ ...card, borderColor: 'var(--brand)' }}>
       <strong style={{ fontSize: 14.5, display: 'block', marginBottom: 12 }}>{initial?.id ? 'Edit monitor' : 'New stream monitor'}</strong>
+      {!initial?.id && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--hairline)' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>Start from a template</span>
+          <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.bar)}>🍺 Bar</button>
+          <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.vendor)}>🧾 Vendor</button>
+          <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => applyTemplate(MONITOR_TEMPLATES.checkin)}>🛂 Check-in</button>
+          <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>or fill it in below</span>
+        </div>
+      )}
       <div style={grid2}>
         <div>
           <span style={label}>Name</span>
@@ -1243,6 +1342,11 @@ function MonitorEditor({ initial, entities, suites, onSaved, onCancel }) {
             <FieldPicker value={f.rosterField} onChange={(v) => set('rosterField', v)}
               fields={(fields.dimensions || []).filter((d) => !/date|time/i.test(d.type || ''))} noneLabel="No roster" />
             <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Pick the device ID or operator dimension. Anything seen in the linked window counts as connected; silence past the online window flags it offline by name.</span>
+            <div style={{ marginTop: 10 }}>
+              <span style={label}>Volume / transactions measure (optional)</span>
+              <FieldPicker value={f.countField} onChange={(v) => set('countField', v)} fields={fields.measures || []} noneLabel="Auto-detect" />
+              <span style={{ fontSize: 11.5, color: 'var(--muted)', display: 'block', marginTop: 3 }}>Which measure the rhythm + transaction line counts. Leave on Auto-detect unless the numbers look wrong — then pin the real per-transaction measure (e.g. …transaction_count).</span>
+            </div>
           </div>
           {f.rosterField && (
             <div>
@@ -1411,6 +1515,7 @@ export default function DataHealthAdmin() {
   const [entities, setEntities] = useState([]);
   const [suites, setSuites] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | monitor
+  const [view, setView] = useState('overview'); // 'overview' | 'board' — the two main faces
   const [err, setErr] = useState('');
   const timerRef = useRef(null);
 
@@ -1447,8 +1552,37 @@ export default function DataHealthAdmin() {
   }
   const platformDot = staleN ? 'stale' : warnN ? 'warn' : allStreams.length ? 'fresh' : undefined;
 
+  const segBtn = (act) => ({
+    flex: 1, minHeight: 44, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 13.5, fontWeight: 800, border: `1px solid ${act ? 'var(--brand)' : 'var(--hairline)'}`,
+    background: act ? 'var(--brand)' : 'var(--card)', color: act ? '#fff' : 'var(--text)',
+  });
+
   return (
     <div>
+      {/* the two main faces of Data health: the monitor overview and the live site board */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button style={segBtn(view === 'overview')} onClick={() => setView('overview')}>📡 Overview</button>
+        <button style={segBtn(view === 'board')} onClick={() => setView('board')}>🎛️ Board</button>
+      </div>
+
+      {view === 'board' ? (
+        !data ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
+          : !monitors.length ? (
+            <div style={card}>
+              <strong style={{ fontSize: 14 }}>Nothing on the board yet</strong>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Create monitors in the Overview and the board builds itself from their checks.</p>
+            </div>
+          ) : groups.map((g) => (
+            <section key={g.key} style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 850, letterSpacing: 0.3, margin: '0 0 8px' }}>{g.label}</h3>
+              <Suspense fallback={<div style={{ fontSize: 12.5, color: 'var(--muted)' }}>Raising the board…</div>}>
+                <SignalBoard monitors={g.monitors} apiBase={ADMIN_BASE} />
+              </Suspense>
+            </section>
+          ))
+      ) : (
+        <>
       <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
         Watches the <strong>stream of data flowing into Looker from BigQuery / Howler</strong> — the pipe every dashboard reads.
         Each monitor pulls the latest record timestamp on an explore (optionally per station: check-in scanners, bars, vendors),
@@ -1478,12 +1612,9 @@ export default function DataHealthAdmin() {
           </div>
           <span style={{ flex: 1 }} />
           <MasterCadence tickMin={data.tickMin || 5} onChanged={load} />
-          {editing == null && <>
-            <button style={btn} onClick={() => setEditing('new')}>+ New monitor</button>
-            <button style={ghostBtn} title="Pre-filled bar-sales monitor (Event Sales family) — just pick the client, the bar and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.bar })}>🍺 Bar template</button>
-            <button style={ghostBtn} title="Pre-filled vendor-sales monitor (Event Sales family, station type vendor) — just pick the client, the event and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.vendor })}>🧾 Vendor template</button>
-            <button style={ghostBtn} title="Pre-filled check-in monitor (Check-Ins family) — just pick the client, the gate and save" onClick={() => setEditing({ ...MONITOR_TEMPLATES.checkin })}>🛂 Check-in template</button>
-          </>}
+          {editing == null && (
+            <button style={btn} title="Create a monitor — the editor offers 🍺 Bar / 🧾 Vendor / 🛂 Check-in templates to start from" onClick={() => setEditing('new')}>+ New monitor</button>
+          )}
         </div>
       )}
 
@@ -1511,6 +1642,8 @@ export default function DataHealthAdmin() {
             reportBody={g.entityId ? { entityId: g.entityId, suiteId: g.suiteId || '' } : null}
             onChanged={load} onEdit={(mm) => { setEditing(mm); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
         ))}
+        </>
+      )}
     </div>
   );
 }
@@ -1520,35 +1653,51 @@ export default function DataHealthAdmin() {
 // picked event). Renders in BOTH consoles — the client's /event-ops page and
 // Admin → client → Event Ops (the dual-surface rule).
 export function DataHealthOps({ entityId, suiteId }) {
+  const isMobile = useIsMobile();
   const [monitors, setMonitors] = useState(null);
   const [err, setErr] = useState('');
+  const [tick, setTick] = useState(0); // manual refresh bumps this
+  const [at, setAt] = useState(null);
   useEffect(() => {
     let alive = true;
     const load = () => jget(`/api/my/data-health?entityId=${encodeURIComponent(entityId || '')}&suiteId=${encodeURIComponent(suiteId || '')}`)
-      .then((r) => { if (alive) { setMonitors(r.monitors || []); setErr(''); } })
+      .then((r) => { if (alive) { setMonitors(r.monitors || []); setAt(new Date()); setErr(''); } })
       .catch((e) => { if (alive) { setErr(e.message); setMonitors((m) => m || []); } });
     load();
     const t = setInterval(load, 60000);
     return () => { alive = false; clearInterval(t); };
-  }, [entityId, suiteId]);
+  }, [entityId, suiteId, tick]);
   if (monitors === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading data health…</div>;
+  // The control cluster (updated · ⓘ · ⋯ menu) rides the top-right of the metrics
+  // row so there's no separate control line. Phones fold the buttons into the ⋯.
+  const controlBits = <>
+    <span style={{ fontSize: 10.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>updated {at ? at.toTimeString().slice(0, 5) : '—'} · auto 60s</span>
+    <InfoTip label="About Data health">Live health of the data flowing from your stations into Pulse. Tap a station for its devices and day timeline; 🩺 Diagnose gives an instant AI verdict.</InfoTip>
+    <Suspense fallback={null}>
+      {(() => {
+        const controls = <>
+          <OwlSummary entityId={entityId} suiteId={suiteId} title="Data health" />
+          <ShareMenuLazy variant="header" heading="Data health — live station status" text={monitors.map((m) => { const s = m.rosterSnapshot || {}; return `${m.name}: ${s.online ?? '—'} online · ${s.offline ?? '—'} offline · ${(s.lastHourScans ?? 0).toLocaleString('en-ZA')} ${unitFor(m)} last hour`; }).join('\n')} />
+          <button className="no-print" title="Download this page as PDF" onClick={() => window.print()} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>⤓ PDF</button>
+          <button title="Refresh now" onClick={() => setTick((v) => v + 1)} style={{ ...ghostBtn, minWidth: 40, minHeight: 34, borderRadius: 8, fontSize: 14, flexShrink: 0 }}>🔄 Refresh</button>
+        </>;
+        return <ControlKebab>{controls}</ControlKebab>; // one ⋯ menu at every width
+      })()}
+    </Suspense>
+  </>;
   return (
     <div>
-      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px' }}>
-        Live health of the data flowing from your stations (check-in scanners, bars, vendors) into Pulse.
-        Tap a station to see its devices and the day timeline; 🩺 Diagnose gives an instant AI verdict. Howler manages the setup.
-      </p>
       {err && <div style={{ ...card, color: STATUS_COLOR.stale, fontSize: 13 }}>{err}</div>}
       {!monitors.length ? (
-        <div style={card}>
-          <strong style={{ fontSize: 14 }}>No data-health monitors yet</strong>
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
-        </div>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>{controlBits}</div>
+          <div style={card}>
+            <strong style={{ fontSize: 14 }}>No data-health monitors yet</strong>
+            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 0' }}>Ask your Howler account manager to set up stream monitoring for this event.</p>
+          </div>
+        </>
       ) : <>
-        <HealthMetrics monitors={monitors} />
-        <div style={{ marginBottom: 12 }}>
-          <ReportPanel url="/api/my/data-health/report" body={{ entityId: entityId || '', suiteId: suiteId || '' }} title="Data health report" />
-        </div>
+        <HealthMetrics monitors={monitors} trailing={controlBits} />
         {monitors.map((m) => (
           <MonitorCard key={m.id} m={m} base="/api/my/data-health" readOnly onChanged={() => {}} onEdit={() => {}} />
         ))}

@@ -9,11 +9,13 @@ const { db, auth } = require('./helpers');
 const productSite = require('../server/productSite');
 
 // Mount capturing the final route handlers (no real express; middleware skipped —
-// requireAdmin is exercised by the auth suite).
+// requireAdmin is exercised by the auth suite). `use` is a no-op: the module
+// also mounts a static gallery (/sales/experience) via app.use, which this
+// harness doesn't exercise — without the stub the whole mount throws.
 function mountRoutes() {
   const routes = {};
   const reg = (m) => (p, ...hs) => { for (const key of [].concat(p)) routes[m + ' ' + key] = hs[hs.length - 1]; };
-  productSite.mount({ get: reg('GET'), put: reg('PUT') }, { db, auth });
+  productSite.mount({ get: reg('GET'), put: reg('PUT'), use: () => {} }, { db, auth });
   return routes;
 }
 const res = () => {
@@ -103,4 +105,20 @@ test('the real overview doc parses into sections and each catalogue id is unique
   const ids = [];
   for (const s of productSite.CATALOGUE) { ids.push(s.id); for (const [fid] of s.features) ids.push(fid); }
   assert.equal(new Set(ids).size, ids.length, 'catalogue section/feature ids unique');
+});
+
+// Every feature must carry the plain-language "what it does for you" description —
+// it powers the tap-to-explain rows on the in-app What's in Pulse grid and the
+// public /sales/features page. A blank one renders as a dead-end row.
+test('every catalogue feature has a client-facing desc, and the public API serves it', () => {
+  for (const s of productSite.CATALOGUE) {
+    for (const [fid, , , desc] of s.features) {
+      assert.ok(typeof desc === 'string' && desc.trim().length >= 20, `feature ${fid} needs a real desc`);
+    }
+  }
+  const routes = mountRoutes();
+  const r = res();
+  routes['GET /api/product/site']({}, r);
+  const dash = r.body.sections.find((s) => s.id === 'dashboards');
+  assert.ok(dash.features.every((f) => f.desc && f.desc.length >= 20), 'public matrix carries desc per feature');
 });

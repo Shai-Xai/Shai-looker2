@@ -89,17 +89,23 @@ test('guardSuperAdminTag: a non-super admin cannot grant or revoke the tag; a su
 });
 
 test('ensureSuperAdmins bootstrap: with none configured, the oldest admin is promoted (no lockout)', () => {
-  // Fresh DB for this file — create two admins; the first-created is "oldest".
-  const first = h.makeAdmin('boot-first@test.local');
+  // The file shares one DB, so earlier tests already tagged super admins —
+  // demote them all to simulate the fresh-deploy "no super admin" state.
+  h.makeAdmin('boot-first@test.local');
   h.makeAdmin('boot-second@test.local');
+  for (const u of h.db.listUsers()) {
+    if (h.roles.isSuperAdmin(u)) h.db.updateUser(u.id, { roles: (u.roles || []).filter((r) => r !== 'super_admin') });
+  }
   assert.equal(h.db.listUsers().some((u) => h.roles.isSuperAdmin(u)), false, 'no super admin yet');
 
   delete process.env.SUPER_ADMIN_EMAILS;
   h.auth.ensureSuperAdmins();
 
+  const oldest = h.db.listUsers().filter((u) => u.role === 'admin')
+    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))[0];
   const supers = h.db.listUsers().filter((u) => h.roles.isSuperAdmin(u));
   assert.equal(supers.length, 1, 'exactly one admin bootstrapped');
-  assert.equal(supers[0].email, first.email, 'the oldest admin was promoted');
+  assert.equal(supers[0].email, oldest.email, 'the oldest admin was promoted');
 
   // Idempotent: a second run doesn't promote anyone else.
   h.auth.ensureSuperAdmins();

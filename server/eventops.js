@@ -40,7 +40,7 @@ const DEVICE_TYPES = ['handheld', 'kiosk', 'radio', 'printer', 'tablet', 'other'
 // Suggested issue categories (free-text is allowed too — the UI offers these as quick picks).
 const ISSUE_CATEGORIES = ['damaged', 'battery', 'connectivity', 'missing_parts', 'frozen', 'wrong_config', 'other'];
 
-function mount(app, { db, auth }) {
+function mount(app, { db, auth, push = require('./push'), messaging = null, mailer = null }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -196,6 +196,46 @@ function mount(app, { db, auth }) {
       at              TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_eventops_cplogs_suite ON eventops_checkpoint_logs(suite_id, at);
+
+    -- Web-push subscriptions for portal staff (no Pulse account — keyed by staff id).
+    -- Powers staff alerts phase 2: a dark station pings the person standing at it.
+    CREATE TABLE IF NOT EXISTS eventops_staff_push (
+      staff_id   TEXT NOT NULL,
+      suite_id   TEXT NOT NULL,
+      endpoint   TEXT NOT NULL PRIMARY KEY,
+      p256dh     TEXT NOT NULL,
+      auth       TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_staff_push ON eventops_staff_push(staff_id);
+
+    -- Device support calls: a barman/vendor taps a reason on the device's PRE-BOUND
+    -- link (station + device baked into the URL, nothing to pick) and it lands with
+    -- dispatch as a live call with an ack loop. Distinct from eventops_issues (a
+    -- maintenance log) — a call is a live "come to me now". Station + device labels
+    -- are denormalised so the call survives a later device/station delete.
+    CREATE TABLE IF NOT EXISTS eventops_calls (
+      id            TEXT PRIMARY KEY,
+      entity_id     TEXT NOT NULL,
+      suite_id      TEXT NOT NULL,
+      device_id     TEXT NOT NULL DEFAULT '',
+      device_label  TEXT NOT NULL DEFAULT '',
+      station_id    TEXT NOT NULL DEFAULT '',
+      station_label TEXT NOT NULL DEFAULT '',
+      reason        TEXT NOT NULL DEFAULT 'help',
+      caller_name   TEXT NOT NULL DEFAULT '',
+      comment       TEXT NOT NULL DEFAULT '',
+      tried         TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'open',
+      created_at    TEXT NOT NULL,
+      acked_by      TEXT NOT NULL DEFAULT '',
+      acked_at      TEXT NOT NULL DEFAULT '',
+      eta           TEXT NOT NULL DEFAULT '',
+      resolved_by   TEXT NOT NULL DEFAULT '',
+      resolved_at   TEXT NOT NULL DEFAULT '',
+      resolution    TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventops_calls_suite ON eventops_calls(suite_id, status);
   `);
 
   // Additive migrations for already-deployed DBs: attribute moves/issues to a staff member.
@@ -215,20 +255,32 @@ function mount(app, { db, auth }) {
   // Per-staff capabilities in the portal: move devices (default ON), do checkpoints (default OFF).
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_move INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN can_checkpoint INTEGER NOT NULL DEFAULT 0'); } catch { /* already there */ }
+  // Station alerts for this staffer (default ON): a dark station pages them.
+  try { sql.exec('ALTER TABLE eventops_staff ADD COLUMN alerts_on INTEGER NOT NULL DEFAULT 1'); } catch { /* already there */ }
   // A device can be handed to a staff member (custody) instead of a station; the event log
   // records the recipient's label so past hand-offs survive a later staff delete.
   try { sql.exec("ALTER TABLE eventops_devices ADD COLUMN holder_staff_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
   try { sql.exec("ALTER TABLE eventops_device_events ADD COLUMN to_holder TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
 
   // ── per-client toggle ──────────────────────────────────────────────────────────
-  const entityEnabled = (entityId) => {
-    const r = sql.prepare('SELECT enabled FROM eventops_settings WHERE entity_id=?').get(entityId);
-    return !!(r && r.enabled);
-  };
+  // Backed by the 🚩 eventops feature flag (the old eventops_settings pilot rows
+  // were seeded into it below) — the Admin → Product → Flags matrix and this
+  // module's own toggle are ONE switch.
+  const flags = require('./flags');
+  flags.init(db);
+  try {
+    if (db.getSetting('flags_seeded_eventops', '') !== '1') {
+      const rows = sql.prepare('SELECT entity_id FROM eventops_settings WHERE enabled=1').all();
+      const ins = sql.prepare('INSERT OR IGNORE INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)');
+      for (const r of rows) ins.run(r.entity_id, 'eventops', 'on', 'seed', now());
+      db.setSetting('flags_seeded_eventops', '1');
+    }
+  } catch (e) { console.error('[eventops] flag seed failed', e.message); }
+  const entityEnabled = (entityId) => flags.enabled(entityId, 'eventops');
   const setEntityEnabled = (entityId, on) => {
-    sql.prepare(`INSERT INTO eventops_settings (entity_id, enabled, updated_at) VALUES (?,?,?)
-      ON CONFLICT(entity_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at`)
-      .run(entityId, on ? 1 : 0, now());
+    sql.prepare(`INSERT INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(entity_id, flag) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
+      .run(entityId, 'eventops', on ? 'on' : 'off', 'eventops-toggle', now());
   };
   // The entities this user may see Event Ops for AND that are switched on (gates the nav/page).
   const enabledEntitiesFor = (user) => {
@@ -302,6 +354,7 @@ function mount(app, { db, auth }) {
       stationIds: stations.map((x) => x.id), stations,
       stationId: stations[0]?.id || null, stationName: stations[0]?.name || '', // legacy single fields
       canMove: s.can_move == null ? true : !!s.can_move, canCheckpoint: !!s.can_checkpoint,
+      alertsOn: s.alerts_on == null ? true : !!s.alerts_on,
       createdAt: s.created_at,
     };
   };
@@ -785,7 +838,7 @@ function mount(app, { db, auth }) {
     const stationIds = [...new Set(raw.map(String).filter((id) => valid.includes(id)))];
     const bool = (v, dflt) => (v == null ? dflt : v ? 1 : 0);
     return { name: str(b.name, 120).trim(), number: str(b.number, 40).trim(), role: str(b.role, 60).trim(), stationIds,
-      canMove: bool(b.canMove, 1), canCheckpoint: bool(b.canCheckpoint, 0) };
+      canMove: bool(b.canMove, 1), canCheckpoint: bool(b.canCheckpoint, 0), alertsOn: bool(b.alertsOn, 1) };
   }
 
   app.post('/api/eventops/suites/:suiteId/staff', auth.requireAuth, (req, res) => {
@@ -793,8 +846,8 @@ function mount(app, { db, auth }) {
     const c = cleanStaff(req.body || {}, su);
     if (!c.name && !c.number) return res.status(400).json({ error: 'Give the staff member a name or number.' });
     const id = uuid();
-    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, can_move, can_checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, now());
+    sql.prepare('INSERT INTO eventops_staff (id, entity_id, suite_id, name, number, role, station_id, station_ids, can_move, can_checkpoint, alerts_on, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, su.entityId, su.id, c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, c.alertsOn, now());
     res.status(201).json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(id)) });
   });
 
@@ -804,9 +857,9 @@ function mount(app, { db, auth }) {
     if (!s || s.suite_id !== su.id) return res.status(404).json({ error: 'Staff member not found' });
     const cur = staffRow(s);
     const c = cleanStaff({ name: req.body?.name ?? s.name, number: req.body?.number ?? s.number, role: req.body?.role ?? s.role, stationIds: req.body?.stationIds ?? cur.stationIds,
-      canMove: req.body?.canMove ?? cur.canMove, canCheckpoint: req.body?.canCheckpoint ?? cur.canCheckpoint }, su);
-    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=?, can_move=?, can_checkpoint=? WHERE id=?')
-      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, s.id);
+      canMove: req.body?.canMove ?? cur.canMove, canCheckpoint: req.body?.canCheckpoint ?? cur.canCheckpoint, alertsOn: req.body?.alertsOn ?? cur.alertsOn }, su);
+    sql.prepare('UPDATE eventops_staff SET name=?, number=?, role=?, station_id=?, station_ids=?, can_move=?, can_checkpoint=?, alerts_on=? WHERE id=?')
+      .run(c.name, c.number, c.role, c.stationIds[0] || '', JSON.stringify(c.stationIds), c.canMove, c.canCheckpoint, c.alertsOn, s.id);
     res.json({ staff: staffRow(sql.prepare('SELECT * FROM eventops_staff WHERE id=?').get(s.id)) });
   });
 
@@ -879,6 +932,8 @@ function mount(app, { db, auth }) {
       issueCategories: issueCategories(su).map(issueCategoryRow),
       // Roster (name + number only) so a staffer can hand a device to a colleague.
       staff: sql.prepare('SELECT id, name, number FROM eventops_staff WHERE suite_id=? ORDER BY number, name').all(su.id),
+      // Howler WhatsApp number (if configured) so staff can open the alert channel.
+      whatsappFrom: (messaging && messaging.waFrom && messaging.waConfigured && messaging.waConfigured()) ? messaging.waFrom() : '',
     });
   });
 
@@ -910,6 +965,55 @@ function mount(app, { db, auth }) {
     }).filter(Boolean);
     const total = sql.prepare('SELECT COUNT(*) c FROM eventops_devices WHERE suite_id=?').get(su.id).c;
     res.json({ staff: portalStaffRow(s), stations, eventTotals: { devices: total } });
+  });
+
+  // Push (staff alerts phase 2): the VAPID key + this staffer's subscription,
+  // so a dark station can ping the person on the ground. Token-gated, no account.
+  app.get('/api/eventops/portal/:suiteId/:token/push-key', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    res.json({ enabled: push.isEnabled(), publicKey: push.isEnabled() ? push.vapidPublicKey() : '' });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/push', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, str(req.body?.staffId, 64));
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    const sub = req.body?.subscription || {};
+    const endpoint = str(sub.endpoint, 800); const keys = sub.keys || {};
+    if (!endpoint || !keys.p256dh || !keys.auth) return res.status(400).json({ error: 'Bad subscription' });
+    sql.prepare(`INSERT INTO eventops_staff_push (staff_id, suite_id, endpoint, p256dh, auth, created_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(endpoint) DO UPDATE SET staff_id=excluded.staff_id, suite_id=excluded.suite_id, p256dh=excluded.p256dh, auth=excluded.auth`)
+      .run(s.id, su.id, endpoint, str(keys.p256dh, 300), str(keys.auth, 300), now());
+    res.json({ ok: true });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/push-off', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const endpoint = str(req.body?.endpoint, 800);
+    if (endpoint) sql.prepare('DELETE FROM eventops_staff_push WHERE endpoint=? AND suite_id=?').run(endpoint, su.id);
+    res.json({ ok: true });
+  });
+
+  // This staffer's own station alerts (the eventops_staff_alert feed, written by
+  // server/staffAlerts.js) + an acknowledge action. Token-gated, no account.
+  const hasStaffAlert = () => { try { return !!sql.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='eventops_staff_alert'").get(); } catch { return false; } };
+  app.get('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ alerts: [] });
+    const alerts = sql.prepare('SELECT id, station, message, at, acked_at FROM eventops_staff_alert WHERE staff_id=? AND suite_id=? ORDER BY at DESC LIMIT 20')
+      .all(s.id, su.id).map((a) => ({ id: a.id, station: a.station, message: a.message, at: a.at, acked: !!a.acked_at }));
+    res.json({ alerts });
+  });
+  app.post('/api/eventops/portal/:suiteId/:token/my-alerts/:staffId/ack', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const s = findStaff(su.id, req.params.staffId);
+    if (!s) return res.status(404).json({ error: 'Staff member not found' });
+    if (!hasStaffAlert()) return res.json({ ok: true });
+    const id = str(req.body?.alertId, 64);
+    // Ack one, or all of this staffer's unacked alerts when no id is given.
+    if (id) sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE id=? AND staff_id=? AND acked_at=''").run(now(), id, s.id);
+    else sql.prepare("UPDATE eventops_staff_alert SET acked_at=? WHERE staff_id=? AND suite_id=? AND acked_at=''").run(now(), s.id, su.id);
+    res.json({ ok: true });
   });
 
   // Scan a code → resolve the device (same matching as the console).
@@ -970,6 +1074,119 @@ function mount(app, { db, auth }) {
     sql.prepare("UPDATE eventops_issues SET status='resolved', resolution=?, resolved_by=?, resolved_at=? WHERE id=?")
       .run(resolution, `portal:${s.number || s.name}`, now(), i.id);
     res.json({ issue: issueRow(sql.prepare('SELECT * FROM eventops_issues WHERE id=?').get(i.id)) });
+  });
+
+  // ════════════════════════════ device support calls ═══════════════════════════════
+  // A barman/vendor taps a reason on the device's PRE-BOUND link (station + device in
+  // the URL, so nothing to pick) and it lands with dispatch as a live call. The link
+  // works from any phone too, so a frozen device never blocks a call for help.
+  const CALL_REASONS = [
+    { key: 'stock', label: 'Stock', icon: '📦' },
+    { key: 'manager', label: 'Manager', icon: '🧑‍💼' },
+    { key: 'help', label: 'Help', icon: '🆘' },
+    { key: 'security', label: 'Security', icon: '🛡️' },
+    { key: 'medical', label: 'Medical', icon: '🚑' },
+  ];
+  // 'cat:<label>' keys are the event's device ISSUE CATEGORIES (mainly operators calling
+  // about the device itself) — same catalogue the Log-issue picker uses.
+  const callReason = (k) => {
+    const s = String(k || '');
+    if (s.startsWith('cat:')) { const lbl = s.slice(4, 44).trim(); if (lbl) return { key: `cat:${lbl}`, label: `Device · ${lbl.replace(/_/g, ' ')}`, icon: '🔧' }; }
+    return CALL_REASONS.find((r) => r.key === s) || CALL_REASONS[2];
+  };
+  const callTestMode = () => db.getSetting('data_health_test_mode', '1') !== '0';
+  const callTestEmail = () => db.getSetting('data_health_test_email', 'shai.evian@howler.co.za');
+  const callRow = (c) => ({
+    id: c.id, suiteId: c.suite_id, deviceId: c.device_id || null, deviceLabel: c.device_label,
+    stationId: c.station_id || null, stationLabel: c.station_label, reason: c.reason,
+    reasonLabel: callReason(c.reason).label, reasonIcon: callReason(c.reason).icon,
+    callerName: c.caller_name, comment: c.comment, tried: c.tried, status: c.status,
+    createdAt: c.created_at, ackedBy: c.acked_by, ackedAt: c.acked_at || null, eta: c.eta,
+    resolvedBy: c.resolved_by, resolvedAt: c.resolved_at || null, resolution: c.resolution,
+  });
+  // Dispatch for a station's calls: alert-enabled staff posted to that station.
+  const callCrew = (suiteId, stationId) => sql.prepare('SELECT * FROM eventops_staff WHERE suite_id=?').all(suiteId)
+    .map(staffRow).filter((s) => s.alertsOn && (!stationId || s.stationIds.includes(stationId)));
+
+  function deliverCall(su, c) {
+    const rz = callReason(c.reason);
+    const where = [c.station_label || 'Hive', c.device_label].filter(Boolean).join(' · ');
+    const title = `${rz.icon} ${rz.label} — ${where}`;
+    const body = [
+      `${c.caller_name ? c.caller_name + ' at ' : ''}${where} needs ${rz.label}.`,
+      c.comment ? `Note: ${c.comment}` : '', c.tried ? `Already tried: ${c.tried}` : '',
+    ].filter(Boolean).join('\n');
+    // Test mode (default while trialling): only the test inbox hears it — never staff.
+    if (callTestMode()) {
+      const to = callTestEmail();
+      if (to && mailer?.send) mailer.send({ to, subject: `[TEST] ${title}`,
+        text: `${body}\n\n🧪 TEST MODE — dispatch (push/WhatsApp) was NOT contacted. Go live in Admin → Data health.`,
+        kind: 'notification' }).catch((e) => console.error('[eventops] call test mail failed', e.message));
+      return;
+    }
+    // Live: web-push the station's dispatch crew on the portal now.
+    const crew = callCrew(su.id, c.station_id).map((s) => s.id);
+    if (crew.length && push.isEnabled && push.isEnabled() && push.sendRaw) {
+      const rows = sql.prepare(`SELECT endpoint, p256dh, auth FROM eventops_staff_push WHERE staff_id IN (${crew.map(() => '?').join(',')})`).all(...crew);
+      if (rows.length) Promise.resolve(push.sendRaw(rows, { title, body, tag: `call-${c.id}`, url: '/event-ops' })).catch(() => {});
+    }
+  }
+
+  // PUBLIC: the pre-bound call page reads its station + device from the link (no login).
+  app.get('/api/eventops/portal/:suiteId/:token/call/:deviceId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const d = getDevice(req.params.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    res.json({ suite: { id: su.id, name: su.name }, device: deviceRow(d),
+      station: d.station_id ? { id: d.station_id, name: stationName(d.station_id) } : null, reasons: CALL_REASONS,
+      deviceIssues: issueCategories(su).map((c2) => ({ key: 'cat:' + c2.label, label: c2.label.replace(/_/g, ' '), icon: '🔧' })) });
+  });
+  // PUBLIC: raise a call. Station + device come from the link; the caller adds a reason
+  // (+ their name, an optional note and what they've already tried).
+  app.post('/api/eventops/portal/:suiteId/:token/call/:deviceId', (req, res) => {
+    const su = portalSuite(req, res); if (!su) return;
+    const d = getDevice(req.params.deviceId);
+    if (!d || d.suite_id !== su.id) return res.status(404).json({ error: 'Device not found' });
+    const b = req.body || {};
+    const id = uuid(); const ts = now();
+    const stationLabel = d.station_id ? stationName(d.station_id) : 'Hive';
+    sql.prepare(`INSERT INTO eventops_calls
+      (id, entity_id, suite_id, device_id, device_label, station_id, station_label, reason, caller_name, comment, tried, status, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, 'open', ?)`)
+      .run(id, su.entityId, su.id, d.id, d.label || '', d.station_id || '', stationLabel, callReason(b.reason).key,
+        str(b.name, 80).trim(), str(b.comment, 2000).trim(), str(b.tried, 2000).trim(), ts);
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(id);
+    try { deliverCall(su, c); } catch (e) { console.error('[eventops] deliverCall failed', e.message); }
+    res.status(201).json({ call: callRow(c) });
+  });
+
+  // ── console (authed): dispatch sees open calls, acknowledges (with ETA) + resolves ──
+  const actorFor = (req) => (req.user && (req.user.name || req.user.email)) || 'staff';
+  app.get('/api/eventops/suites/:suiteId/calls', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res); if (!su) return;
+    const status = req.query.status === 'all' ? null
+      : ['open', 'acked', 'resolved'].includes(req.query.status) ? req.query.status : 'open';
+    const rows = status
+      ? sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? AND status=? ORDER BY created_at DESC').all(su.id, status)
+      : sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? ORDER BY created_at DESC').all(su.id);
+    res.json({ calls: rows.map(callRow), testMode: callTestMode() });
+  });
+  app.post('/api/eventops/suites/:suiteId/calls/:id/ack', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Call not found' });
+    if (c.status === 'resolved') return res.status(409).json({ error: 'Call already resolved' });
+    sql.prepare("UPDATE eventops_calls SET status='acked', acked_by=?, acked_at=?, eta=? WHERE id=?")
+      .run(actorFor(req), now(), str((req.body || {}).eta, 40).trim(), c.id);
+    res.json({ call: callRow(sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(c.id)) });
+  });
+  app.post('/api/eventops/suites/:suiteId/calls/:id/resolve', auth.requireAuth, (req, res) => {
+    const su = gateSuite(req, res, { manage: true }); if (!su) return;
+    const c = sql.prepare('SELECT * FROM eventops_calls WHERE id=? AND suite_id=?').get(req.params.id, su.id);
+    if (!c) return res.status(404).json({ error: 'Call not found' });
+    sql.prepare("UPDATE eventops_calls SET status='resolved', resolved_by=?, resolved_at=?, resolution=? WHERE id=?")
+      .run(actorFor(req), now(), str((req.body || {}).resolution, 2000).trim(), c.id);
+    res.json({ call: callRow(sql.prepare('SELECT * FROM eventops_calls WHERE id=?').get(c.id)) });
   });
 
   // ════════════════════════════ checkpoints (station inspections) ═══════════════════
@@ -1100,6 +1317,16 @@ function mount(app, { db, auth }) {
       let rows = sql.prepare('SELECT * FROM eventops_checkpoint_logs WHERE suite_id=? ORDER BY at DESC LIMIT ?').all(suiteId, Math.min(100, limit)).map(cpLogRow);
       if (stationName) { const n = String(stationName).toLowerCase(); rows = rows.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
       return rows.map((c) => ({ checkpoint: c.checkpointName, station: c.stationLabel, by: c.staffLabel, comment: c.comment, hasPhoto: !!c.photo, at: c.at }));
+    },
+    // Device support calls: an operator/barman tapped a reason on the device's pre-bound link asking for help.
+    listCalls(suiteId, status = 'open', { stationName } = {}) {
+      const st = ['open', 'acked', 'resolved'].includes(status) ? status : status === 'all' ? null : 'open';
+      const rows = st
+        ? sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? AND status=? ORDER BY created_at DESC').all(suiteId, st)
+        : sql.prepare('SELECT * FROM eventops_calls WHERE suite_id=? ORDER BY created_at DESC').all(suiteId);
+      let out = rows.map(callRow);
+      if (stationName) { const n = String(stationName).toLowerCase(); out = out.filter((c) => (c.stationLabel || '').toLowerCase().includes(n)); }
+      return out.map((c) => ({ station: c.stationLabel, device: c.deviceLabel, reason: c.reasonLabel, caller: c.callerName, comment: c.comment, tried: c.tried, status: c.status, calledAt: c.createdAt, ackedBy: c.ackedBy, eta: c.eta, resolvedBy: c.resolvedBy, resolvedAt: c.resolvedAt }));
     },
   };
   const STATE_LABEL_ = (s) => ({ in_stock: 'Hive', deployed: 'deployed', returned: 'Hive', lost: 'lost', damaged: 'damaged' }[s] || s);

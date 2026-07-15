@@ -12,6 +12,33 @@ const orig = looker.lookerRequest;
 beforeEach(() => { paths = []; looker.lookerRequest = async (_m, path) => { paths.push(path); return { data: [] }; }; });
 afterEach(() => { looker.lookerRequest = orig; });
 
+test('forced refresh does NOT join an in-flight cached run (it starts its own live one)', async () => {
+  // Slow "cached" run in flight (a background serve-stale refresh / warmer)…
+  let releaseCached;
+  const gate = new Promise((r) => { releaseCached = r; });
+  looker.lookerRequest = async (_m, path) => {
+    paths.push(path);
+    if (!path.includes('cache=false')) { await gate; return { data: [{ v: 'stale' }] }; }
+    return { data: [{ v: 'fresh' }] };
+  };
+  const body = { model: 'm', view: 'v', fields: ['cap'] };
+  const bg = engine.runLookerQuery('/queries/run/json_detail', body);            // cached run starts
+  const live = await engine.runLookerQuery('/queries/run/json_detail', body, undefined, true); // user hits Refresh
+  assert.equal(live.data[0].v, 'fresh');                    // refresh returned LIVE data, not the joined stale run
+  assert.ok(paths.some((p) => p.includes('cache=false')));  // a real cache=false run was made
+  releaseCached();
+  await bg;
+  // …and the late stale run must not clobber the cache entry the live run wrote.
+  const after = await engine.runLookerQuery('/queries/run/json_detail', body);
+  assert.equal(after.data[0].v, 'fresh');
+  // Two identical CACHED runs still coalesce (dedupe kept for the normal path).
+  paths = [];
+  const b2 = { model: 'm', view: 'v', fields: ['other'] };
+  looker.lookerRequest = async (_m, path) => { paths.push(path); return { data: [] }; };
+  await Promise.all([engine.runLookerQuery('/x', b2), engine.runLookerQuery('/x', b2)]);
+  assert.equal(paths.length, 1);
+});
+
 test('forced refresh busts Looker\'s cache; normal misses do not', async () => {
   await engine.runLookerQuery('/queries/run/json_detail', { model: 'm', view: 'v', fields: ['a'] }); // cold miss
   assert.equal(paths[0], '/queries/run/json_detail');

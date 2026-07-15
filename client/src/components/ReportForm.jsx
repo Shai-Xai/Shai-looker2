@@ -1,9 +1,10 @@
 // The report form modal (bug / improvement / idea + attachments). Shared by the
 // app-wide floating ReportWidget and the "+ New report" button in the Product
 // section, so there's one form and one submit path. Controlled via `open`.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { getReportTiles, REPORT_TILES_EVENT } from '../lib/reportContext.js';
 
 const TYPES = [
   ['bug', '🐞 Bug', 'Something is broken or wrong'],
@@ -11,9 +12,16 @@ const TYPES = [
   ['idea', '💡 Idea', 'A new capability or innovation'],
 ];
 const URGENCIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
-const MAX_FILES = 4, MAX_MB = 30;
+// Per-file and TOTAL caps. Attachments ride as base64 JSON to a small server —
+// the server parses the whole body in memory (60mb limit there), so the total
+// here must stay comfortably under it after the ~1.37× base64 overhead.
+const MAX_FILES = 4, MAX_MB = 20, MAX_TOTAL_MB = 40;
+const MAX_REC_SECS = 45; // cap a screen recording so the upload stays small
+// Screen recording uses getDisplayMedia — desktop browsers only (mobile Safari/
+// Chrome don't expose it). On a phone the video-file picker records via camera.
+const canScreenRecord = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia && typeof window !== 'undefined' && !!window.MediaRecorder;
 
-export default function ReportForm({ open, onClose, screen, onSubmitted }) {
+export default function ReportForm({ open, onClose, screen, onSubmitted, prefill }) {
   const isMobile = useIsMobile();
   const [type, setType] = useState('bug');
   const [title, setTitle] = useState('');
@@ -23,14 +31,45 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  // Which dashboard tile this is about (published by the dashboard view). Empty =
+  // whole screen / not tile-specific. `tiles` is the pickable list for this screen.
+  const [tiles, setTiles] = useState([]);
+  const [tileId, setTileId] = useState('');
+  // In-app screen recording (desktop). Live elapsed seconds; the recorder handle
+  // lives in a ref so re-renders don't reset it.
+  const [recording, setRecording] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const recRef = useRef(null);
 
-  // Fresh form each time it opens.
-  useEffect(() => { if (open) reset(); }, [open]);
+  // Fresh form each time it opens — optionally pre-typed (e.g. the "Interested?
+  // Tell us" CTA on the What's in Pulse matrix seeds a ready-to-send request).
+  // Also pull the current screen's tiles and keep them in sync (a dashboard may
+  // finish loading its definition after the form opens).
+  useEffect(() => {
+    if (!open) return undefined;
+    reset();
+    if (prefill) {
+      if (prefill.type) setType(prefill.type);
+      if (prefill.title) setTitle(prefill.title);
+      if (prefill.body) setBody(prefill.body);
+    }
+    const sync = () => setTiles(getReportTiles());
+    sync();
+    window.addEventListener(REPORT_TILES_EVENT, sync);
+    return () => window.removeEventListener(REPORT_TILES_EVENT, sync);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill]);
+
+  // Stop any in-flight recording if the modal is closed or unmounts, so the
+  // browser's screen-share doesn't keep running in the background.
+  useEffect(() => { if (!open) stopRecording(); }, [open]);
+  useEffect(() => () => stopRecording(), []);
 
   function reset() {
     setType('bug'); setTitle(''); setBody(''); setUrgency('normal'); setFiles([]);
-    setBusy(false); setDone(false); setError('');
+    setTileId(''); setBusy(false); setDone(false); setError('');
   }
+  const tileName = () => (tiles.find((t) => t.id === tileId) || {}).title || '';
 
   async function addFiles(e) {
     const picked = Array.from(e.target.files || []);
@@ -45,17 +84,70 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
       try {
         // Downscale images to keep the upload small; videos pass through as-is.
         const data = isImage ? await downscaleImage(f) : await readAsDataURL(f);
-        setFiles((prev) => prev.length < MAX_FILES ? [...prev, { name: f.name, mime: isImage ? 'image/jpeg' : f.type, data, isImage }] : prev);
+        setFiles((prev) => {
+          if (prev.length >= MAX_FILES) return prev;
+          const total = prev.reduce((n, x) => n + (x.data?.length || 0), 0) + data.length;
+          if (total > MAX_TOTAL_MB * 1024 * 1024 * 1.37) { setError(`Attachments together must stay under ${MAX_TOTAL_MB}MB — remove one first.`); return prev; }
+          return [...prev, { name: f.name, mime: isImage ? 'image/jpeg' : f.type, data, isImage }];
+        });
       } catch { setError('Could not read that file.'); }
     }
   }
   const removeFile = (i) => setFiles((prev) => prev.filter((_, j) => j !== i));
 
+  // ── Screen recording ──────────────────────────────────────────────────────
+  // Capture the screen with getDisplayMedia + MediaRecorder, then attach the
+  // result as a video (alongside — or instead of — a screenshot). Auto-stops at
+  // MAX_REC_SECS and when the user ends the share from the browser's own UI.
+  async function startRecording() {
+    setError('');
+    if (recording) return;
+    if (files.length >= MAX_FILES) { setError(`Up to ${MAX_FILES} files.`); return; }
+    let stream;
+    try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false }); }
+    catch { return; } // the user cancelled the screen-picker — not an error
+    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      .find((m) => window.MediaRecorder.isTypeSupported?.(m)) || 'video/webm';
+    let rec;
+    try { rec = new MediaRecorder(stream, { mimeType: mime }); }
+    catch { stream.getTracks().forEach((t) => t.stop()); setError('Screen recording isn’t supported in this browser.'); return; }
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      if (recRef.current?.timer) clearInterval(recRef.current.timer);
+      stream.getTracks().forEach((t) => t.stop());
+      recRef.current = null;
+      setRecording(false); setRecSecs(0);
+      const blob = new Blob(chunks, { type: mime });
+      if (!blob.size) return;
+      if (blob.size > MAX_MB * 1024 * 1024) { setError(`Recording is over ${MAX_MB}MB — keep it shorter.`); return; }
+      try {
+        const data = await readAsDataURL(blob);
+        setFiles((prev) => prev.length < MAX_FILES ? [...prev, { name: 'screen-recording.webm', mime, data, isImage: false }] : prev);
+      } catch { setError('Could not save the recording.'); }
+    };
+    // Ending the share from Chrome's "Stop sharing" bar fires 'ended'.
+    stream.getVideoTracks()[0]?.addEventListener('ended', () => { if (rec.state !== 'inactive') rec.stop(); });
+    const timer = setInterval(() => setRecSecs((s) => {
+      const n = s + 1;
+      if (n >= MAX_REC_SECS && rec.state !== 'inactive') rec.stop();
+      return n;
+    }), 1000);
+    recRef.current = { rec, timer };
+    rec.start();
+    setRecording(true); setRecSecs(0);
+  }
+  function stopRecording() {
+    const r = recRef.current;
+    if (r?.rec && r.rec.state !== 'inactive') { try { r.rec.stop(); } catch { /* already stopping */ } }
+  }
+
   async function submit() {
     if (!body.trim() && !title.trim()) { setError('Add a title or a description.'); return; }
+    if (recording) stopRecording();
     setBusy(true); setError('');
     try {
-      await api.submitTicket({ type, title: title.trim(), body: body.trim(), urgency, screen, attachments: files.map((f) => ({ name: f.name, mime: f.mime, data: f.data })) });
+      await api.submitTicket({ type, title: title.trim(), body: body.trim(), urgency, screen, tileId, tileName: tileName(), attachments: files.map((f) => ({ name: f.name, mime: f.mime, data: f.data })) });
       setDone(true);
       onSubmitted?.();
     } catch (e) {
@@ -129,8 +221,23 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
                 placeholder={type === 'bug' ? 'e.g. When I click Export on the sales dashboard, nothing happens…' : 'e.g. It would help if we could…'}
                 style={{ width: '100%', marginBottom: 12, boxSizing: 'border-box', resize: 'vertical' }} />
 
-              {/* Attachments: screenshot / image / video */}
-              <label style={lbl}>Screenshot, image or video <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+              {/* Tile picker — only when the current screen (a dashboard) has
+                  published its tiles. Lets the reporter pinpoint the offending
+                  tile so triage doesn't have to guess. A native select is the
+                  most reliable, mobile-friendly picker for a long tile list. */}
+              {tiles.length > 0 && (
+                <>
+                  <label style={lbl}>Which tile is this about? <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
+                  <select className="fld" value={tileId} onChange={(e) => setTileId(e.target.value)}
+                    style={{ width: '100%', marginBottom: 12, boxSizing: 'border-box' }}>
+                    <option value="">Whole dashboard / not tile-specific</option>
+                    {tiles.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                  </select>
+                </>
+              )}
+
+              {/* Attachments: screenshot / image / video / screen recording */}
+              <label style={lbl}>Screenshot, image or {canScreenRecord ? 'screen recording' : 'video'} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                 {files.map((f, i) => (
                   <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'rgba(128,128,128,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -138,11 +245,28 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
                     <button onClick={() => removeFile(i)} aria-label="Remove" style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 11, lineHeight: 1, cursor: 'pointer' }}>×</button>
                   </div>
                 ))}
-                {files.length < MAX_FILES && (
-                  <label style={{ width: 64, height: 64, borderRadius: 8, border: '1px dashed var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, cursor: 'pointer', color: 'var(--muted)' }}>
+                {files.length < MAX_FILES && !recording && (
+                  <label style={{ width: 64, height: 64, borderRadius: 8, border: '1px dashed var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, cursor: 'pointer', color: 'var(--muted)' }} title="Add a screenshot, image or video">
                     ＋
                     <input type="file" accept="image/*,video/*" multiple onChange={addFiles} style={{ display: 'none' }} />
                   </label>
+                )}
+                {/* Record the screen (desktop) — the alternative to a screenshot
+                    for intermittent / interaction bugs. */}
+                {canScreenRecord && files.length < MAX_FILES && !recording && (
+                  <button type="button" onClick={startRecording} title="Record your screen"
+                    style={{ width: 64, height: 64, borderRadius: 8, border: '1px dashed var(--hairline)', display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', justifyContent: 'center', fontSize: 20, cursor: 'pointer', color: 'var(--muted)', background: 'transparent' }}>
+                    🎥<span style={{ fontSize: 9, fontWeight: 600 }}>Record</span>
+                  </button>
+                )}
+                {recording && (
+                  <div style={{ minWidth: 64, height: 64, padding: '0 10px', borderRadius: 8, border: '1px solid var(--brand)', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--brand-rgb), 0.08)' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 700, color: 'var(--brand)' }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--brand)' }} />
+                      {recSecs}s
+                    </span>
+                    <button type="button" onClick={stopRecording} style={{ padding: '3px 8px', borderRadius: 6, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Stop</button>
+                  </div>
                 )}
               </div>
 
