@@ -389,6 +389,61 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['opener', 'hot lead'] } },
     ],
   },
+  {
+    name: 'A delayed follow-up INSIDE a branch fires later, not immediately',
+    flow: [
+      '✉  opener  →  ◆ bought after 2 days?',
+      '   ├─ Bought      → ✉ Thanks (converted)',
+      '   └─ No response → 💬 Quick reminder (now)  …then  ✉ Final call (+2 days)',
+      '   The final email must be SCHEDULED, then send on a later tick — not now.',
+    ],
+    journey: {
+      name: 'Delayed follow-up',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [msg({ subject: 'Thanks!' })] },
+          { label: 'No response', nodes: [
+            msg({ channel: 'sms', body: 'Quick reminder' }),
+            msg({ subject: 'Final call', delayHours: 48 }),
+          ] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Zed', email: 'zed@x.com', behaviour: 'ghosts → reminder now, final email two days later',
+        drive: [() => {}],
+        late: [() => {}], // the trailing tick fires the scheduled +2-day email
+        expect: { status: 'done', got: ['opener', 'Quick reminder', 'Final call'] } },
+      { name: 'Bea', email: 'bea2@x.com', behaviour: 'buys → thanked, no follow-ups',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks!'] } },
+    ],
+  },
+  {
+    name: 'Email consent revoked — the email node is skipped, journey continues',
+    flow: [
+      '✉  opener  →  ◆ clicked?  →  ├─ Clicked → ✉ nudge  (no email consent → skipped)',
+      '                              └─ No      → ✉ last chance',
+      '   No stall: an email with consent off is skipped and the person still finishes.',
+    ],
+    journey: {
+      name: 'Email consent',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked?', waitHours: 24, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Wes', email: 'wes@x.com', behaviour: 'clicks, but has email consent OFF',
+        consent: { emailOk: false },
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: [] } }, // both emails (opener + nudge) skipped; still completes
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
