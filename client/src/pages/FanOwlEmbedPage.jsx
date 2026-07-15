@@ -80,6 +80,13 @@ export default function FanOwlEmbedPage() {
   const [status, setStatus] = useState('');
   const [lead, setLead] = useState(null); // null | 'open' | 'saved'
   const [navOpen, setNavOpen] = useState(false); // the + menu (navStyle 'plus')
+  // A question typed into the persistent ask bar rides in on the hash — the chat
+  // opens with it already sent (once, after boot).
+  const [pendingAsk] = useState(() => {
+    const m = /[#&]ask=([^&]+)/.exec(window.location.hash || '');
+    try { return m ? decodeURIComponent(m[1]).slice(0, 300) : ''; } catch { return ''; }
+  });
+  const askedRef = useRef(false);
   const [expanded, setExpanded] = useState(false); // desktop wide view (parent resizes)
   const isMobileFrame = /[#&]m=1/.test(window.location.hash || '');
   const scroller = useRef(null);
@@ -96,6 +103,9 @@ export default function FanOwlEmbedPage() {
       .catch(() => setError('This session has expired — close and reopen the assistant.'));
   }, [sid]);
   useEffect(() => { scroller.current?.scrollTo({ top: 1e9, behavior: 'smooth' }); }, [messages, busy]);
+  useEffect(() => {
+    if (boot && pendingAsk && !askedRef.current) { askedRef.current = true; send(pendingAsk); }
+  }, [boot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const brand = boot?.site?.brandColor || '#111';
   const T = localeFor(boot?.lang); // widget UI strings in the fan's language

@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-13 (🦉 Fan Owl: quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-15 (🦉 Fan Owl: persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -208,6 +208,10 @@ ticket like a well-informed friend who's already going.
 - **Reads the ticket shop for you** — point the Owl at the event's ticket page
   and it drafts the whole catalogue (names, prices, buy links, images) as
   suggestions to review and save. Interim until the direct Howler catalogue feed.
+- **Persistent ask bar** — a per-site widget style: instead of the floating
+  launcher, a slim always-on bar docks to the bottom of every page — ＋ nav menu,
+  a page-aware ask box ("Ask about the line-up…") and one tap from question to
+  conversation. Typing opens the chat with the question already sent.
 - **Quick-nav buttons, four modes** — the chat grows navigation buttons (one per
   mapped page: home, tickets, line-up, venue…) so the Owl doubles as the site's
   wayfinder. Each site picks where they live: icon strip under the header, a ＋
@@ -1045,6 +1049,14 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-15** — **Fan Owl: persistent ask bar** 🧪: a new per-site widget style
+  (🪄 Personality → Widget style) replaces the floating launcher with an always-on
+  bar at the bottom of every page — outline ＋ opens the nav menu (navigates
+  directly), the brand-ringed input carries the page-aware placeholder, and
+  submitting opens the chat with the question already sent. Theme- and
+  brand-aware; the launcher stays the default. Verified end-to-end with a
+  scripted browser run (8/8 checks).
 
 - **2026-07-14** — **Fan Owl: menu suggestions + nav analytics** 🧪: "🔮 Suggest
   from website menu" reads the real tabs off the client's site (from its

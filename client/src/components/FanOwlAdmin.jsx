@@ -297,7 +297,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -352,6 +352,13 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                     <option value="">Auto — follow the fan's device</option>
                     <option value="light">Light</option>
                     <option value="dark">Dark</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={small}>Widget style — how the Owl sits on the website</div>
+                  <select style={input} value={s.widgetStyle || ''} onChange={(e) => setSite(i, { widgetStyle: e.target.value })}>
+                    <option value="">Floating launcher (default)</option>
+                    <option value="bar">Persistent ask bar — always-on input + nav at the bottom of every page</option>
                   </select>
                 </div>
               </div>
