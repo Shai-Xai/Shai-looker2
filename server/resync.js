@@ -34,31 +34,49 @@ module.exports = function createResync({ looker, fetchDashboard, convertDashboar
     listenTo: fresh.listenTo,
   });
 
+  // What Looker actually owns on a tile — used to tell a real refresh from a no-op.
+  const contentSig = (t) => JSON.stringify({ q: t.query || null, v: t.vis || null, ti: t.title || '', l: t.listenTo || null, b: t.body_text || '', r: t.rich || null, ty: t.type || '' });
+
   // Pure merge: (currentDef, freshLookerDef) → { def, summary }. Never throws.
   function mergeDef(current, fresh) {
     const curTop = current.tiles || [];
     const curCarousels = current.carousels || [];
     const allCur = [...curTop, ...curCarousels.flatMap((c) => c.tiles || [])];
 
-    // Match maps over EVERY current tile (top-level and inside carousels).
+    // Match maps over EVERY current tile (top-level and inside carousels). Title is
+    // only a safe match key when it's non-empty AND unique — so a query change on a
+    // legacy tile (no element id, signature no longer matches) still updates in place
+    // instead of duplicating.
     const byEl = new Map(); const bySig = new Map();
+    const titleCount = new Map();
+    for (const t of allCur) { const ti = String(t.title || '').trim().toLowerCase(); if (ti) titleCount.set(ti, (titleCount.get(ti) || 0) + 1); }
+    const byTitle = new Map();
     for (const t of allCur) {
       if (t.sourceElementId) byEl.set(String(t.sourceElementId), t);
-      else { const s = sig(t); if (!bySig.has(s)) bySig.set(s, t); }
+      const s = sig(t); if (!bySig.has(s)) bySig.set(s, t);
+      const ti = String(t.title || '').trim().toLowerCase();
+      if (ti && titleCount.get(ti) === 1) byTitle.set(ti, t);
     }
 
-    const summary = { updated: 0, added: 0, removedInLooker: 0, keptCustom: 0, filtersUpdated: 0, filtersAdded: 0, added_: [], removed_: [] };
+    const summary = { updated: 0, unchanged: 0, added: 0, removedInLooker: 0, keptCustom: 0, filtersUpdated: 0, filtersAdded: 0, matched: { byId: 0, bySignature: 0, byTitle: 0 }, added_: [], removed_: [] };
     const claimed = new Set();      // current tile ids consumed by a fresh tile
     const updates = new Map();      // current tile id -> merged tile
     const newTiles = [];            // brand-new Looker tiles (append top-level)
 
     for (const ft of fresh.tiles || []) {
-      let cur = ft.sourceElementId ? byEl.get(String(ft.sourceElementId)) : null;
-      if (!cur) { const c = bySig.get(sig(ft)); if (c && !claimed.has(c.id)) cur = c; }
-      if (cur && !claimed.has(cur.id)) {
+      let cur = null; let how = '';
+      const el = ft.sourceElementId ? byEl.get(String(ft.sourceElementId)) : null;
+      if (el && !claimed.has(el.id)) { cur = el; how = 'byId'; }
+      if (!cur) { const c = bySig.get(sig(ft)); if (c && !claimed.has(c.id)) { cur = c; how = 'bySignature'; } }
+      if (!cur) { const ti = String(ft.title || '').trim().toLowerCase(); const c = ti ? byTitle.get(ti) : null; if (c && !claimed.has(c.id)) { cur = c; how = 'byTitle'; } }
+      if (cur) {
         claimed.add(cur.id);
-        updates.set(cur.id, mergeTile(cur, ft));
-        summary.updated++;
+        summary.matched[how]++;
+        const merged = mergeTile(cur, ft);
+        updates.set(cur.id, merged);
+        // Only a REAL content change counts as "updated" — a matched-but-identical
+        // tile is a no-op (so "it worked" never lies about a Looker that didn't change).
+        if (contentSig(merged) !== contentSig(cur)) summary.updated++; else summary.unchanged++;
       } else {
         newTiles.push(ft);
         summary.added++; summary.added_.push(ft.title || '(untitled)');
@@ -83,8 +101,9 @@ module.exports = function createResync({ looker, fetchDashboard, convertDashboar
     const nextFilters = curFilters.map((cf) => {
       const ff = freshByName.get(cf.name);
       if (!ff) return cf; // Pulse filter Looker no longer has — keep (may be wired to a lock)
-      summary.filtersUpdated++;
-      return { ...cf, title: ff.title, type: ff.type, field: ff.field, model: ff.model, explore: ff.explore, ui_config: ff.ui_config, allow_multiple_values: ff.allow_multiple_values, default_value: ff.default_value };
+      const merged = { ...cf, title: ff.title, type: ff.type, field: ff.field, model: ff.model, explore: ff.explore, ui_config: ff.ui_config, allow_multiple_values: ff.allow_multiple_values, default_value: ff.default_value };
+      if (JSON.stringify(merged) !== JSON.stringify(cf)) summary.filtersUpdated++; // only count real changes
+      return merged;
     });
     for (const ff of fresh.filters || []) if (!curNames.has(ff.name)) { nextFilters.push(ff); summary.filtersAdded++; }
 

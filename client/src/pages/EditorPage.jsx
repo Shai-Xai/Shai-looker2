@@ -150,7 +150,8 @@ export default function EditorPage() {
       const dry = await api.resyncDashboard(id, false);
       const s = dry.summary || {};
       if (!s.updated && !s.added && !s.removedInLooker && !s.filtersUpdated && !s.filtersAdded) {
-        alert('This dashboard is already up to date with Looker — nothing to change.');
+        const m = s.matched || {};
+        alert(`No changes to pull — Looker returned the same content as Pulse already has.\n\n(Matched ${(m.byId || 0) + (m.bySignature || 0) + (m.byTitle || 0)} tiles; ${s.unchanged || 0} identical.)\n\nIf you just edited the Looker dashboard, check that:\n• the change was saved/published in Looker,\n• and this Pulse dashboard is linked to that exact Looker dashboard — id ${dry.lookerDashboardId || '?'}.`);
         return;
       }
       const lines = [
