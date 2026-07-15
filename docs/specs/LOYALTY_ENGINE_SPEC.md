@@ -302,6 +302,15 @@ revealed to its grantee.
    purchased), budget burn-down, attributed revenue per pool. (Parts ship
    with 2; the consolidated report is its own deliverable.)
 
+**Rollout (decided 2026-07-15): staging-first.** Every phase lands as a PR
+against `staging`, gets tested on the staging Render service (using the
+`/fan-owl-test` preview page + a test entity), and rides the promote-to-
+production release train only after reporter approval — per the
+two-environment flow in `CLAUDE.md`. Additionally each phase ships behind a
+feature flag (`server/flags.js` REGISTRY + GATES + `OWL_TOOL_FLAGS` for the
+new fan tools), default off, enabled per pilot client from the flag matrix —
+so even production deploys are dark until a client is switched on.
+
 On shipping each phase: update `docs/PRODUCT_OVERVIEW_SALES.md` (status tags +
 changelog) and wire new client-setup steps into the Setup wizard, per
 `CLAUDE.md`.
