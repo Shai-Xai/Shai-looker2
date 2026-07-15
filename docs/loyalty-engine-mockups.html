@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loyalty Engine — mockups</title>
+<style>
+  :root {
+    --brand: #ff385c; --brand-2: #ff6b35; --brand-rgb: 255, 56, 92;
+    --ok: #12a150; --warn: #e8930c;
+    --ground: #f7f6f8; --panel: #ffffff; --ink: #17171b; --ink-2: #5d5a63;
+    --line: #e7e3ea; --bezel: #1a1a1f;
+    --screen: #ffffff; --screen-ink: #17171b; --screen-ink-2: #6a6771;
+    --screen-line: #ecebef; --screen-soft: #f5f4f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ground: #121115; --panel: #1a1a1f; --ink: #f2f0f4; --ink-2: #a49fac; --line: #2b2a31; --bezel: #26252c; }
+  }
+  :root[data-theme="dark"] { --ground: #121115; --panel: #1a1a1f; --ink: #f2f0f4; --ink-2: #a49fac; --line: #2b2a31; --bezel: #26252c; }
+  :root[data-theme="light"] { --ground: #f7f6f8; --panel: #ffffff; --ink: #17171b; --ink-2: #5d5a63; --line: #e7e3ea; --bezel: #1a1a1f; }
+
+  * { box-sizing: border-box; }
+  body { background: var(--ground); color: var(--ink); margin: 0;
+    font: 16px/1.55 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 40px 20px 72px; }
+  a { color: var(--brand); }
+
+  /* header */
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--brand); }
+  h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.12; margin: 10px 0 10px; letter-spacing: -0.02em; text-wrap: balance; }
+  .lede { color: var(--ink-2); max-width: 62ch; margin: 0 0 14px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); }
+  .chip b { color: var(--ink); font-weight: 700; }
+
+  /* scenes */
+  .scene { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--line); }
+  .scene-head { max-width: 66ch; }
+  .scene-no { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 700;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--brand); }
+  .scene-no::before { content: ""; width: 22px; height: 2px; background: linear-gradient(90deg, var(--brand), var(--brand-2)); border-radius: 2px; }
+  .scene h2 { font-size: 23px; margin: 8px 0 8px; letter-spacing: -0.015em; text-wrap: balance; }
+  .scene p.note { color: var(--ink-2); margin: 0 0 6px; }
+  .scene p.note code { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 13.5px; }
+  .phones { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 24px; align-items: flex-start; }
+
+  /* phone frame */
+  .phone { width: 330px; max-width: 100%; background: var(--bezel); border-radius: 38px; padding: 12px;
+    box-shadow: 0 24px 48px -24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.18); }
+  .phone .cap { text-align: center; color: #b9b4c2; font-size: 12px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; padding: 10px 6px 4px; }
+  .screen { background: var(--screen); color: var(--screen-ink); border-radius: 27px; overflow: hidden;
+    display: flex; flex-direction: column; min-height: 560px; }
+
+  /* widget chrome (fan surfaces) */
+  .whead { display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    background: linear-gradient(120deg, var(--brand), var(--brand-2)); color: #fff; }
+  .whead .owl { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.22);
+    display: grid; place-items: center; font-size: 18px; }
+  .whead .t { font-weight: 700; font-size: 15px; line-height: 1.2; }
+  .whead .s { font-size: 11.5px; opacity: .85; }
+  .whead .x { margin-left: auto; opacity: .8; font-size: 18px; }
+  .chat { padding: 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .msg { max-width: 84%; padding: 10px 13px; border-radius: 16px; font-size: 13.8px; line-height: 1.45; }
+  .msg.owl { background: var(--screen-soft); border-bottom-left-radius: 6px; }
+  .msg.fan { background: var(--brand); color: #fff; align-self: flex-end; border-bottom-right-radius: 6px; }
+  .msg .em { font-weight: 700; }
+  .sys { align-self: center; font-size: 11.5px; color: var(--screen-ink-2); background: var(--screen-soft);
+    border-radius: 999px; padding: 4px 12px; }
+  .sys.ok { color: var(--ok); background: rgba(18,161,80,.1); font-weight: 600; }
+  .cbar { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--screen-line); }
+  .cbar .in { flex: 1; border: 1px solid var(--screen-line); border-radius: 999px; padding: 9px 14px;
+    font-size: 13px; color: var(--screen-ink-2); }
+  .cbar .go { width: 38px; height: 38px; border-radius: 50%; background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-size: 16px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips span { font-size: 12px; font-weight: 600; color: var(--brand); border: 1px solid rgba(var(--brand-rgb), .35);
+    border-radius: 999px; padding: 5px 11px; }
+
+  /* otp */
+  .otp { display: flex; gap: 7px; padding: 4px 0 2px; }
+  .otp b { width: 34px; height: 42px; border: 1.5px solid var(--screen-line); border-radius: 10px;
+    display: grid; place-items: center; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .otp b.on { border-color: var(--brand); color: var(--brand); }
+
+  /* tier + reward cards */
+  .tier { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+    color: var(--brand); background: rgba(var(--brand-rgb), .1); border-radius: 999px; padding: 4px 10px; }
+  .reward { border: 1.5px solid rgba(var(--brand-rgb), .4); border-radius: 16px; overflow: hidden; max-width: 88%; }
+  .reward .rh { background: linear-gradient(120deg, var(--brand), var(--brand-2)); color: #fff;
+    padding: 9px 13px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .reward .rb { padding: 11px 13px; font-size: 13.5px; line-height: 1.45; }
+  .reward .code { display: flex; align-items: center; justify-content: space-between; margin-top: 9px;
+    border: 1.5px dashed rgba(var(--brand-rgb), .5); border-radius: 10px; padding: 8px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 700; letter-spacing: .06em; }
+  .reward .code i { font-style: normal; font-size: 11px; color: var(--brand); font-family: inherit; letter-spacing: .02em; }
+  .buy { display: block; text-align: center; background: var(--brand); color: #fff; font-weight: 700;
+    font-size: 13.5px; border-radius: 999px; padding: 11px; margin-top: 10px; text-decoration: none; }
+  .tiny { font-size: 11px; color: var(--screen-ink-2); margin-top: 7px; }
+
+  /* wheel */
+  .wheel-scene { background: radial-gradient(120% 90% at 50% 0%, #2a1030 0%, #17101f 60%, #120d18 100%);
+    color: #fff; flex: 1; display: flex; flex-direction: column; align-items: center; padding: 22px 18px; text-align: center; }
+  .wheel-scene h3 { margin: 2px 0 4px; font-size: 20px; letter-spacing: -0.01em; }
+  .wheel-scene .sub { font-size: 12.5px; color: #cdc4d8; max-width: 30ch; }
+  .wheel { position: relative; width: 218px; height: 218px; margin: 20px 0 14px; }
+  .wheel .disc { width: 100%; height: 100%; border-radius: 50%;
+    background: conic-gradient(#ff385c 0 60deg, #3a2a4d 60deg 120deg, #ff6b35 120deg 180deg,
+      #3a2a4d 180deg 240deg, #b02452 240deg 300deg, #524063 300deg 360deg);
+    border: 6px solid #ffffff22; box-shadow: 0 14px 40px -12px rgba(0,0,0,.7), inset 0 0 0 2px #00000033; }
+  .wheel .hub { position: absolute; inset: 0; margin: auto; width: 74px; height: 74px; border-radius: 50%;
+    background: #fff; color: var(--brand); display: grid; place-items: center;
+    font-weight: 800; font-size: 14px; letter-spacing: .1em; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+  .wheel .pin { position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0; border-left: 11px solid transparent; border-right: 11px solid transparent;
+    border-top: 18px solid #fff; filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
+  .slots { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; margin-top: 4px; }
+  .slots div { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #ddd5e6;
+    background: #ffffff12; border-radius: 9px; padding: 6px 11px; }
+  .slots div b { color: #fff; font-weight: 600; }
+  .slots div span { color: #b9aec9; font-variant-numeric: tabular-nums; }
+  .wheel-cta { margin-top: 12px; width: 100%; background: #fff; color: var(--brand); font-weight: 800;
+    border-radius: 999px; padding: 12px; font-size: 14px; }
+  .wheel-legal { font-size: 10.5px; color: #a394b5; margin-top: 9px; }
+  .wheel-legal u { text-decoration-color: #a394b5aa; }
+
+  /* admin (pulse) screens */
+  .ahead { padding: 14px 16px 10px; border-bottom: 1px solid var(--screen-line); }
+  .ahead .crumb { font-size: 11px; color: var(--screen-ink-2); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .ahead .t { font-weight: 800; font-size: 17px; margin-top: 2px; letter-spacing: -0.01em; }
+  .abody { padding: 13px 14px 18px; display: flex; flex-direction: column; gap: 11px; }
+  .tile { border: 1px solid var(--screen-line); border-radius: 14px; padding: 12px 13px; background: var(--screen); }
+  .tile .tt { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+  .tile .tt .on { margin-left: auto; font-size: 10.5px; font-weight: 700; color: var(--ok);
+    background: rgba(18,161,80,.1); border-radius: 999px; padding: 3px 8px; }
+  .tile .tt .off { margin-left: auto; font-size: 10.5px; font-weight: 700; color: var(--warn);
+    background: rgba(232,147,12,.12); border-radius: 999px; padding: 3px 8px; }
+  .targets { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0 9px; }
+  .targets span { font-size: 10.5px; font-weight: 700; color: var(--brand);
+    background: rgba(var(--brand-rgb), .09); border-radius: 999px; padding: 3px 8px; }
+  .targets span.sig { color: #7c3aed; background: rgba(124,58,237,.1); }
+  .burn { height: 8px; border-radius: 999px; background: var(--screen-soft); overflow: hidden; display: flex; }
+  .burn i { display: block; height: 100%; }
+  .burn .red { background: var(--ok); }
+  .burn .iss { background: var(--brand); }
+  .brow { display: flex; justify-content: space-between; font-size: 11px; color: var(--screen-ink-2);
+    margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .brow b { color: var(--screen-ink); font-weight: 700; }
+  .legend { display: flex; gap: 12px; font-size: 10.5px; color: var(--screen-ink-2); margin-top: 2px; }
+  .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 4px; }
+  .addbtn { border: 1.5px dashed var(--screen-line); border-radius: 14px; padding: 12px; text-align: center;
+    font-size: 13px; font-weight: 700; color: var(--brand); }
+
+  /* funnel */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .stat { border: 1px solid var(--screen-line); border-radius: 12px; padding: 10px 12px; }
+  .stat .n { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 10.5px; color: var(--screen-ink-2); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .stat .d { font-size: 10.5px; color: var(--ok); font-weight: 700; }
+  .funnel { display: flex; flex-direction: column; gap: 7px; }
+  .frow { display: grid; grid-template-columns: 108px 1fr 44px; align-items: center; gap: 8px; font-size: 11.5px; }
+  .frow .fl { color: var(--screen-ink-2); font-weight: 600; text-align: right; }
+  .frow .fb { height: 16px; border-radius: 5px; background: linear-gradient(90deg, var(--brand), var(--brand-2)); opacity: .95; }
+  .frow .fn { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .fnote { font-size: 10.5px; color: var(--screen-ink-2); margin-top: 4px; }
+
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--ink-2); font-size: 13px; max-width: 70ch; }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Howler Pulse · Design mockups · 2026-07-15</div>
+    <h1>The Loyalty &amp; Preference Engine</h1>
+    <p class="lede">Six scenes through the fan journey — from anonymous visitor to verified, rewarded, returning fan — plus the organiser's control room. Companion to <b>docs/specs/LOYALTY_ENGINE_SPEC.md</b>. All names, numbers and codes are illustrative.</p>
+    <div class="meta">
+      <span class="chip">Surface: <b>Fan Owl widget</b> + <b>Pulse admin</b></span>
+      <span class="chip">Status: <b>design</b></span>
+      <span class="chip">Mobile-first, as always</span>
+    </div>
+  </header>
+
+  <!-- 1 · verify -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 1 · The identity handshake</div>
+      <h2>“Want me to check if you qualify for a reward?”</h2>
+      <p class="note">Verification is offered as a favour, never a gate — the same consent-first stance the Owl already takes. A 6-digit code proves the fan controls the address <em>before</em> any history unlocks. Left: the offer. Right: the code moment.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="whead"><div class="owl">🦉</div><div><div class="t">Sonic Bloom Festival</div><div class="s">The Owl · booking guide</div></div><div class="x">✕</div></div>
+          <div class="chat">
+            <div class="msg fan">Which ticket do I need for the Saturday?</div>
+            <div class="msg owl">The <span class="em">Saturday Pass (R950)</span> covers the full day including the main stage — that's the one most people want. 🎟️</div>
+            <div class="msg owl">By the way — if you've been to a Howler event before (or preregistered), you might qualify for a <span class="em">returning-fan reward</span>. Want me to check? I just need your email or mobile to verify it's you.</div>
+            <div class="msg fan">Sure — thandi@gmail.com</div>
+            <div class="msg owl">Sent! 📬 Type the 6-digit code from your inbox and I'll take a look.</div>
+          </div>
+          <div class="cbar"><div class="in">Type the code…</div><div class="go">↑</div></div>
+        </div>
+        <div class="cap">Fan widget · verify offer</div>
+      </div>
+      <div class="phone">
+        <div class="screen">
+          <div class="whead"><div class="owl">🦉</div><div><div class="t">Sonic Bloom Festival</div><div class="s">The Owl · booking guide</div></div><div class="x">✕</div></div>
+          <div class="chat">
+            <div class="msg owl">Type the 6-digit code from your inbox 👇</div>
+            <div class="msg fan" style="background:transparent;padding:0"><span class="otp"><b class="on">4</b><b class="on">8</b><b class="on">2</b><b class="on">9</b><b></b><b></b></span></div>
+            <div class="sys ok">✓ Verified · thandi@gmail.com</div>
+            <div class="msg owl">Welcome back, Thandi! 🎉 You were at the <span class="em">last two editions</span> — checking what's waiting for you…</div>
+            <div class="chips"><span>Show my reward</span><span>Which ticket do I need?</span></div>
+          </div>
+          <div class="cbar"><div class="in">Message the Owl…</div><div class="go">↑</div></div>
+        </div>
+        <div class="cap">Fan widget · OTP + recognition</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · recognised fan -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 2 · The greatest salesman</div>
+      <h2>Guidance from memory — and an honest upgrade tip</h2>
+      <p class="note">The model never sees raw transactions: the server injects a derived profile (<code>Loyal · 2 events · bought GA · usually buys for 4</code>) and the reward is granted server-side from a pool with stock remaining. The Owl just says it like a friend would.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="whead"><div class="owl">🦉</div><div><div class="t">Sonic Bloom Festival</div><div class="s">The Owl · booking guide</div></div><div class="x">✕</div></div>
+          <div class="chat">
+            <div class="sys"><span class="tier">★ Loyal fan · 2 events</span></div>
+            <div class="msg owl">So — you bought <span class="em">General Access</span> last year, and you kept asking about the VIP deck 😄. This year there's a loyal-fan upgrade with your name on it:</div>
+            <div class="reward">
+              <div class="rh">★ Loyal-fan reward</div>
+              <div class="rb"><b>VIP upgrade — 25% off</b><br>GA → VIP Deck, this event only.
+                <div class="code">BLOOM-VIP-TH4K2 <i>expires 31 Aug</i></div>
+                <a class="buy" href="#">Buy VIP with my code →</a>
+                <div class="tiny">Applied at Howler checkout · 1 per fan</div>
+              </div>
+            </div>
+            <div class="msg owl">No pressure though — GA is still a great day out. Want me to compare the two?</div>
+            <div class="chips"><span>Compare GA vs VIP</span><span>What's included?</span></div>
+          </div>
+        </div>
+        <div class="cap">Fan widget · loyal-fan upgrade</div>
+      </div>
+      <div class="phone">
+        <div class="screen">
+          <div class="whead"><div class="owl">🦉</div><div><div class="t">Sonic Bloom Festival</div><div class="s">The Owl · booking guide</div></div><div class="x">✕</div></div>
+          <div class="chat">
+            <div class="sys"><span class="tier">↻ Returning · group buyer</span></div>
+            <div class="msg fan">Getting tickets for my crew again this year 🙌</div>
+            <div class="msg owl">Legend — you brought <span class="em">4 friends</span> last time! Groups of 4+ get a group-leader code this year:</div>
+            <div class="reward">
+              <div class="rh">Group special · 4+ tickets</div>
+              <div class="rb"><b>15% off, 4 or more GA tickets</b> in one order.
+                <div class="code">BLOOM-CREW-9Q3F <i>min 4 tickets</i></div>
+                <a class="buy" href="#">Buy for the crew →</a>
+                <div class="tiny">Code enforces the minimum at checkout</div>
+              </div>
+            </div>
+            <div class="chips"><span>Add camping for 5</span><span>Refund policy?</span></div>
+          </div>
+          <div class="cbar"><div class="in">Message the Owl…</div><div class="go">↑</div></div>
+        </div>
+        <div class="cap">Fan widget · group-leader code</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · comeback -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 3 · The comeback offer</div>
+      <h2>Preregistered, never bought — until now</h2>
+      <p class="note">Two prereg sources feed one signal: the native Howler preregistration list, and Pulse's own captured leads (chatted with the Owl, left an email, didn't buy). The moment they verify, the loop closes.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="whead"><div class="owl">🦉</div><div><div class="t">Sonic Bloom Festival</div><div class="s">The Owl · booking guide</div></div><div class="x">✕</div></div>
+          <div class="chat">
+            <div class="sys ok">✓ Verified · sipho@webmail.com</div>
+            <div class="sys"><span class="tier">✦ Preregistered · 14 March</span></div>
+            <div class="msg owl">Good news, Sipho — you <span class="em">preregistered back in March</span> (and asked me about camping!). Your early-bird rate is still yours:</div>
+            <div class="reward">
+              <div class="rh">✦ Preregistration honoured</div>
+              <div class="rb"><b>Early-bird price on GA — save R150</b><br>Plus camping's still available.
+                <div class="code">BLOOM-EARLY-S1P0 <i>expires in 7 days</i></div>
+                <a class="buy" href="#">Claim my early-bird →</a>
+              </div>
+            </div>
+            <div class="msg owl">Want me to add the camping info while you're here? ⛺</div>
+            <div class="chips"><span>Yes — camping options</span><span>Just the ticket</span></div>
+          </div>
+        </div>
+        <div class="cap">Fan widget · prereg comeback</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · wheel -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 4 · Spin the wheel</div>
+      <h2>A skin over the same engine — the server spins, the wheel performs</h2>
+      <p class="note">Verify to spin (that's the capture mechanic), one spin per fan per event. The outcome is drawn server-side from the same budgeted pools before the animation starts. Real odds, published prizes, T&amp;Cs per campaign — honesty is the Owl's brand.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="wheel-scene">
+            <h3>🦉 Spin for your reward</h3>
+            <div class="sub">One spin per fan — verify your email and see what Sonic Bloom has for you.</div>
+            <div class="wheel"><div class="pin"></div><div class="disc"></div><div class="hub">SPIN</div></div>
+            <div class="slots">
+              <div><b>10% off any ticket</b><span>most spins</span></div>
+              <div><b>GA → VIP upgrade</b><span>limited</span></div>
+              <div><b>Free camping add-on</b><span>limited</span></div>
+              <div><b>Red Bull cooler pack 🎁</b><span>sponsor prize</span></div>
+              <div><b>Meet &amp; greet: headliner</b><span>2 available</span></div>
+              <div><b>Better luck next event</b><span>—</span></div>
+            </div>
+            <div class="wheel-cta">Verify &amp; spin</div>
+            <div class="wheel-legal">No purchase needed · 1 spin per person · <u>Competition rules &amp; T&amp;Cs</u></div>
+          </div>
+        </div>
+        <div class="cap">Fan widget · the wheel</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · pools -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 5 · The organiser's wallet</div>
+      <h2>Promo pools — budgeted, targeted, burn-down visible</h2>
+      <p class="note">Codes are generated in Howler ticketing and uploaded into pools with rules (min quantity, ticket types, expiry). Pink chips target history tiers; purple chips target signals. Issuance stops dead when a pool empties. Ships on both surfaces: Admin → client → Loyalty, and the client's own Settings.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="ahead"><div class="crumb">Pulse · Sonic Bloom Festival</div><div class="t">Loyalty — promo pools</div></div>
+          <div class="abody">
+            <div class="tile">
+              <div class="tt">★ Loyal VIP upgrade <span class="on">Active</span></div>
+              <div class="targets"><span>Loyal</span><span class="sig">2+ events</span></div>
+              <div class="burn"><i class="red" style="width:26%"></i><i class="iss" style="width:22%"></i></div>
+              <div class="brow"><span><b>52</b> redeemed · <b>44</b> issued</span><span><b>104</b> / 200 left</span></div>
+              <div class="brow"><span>25% off VIP · expires 31 Aug</span><span>≈ <b>R23 400</b> budget</span></div>
+            </div>
+            <div class="tile">
+              <div class="tt">✦ Prereg comeback <span class="on">Active</span></div>
+              <div class="targets"><span>New</span><span class="sig">Preregistered</span><span class="sig">Never bought</span></div>
+              <div class="burn"><i class="red" style="width:58%"></i><i class="iss" style="width:19%"></i></div>
+              <div class="brow"><span><b>696</b> redeemed · <b>228</b> issued</span><span><b>276</b> / 1 200 left</span></div>
+              <div class="brow"><span>R150 off GA · expires 7 days after offer</span><span>≈ <b>R180 000</b> budget</span></div>
+            </div>
+            <div class="tile">
+              <div class="tt">Group leader 4+ <span class="on">Active</span></div>
+              <div class="targets"><span>Returning</span><span class="sig">Group buyer</span></div>
+              <div class="burn"><i class="red" style="width:31%"></i><i class="iss" style="width:14%"></i></div>
+              <div class="brow"><span><b>93</b> redeemed · <b>42</b> issued</span><span><b>165</b> / 300 left</span></div>
+              <div class="brow"><span>15% off · min 4 GA tickets</span><span>≈ <b>R85 500</b> budget</span></div>
+            </div>
+            <div class="tile">
+              <div class="tt">🎡 Wheel prizes <span class="off">Paused</span></div>
+              <div class="targets"><span>Any verified</span><span class="sig">1 spin / fan</span></div>
+              <div class="burn"><i class="red" style="width:74%"></i><i class="iss" style="width:11%"></i></div>
+              <div class="brow"><span><b>1 341</b> redeemed · <b>199</b> issued</span><span><b>272</b> / 1 812 left</span></div>
+              <div class="brow"><span>6 slots incl. sponsor + meet &amp; greet</span><span>T&amp;Cs linked ✓</span></div>
+            </div>
+            <div class="legend"><span><i style="background:var(--ok)"></i>Redeemed</span><span><i style="background:var(--brand)"></i>Issued</span><span><i style="background:var(--screen-soft);border:1px solid var(--screen-line)"></i>Remaining</span></div>
+            <div class="addbtn">+ New pool · upload codes (CSV from ticketing)</div>
+          </div>
+        </div>
+        <div class="cap">Pulse admin · promo pools</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 · roi -->
+  <section class="scene">
+    <div class="scene-head">
+      <div class="scene-no">Scene 6 · Closing the loop</div>
+      <h2>The funnel that justifies the budget</h2>
+      <p class="note">Every stage has a known population and a conversion rate — this is the report that makes the loyalty budget defensible to an organiser, and the sales story for the whole engine: identity in, revenue out.</p>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="screen">
+          <div class="ahead"><div class="crumb">Pulse · Sonic Bloom Festival</div><div class="t">Loyalty — results</div></div>
+          <div class="abody">
+            <div class="stats">
+              <div class="stat"><div class="n">3 407</div><div class="l">Fans verified</div><div class="d">+412 this week</div></div>
+              <div class="stat"><div class="n">2 182</div><div class="l">Codes redeemed</div><div class="d">64% of issued</div></div>
+              <div class="stat"><div class="n">R1.94M</div><div class="l">Attributed revenue</div><div class="d">via Owl codes</div></div>
+              <div class="stat"><div class="n">R289K</div><div class="l">Promo spend</div><div class="d">6.7× return</div></div>
+            </div>
+            <div class="tile">
+              <div class="tt" style="font-size:12.5px">Fan journey funnel</div>
+              <div class="funnel" style="margin-top:9px">
+                <div class="frow"><span class="fl">Preregistered</span><span class="fb" style="width:100%"></span><span class="fn">12 040</span></div>
+                <div class="frow"><span class="fl">Owl sessions</span><span class="fb" style="width:71%"></span><span class="fn">8 511</span></div>
+                <div class="frow"><span class="fl">Verified</span><span class="fb" style="width:28%"></span><span class="fn">3 407</span></div>
+                <div class="frow"><span class="fl">Offered</span><span class="fb" style="width:24%"></span><span class="fn">2 926</span></div>
+                <div class="frow"><span class="fl">Redeemed</span><span class="fb" style="width:18%"></span><span class="fn">2 182</span></div>
+                <div class="frow"><span class="fl">Full-price buys</span><span class="fb" style="width:9%; opacity:.55"></span><span class="fn">1 054</span></div>
+              </div>
+              <div class="fnote">Verified fans also bought 1 054 tickets at full price — the engine sells without discounting too.</div>
+            </div>
+            <div class="tile">
+              <div class="tt" style="font-size:12.5px">Marketing pipeline</div>
+              <div class="brow" style="margin-top:7px"><span>New consented contacts</span><b>2 871</b></div>
+              <div class="brow"><span>→ available to Campaigns &amp; segments</span><b>✓</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="cap">Pulse admin · ROI report</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <b>Guardrails baked into every scene:</b> OTP before any history · derived traits only reach the model · grants are server-side and one-per-fan · pools are hard-capped and pausable · real odds, published rules, no invented urgency. Spec: <b>docs/specs/LOYALTY_ENGINE_SPEC.md</b> · Repo: <a href="https://github.com/Shai-Xai/Shai-looker2">github.com/Shai-Xai/Shai-looker2</a>
+  </footer>
+</div>
+
+</body>
+</html>
