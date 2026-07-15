@@ -257,11 +257,13 @@ app.post('/api/admin/dashboards/:id/resync', auth.requireAdmin, asyncHandler(asy
   if (!cur) return res.status(404).json({ error: 'Dashboard not found' });
   if (!(cur.source && cur.source.lookerDashboardId)) return res.status(400).json({ error: 'This dashboard was not imported from Looker, so there is nothing to re-sync.' });
   const { def, summary } = await resync.resync(cur);
-  if (!(req.body || {}).apply) return res.json({ applied: false, summary });
+  const lookerDashboardId = cur.source.lookerDashboardId;
+  if (!(req.body || {}).apply) return res.json({ applied: false, summary, lookerDashboardId });
   def.source = { ...(def.source || {}), lastSyncedAt: new Date().toISOString() };
   const saved = store.update(cur.id, def);
   try { db.harvestDashboardTiles(saved, { sourceDashboardId: saved.id }); } catch (e) { console.error('[resync harvest]', e.message); }
-  res.json({ applied: true, summary });
+  if (clearCache) clearCache(); // drop cached query results so refreshed tiles render live
+  res.json({ applied: true, summary, lookerDashboardId });
 }));
 
 // Re-sync EVERY imported dashboard in a folder (and subfolders). Dry-run returns a
@@ -282,6 +284,7 @@ app.post('/api/admin/folders/resync', auth.requireAdmin, asyncHandler(async (req
       results.push({ id: cur.id, title: cur.title, ...summary });
     } catch (e) { failed.push({ id: cur.id, title: cur.title, error: e.message }); }
   }
+  if (apply && clearCache) clearCache(); // refreshed tiles render live, not from cache
   res.json({ folder, apply, dashboards: results.length, totals: { updated, added, removedInLooker }, failed, results: results.slice(0, 300) });
 }));
 

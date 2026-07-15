@@ -81,13 +81,49 @@ test('legacy tiles (no element id) match by signature and get stamped for next t
   delete cur.tiles[0].sourceElementId; // simulate a pre-element-id import
   const fresh = {
     filters: cur.filters,
-    tiles: [{ id: 'x', sourceElementId: '100', type: 'vis', title: 'Sales', query: { model: 'm', view: 'v', fields: ['a'] }, vis: {}, layout: {} }],
+    // same title+model+view+fields (signature matches) but a changed vis → a real update
+    tiles: [{ id: 'x', sourceElementId: '100', type: 'vis', title: 'Sales', query: { model: 'm', view: 'v', fields: ['a'] }, vis: { type: 'single', big: true }, layout: {} }],
     source: { lookerDashboardId: '555' },
   };
   const { def, summary } = mergeDef(cur, fresh);
-  assert.equal(summary.updated, 1, 'matched by title+query signature, not duplicated');
+  assert.equal(summary.matched.bySignature, 1, 'matched by title+query signature, not duplicated');
+  assert.equal(summary.updated, 1, 'a real content change is counted as updated');
   const sales = def.tiles.find((t) => t.id === 't-sales');
   assert.equal(sales.sourceElementId, '100', 'element id stamped so the next re-sync is exact');
+});
+
+test('a matched tile with identical content is a no-op, not a phantom "update"', () => {
+  const cur = current();
+  const fresh = {
+    filters: cur.filters,
+    tiles: [
+      { id: 'x', sourceElementId: '100', type: 'vis', title: 'Sales', query: { model: 'm', view: 'v', fields: ['a'] }, vis: { type: 'single' }, layout: { x: 9, y: 9, w: 1, h: 1 } },
+      { id: 'y', sourceElementId: '101', type: 'vis', title: 'Trend', query: { model: 'm', view: 'v', fields: ['b'] }, vis: { type: 'line' }, layout: {} },
+    ],
+    source: { lookerDashboardId: '555' },
+  };
+  const { summary } = mergeDef(cur, fresh);
+  assert.equal(summary.updated, 0, 'identical Looker content → nothing to update');
+  assert.equal(summary.unchanged, 2, 'both matched but unchanged');
+  assert.equal(summary.added, 0);
+});
+
+test('a legacy query change matches by unique title (updates in place, not a duplicate)', () => {
+  const cur = current();
+  delete cur.tiles[0].sourceElementId; // legacy Sales tile
+  const fresh = {
+    filters: cur.filters,
+    // Looker changed the measure → fields differ, so the signature no longer matches;
+    // the unique title "Sales" still pairs them so it updates rather than duplicating.
+    tiles: [{ id: 'x', sourceElementId: '100', type: 'vis', title: 'Sales', query: { model: 'm', view: 'v', fields: ['a', 'newmeasure'] }, vis: {}, layout: {} }],
+    source: { lookerDashboardId: '555' },
+  };
+  const { def, summary } = mergeDef(cur, fresh);
+  assert.equal(summary.matched.byTitle, 1, 'paired by unique title');
+  assert.equal(summary.added, 0, 'not duplicated');
+  const sales = def.tiles.find((t) => t.id === 't-sales');
+  assert.deepEqual(sales.query.fields, ['a', 'newmeasure'], 'query change pulled in');
+  assert.equal(sales.sourceElementId, '100', 'element id stamped for next time');
 });
 
 test('filters: matched refresh, new added, Pulse-only kept', () => {
