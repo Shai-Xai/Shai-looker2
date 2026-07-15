@@ -427,6 +427,12 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   input, select, textarea { font-size: 16px !important; }
 }
 
+/* ─── Branded PDF cover ─────────────────────────────────────────────────────
+   The `DashboardPrintHeader` block lives in the DOM at the top of the tile
+   scroll area but is hidden on screen; the print rules below reveal it so the
+   exported PDF opens with the tenant's logo, the title and the active filters. */
+.pdf-cover { display: none; }
+
 /* ─── Print / PDF ─────────────────────────────────────────────────────────────
    The dashboard's "⤓ PDF" button calls window.print(); these rules strip the
    app chrome and let the tile grid flow across pages, so Save-as-PDF yields a
@@ -442,4 +448,22 @@ input::placeholder, textarea::placeholder { color: #b0b0b6; }
   body { zoom: 0.72; }
   .howler-tile { box-shadow: none !important; break-inside: avoid; }
   .ai-glow::before { display: none !important; }
+
+  /* Reveal the branded cover and keep it on the first page above the grid. */
+  .pdf-cover { display: block !important; break-after: avoid; margin-bottom: 14px; color: #111; }
+  .pdf-cover-accent { height: 6px; border-radius: 3px; margin-bottom: 14px; }
+  .pdf-cover-top { display: flex; align-items: center; gap: 14px; }
+  .pdf-cover-logo { width: 46px; height: 46px; border-radius: 10px; object-fit: contain; flex-shrink: 0; }
+  .pdf-cover-logo--fallback { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; font-weight: 800; }
+  .pdf-cover-id { flex: 1; min-width: 0; }
+  .pdf-cover-tenant { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+  .pdf-cover-suite { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #666; }
+  .pdf-cover-stamp { text-align: right; font-size: 10.5px; color: #666; }
+  .pdf-cover-stamp-when { font-weight: 700; color: #222; }
+  .pdf-cover-title { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 12px 0 8px; }
+  .pdf-cover-filters { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .pdf-cover-filters-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; }
+  .pdf-cover-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pdf-cover-chip { font-size: 11px; padding: 3px 9px; border: 1px solid #ddd; border-radius: 980px; background: #fafafa; }
+  .pdf-cover-chip b { font-weight: 700; }
 }
