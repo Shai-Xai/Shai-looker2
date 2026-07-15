@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (🦉 Fan Owl: persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-15 (🦉 Fan Owl: homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -208,6 +208,10 @@ ticket like a well-informed friend who's already going.
 - **Reads the ticket shop for you** — point the Owl at the event's ticket page
   and it drafts the whole catalogue (names, prices, buy links, images) as
   suggestions to review and save. Interim until the direct Howler catalogue feed.
+- **Homepage hero chat** — a per-site toggle: fans landing on the home page get
+  the ask box centred like a welcome mat — the Owl's face, greeting, the site's
+  nav buttons and the question box. Folds into the bar/launcher on scroll or
+  dismiss, once per visit.
 - **Persistent ask bar** — a per-site widget style: instead of the floating
   launcher, a slim always-on bar docks to the bottom of every page — ＋ nav menu,
   a page-aware ask box ("Ask about the line-up…") and one tap from question to
@@ -1050,6 +1054,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-15** — **Fan Owl: homepage hero chat** 🧪: a per-site toggle (next to
+  Widget style) opens the ask box centred when fans land on the home page —
+  avatar, localised greeting ("where should we begin?"), the nav buttons in the
+  site's chosen style, and the ask box; typing starts the chat with the question
+  sent. Folds into the bar/launcher on scroll/dismiss and stays folded for the
+  session. Verified end-to-end with a scripted browser run (8/8 checks).
 - **2026-07-15** — **Fan Owl: persistent ask bar** 🧪: a new per-site widget style
   (🪄 Personality → Widget style) replaces the floating launcher with an always-on
   bar at the bottom of every page — outline ＋ opens the nav menu (navigates
