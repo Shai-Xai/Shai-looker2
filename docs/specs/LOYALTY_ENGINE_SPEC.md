@@ -4,6 +4,8 @@
 > North Star: `docs/EXPERIENCE_OS_BRIEF.md` · Companions:
 > `docs/specs/FAN_OWL_SPEC.md` (the surface this rides on),
 > `docs/ENGAGEMENT_ENGINE.md` (where the fan data lands),
+> `docs/specs/PORTFOLIO_VIEW_SPEC.md` (the scoping layers + customer master
+> that portfolio/brand-wide loyalty rides on),
 > `server/audienceQuery.js` (the PII boundary this mirrors).
 >
 > **Scope of this spec:** giving the Fan Owl *memory and a wallet* — a verified
@@ -155,6 +157,28 @@ offer; "returning AND group_buyer" → group-leader code), which is barely more
 complex than tiers but far more expressive — and every pool still has its own
 stock and burn-down regardless of targeting.
 
+### Scope: event, portfolio, or brand (aligns with PORTFOLIO_VIEW_SPEC)
+
+Rewards are *offered* per event, but loyalty is *earned* across a
+relationship — so the two scopes must not be conflated, and
+`docs/specs/PORTFOLIO_VIEW_SPEC.md` already defines the layers this adopts:
+
+| Layer | Loyalty meaning |
+|---|---|
+| **Event** (entity + suite) | where a pool spends: codes, budget, wheel — per-event by default, as the organiser's promo budget is per-event |
+| **Portfolio** (one entity, all suites) | where loyalty is EARNED: the derived profile's history lookup already runs entity-wide (tier = "2+ events" is inherently cross-event), and `fan_profiles` is keyed by entity — portfolio loyalty is the DEFAULT, not an extension |
+| **Multi-profile** (entity group) | a brand owning several client profiles: profile + history union across the group's entities, via the portfolio spec's `entity_groups`. Deferred until that ships; the loyalty tables need no rework — pools gain a nullable group scope and the profile lookup unions the group's organiser scopes |
+
+Two consequences:
+
+- **`promo_pools.suite_id` is nullable**: an entity-level pool ("any of my
+  events this season") is the portfolio-loyalty surface — same stock, budget
+  and one-per-fan rules, just redeemable against any of the client's events.
+- **The hard rule is inherited unchanged**: loyalty NEVER crosses client
+  boundaries. A fan's tier at one Howler client says nothing at another —
+  there is no cross-client fan graph. (Within a brand's own entity group it
+  may, once groups exist.)
+
 ## 4. Preregistration: two sources, one signal
 
 Howler already runs preregistration lists — this engine plugs into that
@@ -232,7 +256,8 @@ fan_profiles        + phone, verified_at, verified_channel,
 prereg_lists        id, entity_id, suite_id, source(howler|csv|pulse),
                     name, uploaded_by, created_at
 prereg_entries      id, list_id, email, phone, registered_at, meta(json)
-promo_pools         id, entity_id, suite_id, name, target(json: tiers[],
+promo_pools         id, entity_id, suite_id?,  -- null = portfolio-wide pool (any of the entity's events)
+                    name, target(json: tiers[],
                     signals[]),
                     reward_kind(discount|upgrade|addon|credit_bundle|merch|prize),
                     value_label, rules(json: min_qty, ticket_types[], expires_at),
@@ -304,6 +329,10 @@ changelog) and wire new client-setup steps into the Setup wizard, per
    community (both have APIs). Remaining: which events count as "engaged"
    (opens? favourites? lineup saves? community posts?), whether PostHog
    persons are identified by the same email, and the pull cadence.
+9. **Brand-wide (multi-profile) loyalty** — depends on the portfolio spec's
+   `entity_groups` + customer-master identity resolution. Which pilot brand
+   actually needs it, and does its tier maths differ per profile (a fan loyal
+   to one of the brand's festivals vs the brand overall)?
 
 ## 10. Risks
 
