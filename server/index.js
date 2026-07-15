@@ -123,7 +123,7 @@ app.use(express.static(staticDir, {
 // Bring legacy JSON data into SQLite on first boot (idempotent), then ensure an
 // admin exists.
 migrate.run();
-auth.seedAdmin();
+auth.seedAdmin(); auth.ensureSuperAdmins(); // seed a login, then the initial Super Admin(s) — see auth.js
 // Apply any version-controlled release-notes seed (authored at source; prod has no
 // git history to summarise). Idempotent — each entry is applied exactly once.
 require('./releaseNotesSeed').applySeed(db);
@@ -225,12 +225,12 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
 const team = require('./team').mount(app, { auth, db, roles, mailer });
 
 // ─── Backup / restore (full data export & import) ──────────────────────────────
-app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
+app.get('/api/admin/export', auth.requireSuperAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="pulse-backup-${new Date().toISOString().slice(0, 10)}.json"`);
   res.send(JSON.stringify(db.exportAll()));
 });
-app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => { // large limit: a full export (logos/defs) is big
+app.post('/api/admin/import', auth.requireSuperAdmin, express.json({ limit: '256mb' }), (req, res) => { // large limit: a full export (logos/defs) is big
   const data = req.body;
   if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
     return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
@@ -268,7 +268,7 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
     };
   }));
 });
-app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
+app.post('/api/admin/users', auth.requireAdmin, auth.guardSuperAdminTag, (req, res) => {
   try {
     const b = req.body || {};
     // No password typed → email the new user a set-password link (email-invite).
@@ -278,7 +278,7 @@ app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
     res.status(201).json({ ...u, invited: emailInvite });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.put('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/users/:id', auth.requireAdmin, auth.guardSuperAdminTag, (req, res) => {
   try {
     const u = auth.updateUser(req.params.id, req.body || {});
     if (!u) return res.status(404).json({ error: 'User not found' });
@@ -438,13 +438,13 @@ app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.dele
 
 // Reusable Inventive workspaces — create (name + reference), then link users to them.
 app.get('/api/admin/inventive-workspaces', auth.requireAdmin, (_req, res) => res.json(db.listInventiveWorkspaces()));
-app.post('/api/admin/inventive-workspaces', auth.requireAdmin, (req, res) => res.status(201).json(db.createInventiveWorkspace(req.body || {})));
-app.put('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => {
+app.post('/api/admin/inventive-workspaces', auth.requireSuperAdmin, (req, res) => res.status(201).json(db.createInventiveWorkspace(req.body || {})));
+app.put('/api/admin/inventive-workspaces/:id', auth.requireSuperAdmin, (req, res) => {
   const w = db.updateInventiveWorkspace(req.params.id, req.body || {});
   if (!w) return res.status(404).json({ error: 'Workspace not found' });
   res.json(w);
 });
-app.delete('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => { db.deleteInventiveWorkspace(req.params.id); res.status(204).end(); });
+app.delete('/api/admin/inventive-workspaces/:id', auth.requireSuperAdmin, (req, res) => { db.deleteInventiveWorkspace(req.params.id); res.status(204).end(); });
 
 // Sets = reusable dashboard collections (Ticketing, Cashless, …).
 app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets()));
@@ -1042,7 +1042,7 @@ const {
 
 // Admin: primary accounts.
 app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(adminIntegrationsView()));
-app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/integrations', auth.requireSuperAdmin, (req, res) => {
   const locks = getPlatformIntegrationLocks();
   const body = { ...(req.body || {}) };
   // Locked by default: a section is editable only when explicitly unlocked (false).
@@ -1072,7 +1072,7 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   res.json(adminIntegrationsView());
 });
 // Freeze / unfreeze a platform integration.
-app.put('/api/admin/integrations/lock', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/integrations/lock', auth.requireSuperAdmin, (req, res) => {
   const { key, locked } = req.body || {};
   if (!PLATFORM_INTEGRATION_KEYS.includes(key)) return res.status(400).json({ error: 'Unknown integration' });
   setPlatformIntegrationLock(key, !!locked);
@@ -2323,7 +2323,7 @@ app.get('/api/admin/sms-config', auth.requireAdmin, (_req, res) => {
   const key = db.getSetting('clickatell_api_key') || '';
   res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
 });
-app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/sms-config', auth.requireSuperAdmin, (req, res) => {
   const b = req.body || {};
   if (typeof b.apiKey === 'string' && b.apiKey.trim()) db.setSetting('clickatell_api_key', b.apiKey.trim()); // only overwrite when provided
   if ('sender' in b) db.setSetting('sms_sender', String(b.sender || '').slice(0, 40));
@@ -2332,7 +2332,7 @@ app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
   res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
 });
 // Send a test SMS to a number (admin) — confirms the provider end to end.
-app.post('/api/admin/sms-test', auth.requireAdmin, asyncHandler(async (req, res) => {
+app.post('/api/admin/sms-test', auth.requireSuperAdmin, asyncHandler(async (req, res) => {
   const to = String((req.body || {}).to || '').trim();
   if (!to) return res.status(400).json({ error: 'A phone number is required' });
   const r = await messaging.sendSms({ to, text: 'Howler : Pulse — SMS is connected ✓' });
@@ -2343,7 +2343,7 @@ app.post('/api/admin/sms-test', auth.requireAdmin, asyncHandler(async (req, res)
 app.get('/api/admin/notification-settings', auth.requireAdmin, (_req, res) => {
   res.json({ ackReminderHours: Number(db.getSetting('ack_reminder_hours', '12')) || 12 });
 });
-app.put('/api/admin/notification-settings', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/notification-settings', auth.requireSuperAdmin, (req, res) => {
   let h = Number((req.body || {}).ackReminderHours);
   if (!Number.isFinite(h)) h = 12;
   h = Math.min(168, Math.max(1, Math.round(h))); // clamp 1h..7d
