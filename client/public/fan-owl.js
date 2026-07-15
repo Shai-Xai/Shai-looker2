@@ -25,6 +25,7 @@
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
   var SS_HERO = 'howler_fan_hero_' + siteKey.slice(-8); // per-tab: home-page hero shown/dismissed
+  var SS_LAYOUT = 'howler_fan_layout_' + siteKey.slice(-8); // per-tab: desktop chat layout (main | side)
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -94,11 +95,30 @@
 
   var frameHref = ''; // the host page the iframe was last (re)built on
   var frameSeq = 0;   // cache-buster so re-setting src forces a fresh boot
+  // Desktop chat layout. Bar-mode sites open in MAIN view (wide, centred above
+  // where the bar sits — continuous with the drawer); a header toggle switches
+  // to the classic side panel and back, remembered for the tab session.
+  var chatLayout = 'side';
+  function isBarMode() { return !!(ctx && ctx.site && ctx.site.widgetStyle === 'bar'); }
+  function initLayout() { chatLayout = isBarMode() ? (sstore(true, SS_LAYOUT) || 'main') : 'side'; }
+  function applyLayout() {
+    if (!frameWrap || MOBILE()) return;
+    if (chatLayout === 'main') {
+      frameWrap.style.left = '0'; frameWrap.style.right = '0'; frameWrap.style.margin = '0 auto';
+      frameWrap.style.top = 'auto'; frameWrap.style.bottom = '10px';
+      frameWrap.style.width = 'min(860px, calc(100vw - 20px))';
+      frameWrap.style.height = 'min(680px, calc(100vh - 60px))';
+    } else {
+      frameWrap.style.left = 'auto'; frameWrap.style.right = '20px'; frameWrap.style.margin = '0';
+      frameWrap.style.top = 'auto'; frameWrap.style.bottom = '20px';
+      frameWrap.style.width = '380px'; frameWrap.style.height = 'min(640px, calc(100vh - 40px))';
+    }
+  }
   function frameSrc(afterNav, ask) {
     frameSeq += 1;
     // &m=1 marks the mobile fullscreen frame (the embed hides its expand button
     // there); &ask= carries a question typed into the persistent bar.
-    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '') + (MOBILE() ? '&m=1' : '') + (ask ? '&ask=' + encodeURIComponent(String(ask).slice(0, 300)) : '');
+    return base + '/embed/fan?r=' + frameSeq + '#sid=' + encodeURIComponent(ctx.sessionId) + (afterNav === true ? '&nav=1' : '') + (MOBILE() ? '&m=1' : '') + (isBarMode() && !MOBILE() ? '&lay=' + chatLayout : '') + (ask ? '&ask=' + encodeURIComponent(String(ask).slice(0, 300)) : '');
   }
   // Desktop wide view: the embed's ⤢ button asks us to grow the panel (the
   // iframe can't resize itself). No-op on mobile — it's already fullscreen.
@@ -112,7 +132,7 @@
       // Reopening on a DIFFERENT page (SPA navigations keep this iframe alive):
       // reload it so the chat boots with THIS page's context, not the stale one.
       // A typed question always reloads so the embed sends it.
-      if (ask || window.location.href !== frameHref) { frameHref = window.location.href; applyExpand(false); frame.src = frameSrc(afterNav, ask); }
+      if (ask || window.location.href !== frameHref) { frameHref = window.location.href; applyLayout(); frame.src = frameSrc(afterNav, ask); }
       frameWrap.style.display = 'block';
       if (launcher) launcher.style.display = 'none';
       if (bar) bar.style.display = 'none';
@@ -120,12 +140,13 @@
       beacon('widget_open');
       return;
     }
+    initLayout();
     frameWrap = el('div', MOBILE() ? {
       position: 'fixed', inset: '0', zIndex: '2147483000', background: '#0008',
     } : {
-      position: 'fixed', right: '20px', bottom: '20px', width: '380px', height: 'min(640px, calc(100vh - 40px))',
-      zIndex: '2147483000', borderRadius: '18px', overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,.35)',
+      position: 'fixed', zIndex: '2147483000', borderRadius: '18px', overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,.35)',
     }, root);
+    applyLayout();
     var frameDark = (ctx.site && ctx.site.theme === 'dark') ||
       ((!ctx.site || ctx.site.theme !== 'light') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     frame = el('iframe', {
@@ -152,6 +173,12 @@
     if (e.origin !== base) return;
     if (e.data === 'howler-fan-owl:close') { closePanel(); return; }
     if (e.data && e.data.t === 'howler-fan-owl:expand') { applyExpand(e.data.on === true); return; }
+    if (e.data && e.data.t === 'howler-fan-owl:layout' && (e.data.mode === 'main' || e.data.mode === 'side')) {
+      chatLayout = e.data.mode;
+      sstore(false, SS_LAYOUT, chatLayout);
+      applyLayout();
+      return;
+    }
     // The Owl's "Take me there" button: navigate WITHIN the host site (the path
     // is resolved against this page's own origin — never off-site).
     if (e.data && e.data.t === 'howler-fan-owl:nav' && typeof e.data.path === 'string') {
@@ -182,7 +209,7 @@
   };
   var NAV_TYPE_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
   function navIconHtml(n, size) {
-    if (n.emoji) return '<span style="font-size:' + (size - 3) + 'px;line-height:1" aria-hidden="true">' + n.emoji + '</span>';
+    if (n.emoji) return '<span style="font-size:' + (size - 3) + 'px;line-height:1" aria-hidden="true">' + String(n.emoji).replace(/[<>&"]/g, '') + '</span>';
     return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (NAV_SVG[n.pageType] || NAV_SVG.other) + '</svg>';
   }
   function navLabelOf(n) { return n.label || NAV_TYPE_LABELS[n.pageType] || NAV_TYPE_LABELS.other; }
@@ -226,7 +253,9 @@
         cursor: 'pointer', fontSize: '14px', fontWeight: '600', fontFamily: 'inherit',
       }, menu);
       r.type = 'button';
-      r.insertAdjacentHTML('beforeend', navIconHtml(n, 16) + '<span style="margin-left:2px">' + navLabelOf(n) + '</span>');
+      r.insertAdjacentHTML('beforeend', navIconHtml(n, 16));
+      var lbl = el('span', { marginLeft: '2px' }, r);
+      lbl.textContent = navLabelOf(n);
       r.addEventListener('mouseenter', function () { r.style.background = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.05)'; });
       r.addEventListener('mouseleave', function () { r.style.background = 'transparent'; });
       r.addEventListener('click', function () { menu.style.display = 'none'; onPick(n); });
@@ -337,8 +366,33 @@
       backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
       fontFamily: '-apple-system, system-ui, sans-serif',
     }, root);
+    // The bar wears the site's nav style: 'plus' → the ＋ menu; 'top' → inline
+    // icon circles (mobile falls back to ＋ for width); 'pills'/'below' → a
+    // labelled pill row above/below the input; 'off' → chat only.
+    var navStyle = (ctx.site && ctx.site.navStyle) || 'top';
+    var showNav = (ctx.nav || []).length > 0 && navStyle !== 'off';
+    var usePlus = showNav && (navStyle === 'plus' || (navStyle === 'top' && MOBILE()));
+    var inlineIcons = showNav && navStyle === 'top' && !MOBILE();
+    function barPills(pad) {
+      var scroller = el('div', { overflowX: 'auto', WebkitOverflowScrolling: 'touch', padding: pad }, bar);
+      var inner = el('div', { display: 'flex', gap: '8px', width: 'max-content', margin: '0 auto' }, scroller);
+      (ctx.nav || []).forEach(function (n) {
+        var b = el('button', {
+          display: 'inline-flex', alignItems: 'center', gap: '7px', flex: '0 0 auto', cursor: 'pointer', minHeight: '36px',
+          border: '1px solid ' + (n.active ? color : (dark ? 'rgba(255,255,255,.22)' : 'rgba(0,0,0,.18)')),
+          background: n.active ? color : (dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.04)'),
+          color: n.active ? '#fff' : 'inherit',
+          borderRadius: '999px', padding: '7px 13px', fontSize: '12.5px', fontWeight: '600', fontFamily: 'inherit',
+        }, inner);
+        b.type = 'button'; b.title = n.note || navLabelOf(n);
+        b.insertAdjacentHTML('beforeend', navIconHtml(n, 14));
+        var sp = el('span', {}, b); sp.textContent = navLabelOf(n);
+        b.addEventListener('click', function () { navPick(n); });
+      });
+    }
+    if (showNav && navStyle === 'pills') barPills('0 2px 8px');
     var row = el('div', { display: 'flex', gap: '9px', alignItems: 'center', position: 'relative' }, bar);
-    if ((ctx.nav || []).length) {
+    if (usePlus) {
       var plus = el('button', {
         width: '44px', height: '44px', borderRadius: '50%', flex: '0 0 auto', cursor: 'pointer',
         border: '1.5px solid ' + (dark ? 'rgba(255,255,255,.28)' : 'rgba(0,0,0,.22)'),
@@ -352,6 +406,19 @@
         barMenu.style.display = 'block';
       });
     }
+    if (inlineIcons) {
+      var icons = el('div', { display: 'flex', gap: '7px', flex: '0 1 auto', overflowX: 'auto', scrollbarWidth: 'none' }, row);
+      (ctx.nav || []).forEach(function (n) {
+        var ib = el('button', {
+          width: '40px', height: '40px', borderRadius: '50%', border: '0', flex: '0 0 auto', cursor: 'pointer', padding: '0',
+          background: n.active ? color : (dark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.06)'), color: n.active ? '#fff' : 'inherit',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }, icons);
+        ib.type = 'button'; ib.title = n.note || navLabelOf(n); ib.setAttribute('aria-label', navLabelOf(n));
+        ib.insertAdjacentHTML('beforeend', navIconHtml(n, 18));
+        ib.addEventListener('click', function () { navPick(n); });
+      });
+    }
     barInput = makeAskPill(row, dark, color, function (q) {
       if (barMenu) barMenu.style.display = 'none';
       hideDrawer();
@@ -362,6 +429,7 @@
     barInput.addEventListener('input', renderDrawer);
     barInput.addEventListener('blur', function () { setTimeout(hideDrawer, 150); });
     barInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { hideDrawer(); barInput.blur(); } });
+    if (showNav && navStyle === 'below') barPills('8px 2px 0');
     var foot = el('div', { textAlign: 'center', fontSize: '10.5px', opacity: '.55', padding: '3px 0 2px' }, bar);
     foot.insertAdjacentHTML('beforeend', 'Powered by Howler <img src="' + base + '/email-howler.png" alt="" style="height:11px;width:11px;border-radius:50%;vertical-align:-1.5px">');
   }
@@ -431,7 +499,8 @@
         b.type = 'button';
         b.title = navLabelOf(n);
         b.setAttribute('aria-label', navLabelOf(n));
-        b.insertAdjacentHTML('beforeend', navIconHtml(n, isIcon ? 19 : 15) + (isIcon ? '' : '<span>' + navLabelOf(n) + '</span>'));
+        b.insertAdjacentHTML('beforeend', navIconHtml(n, isIcon ? 19 : 15));
+        if (!isIcon) { var hlbl = el('span', {}, b); hlbl.textContent = navLabelOf(n); }
         b.addEventListener('click', function () { dismissHero(); navPick(n); });
       });
     }
