@@ -85,8 +85,9 @@ main{max-width:880px;margin:0 auto;padding:46px 24px 120px;}
   </article>
 </main>
 
-<!-- Markdown renderer. Pinned version; falls back gracefully if the CDN is blocked. -->
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<!-- Markdown renderer — self-hosted (no external CDN), so the page works even
+     where outbound network access is blocked. See docs/vendor/md-lite.js. -->
+<script src="/vendor/md-lite.js"></script>
 <script>
 (async function () {
   const docEl = document.getElementById('doc');
@@ -103,7 +104,7 @@ main{max-width:880px;margin:0 auto;padding:46px 24px 120px;}
   }
 
   if (typeof marked === 'undefined') {
-    return showError('The markdown renderer didn’t load (CDN blocked?). The page needs network access to <code>cdn.jsdelivr.net</code>.');
+    return showError('The markdown renderer didn’t load. Try reloading the page.');
   }
 
   try {
