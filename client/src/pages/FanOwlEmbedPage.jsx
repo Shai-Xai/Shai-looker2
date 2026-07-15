@@ -201,13 +201,15 @@ export default function FanOwlEmbedPage() {
   const navStyle = nav.length ? (boot.navStyle === 'top' || !boot.navStyle ? 'top' : boot.navStyle) : 'off';
   // Centred pills that still scroll fully when they overflow: centring the inner
   // max-content row (not the scroller itself) keeps the leading pills reachable.
+  const navIco = (n, size) => (n.emoji ? <span style={{ fontSize: size, lineHeight: 1 }} aria-hidden>{n.emoji}</span> : <NavIcon t={n.pageType} size={size} />);
+  const navText = (n) => n.label || navLabel(n);
   const navPillRow = (pad) => (
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', padding: pad }}>
       <div style={{ display: 'flex', gap: 8, width: 'max-content', margin: '0 auto' }}>
         {nav.map((n) => (
-          <button key={n.path} type="button" title={n.note || navLabel(n)} onClick={() => goTo(n)}
+          <button key={n.path} type="button" title={n.note || navText(n)} onClick={() => goTo(n)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flex: '0 0 auto', cursor: 'pointer', border: `1px solid ${n.active ? brand : C.chipLine}`, background: n.active ? brand : C.chipBg, color: n.active ? '#fff' : C.ink, borderRadius: 999, padding: '8px 13px', fontSize: 12.5, fontWeight: 600, minHeight: 36 }}>
-            <NavIcon t={n.pageType} size={15} />{navLabel(n)}
+            {navIco(n, 15)}{navText(n)}
           </button>
         ))}
       </div>
@@ -248,9 +250,9 @@ export default function FanOwlEmbedPage() {
       {navStyle === 'top' && (
         <div style={{ display: 'flex', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${C.line}`, background: C.sheetBg, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {nav.map((n) => (
-            <button key={n.path} type="button" title={n.note || navLabel(n)} aria-label={navLabel(n)}
+            <button key={n.path} type="button" title={n.note || navText(n)} aria-label={navText(n)}
               style={navBtnStyle(n)} onClick={() => goTo(n)}>
-              <NavIcon t={n.pageType} />
+              {navIco(n, 19)}
             </button>
           ))}
         </div>
@@ -345,8 +347,8 @@ export default function FanOwlEmbedPage() {
             {nav.map((n) => (
               <button key={n.path} type="button" onClick={() => { setNavOpen(false); goTo(n); }}
                 style={{ display: 'flex', alignItems: 'center', gap: 11, width: '100%', textAlign: 'left', border: 0, background: 'transparent', color: C.ink, borderRadius: 10, padding: '9px 10px', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
-                <span style={navBtnStyle(n, 32)}><NavIcon t={n.pageType} size={15} /></span>
-                {navLabel(n)}
+                <span style={navBtnStyle(n, 32)}>{navIco(n, 15)}</span>
+                {navText(n)}
                 {n.note && <span style={{ fontWeight: 400, color: C.muted, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.note}</span>}
               </button>
             ))}

@@ -14,6 +14,12 @@ const PAGE_TYPES = ['home', 'lineup', 'artist', 'tickets', 'attraction', 'venue'
 const ITEM_KINDS = ['ticket', 'addon', 'bundle', 'accommodation', 'transport', 'merchandise'];
 const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
 const LANGS = [['', "Auto — fan's device language, else English"], ['en', 'English'], ['af', 'Afrikaans'], ['it', 'Italiano'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['nl', 'Nederlands']];
+const NAV_TYPE_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
+// Same derivation as the server: a mapping is navigable when its pattern leaves a path.
+const navigablePath = (pattern) => {
+  const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
+  return !frag || frag.startsWith('/') ? frag : `/${frag}`;
+};
 const input = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', fontFamily: 'inherit', background: 'var(--card, #fff)', color: 'var(--text)' };
 const small = { fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 4px' };
 const btn = { padding: '8px 14px', borderRadius: 8, border: '1.5px solid var(--hairline)', background: 'transparent', color: 'var(--text)', fontSize: 12.5, cursor: 'pointer', minHeight: 36 };
@@ -271,7 +277,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', navStyle: '', pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -329,15 +335,72 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   </select>
                 </div>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <div style={small}>🧭 Quick-nav buttons — one per mapped page (📄 Pages tab); fans tap them to hop around your site from the chat. Pick where they live:</div>
-                <select style={input} value={s.navStyle || ''} onChange={(e) => setSite(i, { navStyle: e.target.value })}>
-                  <option value="">Icon strip under the header (default)</option>
-                  <option value="plus">＋ menu next to the message box</option>
-                  <option value="pills">Labelled pills above the message box (centred)</option>
-                  <option value="below">Labelled pills below the message box (centred)</option>
-                  <option value="off">Off — chat only</option>
-                </select>
+              <div style={{ marginTop: 12, borderTop: '1px dashed var(--hairline)', paddingTop: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>🧭 Navigation buttons</div>
+                <p style={small}>The quick buttons fans use to hop around your site from the Owl — tap = the Owl takes them there and follows with that page's context.</p>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+                  <div>
+                    <div style={small}>Where they live</div>
+                    <select style={input} value={s.navStyle || ''} onChange={(e) => setSite(i, { navStyle: e.target.value })}>
+                      <option value="">Icon strip under the header (default)</option>
+                      <option value="plus">＋ menu next to the message box</option>
+                      <option value="pills">Labelled pills above the message box (centred)</option>
+                      <option value="below">Labelled pills below the message box (centred)</option>
+                      <option value="off">Off — chat only</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={small}>Which buttons</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" style={{ ...btn, fontWeight: 700, background: !Array.isArray(s.navButtons) ? 'var(--text)' : 'transparent', color: !Array.isArray(s.navButtons) ? 'var(--bg, #fff)' : 'var(--text)', border: !Array.isArray(s.navButtons) ? 0 : btn.border }}
+                        onClick={() => setSite(i, { navButtons: null })}>Auto — from your pages</button>
+                      <button type="button" style={{ ...btn, fontWeight: 700, background: Array.isArray(s.navButtons) ? 'var(--text)' : 'transparent', color: Array.isArray(s.navButtons) ? 'var(--bg, #fff)' : 'var(--text)', border: Array.isArray(s.navButtons) ? 0 : btn.border }}
+                        onClick={() => { if (!Array.isArray(s.navButtons)) setSite(i, { navButtons: (s.pages || []).filter((p) => navigablePath(p.urlPattern)).slice(0, 12).map((p) => ({ kind: 'page', urlPattern: p.urlPattern, label: '', emoji: '', enabled: true })) }); }}>Custom</button>
+                    </div>
+                  </div>
+                </div>
+                {!Array.isArray(s.navButtons) && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+                    {(s.pages || []).filter((p) => navigablePath(p.urlPattern)).slice(0, 8).map((p) => (
+                      <span key={p.urlPattern} style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 999, padding: '5px 11px' }}>{NAV_TYPE_LABELS[p.pageType] || NAV_TYPE_LABELS.other} <span style={{ color: 'var(--muted)' }}>· {navigablePath(p.urlPattern)}</span></span>
+                    ))}
+                    {!(s.pages || []).some((p) => navigablePath(p.urlPattern)) && <span style={small}>No mapped pages yet — add them under 📄 Pages (or run "Read the website") and buttons appear automatically.</span>}
+                    <span style={small}>Switch to Custom to rename, reorder, toggle or add your own links.</span>
+                  </div>
+                )}
+                {Array.isArray(s.navButtons) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                    {s.navButtons.map((b, bi) => {
+                      const pg = b.kind !== 'custom' ? (s.pages || []).find((p) => p.urlPattern === b.urlPattern) : null;
+                      const defLabel = b.kind === 'custom' ? 'Custom link' : (NAV_TYPE_LABELS[pg?.pageType] || NAV_TYPE_LABELS.other);
+                      const upd = (patch) => setSite(i, { navButtons: s.navButtons.map((x, xi) => (xi === bi ? { ...x, ...patch } : x)) });
+                      const move = (dir) => {
+                        const arr = [...s.navButtons]; const to = bi + dir;
+                        if (to < 0 || to >= arr.length) return;
+                        const [x] = arr.splice(bi, 1); arr.splice(to, 0, x);
+                        setSite(i, { navButtons: arr });
+                      };
+                      return (
+                        <div key={`${b.kind}-${b.urlPattern || b.path}-${bi}`} style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', borderRadius: 10, padding: '6px 8px', flexWrap: 'wrap', opacity: b.enabled === false ? 0.55 : 1 }}>
+                        <input type="checkbox" checked={b.enabled !== false} onChange={(e) => upd({ enabled: e.target.checked })} style={{ width: 16, height: 16 }} title="Show this button" />
+                        <input style={{ ...input, width: 54, textAlign: 'center', padding: '7px 4px' }} value={b.emoji || ''} maxLength={4} placeholder="icon" title="Emoji icon (blank = the page-type icon)" onChange={(e) => upd({ emoji: e.target.value })} />
+                        <input style={{ ...input, flex: '1 1 110px', width: 'auto' }} value={b.label || ''} maxLength={24} placeholder={defLabel} title="Button label" onChange={(e) => upd({ label: e.target.value })} />
+                        {b.kind === 'custom'
+                          ? <input style={{ ...input, flex: '2 1 140px', width: 'auto' }} value={b.path || ''} placeholder="/glamping (path on your site)" onChange={(e) => upd({ path: e.target.value })} />
+                          : <span style={{ ...small, margin: 0, flex: '2 1 140px', fontFamily: 'ui-monospace, monospace' }}>{navigablePath(b.urlPattern)} · {pg ? pg.pageType : '⚠️ page mapping removed'}</span>}
+                        <button type="button" aria-label="Move up" disabled={bi === 0} style={{ ...btn, minHeight: 28, padding: '2px 8px', fontSize: 11, opacity: bi === 0 ? 0.35 : 1 }} onClick={() => move(-1)}>▲</button>
+                        <button type="button" aria-label="Move down" disabled={bi === s.navButtons.length - 1} style={{ ...btn, minHeight: 28, padding: '2px 8px', fontSize: 11, opacity: bi === s.navButtons.length - 1 ? 0.35 : 1 }} onClick={() => move(1)}>▼</button>
+                        <button type="button" aria-label="Remove" style={{ ...btn, minHeight: 28, padding: '2px 8px', fontSize: 11, color: 'var(--danger, #b3261e)' }} onClick={() => setSite(i, { navButtons: s.navButtons.filter((_, xi) => xi !== bi) })}>✕</button>
+                        </div>
+                      );
+                    })}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button type="button" style={btn} onClick={() => setSite(i, { navButtons: [...s.navButtons, { kind: 'custom', urlPattern: '', label: '', emoji: '🔗', path: '', enabled: true }] })}>+ Add custom link</button>
+                      <button type="button" style={btn} onClick={() => setSite(i, { navButtons: (s.pages || []).filter((p) => navigablePath(p.urlPattern)).slice(0, 12).map((p) => ({ kind: 'page', urlPattern: p.urlPattern, label: '', emoji: '', enabled: true })) })}>↺ Rebuild from pages</button>
+                      <span style={{ ...small, alignSelf: 'center' }}>Up to 8 show; blank label/icon = the page-type default.</span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
               <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
