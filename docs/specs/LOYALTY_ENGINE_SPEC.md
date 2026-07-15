@@ -134,13 +134,18 @@ Two axes, all computed server-side from data we already hold:
   no-showed is a *win-back* segment, not an upsell one
 - `high_onsite_spender` — bar/product spend band from the cashless explore
   (already registered in Pulse, `owlCatalogue.js` cashless field families).
-  Arguably the strongest loyalty signal we hold: it measures engagement AT the
-  event, not just the purchase — and cashless accounts carry an identity,
-  which helps matching
-- `app_engaged` — active in the Howler app (data plumbing TBD, §9). Rewarded
-  with LOW-COST currency only (extra wheel spin, presale access, first pick) —
-  engagement isn't a purchase, so it never earns deep discounts; the budget
-  stays pointed at conversion
+  Product spend is keyed **by email** (confirmed 2026-07-15), so it joins the
+  verified profile with the same lookup as purchase history — phase-1 viable.
+  Arguably the strongest loyalty signal we hold: it measures engagement AT
+  the event, not just the purchase
+- `app_engaged` — active in the Howler app. Data lives in **PostHog**
+  (product analytics events) and the **Social+ community** platform
+  (posts/comments/reactions — potentially its own `community_member` signal);
+  both expose APIs, so this is a periodic per-identity pull, not a new
+  pipeline (§9 for the definition question). Rewarded with LOW-COST currency
+  only (extra wheel spin, presale access, first pick) — engagement isn't a
+  purchase, so it never earns deep discounts; the budget stays pointed at
+  conversion
 - `interests[]` — already logged by `logInterest` / `captureLead`
 - traits: favourite ticket type, ticket + on-site spend bands, last event
   attended
@@ -178,11 +183,17 @@ Codes are **generated in the Howler ticketing system** (discount enforcement
 happens at checkout, not in Pulse) and **uploaded into pools**:
 
 - **Pool** = event (suite) + name + target (tier/signal combination) + reward
-  kind (discount / upgrade / add-on / prize / **cashless credit**) + value +
-  expiry + code stock + optional wheel flag & weight. Cashless credit ("R100
-  bar credit when you buy this week") is likely the cheapest reward per
-  conversion — it costs less than face value (breakage + product margin) and
-  drives on-site spend too; mechanics are an open question (§9).
+  kind (discount / upgrade / add-on / prize / **credit bundle**) + value +
+  expiry + code stock + optional wheel flag & weight.
+- **Cashless credit rides a bundle, not a voucher.** Topup vouchers cannot be
+  issued as codes (confirmed 2026-07-15) — but ticketing CAN bundle tickets +
+  credit as a product. So the credit reward is a **ticket+credit bundle**
+  ("Saturday Pass + R150 bar credit"), offered either as its own catalogue
+  item behind a deep link (a pool can gate WHO gets shown it) or with a
+  discount code applied to the bundle. This is neater than vouchers anyway:
+  it fits the existing catalogue/deep-link pattern, redemption is just a
+  ticket sale, and it's likely the cheapest reward per conversion (breakage +
+  product margin) while lifting on-site spend.
 - **Code metadata matters:** min quantity (group codes), applicable ticket
   types, expiry — captured at upload so the Owl only offers a code when the
   fan's intent matches its rules (a group code goes to someone buying for 4,
@@ -214,8 +225,10 @@ prereg_lists        id, entity_id, suite_id, source(howler|csv|pulse),
                     name, uploaded_by, created_at
 prereg_entries      id, list_id, email, phone, registered_at, meta(json)
 promo_pools         id, entity_id, suite_id, name, target(json: tiers[],
-                    signals[]), reward_kind(discount|upgrade|addon|prize),
+                    signals[]),
+                    reward_kind(discount|upgrade|addon|credit_bundle|prize),
                     value_label, rules(json: min_qty, ticket_types[], expires_at),
+                    bundle_item_id?,  -- credit_bundle: the fan_catalogue item it gates
                     wheel_enabled, wheel_weight, terms_url, active, created_at
 promo_codes         id, pool_id, code, status(available|issued|redeemed|void),
                     issued_to_profile?, issued_at?, redeemed_at?
@@ -272,15 +285,16 @@ changelog) and wire new client-setup steps into the Setup wizard, per
    campaign (SA CPA §36; EU per-country).
 5. **Phone-only verification** — Clickatell SMS costs per message; do we gate
    SMS OTP behind a per-site toggle/budget like the chat's `daily_budget`?
-6. **Cashless identity join** — which identity does a cashless account carry
-   (email/phone/ticket ref), and does it match the purchaser record reliably
-   enough to feed `high_onsite_spender` / `attended` without manual mapping?
-7. **Cashless credit as a reward** — can topup vouchers be issued as codes
-   (or credited server-side on redemption), and how does breakage get
-   reported back into the pool's ROI?
-8. **App engagement feed** — where does Howler app engagement data live, what
-   events are meaningful (opens? favourites? lineup saves?), and can Pulse
-   read it per fan identity?
+6. ~~Cashless identity join~~ **RESOLVED (2026-07-15):** product spend is
+   keyed by email — joins the verified profile directly, no mapping layer.
+7. ~~Cashless credit as a reward~~ **RESOLVED (2026-07-15):** topup vouchers
+   can't be code-issued, but ticketing can bundle tickets + credit as a
+   product — the credit reward ships as a ticket+credit bundle (§5).
+   Remaining detail: how bundle margin/breakage shows in the pool ROI view.
+8. **App engagement definition** — data lives in PostHog + the Social+
+   community (both have APIs). Remaining: which events count as "engaged"
+   (opens? favourites? lineup saves? community posts?), whether PostHog
+   persons are identified by the same email, and the pull cadence.
 
 ## 10. Risks
 
