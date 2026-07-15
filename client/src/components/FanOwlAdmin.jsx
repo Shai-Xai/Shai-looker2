@@ -47,6 +47,8 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [ticketUrl, setTicketUrl] = useState('');
   const [catIngesting, setCatIngesting] = useState(false);
   const [catNote, setCatNote] = useState('');
+  const [navBusy, setNavBusy] = useState(false);
+  const [navNote, setNavNote] = useState(null); // { i, text }
   const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
 
   useEffect(() => {
@@ -117,6 +119,24 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       });
     } catch (e) { setCatNote(`⚠️ ${e.message}`); }
     finally { setCatIngesting(false); }
+  }
+
+  // "Suggest from website menu": read the site's real <nav>/<header> tabs
+  // (deterministic, no AI) and load them as an UNSAVED custom button list.
+  async function suggestNav(i) {
+    const site = cfg.sites[i];
+    if (!site.id) { setNavNote({ i, text: 'Save the site first, then suggest.' }); return; }
+    const domain = (site.domains || [])[0];
+    if (!domain) { setNavNote({ i, text: 'Add the site’s domain first (Sites tab) — that tells the reader which website’s menu to read.' }); return; }
+    setNavBusy(true); setNavNote({ i, text: 'Reading the website’s menu…' });
+    try {
+      const r = await fetch(`${base}/suggest-nav`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteId: site.id, url: `https://${domain}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'The read failed — try again.');
+      setCfg((c) => ({ ...c, sites: c.sites.map((x, j) => (j === i ? { ...x, navButtons: d.buttons } : x)) }));
+      setNavNote({ i, text: `Found ${d.buttons.length} menu tab${d.buttons.length === 1 ? '' : 's'} — review, rename or toggle, then Save.` });
+    } catch (e) { setNavNote({ i, text: `⚠️ ${e.message}` }); }
+    finally { setNavBusy(false); }
   }
 
   // The Owl's face: one square-ish image per site, downscaled small and hosted
@@ -356,6 +376,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                         onClick={() => setSite(i, { navButtons: null })}>Auto — from your pages</button>
                       <button type="button" style={{ ...btn, fontWeight: 700, background: Array.isArray(s.navButtons) ? 'var(--text)' : 'transparent', color: Array.isArray(s.navButtons) ? 'var(--bg, #fff)' : 'var(--text)', border: Array.isArray(s.navButtons) ? 0 : btn.border }}
                         onClick={() => { if (!Array.isArray(s.navButtons)) setSite(i, { navButtons: (s.pages || []).filter((p) => navigablePath(p.urlPattern)).slice(0, 12).map((p) => ({ kind: 'page', urlPattern: p.urlPattern, label: '', emoji: '', enabled: true })) }); }}>Custom</button>
+                      <button type="button" style={{ ...btn, borderStyle: 'dashed' }} disabled={navBusy} onClick={() => suggestNav(i)}>{navBusy ? 'Reading…' : '🔮 Suggest from website menu'}</button>
                     </div>
                   </div>
                 </div>
@@ -401,6 +422,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                     </div>
                   </div>
                 )}
+                {navNote && navNote.i === i && <p style={{ ...small, marginTop: 6 }}>{navNote.text}</p>}
               </div>
               <div style={{ ...small, marginTop: 8 }}>Personality & voice — how should it sound? (style only; it can never change prices or facts)</div>
               <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={s.persona || ''} maxLength={2000}
@@ -631,6 +653,7 @@ function Flywheel({ stats, leads, loadLeads }) {
     return acc;
   }, {}), [stats]);
   const topics = useMemo(() => (stats.sites || []).flatMap((s) => s.topics || []).sort((a, b) => b.c - a.c).slice(0, 10), [stats]);
+  const navTaps = useMemo(() => (stats.sites || []).flatMap((s) => s.navTaps || []).sort((a, b) => b.c - a.c).slice(0, 10), [stats]);
   const stat = (label, v) => (
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 12px', minWidth: 90 }}>
       <div style={{ fontSize: 18, fontWeight: 700 }}>{v || 0}</div>
@@ -645,6 +668,7 @@ function Flywheel({ stats, leads, loadLeads }) {
         {stat('Chats opened', total.chat_open)}
         {stat('Messages', total.chat_message)}
         {stat('Buy clicks', total.deeplink_click)}
+        {stat('Nav taps', total.nav_click)}
         {stat('Leads', stats.leads?.total)}
         {stat('Opted in', stats.leads?.optedIn)}
       </div>
@@ -653,6 +677,14 @@ function Flywheel({ stats, leads, loadLeads }) {
           <p style={{ ...small, marginTop: 10 }}>What fans asked about (interest + unanswered questions — your FAQ gaps):</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {topics.map((t) => <span key={t.topic} style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 999, padding: '4px 10px' }}>{t.topic} · {t.c}</span>)}
+          </div>
+        </>
+      )}
+      {navTaps.length > 0 && (
+        <>
+          <p style={{ ...small, marginTop: 10 }}>Where fans navigated (nav-button taps):</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {navTaps.map((t) => <span key={t.path} style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 999, padding: '4px 10px', fontFamily: 'ui-monospace, monospace' }}>{t.path} · {t.c}</span>)}
           </div>
         </>
       )}

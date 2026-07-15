@@ -397,6 +397,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // site — the promoter-facing read; same payload on both surfaces.
   const statsSince = sql.prepare('SELECT kind, COUNT(*) AS c FROM fan_events WHERE site_id = ? AND created_at >= ? GROUP BY kind');
   const topicsSince = sql.prepare(`SELECT json_extract(payload,'$.topic') AS topic, COUNT(*) AS c FROM fan_events WHERE site_id = ? AND kind IN ('interest','faq_gap') AND created_at >= ? GROUP BY topic ORDER BY c DESC LIMIT 20`);
+  // Where the nav buttons actually take fans (nav_click = a tapped button;
+  // nav_issued = the Owl offered a "take me there" in chat).
+  const navTapsSince = sql.prepare(`SELECT json_extract(payload,'$.path') AS path, COUNT(*) AS c FROM fan_events WHERE site_id = ? AND kind = 'nav_click' AND created_at >= ? GROUP BY path ORDER BY c DESC LIMIT 10`);
   const leadsByEntity = sql.prepare('SELECT COUNT(*) AS c, SUM(consent_marketing) AS m FROM fan_profiles WHERE entity_id = ?');
   const listLeads = sql.prepare('SELECT * FROM fan_profiles WHERE entity_id = ? ORDER BY created_at DESC LIMIT 500');
   function insightsView(entityId, days) {
@@ -405,6 +408,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       id: s.id, name: s.name,
       funnel: Object.fromEntries(statsSince.all(s.id, since).map((r) => [r.kind, r.c])),
       topics: topicsSince.all(s.id, since).filter((t) => t.topic),
+      navTaps: navTapsSince.all(s.id, since).filter((t) => t.path),
     }));
     const l = leadsByEntity.get(entityId) || {};
     return { sites, leads: { total: l.c || 0, optedIn: l.m || 0 } };
@@ -605,6 +609,44 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const catIngestLimit = rateLimit({ windowMs: 5 * 60_000, max: 4, by: 'user', scope: 'fan-cat-ingest', message: 'Give the ticket-site reader a few minutes between runs.' });
   app.post('/api/admin/entities/:entityId/fan-owl/ingest-catalogue', auth.requireAdmin, requireManager, catIngestLimit, catIngestHandler);
   app.post('/api/my/fan-owl/:entityId/ingest-catalogue', auth.requireAuth, requireMyEntity, requireManager, catIngestLimit, catIngestHandler);
+
+  // ── "Suggest from website menu" — read the site's REAL nav tabs and propose
+  // nav buttons from them. Deterministic (no AI): pull the anchors inside
+  // <nav>/<header> regions, keep same-host short-labelled links, and map each to
+  // an existing page mapping where one matches (else a custom link). Returned as
+  // SUGGESTIONS the editor loads unsaved — review, edit, Save.
+  const suggestNavHandler = asyncHandler(async (req, res) => {
+    const entityId = req.params.entityId;
+    const site = siteById.get(String((req.body || {}).siteId || ''));
+    if (!site || site.entity_id !== entityId) throw new HttpError(404, 'Site not found.');
+    const url = String((req.body || {}).url || '').trim();
+    if (!/^https?:\/\/.+\..+/i.test(url)) throw new HttpError(400, 'Give the full site URL (https://…).');
+    const html = await safeGetText(url, { timeoutMs: 15000, maxBytes: 3 * 1024 * 1024, allowHttp: true }).catch((e) => { throw new HttpError(400, `Couldn’t read that page: ${e.message}`); });
+    // Menus live in <nav>/<header>; fall back to the whole page when a site has neither.
+    const regions = [...String(html).matchAll(/<(nav|header)\b[\s\S]*?<\/\1>/gi)].map((m) => m[0]);
+    const host = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
+    const pages = pagesBySite.all(site.id);
+    const seen = new Set(); const buttons = [];
+    for (const l of linksOf(regions.length ? regions.join('\n') : html, url, 80)) {
+      let u; try { u = new URL(l.url); } catch { continue; }
+      if (u.hostname !== host) continue; // the site's own tabs only
+      const path = u.pathname + (u.search || '');
+      const label = String(l.text || '').replace(/\s+/g, ' ').trim();
+      if (!label || label.length > 24 || seen.has(path)) continue;
+      seen.add(path);
+      // Prefer an existing page mapping (keeps the button wired to its context).
+      const p = pages.find((x) => { const np = navPath(x.url_pattern); return np && np !== '/' && (path === np || path.startsWith(np) || path.includes(np)); });
+      buttons.push(p
+        ? { kind: 'page', urlPattern: p.url_pattern, label: label.slice(0, 24), emoji: '', enabled: true }
+        : { kind: 'custom', path: path.slice(0, 300), label: label.slice(0, 24), emoji: '', enabled: true });
+      if (buttons.length >= 10) break;
+    }
+    if (!buttons.length) throw new HttpError(400, 'Couldn’t find a menu on that page — check the URL, or build the buttons by hand below.');
+    res.json({ buttons });
+  });
+  const suggestNavLimit = rateLimit({ windowMs: 5 * 60_000, max: 6, by: 'user', scope: 'fan-nav-suggest' });
+  app.post('/api/admin/entities/:entityId/fan-owl/suggest-nav', auth.requireAdmin, requireManager, suggestNavLimit, suggestNavHandler);
+  app.post('/api/my/fan-owl/:entityId/suggest-nav', auth.requireAuth, requireMyEntity, requireManager, suggestNavLimit, suggestNavHandler);
 
   // ── Public surface (/api/fan/*) ──────────────────────────────────────────────
   // Anonymous + cross-origin BY DESIGN: the loader on the promoter's site calls

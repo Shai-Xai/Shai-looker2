@@ -314,18 +314,30 @@ test('custom nav buttons: curated list overrides auto (labels, emoji, toggles, c
   assert.equal(back.body.sites[0].navButtons, null);
 });
 
+test('suggest-nav: gated like config, needs a real site + URL (menu read is deterministic)', async () => {
+  const { e, site } = await provision('navsuggest');
+  const other = h.makeEntity('NavSugOther Co', 'navsug-other-org');
+  const client = h.makeClient('nav-sug@test.local', [e.id], 'owner');
+  assert.equal((await app.req('POST', `/api/admin/entities/${e.id}/fan-owl/suggest-nav`, { body: { siteId: site.id, url: 'https://x.example' } })).status, 401);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${other.id}/suggest-nav`, { as: client, body: { siteId: site.id, url: 'https://x.example' } })).status, 403);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${e.id}/suggest-nav`, { as: client, body: { siteId: 'nope', url: 'https://x.example' } })).status, 404);
+  assert.equal((await app.req('POST', `/api/my/fan-owl/${e.id}/suggest-nav`, { as: client, body: { siteId: site.id, url: 'not a url' } })).status, 400);
+});
+
 test('funnel: beacons are whitelisted and roll up in the insights view', async () => {
   const { e, admin, site } = await provision('funnel');
   const ctx = await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://fest.example/' }, headers: ORIGIN });
   const sid = ctx.body.sessionId;
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'deeplink_click', payload: { itemId: 'x' } } });
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'nav_click', payload: { path: '/artists/' } } }); // Owl-driven page hop
+  await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'nav_click', payload: { path: '/artists/' } } });
   await app.req('POST', '/api/fan/event', { body: { sessionId: sid, kind: 'drop_table', payload: {} } }); // not whitelisted → ignored
   const s = await app.req('GET', `/api/admin/entities/${e.id}/fan-owl/insights`, { as: admin });
   const funnel = s.body.sites[0].funnel;
   assert.equal(funnel.ribbon_view, 1);
   assert.equal(funnel.deeplink_click, 1);
-  assert.equal(funnel.nav_click, 1);
+  assert.equal(funnel.nav_click, 2);
+  assert.deepEqual(s.body.sites[0].navTaps, [{ path: '/artists/', c: 2 }]); // per-destination breakdown
   assert.equal(funnel.drop_table, undefined);
 });
 

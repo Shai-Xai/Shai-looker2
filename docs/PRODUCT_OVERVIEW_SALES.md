@@ -1046,6 +1046,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-14** — **Fan Owl: menu suggestions + nav analytics** 🧪: "🔮 Suggest
+  from website menu" reads the real tabs off the client's site (from its
+  <nav>/<header> — deterministic, no AI) and loads them as an editable custom
+  button list, matched to existing page mappings where possible. Reports gains a
+  **Nav taps** tile and a per-destination breakdown of where fans navigate.
 - **2026-07-14** — **Fan Owl: full nav-button editor** 🧪: the Navigation section
   under 🪄 Personality now matches the design concept — Auto (buttons derive from
   your mapped pages) or **Custom**: toggle buttons on/off, rename them, give them
