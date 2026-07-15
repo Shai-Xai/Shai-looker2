@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-15 (Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -79,6 +79,12 @@ longer they use Pulse, the better it gets."
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
   insight/summary panels hands the finding off to **email, WhatsApp or Slack** in
   one tap, with room to add a personal note and a link back to the view.
+- **Download as branded PDF** ✅ — the dashboard's ⋯ menu has a **Download PDF** that
+  produces a clean, shareable report for stakeholders who aren't on Pulse. It opens
+  with the client's own **logo + brand colours**, the dashboard title and the
+  **exact filters/date range** currently applied, then the charts and tiles — so
+  the file explains itself. Works from a phone, and only ever exports the tenant's
+  own data.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
@@ -1064,6 +1070,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-15** — **Download as branded PDF** ✅ (new): every dashboard's ⋯ menu now
+  produces a shareable PDF that opens with the client's **logo + brand colours**, the
+  title and the **filters/date range currently applied**, then the charts and tiles —
+  a self-explanatory report for people who aren't on Pulse. Mobile-friendly and scoped
+  to the tenant's own data. Covers **App Analytics** and **App Community** (and every
+  other dashboard, since it rides on the shared dashboard viewer).
 - **2026-07-15** — **Fan Owl: side/docked views survive navigation** 🧪: hopping
   pages from inside a side-panel or docked chat now keeps the chat open in the
   same view on the new page (with that page's context) — browsing WITH the
