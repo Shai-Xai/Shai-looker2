@@ -132,7 +132,10 @@ module.exports = function createActivity({ sql, now, J, getSuite, getEntity, get
     ).all(win, win, limit).map((r) => { const u = getUser(r.userId); return { userId: r.userId, name: u ? (u.fullName || u.email) : r.userId, role: u?.role || '', total: r.total, lastAt: r.lastAt }; });
     const topDashboards = sql.prepare('SELECT dashboard_id AS dashboardId, COUNT(*) AS opens, COUNT(DISTINCT user_id) AS users, MAX(at) AS lastAt FROM user_views WHERE at>=? GROUP BY dashboard_id ORDER BY opens DESC LIMIT ?')
       .all(win, limit).map((r) => ({ ...r, title: getDashboard(r.dashboardId)?.title || r.dashboardId }));
-    const topFeatures = sql.prepare('SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY action ORDER BY uses DESC LIMIT ?')
+    // "Most used FEATURES" ranks deliberate actions, so exclude passive '.view'
+    // pings (e.g. goal.view fired by the home goals widget) — otherwise a page-load
+    // side effect outranks every real action.
+    const topFeatures = sql.prepare("SELECT action, COUNT(*) AS uses, COUNT(DISTINCT user_id) AS users, MAX(label) AS label FROM user_actions WHERE at>=? AND action NOT LIKE '%.view' GROUP BY action ORDER BY uses DESC LIMIT ?")
       .all(win, limit).map((r) => ({ action: r.action, label: r.label || r.action, uses: r.uses, users: r.users }));
     const totalViews = sql.prepare('SELECT COUNT(*) c FROM user_views WHERE at>=?').get(win).c;
     const totalActions = sql.prepare('SELECT COUNT(*) c FROM user_actions WHERE at>=?').get(win).c;
@@ -163,7 +166,7 @@ module.exports = function createActivity({ sql, now, J, getSuite, getEntity, get
     for (const r of sql.prepare('SELECT substr(at,1,10) AS day, user_id, entity_id, action, MAX(label) AS label FROM user_actions WHERE at>=? GROUP BY day, user_id, entity_id, action').all(since)) {
       const i = idx.get(r.day); if (i !== undefined) totalSets[i].add(r.user_id);
       bump(clientSets, r.entity_id, r.day, r.user_id);
-      bump(featSets, r.action, r.day, r.user_id, { label: r.label || r.action });
+      if (!/\.view$/.test(r.action)) bump(featSets, r.action, r.day, r.user_id, { label: r.label || r.action }); // views aren't "features used"
     }
     const top = (map, nameOf, n = 7) => {
       const list = [...map.entries()].map(([key, e]) => ({ key, name: nameOf(key, e), series: e.sets.map((s) => s.size), total: e.sets.reduce((t, s) => t + s.size, 0) })).sort((a, b) => b.total - a.total);

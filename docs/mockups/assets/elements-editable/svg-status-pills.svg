@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="40" viewBox="0 0 480 40" font-family="Helvetica,Arial,sans-serif" font-size="12" font-weight="700">
+<rect x="0" y="4" width="80" height="30" rx="15" fill="#dcf2e7"/><text x="40" y="24" text-anchor="middle" fill="#0a8f5b">live</text>
+<rect x="95" y="4" width="80" height="30" rx="15" fill="#eae2fb"/><text x="135" y="24" text-anchor="middle" fill="#7C3AED">beta</text>
+<rect x="190" y="4" width="120" height="30" rx="15" fill="#fdeacc"/><text x="250" y="24" text-anchor="middle" fill="#b45309">needs setup</text>
+<rect x="325" y="4" width="80" height="30" rx="15" fill="#efeff2"/><text x="365" y="24" text-anchor="middle" fill="#6e6e73">soon</text></svg>

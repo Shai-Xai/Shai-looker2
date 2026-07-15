@@ -177,8 +177,10 @@ function mount(app, { db, auth, os, mailer, messaging }) {
   }
 
   // ─────────────────────────────── Admin routes ───────────────────────────────
+  // Reading the notice list is open to any Howler admin; creating/editing/resolving
+  // and deleting notices is Super-Admin-only (a high-risk broadcast to clients).
   // Create a notice + its opening update, then fan out per the severity policy.
-  app.post('/api/admin/notices', auth.requireAdmin, (req, res) => {
+  app.post('/api/admin/notices', auth.requireSuperAdmin, (req, res) => {
     if (!enabled()) return off(res);
     const c = clean(req.body || {});
     if (!c.title) return res.status(400).json({ error: 'Give the notice a title.' });
@@ -206,7 +208,7 @@ function mount(app, { db, auth, os, mailer, messaging }) {
 
   // Edit the framing (title · severity · scope · targets · channels · sms). Does NOT
   // notify — that's what posting an update is for.
-  app.put('/api/admin/notices/:id', auth.requireAdmin, (req, res) => {
+  app.put('/api/admin/notices/:id', auth.requireSuperAdmin, (req, res) => {
     if (!enabled()) return off(res);
     const existing = sql.prepare('SELECT * FROM status_notices WHERE id=?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Notice not found' });
@@ -220,7 +222,7 @@ function mount(app, { db, auth, os, mailer, messaging }) {
   });
 
   // Post a progress update (optionally advancing the status) + re-notify.
-  app.post('/api/admin/notices/:id/updates', auth.requireAdmin, (req, res) => {
+  app.post('/api/admin/notices/:id/updates', auth.requireSuperAdmin, (req, res) => {
     if (!enabled()) return off(res);
     const existing = sql.prepare('SELECT * FROM status_notices WHERE id=?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Notice not found' });
@@ -239,7 +241,7 @@ function mount(app, { db, auth, os, mailer, messaging }) {
 
   // Mark resolved — a closing update + the resolved_at stamp, then a final "resolved"
   // broadcast. The banner drops; the feed keeps it for RESOLVED_WINDOW_MS.
-  app.post('/api/admin/notices/:id/resolve', auth.requireAdmin, (req, res) => {
+  app.post('/api/admin/notices/:id/resolve', auth.requireSuperAdmin, (req, res) => {
     if (!enabled()) return off(res);
     const existing = sql.prepare('SELECT * FROM status_notices WHERE id=?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Notice not found' });
@@ -252,7 +254,7 @@ function mount(app, { db, auth, os, mailer, messaging }) {
     res.json({ notice: n });
   });
 
-  app.delete('/api/admin/notices/:id', auth.requireAdmin, (req, res) => {
+  app.delete('/api/admin/notices/:id', auth.requireSuperAdmin, (req, res) => {
     if (!enabled()) return off(res);
     sql.prepare('DELETE FROM status_notice_updates WHERE notice_id=?').run(req.params.id);
     sql.prepare('DELETE FROM notice_targets WHERE notice_id=?').run(req.params.id);

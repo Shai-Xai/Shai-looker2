@@ -642,12 +642,19 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
   fixupLegacyInbound();
 
   // The webhook. NOT cookie-authed — protected by a shared secret (header
-  // `x-owl-secret` or `?secret=`) that whatever forwards mail must include.
-  // Transport-agnostic: Cloudflare Email Worker, SendGrid Parse, Resend inbound,
-  // etc. all just POST this JSON shape.
+  // `x-owl-secret`, or `secret` in the JSON body) that whatever forwards mail
+  // must include. Deliberately NOT accepted as `?secret=` — query strings land
+  // in access/proxy logs and Referer headers, which is exactly where a shared
+  // secret leaks from (the embed token uses a URL *fragment* for the same
+  // reason). Compared constant-time. Transport-agnostic: Cloudflare Email
+  // Worker, SendGrid Parse, Resend inbound, etc. all just POST this JSON shape.
   app.post('/api/inbound/email', bigJson, requireOn, (req, res) => {
-    const given = req.get('x-owl-secret') || req.query.secret || (req.body || {}).secret || '';
-    if (given !== inboundSecret()) return res.status(401).json({ error: 'bad secret' });
+    const given = String(req.get('x-owl-secret') || (req.body || {}).secret || '');
+    const want = inboundSecret();
+    const okSecret = (() => {
+      try { return !!want && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(want)); } catch { return false; } // length mismatch → false
+    })();
+    if (!okSecret) return res.status(401).json({ error: 'bad secret' });
     const r = ingestInbound(req.body || {});
     if (r.ok) return res.status(201).json({ ok: true, threadId: r.threadId, attachments: r.attachments || 0 });
     if (r.skipped) return res.json({ ok: true, skipped: r.reason });
@@ -663,7 +670,7 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
       webhookPath: '/api/inbound/email',
     });
   });
-  app.put('/api/os/admin/inbound', auth.requireAdmin, (req, res) => {
+  app.put('/api/os/admin/inbound', auth.requireSuperAdmin, (req, res) => {
     if ((req.body || {}).domain !== undefined) db.setSetting('inbound_domain', String(req.body.domain || '').trim().replace(/^@/, ''));
     if ((req.body || {}).regenerateSecret) db.setSetting('inbound_secret', crypto.randomBytes(18).toString('base64url'));
     res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });

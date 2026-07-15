@@ -63,7 +63,7 @@ module.exports = function tileValues({ db, query }) {
 
   // `preferPivotKey` (optional) explicitly names which pivot column to read — a goal's
   // saved "this event" override. It beats the Current-Event-lock auto-match below.
-  async function resolveTileValue({ dashboardId, tileId, user, suiteId, preferPivotKey }) {
+  async function resolveTileValue({ dashboardId, tileId, user, suiteId, preferPivotKey, live = false }) {
     const def = db.getDashboard(dashboardId);
     if (!def) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -83,7 +83,7 @@ module.exports = function tileValues({ db, query }) {
     // goal, the curve and the dashboard on one number. No-op for tiles without such a
     // filter (date ranges and other filters are untouched).
     body.filters = stripDaysBeforeFilters(body.filters, def, tile).filters;
-    const data = await runLookerQuery('/queries/run/json_detail', body);
+    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live);
     // On a current-vs-past comparison (measure pivoted by event), read THIS event's
     // column specifically — identified by the suite's Current Event lock — instead of
     // the latest/biggest pivot (which can be a prior edition). Falls back to the
@@ -114,7 +114,7 @@ module.exports = function tileValues({ db, query }) {
   // total) and includes hidden fields (the point IS the underlying data — e.g.
   // an email column a table hides for display). Pivoted tiles flatten to one
   // column per (measure × pivot value). Returns { fields, rows } or null.
-  async function resolveTileRows({ dashboardId, tileId, user, suiteId, limit }) {
+  async function resolveTileRows({ dashboardId, tileId, user, suiteId, limit, live = false }) {
     const def = db.getDashboard(dashboardId);
     if (!def) return null;
     const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))];
@@ -126,7 +126,7 @@ module.exports = function tileValues({ db, query }) {
     const body = await tileQueryBody(tile, def, user, suiteId, lockMap, tileLockOverrides(su, tile, def));
     if (!body) return null; // scope denied or non-queryable tile
     body.limit = String(Math.min(Math.max(Number(limit) || 500, 1), 10000));
-    const data = await runLookerQuery('/queries/run/json_detail', body);
+    const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live);
     const f = data?.fields || {};
     const dims = f.dimensions || [];
     const measures = [...(f.measures || []), ...(f.table_calculations || [])];
@@ -318,14 +318,30 @@ module.exports = function tileValues({ db, query }) {
     const seen = new Set();
     const ordered = [...candidates.filter((c) => c.refsEvents), ...candidates.filter((c) => !c.refsEvents)]
       .filter((c) => { const k = `${c.model}|${c.view}`; if (seen.has(k)) return false; seen.add(k); return true; });
-    for (const c of ordered) {
-      const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
-      if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
-      try {
-        const rows = await runLookerQuery('/queries/run/json', q);
-        const v = rows && rows[0] && rows[0][DATE];
-        if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
-      } catch { /* explore may not expose start_date — try the next */ }
+    // Pin to THIS suite's own event(s). Without this, "newest event" is the newest
+    // across the whole organiser — so every edition of a festival (e.g. KFF26 AND
+    // KFF27) resolves to the latest one's date and all show as "upcoming". The suite's
+    // locked core_events dimension(s) restrict the scan to its own editions; sorting by
+    // start_date desc then yields THIS suite's current event (newest within its set).
+    const expanded = expandLockMap(db.lockedFiltersForSuite(suiteId) || {});
+    const eventPin = {};
+    for (const [k, v] of Object.entries(expanded)) {
+      if (/^core_events\./i.test(k) && !/start_date/i.test(k) && v != null && String(v).trim()) eventPin[k] = String(v).trim();
+    }
+    // Try pinned first (correct per-suite date); fall back to unpinned (legacy
+    // newest-in-scope) so a suite whose event isn't lock-pinned still resolves something.
+    const passes = Object.keys(eventPin).length ? [eventPin, null] : [null];
+    for (const pin of passes) {
+      for (const c of ordered) {
+        const q = { model: c.model, view: c.view, fields: [DATE], sorts: [`${DATE} desc`], limit: 1 };
+        if (pin) q.filters = { ...pin };
+        if (!(await applyScope(q, user, suiteId))) continue; // fail closed → try next / fall back
+        try {
+          const rows = await runLookerQuery('/queries/run/json', q);
+          const v = rows && rows[0] && rows[0][DATE];
+          if (v != null && v !== '') { const m = String(v).match(/^\d{4}-\d{2}-\d{2}/); if (m) return m[0]; }
+        } catch { /* explore may not expose start_date / the pinned field — try the next */ }
+      }
     }
     return null;
   }

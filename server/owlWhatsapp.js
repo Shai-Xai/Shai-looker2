@@ -14,6 +14,33 @@
 const crypto = require('crypto');
 const { runOwlLoop, owlTurn, personaOf } = require('./owlChat'); // owlTurn already layers OWL_CHAT_SYSTEM
 
+// Pull the CURRENT-edition event names out of a suite's lockedFilters map. A suite is
+// an EDITION and may span several event records (e.g. KFF26 = "Kappa FuturFestival
+// 2026" + "Kappa FuturFestival 2026 - Carte Cultura"); this is how the WhatsApp Owl
+// (which has no suite picker) learns the full event set for an edition, straight from
+// the suite lock — one source of truth.
+//
+// CRITICAL: take ONLY the current-event lock. "Past Event" / "Comparison Events" also
+// resolve to core_events.name (they hold the PRIOR edition — 2025 — for YoY), so
+// scooping every event-name lock would fold last year into this year. We whitelist the
+// current-edition lock shapes: the raw `core_events.name` field, a combined
+// `__or__:op:…core_events.name…` key (the current event × cashless multi-field lock),
+// or the "Current Event" / "Event Name" by-name presets. Comma lists (Looker OR) split.
+const EVENT_NAME_FIELD = 'core_events.name';
+const CURRENT_EVENT_TITLES = new Set(['current event', 'event name']);
+function eventLockValues(lockedFilters) {
+  const vals = new Set();
+  for (const [k, v] of Object.entries(lockedFilters || {})) {
+    if (v == null || String(v).trim() === '') continue;
+    let isCurrent = false;
+    if (k === EVENT_NAME_FIELD) isCurrent = true;                                   // raw current-event field
+    else if (k.startsWith('__or__:')) isCurrent = (k.split(':')[2] || '').split('|').includes(EVENT_NAME_FIELD); // combined current lock
+    else if (!k.includes('.')) isCurrent = CURRENT_EVENT_TITLES.has(k.toLowerCase()); // by-name preset (NOT "Past Event")
+    if (isCurrent) String(v).split(',').map((s) => s.trim()).filter(Boolean).forEach((x) => vals.add(x));
+  }
+  return [...vals];
+}
+
 // WhatsApp-tuned depth layers (the web Analyst/Operator briefs mention Markdown tables,
 // which we forbid on WhatsApp — so these say the same thing in chat-friendly terms).
 const WA_DEEP_LAYER = 'DEEPER READ: pull a couple of supporting cuts (the trend, a key breakdown, a comparison to a prior period or event), then give the answer + what\'s driving it + one recommended next step. Stay plain WhatsApp text — a few short lines, no tables, no walls of text.';
@@ -54,7 +81,7 @@ function parseFollowups(out) {
   try { const a = JSON.parse(m[0]); return Array.isArray(a) ? a.filter((x) => typeof x === 'string' && x.trim()).slice(0, 3) : []; } catch { return []; }
 }
 
-function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi }) {
+function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, anthropicKeyForEntity, currencyNote, languageNote, whatsappDigestFor, getAlertsApi, getSegmentsApi, getActionsApi, memoryApi, getStaffInbound = null }) {
   const owlMemory = require('./owlMemory'); // memoryNote + rememberFact tool (durable client memory)
   const sql = db.db;
   sql.exec(`
@@ -125,6 +152,18 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   // so the admin panel can SHOW whether Clickatell is delivering + where the flow stops.
   const insEvent = sql.prepare('INSERT INTO owl_wa_events (id,msisdn,stage,detail,created_at) VALUES (?,?,?,?,?)');
   const logEvent = (msisdn, stage, detail) => { try { insEvent.run(crypto.randomUUID(), msisdn || '', stage, String(detail || '').slice(0, 800), now()); } catch { /* ignore */ } };
+  // A one-line, human-readable summary of the QUERY behind an answer — the exact
+  // measure(s), group-bys, filters and row count of every data tool call. This is
+  // what makes a WhatsApp answer's figures auditable ("did it use count or
+  // sold_tickets?") from the admin panel.
+  const traceOfTrail = (trail) => (trail || []).map((t) => {
+    const i = t.input || {}; const r = t.result || {};
+    if (!/^(askData|queryDashboard|ask_)/.test(t.name)) return `${t.name}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ''}`;
+    const meas = [i.measure, ...(Array.isArray(i.measures) ? i.measures : [])].filter(Boolean).join(', ');
+    const dims = (Array.isArray(i.dimensions) ? i.dimensions : []).join(', ');
+    const filt = Object.entries(i.filters || {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    return `${t.name}: ${meas || '?'}${dims ? ` by [${dims}]` : ''}${i.dateRange ? ` range="${i.dateRange}"` : ''}${filt ? ` where {${filt}}` : ''}${r.ok === false ? ` ✗ ${r.reason || 'failed'}` : ` → ${r.count != null ? `${r.count} rows` : 'ok'}`}`;
+  }).join(' | ');
 
   // Last follow-up suggestions per number, so a bare "1"/"2"/"3" reply (the numbered
   // fallback when interactive buttons aren't available) maps back to its question.
@@ -214,6 +253,9 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     if (!user) user = (db.listUsers() || []).find((u) => u.mobile && norm(u.mobile) === msisdn) || null;
     if (!user) return null;
     if (!entityId) entityId = (user.entityIds && user.entityIds[0]) || '';
+    // 🚩 waowl feature flag: OFF for this client = the WhatsApp Owl doesn't engage
+    // (the sender falls into the existing unregistered-number path).
+    if (entityId && !require('./flags').enabled(entityId, 'waowl')) return { user: null, entityId }; // flag off — caller says so (never dereference user)
     return { user, entityId };
   }
 
@@ -245,6 +287,17 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     }
     const cat = getOwlTools().catalogue || {};
     if ((cat.notes || []).length) parts.push(`Rules:\n- ${cat.notes.join('\n- ')}`);
+    // EDITIONS: WhatsApp has no suite picker, so an edition that spans several event
+    // records (KFF26 = the festival + its Carte Cultura channel) would be undercounted
+    // if the model filtered a single name. Surface each suite's event-lock set as the
+    // authoritative event list for that edition — configure it once in the suite lock,
+    // and both web (suite selected) and WhatsApp scope to the full set.
+    try {
+      const suites = db.listSuitesForEntity ? (db.listSuitesForEntity(entityId) || []) : [];
+      const editions = suites.map((s) => ({ name: s.name, events: eventLockValues(s.lockedFilters) }))
+        .filter((e) => e.events.length);
+      if (editions.length) parts.push(`EVENT EDITIONS (the client's saved groupings — AUTHORITATIVE; an edition may span MORE THAN ONE event record): ${editions.map((e) => `"${e.name}" = ${e.events.map((n) => `"${n}"`).join(' + ')}`).join('; ')}. When the client asks about an edition by its name or an obvious shorthand (e.g. "KFF26" → "KFF 26"), filter core_events.name to ALL of that edition's event names (comma-separated) — never just one, or the total is undercounted.`);
+    } catch { /* ignore */ }
     try { const g = resolveGuidance(db, entityId); if (g) parts.push(g); } catch { /* ignore */ }
     // Durable client memory (facts confirmed over time) — same source as the web Owl.
     try { const mem = owlMemory.memoryNote(db, entityId, '', userId); if (mem) parts.push(mem); } catch { /* ignore */ }
@@ -423,8 +476,22 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   }
 
   async function handleInbound(msisdn, rawText) {
+    // Staff-alerts intercept: a message from a known Event Ops staff number is
+    // captured for ops and answered simply — it must NEVER reach the client
+    // Owl. Fully guarded: any non-staff number (or an error) falls straight
+    // through to the normal Owl flow below.
+    const staffInbound = getStaffInbound && getStaffInbound();
+    if (staffInbound) {
+      try { if (await staffInbound(msisdn, rawText)) { logEvent(msisdn, 'staff-alert', 'captured (kept off the Owl)'); return; } }
+      catch (e) { console.error('[owlWhatsapp] staffInbound failed', e && e.message); }
+    }
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', 'number not linked to any Pulse user'); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    // Linked number, but the WhatsApp Owl flag is OFF for the linked client —
+    // identify() signals that with user:null. Say so instead of crashing silent
+    // (seen live: switching a number to a flag-off client killed every reply with
+    // "Cannot read properties of null (reading 'email')").
+    if (!id.user) { logEvent(msisdn, 'flag-off', `WhatsApp Owl is disabled for the linked client${id.entityId ? ` (${id.entityId})` : ''}`); await messaging.sendWhatsapp({ to: msisdn, text: 'The WhatsApp assistant isn\'t switched on for this client yet — an admin can enable it in Pulse under the client\'s feature flags (the "waowl" switch), and then I\'m all yours.' }); return; }
     logEvent(msisdn, 'identified', `${id.user.email || '?'} → ${id.entityId || '(no client)'}`);
     // A tap on a Confirm / Cancel / event button (or a yes/no/number reply to a pending
     // action) commits or cancels the drafted alert/segment — handle it before the Owl runs.
@@ -462,18 +529,27 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const r = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, effort: persona.effort, maxTokens: persona.maxTokens, model: persona.model, signal }),
         toolMap, tools: toolSchemas, messages: history,
         ctx: { user: id.user, entityId: id.entityId },
         maxRounds: persona.maxRounds,
+        turnTimeoutMs: persona.turnTimeoutMs, toolTimeoutMs: persona.toolTimeoutMs,
       }));
       out = r.text; trail = r.trail || [];
     } catch { out = ''; }
     const answer = String(out || '').split(FU_MARK)[0].replace(/\s+$/, '').trim() || 'Sorry — I couldn\'t answer that just now. Try rephrasing?';
     const followups = parseFollowups(out);
     insMsg.run(crypto.randomUUID(), msisdn, 'owl', answer, eid, now());
+    // Provenance: log the EXACT query behind this answer (measure(s) + group-bys +
+    // filters + row count per tool call) so a "the number looks wrong" report is
+    // investigable straight from the Recent-inbound panel — no guessing which measure
+    // the Owl chose (e.g. core_tickets.count vs core_tickets.sold_tickets).
+    if (trail.length) logEvent(msisdn, 'query', traceOfTrail(trail));
     const sent = await messaging.sendWhatsapp({ to: msisdn, text: answer });
-    logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? answer.slice(0, 120) : (sent && sent.error) || 'send error');
+    // Log the Clickatell message id with the reply — 'replied' only means Clickatell
+    // ACCEPTED it; the id is what you trace in their portal / status callbacks when a
+    // message never reaches the handset.
+    logEvent(msisdn, sent && sent.ok ? 'replied' : 'send-failed', sent && sent.ok ? `${answer.slice(0, 110)} [id:${sent.id || '?'}]` : (sent && sent.error) || 'send error');
     if (chartImg.wantsChart(text)) await maybeSendChart(msisdn, trail);
     // If the Owl drafted an alert/segment, send the Confirm (or event-choice) buttons —
     // that's the call to action this turn, so skip the follow-up suggestions.
@@ -582,6 +658,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   async function handleMedia(msisdn, kind) {
     const id = identify(msisdn);
     if (!id) { logEvent(msisdn, 'no-account', `media (${kind}) from unlinked number`); await messaging.sendWhatsapp({ to: msisdn, text: 'Hi! This number isn\'t linked to a Howler account yet. Ask your Howler contact to connect it, then I can answer questions about your event data.' }); return; }
+    if (!id.user) { logEvent(msisdn, 'flag-off', `media (${kind}) — WhatsApp Owl disabled for the linked client`); await messaging.sendWhatsapp({ to: msisdn, text: 'The WhatsApp assistant isn\'t switched on for this client yet — an admin can enable it in Pulse under the client\'s feature flags (the "waowl" switch).' }); return; }
     insMsg.run(crypto.randomUUID(), msisdn, 'user', `[${kind}]`, id.entityId || '', now()); // keep the 24h window open
     const what = kind === 'voice' ? 'listen to voice notes' : kind === 'image' ? 'read images' : kind === 'video' ? 'watch videos' : kind === 'document' ? 'open documents' : `handle ${kind}s`;
     await messaging.sendWhatsapp({ to: msisdn, text: `🦉 I can't ${what} yet — please *type* your question instead (or send *menu* to see what I can do).` });
@@ -728,7 +805,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
     const { toolMap, toolSchemas } = currentTools(id.entityId);
     try {
       const { text } = await require('./aiUsage').run({ entityId: id.entityId, kind: 'whatsapp' }, () => runOwlLoop({
-        llmTurn: ({ messages: m, tools, onText }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText }),
+        llmTurn: ({ messages: m, tools, onText, signal }) => owlTurn(insights, { messages: m, tools, instructions, apiKey, onText, signal }),
         toolMap, tools: toolSchemas, messages: [{ role: 'user', content: ask }],
         ctx: { user: id.user, entityId: id.entityId },
       }));
@@ -767,7 +844,7 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
         if (sentGet.get(msisdn, day)) continue; // already handled today
         sentMark.run(msisdn, day, now()); // evaluate once per day, in or out of window
         if (!inWindow(msisdn)) { logEvent(msisdn, 'push-skip', 'outside 24h window (needs a template) — no send'); continue; }
-        const id = identify(msisdn); if (!id) continue;
+        const id = identify(msisdn); if (!id || !id.user) continue; // unlinked or flag-off → no scheduled push
         const msg = await buildScheduledMessage(id, topics);
         if (!msg) { logEvent(msisdn, 'push-failed', 'no content generated'); continue; }
         insMsg.run(crypto.randomUUID(), msisdn, 'owl', msg, id.entityId || '', now());
@@ -817,4 +894,4 @@ function mount(app, { db, auth, insights, messaging, getOwlTools, owlFields, ant
   console.log('[owlWhatsapp] WhatsApp door mounted (POST /api/whatsapp/inbound)');
 }
 
-module.exports = { mount };
+module.exports = { mount, eventLockValues };
