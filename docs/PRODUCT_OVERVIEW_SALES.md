@@ -1064,6 +1064,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-15** — **Fan Owl: side/docked views survive navigation** 🧪: hopping
+  pages from inside a side-panel or docked chat now keeps the chat open in the
+  same view on the new page (with that page's context) — browsing WITH the
+  assistant, as docking intends. Mobile and main view still close so the page
+  stays visible.
 - **2026-07-15** — **Fan Owl: docked side panel** 🧪: a third desktop view — ◨
   docks the chat as a true right-hand panel (full height) and SHIFTS THE PAGE
   LEFT (animated margin) so the assistant never covers the site; ❏/⇥ floats it
