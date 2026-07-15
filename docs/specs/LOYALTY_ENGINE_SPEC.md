@@ -130,8 +130,20 @@ Two axes, all computed server-side from data we already hold:
   Pulse's *native* preregistration
 - `group_buyer` — bought ≥ N tickets in one basket at a past event
   (tickets-per-purchaser-per-event, derivable today)
+- `attended` vs bought — from cashless check-in data: a past buyer who
+  no-showed is a *win-back* segment, not an upsell one
+- `high_onsite_spender` — bar/product spend band from the cashless explore
+  (already registered in Pulse, `owlCatalogue.js` cashless field families).
+  Arguably the strongest loyalty signal we hold: it measures engagement AT the
+  event, not just the purchase — and cashless accounts carry an identity,
+  which helps matching
+- `app_engaged` — active in the Howler app (data plumbing TBD, §9). Rewarded
+  with LOW-COST currency only (extra wheel spin, presale access, first pick) —
+  engagement isn't a purchase, so it never earns deep discounts; the budget
+  stays pointed at conversion
 - `interests[]` — already logged by `logInterest` / `captureLead`
-- traits: favourite ticket type, spend band, last event attended
+- traits: favourite ticket type, ticket + on-site spend bands, last event
+  attended
 
 **Pools target a combination** ("preregistered AND never bought" → comeback
 offer; "returning AND group_buyer" → group-leader code), which is barely more
@@ -166,8 +178,11 @@ Codes are **generated in the Howler ticketing system** (discount enforcement
 happens at checkout, not in Pulse) and **uploaded into pools**:
 
 - **Pool** = event (suite) + name + target (tier/signal combination) + reward
-  kind (discount / upgrade / add-on / prize) + value + expiry + code stock +
-  optional wheel flag & weight.
+  kind (discount / upgrade / add-on / prize / **cashless credit**) + value +
+  expiry + code stock + optional wheel flag & weight. Cashless credit ("R100
+  bar credit when you buy this week") is likely the cheapest reward per
+  conversion — it costs less than face value (breakage + product margin) and
+  drives on-site spend too; mechanics are an open question (§9).
 - **Code metadata matters:** min quantity (group codes), applicable ticket
   types, expiry — captured at upload so the Owl only offers a code when the
   fan's intent matches its rules (a group code goes to someone buying for 4,
@@ -190,9 +205,11 @@ fan_verifications   id, entity_id, session_id, profile_id?, channel(email|sms),
                     created_at
 fan_profiles        + phone, verified_at, verified_channel,
                     + tier(new|returning|loyal), signals(json: preregistered,
-                      lead_no_purchase, group_buyer, …),
-                    + traits(json: fav_ticket_type, spend_band, events_count,
-                      last_event, group_size), profile_refreshed_at
+                      lead_no_purchase, group_buyer, attended,
+                      high_onsite_spender, app_engaged, …),
+                    + traits(json: fav_ticket_type, spend_band,
+                      onsite_spend_band, events_count, last_event,
+                      group_size), profile_refreshed_at
 prereg_lists        id, entity_id, suite_id, source(howler|csv|pulse),
                     name, uploaded_by, created_at
 prereg_entries      id, list_id, email, phone, registered_at, meta(json)
@@ -255,6 +272,15 @@ changelog) and wire new client-setup steps into the Setup wizard, per
    campaign (SA CPA §36; EU per-country).
 5. **Phone-only verification** — Clickatell SMS costs per message; do we gate
    SMS OTP behind a per-site toggle/budget like the chat's `daily_budget`?
+6. **Cashless identity join** — which identity does a cashless account carry
+   (email/phone/ticket ref), and does it match the purchaser record reliably
+   enough to feed `high_onsite_spender` / `attended` without manual mapping?
+7. **Cashless credit as a reward** — can topup vouchers be issued as codes
+   (or credited server-side on redemption), and how does breakage get
+   reported back into the pool's ROI?
+8. **App engagement feed** — where does Howler app engagement data live, what
+   events are meaningful (opens? favourites? lineup saves?), and can Pulse
+   read it per fan identity?
 
 ## 10. Risks
 
