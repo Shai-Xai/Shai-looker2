@@ -25,7 +25,8 @@
   var SS_SESSION = 'howler_fan_session_' + siteKey.slice(-8);
   var SS_TEASED = 'howler_fan_teased_' + siteKey.slice(-8);
   var SS_HERO = 'howler_fan_hero_' + siteKey.slice(-8); // per-tab: home-page hero shown/dismissed
-  var SS_LAYOUT = 'howler_fan_layout_' + siteKey.slice(-8); // per-tab: desktop chat layout (main | side)
+  var SS_LAYOUT = 'howler_fan_layout_' + siteKey.slice(-8); // per-tab: desktop chat layout (main | side | dock)
+  var SS_REOPEN = 'howler_fan_reopen_' + siteKey.slice(-8); // per-tab: keep the side/docked chat open across an in-chat navigation
   function store(get, key, val) {
     try { return get ? window.localStorage.getItem(key) : window.localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -212,8 +213,13 @@
     // The Owl's "Take me there" button: navigate WITHIN the host site (the path
     // is resolved against this page's own origin — never off-site).
     if (e.data && e.data.t === 'howler-fan-owl:nav' && typeof e.data.path === 'string') {
-      // Just show the page: the chat stays closed so the fan actually SEES where
-      // they asked to go. The ribbon/bar carries the new page's context.
+      // Side/docked desktop views don't cover the page — keep the chat open in
+      // the same view across the hop. Mobile and main view close instead, so the
+      // fan actually SEES the page they asked for.
+      var chatOpen = frameWrap && frameWrap.style.display !== 'none';
+      if (chatOpen && !MOBILE() && (chatLayout === 'side' || chatLayout === 'dock')) {
+        try { window.sessionStorage.setItem(SS_REOPEN, '1'); } catch (err) { /* just won't auto-reopen */ }
+      }
       navTo(e.data.path);
     }
   });
@@ -569,7 +575,14 @@
     var color = (ctx.site && ctx.site.brandColor) || '#111';
     root = el('div', {}, document.body);
     root.setAttribute('data-howler-fan-owl', '');
-    if (ctx.site && ctx.site.widgetStyle === 'bar') { renderBar(); if (shouldHero()) renderHero(); return; }
+    var reopen = null;
+    try { reopen = window.sessionStorage.getItem(SS_REOPEN); if (reopen) window.sessionStorage.removeItem(SS_REOPEN); } catch (e) { /* ignore */ }
+    if (ctx.site && ctx.site.widgetStyle === 'bar') {
+      renderBar();
+      if (reopen === '1' && !MOBILE()) { openPanel(true); return; }
+      if (shouldHero()) renderHero();
+      return;
+    }
     // The launcher: a round Owl button, thumb-reachable, ≥48px tap target.
     launcher = el('button', {
       position: 'fixed', right: '18px', bottom: '18px', zIndex: '2147483000',
@@ -587,6 +600,7 @@
     } else launcher.textContent = '🦉';
     launcher.addEventListener('click', function () { openPanel(); });
 
+    if (reopen === '1' && !MOBILE()) { openPanel(true); return; }
     if (shouldHero()) { renderHero(); return; }
     updateTeaser();
   }
