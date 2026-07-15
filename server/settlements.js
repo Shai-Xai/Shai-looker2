@@ -90,7 +90,7 @@ function mount(app, { db, auth, insights, anthropicKey }) {
       senders: db.getSetting('settlement_ingest_senders', 'howler.co.za'),
     });
   });
-  app.put('/api/admin/owl-ingest', auth.requireAdmin, (req, res) => {
+  app.put('/api/admin/owl-ingest', auth.requireSuperAdmin, (req, res) => {
     if (req.body?.enabled !== undefined) db.setSetting('owl_ingest_enabled', req.body.enabled ? '1' : '0');
     if (req.body?.senders !== undefined) db.setSetting('settlement_ingest_senders', String(req.body.senders || '').slice(0, 2000));
     res.json({

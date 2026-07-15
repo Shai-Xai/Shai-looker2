@@ -162,31 +162,40 @@ const ADMIN_NAV = [
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
+// Tabs that are entirely Super-Admin surfaces — hidden for generic Howler admins
+// (the server also 403s their write routes). Billing stays visible to all admins
+// (rollup + read-only master; client-level fees live under each client).
+const SUPER_ONLY_TABS = new Set(['integrations', 'status', 'backup']);
 
 export default function AdminPage() {
   const [tab, setTab] = useState('entities');
   const [fields, setFields] = useState([]);
   const isMobile = useIsMobile();
+  const { isSuperAdmin } = useAuth();
+  const nav = ADMIN_NAV.filter(([key]) => isSuperAdmin || !SUPER_ONLY_TABS.has(key));
   useEffect(() => { api.adminFilterFields().then(setFields).catch(() => setFields([])); }, []);
+  // Defence-in-depth: if state ever lands on a super-only tab without the role,
+  // fall back to the safe default instead of rendering the gated surface.
+  const safeTab = (!isSuperAdmin && SUPER_ONLY_TABS.has(tab)) ? 'entities' : tab;
 
   const content = (
     <>
-      {tab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
-      {tab === 'wizard' && <SetupWizard fields={fields} />}
-      {tab === 'users' && <UsersTab />}
-      {tab === 'sets' && <Sets />}
-      {tab === 'library' && <Library />}
-      {tab === 'ai' && <AISettings />}
-      {tab === 'onboarding' && <OnboardingHub />}
-      {tab === 'settlements' && <Settlements />}
-      {tab === 'billing' && <Billing />}
-      {tab === 'integrations' && <AdminIntegrations />}
-      {tab === 'appanalytics' && <AppAnalyticsAdmin />}
-      {tab === 'email' && <MailLog />}
-      {tab === 'status' && <StatusNoticesAdmin />}
-      {tab === 'datahealth' && <DataHealthAdmin />}
-      {tab === 'product' && <Product />}
-      {tab === 'backup' && <BackupRestore />}
+      {safeTab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
+      {safeTab === 'wizard' && <SetupWizard fields={fields} />}
+      {safeTab === 'users' && <UsersTab />}
+      {safeTab === 'sets' && <Sets />}
+      {safeTab === 'library' && <Library />}
+      {safeTab === 'ai' && <AISettings />}
+      {safeTab === 'onboarding' && <OnboardingHub />}
+      {safeTab === 'settlements' && <Settlements />}
+      {safeTab === 'billing' && <Billing />}
+      {safeTab === 'integrations' && <AdminIntegrations />}
+      {safeTab === 'appanalytics' && <AppAnalyticsAdmin />}
+      {safeTab === 'email' && <MailLog />}
+      {safeTab === 'status' && <StatusNoticesAdmin />}
+      {safeTab === 'datahealth' && <DataHealthAdmin />}
+      {safeTab === 'product' && <Product />}
+      {safeTab === 'backup' && <BackupRestore />}
     </>
   );
 
@@ -200,7 +209,7 @@ export default function AdminPage() {
           <Link to="/dashboards" style={dashAdminBtn}>📊 Dashboard admin</Link>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
-          {ADMIN_NAV.map(([key, label]) => <Tab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</Tab>)}
+          {nav.map(([key, label]) => <Tab key={key} active={safeTab === key} onClick={() => setTab(key)}>{label}</Tab>)}
           <Tab active={false} onClick={openReport}>💬 Report</Tab>
         </div>
         {content}
@@ -217,15 +226,15 @@ export default function AdminPage() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '188px minmax(0,1fr)', gap: 28, alignItems: 'start' }}>
         <nav className="glass" style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2, padding: 8, borderRadius: 14 }}>
-          {ADMIN_NAV.map(([key, label, icon]) => (
+          {nav.map(([key, label, icon]) => (
             <button key={key} onClick={() => setTab(key)} style={{
               display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer',
               padding: '9px 12px', borderRadius: 9, border: 'none', fontSize: 13.5,
-              fontWeight: tab === key ? 700 : 500,
-              background: tab === key ? 'var(--brand)' : 'transparent',
-              color: tab === key ? '#fff' : 'var(--text)',
+              fontWeight: safeTab === key ? 700 : 500,
+              background: safeTab === key ? 'var(--brand)' : 'transparent',
+              color: safeTab === key ? '#fff' : 'var(--text)',
             }}>
-              <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: tab === key ? 1 : 0.8 }}>{icon}</span>
+              <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: safeTab === key ? 1 : 0.8 }}>{icon}</span>
               {label}
             </button>
           ))}
@@ -1043,6 +1052,7 @@ const codeChip = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 
 // ─── Billing (master rate card + spend rollup) ────────────────────────────────
 function Billing() {
+  const { isSuperAdmin } = useAuth();
   const [rollup, setRollup] = useState(null);
   useEffect(() => { api.getBillingRollup().then(setRollup).catch(() => setRollup({ clients: [], total: 0 })); }, []);
   const cur = rollup?.currency || 'ZAR';
@@ -1050,8 +1060,10 @@ function Billing() {
   return (
     <div style={{ maxWidth: 720 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Campaign billing</h2>
-      <p style={{ ...hint }}>Set the platform master rates per channel. Each client inherits these unless you set a client-specific fee under <b>Clients → [client] → Fees</b>. Costs are per message sent.</p>
-      <RateCard scope="master" />
+      <p style={{ ...hint }}>{isSuperAdmin
+        ? <>Set the platform master rates per channel. Each client inherits these unless you set a client-specific fee under <b>Clients → [client] → Fees</b>. Costs are per message sent.</>
+        : <>Platform master rates per channel (only <b>Super Admins</b> can change these). Client-specific fees are editable under <b>Clients → [client] → Fees</b> for clients you administer. Costs are per message sent.</>}</p>
+      <RateCard scope="master" canEdit={isSuperAdmin} />
       <div style={{ borderTop: '1px solid var(--hairline)', margin: '24px 0 16px' }} />
       <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Spend rollup — all clients</h3>
       {!rollup ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
@@ -2632,6 +2644,7 @@ function UserDetail({ userId, entities = [], roles = [], install = null, initial
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
+  const { isSuperAdmin } = useAuth(); // only a Super Admin may grant the super_admin tag (server enforces too)
   const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '', roles: user.roles || [] });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
@@ -2679,9 +2692,14 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
           </>
         )}
         <L>Designations</L>
-        <p style={{ ...hint, marginTop: 2 }}>Extra roles this person holds — a user can have several. <b>Developer</b> makes them assignable to tickets on the product board.</p>
+        <p style={{ ...hint, marginTop: 2 }}>Extra roles this person holds — a user can have several. <b>Developer</b> makes them assignable to tickets on the product board. <b>Super Admin</b> unlocks the global billing, integrations, status-notice and backup controls (Howler admins only).</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 14px' }}>
-          {[['dev', 'Developer']].map(([key, label]) => {
+          {[
+            ['dev', 'Developer'],
+            // Super Admin is only offered on a Howler-admin account, and only a
+            // Super Admin can toggle it (the server strips it otherwise).
+            ...((accountType === 'admin' && isSuperAdmin) ? [['super_admin', 'Super Admin']] : []),
+          ].map(([key, label]) => {
             const on = (form.roles || []).includes(key);
             return (
               <button key={key} onClick={() => setForm({ ...form, roles: on ? form.roles.filter((r) => r !== key) : [...(form.roles || []), key] })}
@@ -3083,12 +3101,17 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             </>
           )}
           {section === 'messages' && <ClientMessages entity={entity} />}
-          {section === 'fees' && (
-            <div>
-              <p style={hint}>Per-message campaign fees for <b>{entity.name}</b>. Leave a channel blank to inherit the platform master rate (set under the top-level <b>Billing</b> tab).</p>
-              <RateCard scope="admin-client" entityId={entity.id} />
-            </div>
-          )}
+          {section === 'fees' && (() => {
+            // A Super Admin, or the account manager(s) who administer this client
+            // (its Howler support contacts), may edit its fees. Server enforces it too.
+            const canEditFees = (authUser?.roles || []).includes('super_admin') || (entity.howlerSupportIds || []).includes(authUser?.id);
+            return (
+              <div>
+                <p style={hint}>Per-message campaign fees for <b>{entity.name}</b>. Leave a channel blank to inherit the platform master rate (set under the top-level <b>Billing</b> tab).{canEditFees ? '' : ' Only this client’s account manager or a Super Admin can change these.'}</p>
+                <RateCard scope="admin-client" entityId={entity.id} canEdit={canEditFees} />
+              </div>
+            );
+          })()}
           {section === 'campaigns' && (
             <div>
               <p style={hint}>Turn data into action for <b>{entity.name}</b> — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>

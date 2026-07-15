@@ -670,7 +670,7 @@ function mount(app, { db, auth, mailer, push, slack, onInbound }) {
       webhookPath: '/api/inbound/email',
     });
   });
-  app.put('/api/os/admin/inbound', auth.requireAdmin, (req, res) => {
+  app.put('/api/os/admin/inbound', auth.requireSuperAdmin, (req, res) => {
     if ((req.body || {}).domain !== undefined) db.setSetting('inbound_domain', String(req.body.domain || '').trim().replace(/^@/, ''));
     if ((req.body || {}).regenerateSecret) db.setSetting('inbound_secret', crypto.randomBytes(18).toString('base64url'));
     res.json({ domain: db.getSetting('inbound_domain', ''), secret: inboundSecret(), webhookPath: '/api/inbound/email' });

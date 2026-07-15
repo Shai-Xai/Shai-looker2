@@ -8,8 +8,10 @@ import { api } from '../lib/api.js';
 // Costs are per MESSAGE sent. Currency is set on the master card.
 const money = (cur, n) => `${cur === 'ZAR' ? 'R' : `${cur || 'R'} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function RateCard({ scope = 'my', entityId }) {
-  const readOnly = scope === 'my';
+export default function RateCard({ scope = 'my', entityId, canEdit = true }) {
+  // 'my' is always read-only (client self-service); an admin scope is read-only
+  // when the viewer lacks permission (canEdit=false) — the server enforces the same.
+  const readOnly = scope === 'my' || !canEdit;
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState(null); // editable copy (rate inputs as strings)
   const [busy, setBusy] = useState(false);
@@ -41,35 +43,44 @@ export default function RateCard({ scope = 'my', entityId }) {
       .catch((e) => alert('Save failed: ' + (e.message || e))).finally(() => setBusy(false));
   };
 
-  // Read-only client view: effective rates + spend rollup.
+  // Read-only view: 'my' is the client's self-service (rates + spend rollup); an
+  // admin scope shown read-only (no permission) shows just the effective rates.
   if (readOnly) {
     const spend = data.spend || { total: 0, campaigns: [] };
+    const clientView = scope === 'my';
     return (
       <div style={{ maxWidth: 640 }}>
-        <h3 style={h3}>Your rates</h3>
-        <p style={hint}>What you’re charged per message sent. Campaign costs use these rates.</p>
+        <h3 style={h3}>{clientView ? 'Your rates' : 'Rates'}</h3>
+        <p style={hint}>{clientView
+          ? 'What you’re charged per message sent. Campaign costs use these rates.'
+          : 'Effective per-message fees. You don’t have permission to change these.'}</p>
         <table style={table}>
           <tbody>
             {channels.map((ch) => (
               <tr key={ch}>
                 <td style={tdLabel}>{labels[ch]}</td>
-                <td style={tdVal}>{money(currency, data.rates[ch])} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>/ message</span></td>
+                <td style={tdVal}>{money(currency, data.rates[ch])} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>/ message</span>
+                  {scope === 'admin-client' && data.inherited?.[ch] ? <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 12 }}> · inherited</span> : null}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <h3 style={{ ...h3, marginTop: 22 }}>Campaign spend</h3>
-        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>{money(currency, spend.total)}<span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginLeft: 8 }}>across {spend.campaigns?.length || 0} campaign{spend.campaigns?.length === 1 ? '' : 's'}</span></div>
-        {(spend.campaigns || []).length > 0 && (
-          <div style={{ marginTop: 12, border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
-            {spend.campaigns.map((c) => (
-              <div key={c.id} style={spendRow}>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || 'Campaign'}</span>
-                <span style={{ color: 'var(--muted)', fontSize: 12, flexShrink: 0 }}>{c.sent} sent</span>
-                <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80, textAlign: 'right' }}>{money(currency, c.cost)}</span>
+        {clientView && (
+          <>
+            <h3 style={{ ...h3, marginTop: 22 }}>Campaign spend</h3>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>{money(currency, spend.total)}<span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, marginLeft: 8 }}>across {spend.campaigns?.length || 0} campaign{spend.campaigns?.length === 1 ? '' : 's'}</span></div>
+            {(spend.campaigns || []).length > 0 && (
+              <div style={{ marginTop: 12, border: '1px solid var(--hairline)', borderRadius: 10, overflow: 'hidden' }}>
+                {spend.campaigns.map((c) => (
+                  <div key={c.id} style={spendRow}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title || 'Campaign'}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: 12, flexShrink: 0 }}>{c.sent} sent</span>
+                    <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 80, textAlign: 'right' }}>{money(currency, c.cost)}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     );
