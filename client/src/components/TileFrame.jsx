@@ -80,11 +80,12 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   }
 
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
-  // Inspect query: available in view mode on any queryable tile. Shown to
-  // everyone (transparency) — staff get the raw-internals view, clients a plain
-  // labelled summary (see InspectQueryModal). Wait for a result so the fields &
-  // filters reflect the exact number on screen.
-  const canInspect = !editable && tile.type !== 'text' && isRunnableQuery(tile.query) && data && !loading && !error;
+  // Inspect query: an EDIT-mode tool (lives with the tile's edit controls, not
+  // on the viewing surface) for auditing a queryable tile Explore-style —
+  // fields in use, filters, a bar visualization and the result grid (see
+  // InspectQueryModal). Wait for a result so the fields & filters reflect the
+  // exact number on screen.
+  const canInspect = editable && tile.type !== 'text' && isRunnableQuery(tile.query) && data && !loading && !error;
 
   // "Segment from a tile": offer it (view mode only) when the tile lists people —
   // i.e. its data has an email-like column — and the viewer can manage campaigns.
@@ -173,7 +174,6 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
             {isMetric ? null : (tile.title || <em style={{ color: '#bbb', fontWeight: 400 }}>Untitled</em>)}
           </span>
           {!editable && (!isMobile || tapped) && canSegment && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} />}
-          {!editable && (!isMobile || tapped) && canInspect && <InspectButton onClick={() => setShowInspect(true)} isMobile={isMobile} />}
           {!editable && (!isMobile || tapped) && <ShareMenu variant="tile" isMobile={isMobile} heading={tile.title || 'Dashboard tile'} />}
           {!editable && (!isMobile || tapped) && canInsight && (
             <>
@@ -184,6 +184,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           {editable && (
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
               {inCarousel && <ReorderGrip tileId={tile.id} />}
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -215,7 +216,6 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           </>
         )}
         {!editable && (!isMobile || tapped) && canSegment && !showHeader && <SegmentButton onClick={() => setShowSegment(true)} isMobile={isMobile} corner />}
-        {!editable && (!isMobile || tapped) && canInspect && !showHeader && <InspectButton onClick={() => setShowInspect(true)} isMobile={isMobile} corner />}
         {/* Chart zoom: show only the last N points of a long axis (e.g. a
             days-before-event countdown where all the action is the final two
             weeks). Personal + persisted; stays visible while active. */}
@@ -246,6 +246,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               ? <ReorderGrip tileId={tile.id} />
               : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -393,18 +394,6 @@ function SegmentButton({ onClick, isMobile, corner }) {
   const cornerStyle = corner ? { position: 'absolute', top: 6, left: 6, zIndex: 6 } : null;
   return (
     <button className="no-print" title="Create a reusable segment from this tile" onClick={onClick} style={{ ...base, ...cornerStyle }}>🎯</button>
-  );
-}
-
-// "Inspect query" affordance — audit the tile's dimensions / measures / filters
-// (read-only). Same visual language as the segment/share buttons. Corner variant
-// floats bottom-left on headerless metric tiles (clear of the pin/insight cluster
-// top-right and the segment button top-left).
-function InspectButton({ onClick, isMobile, corner }) {
-  const base = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--muted)', borderRadius: 7, fontSize: isMobile ? 13 : 12, lineHeight: 1, width: isMobile ? 28 : 24, height: isMobile ? 28 : 24 };
-  const cornerStyle = corner ? { position: 'absolute', bottom: 6, left: 6, zIndex: 6 } : null;
-  return (
-    <button className="no-print" title="Inspect query — dimensions, measures & filters driving this tile" aria-label="Inspect query" onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ ...base, ...cornerStyle }}>🔍</button>
   );
 }
 
