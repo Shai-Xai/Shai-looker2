@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-16 (Campaigns: test send now matches the preview for drip sequences) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -768,6 +768,13 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-16** — **Campaigns — test send fix** ✅: "Send test to me" now sends
+  the exact content shown in the preview pane. Previously, for a **drip sequence**
+  (e.g. Abandoned Cart Recovery) the test email could arrive with an empty body
+  when the HTML lived in a step — the test-send used the top-level copy while the
+  preview rendered the active step. Both now render the same step, so a test send
+  faithfully validates what recipients will get.
 
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
