@@ -25,7 +25,7 @@ import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onApplyQuery, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
   const { insightsEnabled, isAdmin } = useAuth();
   const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
@@ -296,6 +296,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           filters={appliedFilters()}
           dashboardFields={dashboardFilterFields()}
           detailed={isAdmin}
+          onApply={onApplyQuery}
           onClose={() => setShowInspect(false)}
         />
       )}

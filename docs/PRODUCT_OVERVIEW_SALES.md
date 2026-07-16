@@ -1085,7 +1085,10 @@ see "The continuous comms loop" above.)*
   remove filters), add / remove fields from the explore's catalogue, change the
   row limit, and hit **▶ Run** to re-query and watch the bars + grid update. A
   sandbox: only the preview re-runs (server tenant-scoping still applies); the
-  tile keeps its saved query, and **Reset** returns to it.
+  tile keeps its saved query, and **Reset** returns to it. When the sandbox
+  looks right, **✓ Apply to tile** writes the query onto the tile in the editor
+  (the dashboard's Save publishes it) — dashboard-driven filter values that rode
+  in unchanged stay live-wired rather than being baked in.
 - **2026-07-16** — **Branded PDF reaches the App pages** ✅ (App): the App page's
   Analytics, Audience and Community tabs (and Admin → App analytics) now carry
   their own **⤓ PDF** button with the same branded cover — the original export

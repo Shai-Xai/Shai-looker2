@@ -11,15 +11,16 @@ import { api } from '../lib/api.js';
 // visualization and the result grid. It opens showing exactly what drove the
 // number on screen, and the controls are LIVE: edit filter values, add/remove
 // filters and fields, change the row limit, then ▶ Run to re-query and watch
-// the bars + grid update. It's a SANDBOX — Run only re-runs the preview here;
-// the tile itself is never modified (edit the tile for that), and Reset returns
-// to the tile's real query. Queries still run through /api/run-query, so the
-// server's tenant scoping applies to every run.
+// the bars + grid update. ▶ Run is a SANDBOX (only the preview changes; Reset
+// returns to the tile's real query); ✓ Apply to tile (when the editor wires
+// `onApply`) writes the draft query onto the tile in the editor's local draft,
+// which the dashboard's Save then publishes. Queries still run through
+// /api/run-query, so the server's tenant scoping applies to every run.
 //
 // The add-field/add-filter pickers come from the explore's field catalogue
 // (admin-only endpoint); if it can't load, editing degrades gracefully to the
 // fields/filters already on the tile. `detailed` (staff) shows raw internals.
-export default function InspectQueryModal({ tile, data, filters, dashboardFields = [], detailed = false, onClose }) {
+export default function InspectQueryModal({ tile, data, filters, dashboardFields = [], detailed = false, onApply, onClose }) {
   const isMobile = useIsMobile();
   const drag = useSheetDrag(onClose);
   const { suiteId } = useScope();
@@ -82,22 +83,35 @@ export default function InspectQueryModal({ tile, data, filters, dashboardFields
     }), [draftFields, draftFilters, draftLimit, q, filters]);
 
   // ── Run the sandbox query (server-scoped like any tile query) ──────────────
-  const run = () => {
-    if (!draftFields.length || running) return;
+  const buildQuery = (filterRows) => {
     const stripDesc = (s) => String(s).replace(/\s+desc$/i, '');
-    const runQuery = {
+    return {
       ...q,
       fields: draftFields,
-      filters: Object.fromEntries(draftFilters.filter((f) => f.field && String(f.value).trim() !== '').map((f) => [f.field, f.value])),
+      filters: Object.fromEntries(filterRows.filter((f) => f.field && String(f.value).trim() !== '').map((f) => [f.field, f.value])),
       limit: draftLimit,
       sorts: (q.sorts || []).filter((s) => draftFields.includes(stripDesc(s))),
       pivots: (q.pivots || []).filter((p) => draftFields.includes(p)),
     };
+  };
+  const run = () => {
+    if (!draftFields.length || running) return;
     setRunning(true); setRunErr('');
-    api.runQuery(runQuery, {}, undefined, suiteId)
+    api.runQuery(buildQuery(draftFilters), {}, undefined, suiteId)
       .then((r) => setResult(r))
       .catch((e) => setRunErr(e.message || 'Query failed'))
       .finally(() => setRunning(false));
+  };
+  // Write the sandbox back onto the tile (the editor's local draft — the
+  // dashboard's Save publishes it). Filters that are just the CURRENT dashboard
+  // filter values riding in unchanged stay OUT of the tile's baked query — they
+  // keep flowing live via the dashboard's filter wiring; an edited or added
+  // value is deliberate, so it bakes in.
+  const apply = () => {
+    if (!onApply || !draftFields.length) return;
+    const rows = draftFilters.filter((f) => !(dashSet.has(f.field) && String(f.value) === String(filters?.[f.field] ?? '')));
+    onApply(buildQuery(rows));
+    onClose();
   };
   const reset = () => {
     setDraftFields(q.fields || []);
@@ -156,6 +170,12 @@ export default function InspectQueryModal({ tile, data, filters, dashboardFields
             </div>
           )}
           {dirty && <button style={ghostBtn} onClick={reset} title="Back to the tile's real query">Reset</button>}
+          {onApply && dirty && (
+            <button style={{ ...ghostBtn, color: 'var(--brand)', borderColor: 'var(--brand)' }} onClick={apply} disabled={!draftFields.length}
+              title="Write this query onto the tile (the dashboard's Save then publishes it)">
+              ✓ Apply to tile
+            </button>
+          )}
           <button style={runBtn(running || !draftFields.length)} onClick={run} disabled={running || !draftFields.length} title="Re-run the preview with your changes (the tile itself is untouched)">
             {running ? 'Running…' : '▶ Run'}
           </button>
@@ -247,7 +267,8 @@ export default function InspectQueryModal({ tile, data, filters, dashboardFields
         </div>
 
         <div style={{ padding: '10px 18px 14px', fontSize: 11, color: 'var(--muted)', borderTop: '1px solid var(--hairline)', flexShrink: 0 }}>
-          Sandbox — edit the filters, fields or row limit and hit <b>Run</b> to re-query. Only this preview changes; the tile keeps its saved query.
+          Sandbox — edit the filters, fields or row limit and hit <b>Run</b> to re-query; only this preview changes.
+          {onApply ? <> Happy with it? <b>✓ Apply to tile</b> writes it onto the tile — the dashboard's Save publishes it.</> : ' The tile keeps its saved query.'}
           {detailed ? ' Staff view — includes raw query internals.' : ''}
         </div>
       </div>
