@@ -163,6 +163,15 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
       {err && <div style={errBox}>{err}</div>}
       {s.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {s.lastError}</div>}
 
+      {/* Community → client linking is ADMIN-ONLY (the picker lists the whole
+          Social+ directory — every organiser's communities — so it must never
+          render on the client surface, whichever key the client rides on). It
+          lives at the TOP of the admin view because it's the config and the
+          data blocks below get long; always editable — tick/untick + Save. */}
+      {scope === 'admin-client' && (
+        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={(started) => waitForSync(started)} />
+      )}
+
       {!s.assigned ? (
         <div style={card}>
           <p style={{ ...sub, marginBottom: 0 }}>
@@ -198,6 +207,11 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
               ['Chat messages', t.messages],
             ]} />
           )}
+          {/* Admin-only diagnosis: chats live in event_<id> groups, so a client
+              with only communities ticked honestly shows 0 chat messages. */}
+          {scope === 'admin-client' && !filtered && !(t.messages > 0) && !(s.communityIds || []).some((x) => String(x).startsWith('event_')) && (
+            <p style={{ ...mutedTxt, fontSize: 12, margin: '6px 0 0' }}>💬 Chat messages are 0 because no <b>event chat groups</b> are linked for this client — tick them under "Communities linked to this client" above.</p>
+          )}
           <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
           <PresenceCard presence={data.presence} isMobile={isMobile} />
           {/* 🎯 Member engagement (contribution-based) is HIDDEN for now — presence
@@ -219,12 +233,6 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         </>
       )}
 
-      {/* Community → client linking is ADMIN-ONLY: the picker lists the whole
-          Social+ directory (every organiser's communities), so it must never
-          render on the client surface — whichever key the client rides on. */}
-      {scope === 'admin-client' && (
-        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={(started) => waitForSync(started)} />
-      )}
     </div>
   );
 }
@@ -490,17 +498,21 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
   const [picked, setPicked] = useState(() => new Set(assigned));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setPicked(new Set(assigned)); }, [assigned.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The parent re-polls data after a save (background re-sync), which refreshes
+  // `assigned` every few seconds — without the dirty guard those polls clobbered
+  // ticks made mid-edit, which read as "the picker won't let me change anything".
+  const dirty = useRef(false);
+  useEffect(() => { if (!dirty.current) setPicked(new Set(assigned)); }, [assigned.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open || dir) return;
     api.socialplusDirectory(entityId).then(setDir).catch((e) => setDirErr(e.message));
   }, [open, dir, entityId]);
-  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id) => { dirty.current = true; setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
   const save = async () => {
     setBusy(true); setDirErr('');
     // The server answers as soon as the links are stored (the re-sync runs in
     // the background) — the parent polls the data in while we show ✓ Saved.
-    try { const r = await api.socialplusAssign(entityId, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 2500); onSaved?.(r.started || new Date().toISOString()); }
+    try { const r = await api.socialplusAssign(entityId, [...picked]); dirty.current = false; setSaved(true); setTimeout(() => setSaved(false), 2500); onSaved?.(r.started || new Date().toISOString()); }
     catch (e) { setDirErr(e.message); }
     setBusy(false);
   };
@@ -513,7 +525,8 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
       {open && (
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 8px' }}>
-            Tick only THIS client's communities and event chats — unticked ones stay invisible to them. Saving re-syncs their data immediately. Only admins ever see this list; the client just sees what you tick.
+            Tick only THIS client's communities and event chats — unticked ones stay invisible to them. You can come back anytime: tick more, untick to remove, then Save again (it re-syncs immediately). Only admins ever see this list; the client just sees what you tick.
+            {' '}<b>Chat messages come from the Event chats groups</b> — a client with only communities ticked will show 0 chat messages.
           </div>
           {dirErr && <div style={errBox}>{dirErr}</div>}
           {!dir && !dirErr && <div style={mutedTxt}>Loading the Social+ directory…</div>}
@@ -567,4 +580,4 @@ const ghostBtn = { border: '1px solid var(--hairline)', background: 'transparent
 const th = { textAlign: 'left', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700, padding: '6px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
 const td = { padding: '8px', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
 const groupLbl = { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '8px 0 2px' };
-const pickRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' };
+const pickRow = { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, minHeight: 40, cursor: 'pointer' };

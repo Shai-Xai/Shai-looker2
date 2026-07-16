@@ -462,7 +462,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my', section = 'analytics
       <>
       <StatRow isMobile={isMobile} stats={[
         ['Viewers today', data.live?.actives, true],
-        ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
+        // No LIVE tag here — it's a window total, not a right-now number (the tag confused more than it informed).
+        ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),
