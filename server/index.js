@@ -2859,9 +2859,8 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(staticDir, 'index.html'));
 });
 
-// Single error-handling middleware (mounted last). Catches sync throws from any
-// route + async rejections forwarded by asyncHandler; logs full 5xx server-side
-// and returns a sanitized message (never leaks internal error text). See http.js.
+// Single error-handling middleware (mounted last): sync throws + asyncHandler-
+// forwarded rejections → full 5xx logged server-side, sanitized message out. See http.js.
 app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3045;
@@ -2872,12 +2871,11 @@ const server = app.listen(PORT, () => {
   socialMetrics.startDailySync({ listEntities: () => db.listEntities() }); socialplus.startDailySync({ listEntities: () => db.listEntities() });
 });
 
-// Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new
-// connections and give in-flight requests a moment to drain, then exit. Work
-// interrupted anyway is designed to survive the kill: campaign blasts resume
-// from the action_sends ledger on next boot, and digest/alert run-slots are
-// claimed before sending, so a killed send is missed (and visible), never
-// double-delivered.
+// Graceful shutdown — Render sends SIGTERM on EVERY deploy: stop accepting new
+// connections, drain in-flight requests, then exit. Interrupted work survives the
+// kill (campaign blasts resume from the action_sends ledger on next boot; digest/
+// alert run-slots are claimed before sending — a killed send is missed and
+// visible, never double-delivered).
 process.on('SIGTERM', () => {
   console.log('[shutdown] SIGTERM received — draining connections');
   server.close(() => process.exit(0));

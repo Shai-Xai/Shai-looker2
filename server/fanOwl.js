@@ -243,6 +243,12 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
   const uid = () => crypto.randomUUID();
 
+  // Loyalty & verification (docs/specs/LOYALTY_ENGINE_SPEC.md phase 1) — the
+  // identity handshake lives in server/loyalty.js; offered per entity ONLY when
+  // the fanowl.loyalty flag is on (flag off = the tools are never in the toolbox).
+  const loyalty = require('./loyalty').createLoyalty({ db, auth, mailer: require('./mailer') });
+  const loyaltyOn = (entityId) => { try { return require('./flags').enabled(entityId, 'fanowl.loyalty'); } catch { return false; } };
+
   const siteByKey = sql.prepare('SELECT * FROM fan_sites WHERE site_key = ?');
   const siteById = sql.prepare('SELECT * FROM fan_sites WHERE id = ?');
   const sitesByEntity = sql.prepare('SELECT * FROM fan_sites WHERE entity_id = ? ORDER BY created_at');
@@ -407,7 +413,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // Where the nav buttons actually take fans (nav_click = a tapped button;
   // nav_issued = the Owl offered a "take me there" in chat).
   const navTapsSince = sql.prepare(`SELECT json_extract(payload,'$.path') AS path, COUNT(*) AS c FROM fan_events WHERE site_id = ? AND kind = 'nav_click' AND created_at >= ? GROUP BY path ORDER BY c DESC LIMIT 10`);
-  const leadsByEntity = sql.prepare('SELECT COUNT(*) AS c, SUM(consent_marketing) AS m FROM fan_profiles WHERE entity_id = ?');
+  const leadsByEntity = sql.prepare("SELECT COUNT(*) AS c, SUM(consent_marketing) AS m, SUM(CASE WHEN verified_at != '' THEN 1 ELSE 0 END) AS v FROM fan_profiles WHERE entity_id = ?");
   const listLeads = sql.prepare('SELECT * FROM fan_profiles WHERE entity_id = ? ORDER BY created_at DESC LIMIT 500');
   function insightsView(entityId, days) {
     const since = new Date(Date.now() - (Number(days) || 30) * 86400_000).toISOString();
@@ -418,12 +424,12 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
       navTaps: navTapsSince.all(s.id, since).filter((t) => t.path),
     }));
     const l = leadsByEntity.get(entityId) || {};
-    return { sites, leads: { total: l.c || 0, optedIn: l.m || 0 } };
+    return { sites, leads: { total: l.c || 0, optedIn: l.m || 0, verified: l.v || 0 } };
   }
   app.get('/api/admin/entities/:entityId/fan-owl/insights', auth.requireAdmin, requireManager, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
   app.get('/api/my/fan-owl/:entityId/insights', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json(insightsView(req.params.entityId, req.query.days)));
   // Captured fans (name/email/preferences/consent) — the remarketable list.
-  const leadView = (p) => ({ id: p.id, email: p.email, name: p.name, preferences: J(p.preferences, []), consentMarketing: !!p.consent_marketing, consentAt: p.consent_at, at: p.created_at });
+  const leadView = (p) => ({ id: p.id, email: p.email, name: p.name, preferences: J(p.preferences, []), consentMarketing: !!p.consent_marketing, consentAt: p.consent_at, at: p.created_at, verified: !!p.verified_at, tier: p.tier || '' });
   app.get('/api/admin/entities/:entityId/fan-owl/leads', auth.requireAdmin, requireManager, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
   app.get('/api/my/fan-owl/:entityId/leads', auth.requireAuth, requireMyEntity, requireManager, (req, res) => res.json({ leads: listLeads.all(req.params.entityId).map(leadView) }));
 
@@ -900,6 +906,12 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // the fan's own language (it knows the locale; we only know the codes).
       starters: pageStarters.slice(0, 4),
       consentVersion: CONSENT_WORDING_VERSION,
+      // Verified-fan chip (loyalty phase 1): THIS session proved the address.
+      verified: (() => {
+        if (!loyaltyOn(site.entity_id)) return null;
+        const p = loyalty.verifiedProfile(session);
+        return p ? { email: p.email, tier: p.tier || 'new' } : null;
+      })(),
     });
   });
 
@@ -963,6 +975,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
           return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
         },
       },
+      // Identity handshake (flag-gated): flag off = the tools simply don't exist.
+      ...(loyaltyOn(site.entity_id) ? loyalty.tools(site, session) : {}),
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -1063,6 +1077,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         : '',
       page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
       memory,
+      // Loyalty (flag-gated): the verification rules + this session's verified
+      // profile (server-derived; raw history never reaches the model).
+      loyaltyOn(site.entity_id) ? require('./loyalty').FAN_LOYALTY_SYSTEM : '',
+      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session) : '',
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
       (() => {
         const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
