@@ -77,13 +77,16 @@ function mount(app, { db, auth }) {
   }
 
   // ── Admin routes ──
+  // Reading the rate card is open to any Howler admin; EDITING the global master
+  // is Super-Admin-only, and editing a client's fees is delegated to the admin who
+  // administers that client (account managers), enforced by requireEntityAdmin.
   app.get('/api/billing/master', auth.requireAdmin, (_req, res) => res.json({ rates: masterRates(), channels: CHANNELS, labels: CHANNEL_LABELS }));
-  app.put('/api/billing/master', auth.requireAdmin, (req, res) => res.json({ rates: setMaster(req.body || {}), channels: CHANNELS, labels: CHANNEL_LABELS }));
+  app.put('/api/billing/master', auth.requireSuperAdmin, (req, res) => res.json({ rates: setMaster(req.body || {}), channels: CHANNELS, labels: CHANNEL_LABELS }));
   app.get('/api/billing/admin/entities/:id/rates', auth.requireAdmin, (req, res) => {
     if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     res.json({ ...effectiveRates(req.params.id), overrides: entityOverrides(req.params.id), master: masterRates() });
   });
-  app.put('/api/billing/admin/entities/:id/rates', auth.requireAdmin, (req, res) => {
+  app.put('/api/billing/admin/entities/:id/rates', auth.requireAdmin, auth.requireEntityAdmin(), (req, res) => {
     if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
     setEntityOverrides(req.params.id, req.body || {});
     res.json({ ...effectiveRates(req.params.id), overrides: entityOverrides(req.params.id), master: masterRates() });

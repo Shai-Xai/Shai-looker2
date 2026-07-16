@@ -75,6 +75,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
     if (d.sources && d.sources.length) return { event: '', detail: `Combined · ${d.combine || 'union'} of ${d.sources.length} sources` };
     if (d.mode === 'paste') return { event: '', detail: 'Uploaded / pasted list' };
     if (d.mode === 'gsheet') return { event: '', detail: 'Linked Google Sheet (live)' };
+    if (d.mode === 'appmatch') return { event: '', detail: 'App audience group (live — recomputed at every send)' };
     const dash = tiles?.dashboards?.find((x) => x.dashboardId === d.dashboardId);
     const tile = dash?.tiles?.find((t) => t.tileId === d.tileId);
     return { event: dash?.suiteName || '', detail: tile?.title || dash?.title || '' };
@@ -154,7 +155,7 @@ export default function SegmentManager({ entityId, scope = 'admin' }) {
         <div style={{ flex: isMobile ? undefined : '1 1 240px', minWidth: isMobile ? 0 : 220 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, fontSize: isMobile ? 17 : 15 }}>{s.name}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : 'Dashboard tile'}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.14)', color: 'var(--muted)' }}>{s.source === 'mix' ? 'Combined' : s.source === 'paste' ? 'Uploaded / pasted' : s.source === 'gsheet' ? 'Google Sheet' : s.source === 'appmatch' ? '📲 App audience (live)' : 'Dashboard tile'}</span>
             {viaBadge(s.createdVia) && <span style={viaChipStyle}>{viaBadge(s.createdVia).icon} via {viaBadge(s.createdVia).label}</span>}
           </div>
           {lbl.event && <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 5, fontWeight: 600 }}>🗓 {lbl.event}</div>}
@@ -346,6 +347,9 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     // Dashboard filters captured when the segment was made from a tile. Not
     // edited here, but preserved so saving doesn't silently change the cohort.
     lookerFilters: def.lookerFilters || {},
+    // Live App-audience group (mode 'appmatch') — managed from the App page, but
+    // preserved here so renaming/re-filing never silently drops the definition.
+    group: def.group || '', appEvent: def.appEvent || '', appSize: def.appSize || 0,
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   // Event/suite picker — choose the event first, then its dashboards. Distinct
@@ -387,6 +391,7 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
     emailConsentField: f.emailConsentField, smsConsentField: f.smsConsentField,
     attrDashboardId: f.attrDashboardId, attrTileId: f.attrTileId, filters: f.filters, pasted: f.pasted,
     gsheetUrl: f.gsheetUrl, lookerFilters: f.lookerFilters,
+    group: f.group, appEvent: f.appEvent, appSize: f.appSize,
   });
   // Keep only fully-specified combine blocks.
   const validExtras = () => extras.filter((b) => (b.mode === 'segment' && b.segmentId) || (b.mode === 'gsheet' && (b.gsheetUrl || '').trim()) || (b.mode === 'paste' && (b.pasted || '').trim()));
@@ -457,14 +462,22 @@ function SegmentBuilder({ entityId, tiles, segment, onClose, onSaved }) {
         </Field>
 
         <Field label="Source">
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Toggle on={f.mode === 'tile'} onClick={() => pickMode('tile')}>From a dashboard tile</Toggle>
-            <Toggle on={f.mode === 'paste'} onClick={() => pickMode('paste')}>Paste / upload a list</Toggle>
-            <Toggle on={f.mode === 'gsheet'} onClick={() => pickMode('gsheet')}>Link a Google Sheet</Toggle>
-          </div>
+          {f.mode === 'appmatch' ? (
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5, border: '1px solid var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+              📲 <b style={{ color: 'var(--text)' }}>Live App-audience group</b> — the members are re-computed from App analytics
+              (app users matched against ticket holders/buyers) every time this segment is counted or a campaign sends from it.
+              The group itself is managed on the <b>App page</b>; here you can rename, re-file or combine it.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Toggle on={f.mode === 'tile'} onClick={() => pickMode('tile')}>From a dashboard tile</Toggle>
+              <Toggle on={f.mode === 'paste'} onClick={() => pickMode('paste')}>Paste / upload a list</Toggle>
+              <Toggle on={f.mode === 'gsheet'} onClick={() => pickMode('gsheet')}>Link a Google Sheet</Toggle>
+            </div>
+          )}
         </Field>
 
-        {f.mode === 'tile' ? (
+        {f.mode === 'appmatch' ? null : f.mode === 'tile' ? (
           <Field label="Audience">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {suiteList.length > 1 && (

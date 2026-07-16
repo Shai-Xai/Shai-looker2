@@ -2,10 +2,12 @@ import SingleValueTile from './tiles/SingleValueTile.jsx';
 import ChartTile from './tiles/ChartTile.jsx';
 import TableTile from './tiles/TableTile.jsx';
 import BarGaugeTile from './tiles/BarGaugeTile.jsx';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
+import InspectQueryModal from './InspectQueryModal.jsx';
 import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
@@ -23,9 +25,9 @@ import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onApplyQuery, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
-  const { insightsEnabled } = useAuth();
+  const { insightsEnabled, isAdmin } = useAuth();
   const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
   const [showTileLock, setShowTileLock] = useState(false);
   // Admin per-tile lock affordance: only when in a suite, the tile is queryable
@@ -36,6 +38,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
+  const [showInspect, setShowInspect] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
   // Per-user chart zoom ("last N points") — loaded from the user's prefs and
   // saved back on change; a personal lens, never a dashboard edit.
@@ -45,6 +48,11 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   // On phones the per-tile owl/pin/segment buttons clutter every card, so they
   // stay hidden until you tap the tile (desktop shows them on hover as before).
   const [tapped, setTapped] = useState(false);
+  // Double-tap a chart/table on the phone → expand it fullscreen (portaled, so
+  // the grid item's transform can't trap the fixed overlay). Single tap keeps
+  // its reveal-the-buttons job.
+  const [expanded, setExpanded] = useState(false);
+  const lastTapAt = useRef(0);
   // Open the Owl on this tile, recording it as a feature-usage signal (Admin → Onboarding).
   const openInsight = () => { if (entityId) api.trackUsage(entityId, { kind: 'feature', name: 'insight', event: 'use' }); setShowInsight(true); };
 
@@ -60,7 +68,24 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
     return f;
   }
 
+  // The query fields whose filter value comes from a live dashboard filter (vs
+  // baked into the tile) — so the Inspect panel can tag each filter's source.
+  function dashboardFilterFields() {
+    const out = [];
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const val = filterValues?.[filterName];
+      if (val && val !== ANY_VALUE && String(val).trim()) out.push(queryField);
+    }
+    return out;
+  }
+
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
+  // Inspect query: an EDIT-mode tool (lives with the tile's edit controls, not
+  // on the viewing surface) for auditing a queryable tile Explore-style —
+  // fields in use, filters, a bar visualization and the result grid (see
+  // InspectQueryModal). Wait for a result so the fields & filters reflect the
+  // exact number on screen.
+  const canInspect = editable && tile.type !== 'text' && isRunnableQuery(tile.query) && data && !loading && !error;
 
   // "Segment from a tile": offer it (view mode only) when the tile lists people —
   // i.e. its data has an email-like column — and the viewer can manage campaigns.
@@ -88,14 +113,30 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   // big number stays fully visible; their edit controls float in the corners instead.
   const showHeader = !isMetric && (editable || !!tile.title);
 
+  // What double-tap fullscreen applies to: real data tiles (charts + tables) —
+  // not text tiles, and not KPI numbers (nothing to see bigger).
+  const canExpand = isMobile && !editable && tile.type !== 'text' && !isMetric && !!data && !error;
+  const onCardTap = (e) => {
+    // Taps on the tile's own controls (owl, pin, zoom select…) are theirs alone.
+    if (e.target.closest && e.target.closest('button, select, a, input')) return;
+    const t = Date.now();
+    if (canExpand && t - lastTapAt.current < 350) { lastTapAt.current = 0; setExpanded(true); return; }
+    lastTapAt.current = t;
+    setTapped((v) => !v);
+  };
+
   return (
     <div
       // Hover-lift in view mode (matches the home cards). Not while editing — it
       // would fight the drag-to-rearrange transform.
       className={`howler-tile${editable ? '' : ' lift'}`}
-      // Mobile: tap the card to reveal/hide its owl + controls.
-      onClick={isMobile && !editable ? () => setTapped((v) => !v) : undefined}
+      // Mobile: tap the card to reveal/hide its owl + controls; double-tap a
+      // chart/table to expand it fullscreen.
+      onClick={isMobile && !editable ? onCardTap : undefined}
       style={{
+        // Kill iOS Safari's double-tap page zoom on tiles so the double-tap
+        // lands here (pan/scroll unaffected).
+        ...(isMobile && !editable ? { touchAction: 'manipulation' } : null),
         background: 'var(--tile-bg, #fff)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
@@ -143,6 +184,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           {editable && (
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
               {inCarousel && <ReorderGrip tileId={tile.id} />}
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -204,6 +246,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               ? <ReorderGrip tileId={tile.id} />
               : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -236,8 +279,26 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         ) : null}
       </div>
 
+      {expanded && (
+        <TileFullscreen title={tile.title || 'Chart'} onClose={() => setExpanded(false)}>
+          <ErrorBoundary resetKey={data}>
+            <TileContent tile={tile} data={data} zoom={zoom} />
+          </ErrorBoundary>
+        </TileFullscreen>
+      )}
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
+      )}
+      {showInspect && (
+        <InspectQueryModal
+          tile={tile}
+          data={data}
+          filters={appliedFilters()}
+          dashboardFields={dashboardFilterFields()}
+          detailed={isAdmin}
+          onApply={onApplyQuery}
+          onClose={() => setShowInspect(false)}
+        />
       )}
       {showSegment && (
         <CreateSegmentModal
@@ -261,6 +322,37 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
         />
       )}
     </div>
+  );
+}
+
+// Fullscreen view of one tile (mobile double-tap). Portaled to <body> so the
+// grid item's transform can't trap the fixed overlay. Close via ✕, another
+// double-tap, or the Escape key; body scroll is locked while open.
+function TileFullscreen({ title, onClose, children }) {
+  const lastTapAt = useRef(0);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey); };
+  }, [onClose]);
+  const tap = (e) => {
+    if (e.target.closest && e.target.closest('button, select, a, input')) return;
+    const t = Date.now();
+    if (t - lastTapAt.current < 350) { onClose(); return; }
+    lastTapAt.current = t;
+  };
+  return createPortal(
+    <div onClick={tap} style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'var(--bg, #fff)', color: 'var(--text)', display: 'flex', flexDirection: 'column', touchAction: 'manipulation' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', paddingTop: 'calc(10px + env(safe-area-inset-top))', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>double-tap to close</span>
+        <button onClick={onClose} aria-label="Close" style={{ border: 'none', background: 'rgba(128,128,128,0.12)', color: 'var(--muted-2)', borderRadius: 980, width: 30, height: 30, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, padding: '10px 6px calc(10px + env(safe-area-inset-bottom))' }}>{children}</div>
+    </div>,
+    document.body
   );
 }
 

@@ -233,13 +233,16 @@ function mount(app, deps) {
   const { asyncHandler } = require('./http');
   init(deps);
 
+  // Backup status is viewable by any Howler admin; taking one and downloading a
+  // snapshot (a full copy of the DB — same trust level as /api/admin/export) is
+  // Super-Admin-only.
   app.get('/api/admin/backups', auth.requireAdmin, (_req, res) => res.json(status()));
-  app.post('/api/admin/backups/run', auth.requireAdmin, asyncHandler(async (_req, res) => {
+  app.post('/api/admin/backups/run', auth.requireSuperAdmin, asyncHandler(async (_req, res) => {
     res.json(await runBackup('manual'));
   }));
   // Manual off-box copy: stream the newest snapshot to the admin's machine.
   // (Contains everything the DB contains — same trust level as /api/admin/export.)
-  app.get('/api/admin/backups/download', auth.requireAdmin, (_req, res) => {
+  app.get('/api/admin/backups/download', auth.requireSuperAdmin, (_req, res) => {
     const [latest] = listLocal();
     if (!latest) return res.status(404).json({ error: 'No backup taken yet — run one first' });
     res.setHeader('Content-Type', 'application/gzip');

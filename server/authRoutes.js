@@ -56,8 +56,15 @@ function mount(app, { auth, db, mailer, rateLimit, ops, meUser }) {
     return url;
   }
 
+  // Per-account throttle (by submitted email) so distributed IPs can't email-bomb
+  // one victim's inbox with reset/magic links — complements the per-IP limiter.
+  const byEmail = (scope) => rateLimit({
+    windowMs: 60 * 60_000, max: 5, scope,
+    by: (req) => `email:${String(req.body?.email || '').trim().toLowerCase()}`,
+  });
+
   // Request a password-reset email.
-  app.post('/api/auth/forgot', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'forgot' }), (req, res) => {
+  app.post('/api/auth/forgot', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'forgot' }), byEmail('forgot-acct'), (req, res) => {
     const email = String((req.body || {}).email || '').trim().toLowerCase();
     const user = email ? db.getUserByEmail(email) : null;
     if (user && mailer.isConfigured()) {
@@ -88,7 +95,7 @@ function mount(app, { auth, db, mailer, rateLimit, ops, meUser }) {
   });
 
   // Request a magic sign-in link.
-  app.post('/api/auth/magic', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'magic' }), (req, res) => {
+  app.post('/api/auth/magic', rateLimit({ windowMs: 15 * 60_000, max: 5, by: 'ip', scope: 'magic' }), byEmail('magic-acct'), (req, res) => {
     const email = String((req.body || {}).email || '').trim().toLowerCase();
     const user = email ? db.getUserByEmail(email) : null;
     if (user && mailer.isConfigured()) {

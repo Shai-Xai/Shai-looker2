@@ -2,11 +2,14 @@ import { useParams, useSearchParams, useNavigate, useOutletContext } from 'react
 import { useAuth } from '../lib/auth.jsx';
 import { useProfile } from '../lib/profile.jsx';
 import { vtNavigate } from '../lib/viewTransition.js';
-import HomeButton from '../components/HomeButton.jsx';
+import { useMyFlags, flagOn } from '../lib/flags.js';
+import PageHeader from '../components/PageHeader.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
+import JourneyWizard from '../components/JourneyWizard.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -14,9 +17,11 @@ import TemplateManager from '../components/TemplateManager.jsx';
 // before each ships. Deep links to /actions and /segments redirect in here.
 const TABS = [
   { key: 'campaigns', label: 'Campaigns', icon: '📣', ready: true },
+  { key: 'journeys', label: 'Journeys', icon: '🧭', ready: true },
   { key: 'segments', label: 'Segments', icon: '🥧', ready: true },
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
+  { key: 'links', label: 'Links', icon: '🔗', ready: true },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
@@ -32,7 +37,13 @@ export default function EngagePage() {
   const entityId = previewEntityId || (isAdmin ? null : activeEntityId);
   const [params] = useSearchParams();
 
-  const active = TABS.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';
+  // Feature-flagged tabs (Admin → Product → Flags): hidden when the client's
+  // effective flag is off. Server routes enforce the same flags for real.
+  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links' };
+  const myFlags = useMyFlags(entityId);
+  const tabs = TABS.filter((t) => !TAB_FLAGS[t.key] || flagOn(myFlags, TAB_FLAGS[t.key]));
+
+  const active = tabs.find((t) => t.key === tab && t.ready) ? tab : 'campaigns';
   const go = (key) => { if (key !== active) vtNavigate(navigate, `/engage/${key}`); };
 
   // "Make it happen" + approval deep links ride in on the Campaigns tab.
@@ -48,20 +59,14 @@ export default function EngagePage() {
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <HomeButton />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 2 }}>Engage</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Turn data into action</h1>
-        </div>
-      </div>
+      <PageHeader kicker="Engage" title="Turn data into action" />
 
       {/* Tab bar — scrolls horizontally on small screens (mobile-first) and
           sticks to the top of the scroll area so it stays in reach while the
           tab's content scrolls under it. Page-bg background masks that content;
           negative side margins + padding let it span the main's edge padding. */}
       <div className="no-scrollbar" style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const on = t.key === active;
           return (
             <button
@@ -92,10 +97,20 @@ export default function EngagePage() {
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Build reusable, always-live audiences from your data — then act on them in campaigns.</p>
           <SegmentManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
+      ) : active === 'journeys' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Build a multi-step, multi-channel journey by chatting to the Owl — describe what you want, it drafts a branching journey (grounded in your saved audiences) and refines it as you talk. You review it before anything is created.</p>
+          <JourneyWizard entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
       ) : active === 'audiences' ? (
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Every audience Pulse mirrors to your Meta &amp; TikTok ad accounts — connection health, live size and status, all in one place.</p>
           <AudienceHub entityId={entityId} />
+        </>
+      ) : active === 'links' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Short links into the Howler app — created from Pulse, tied to your events, with click counts. Share them in posts, bios, emails and QR codes.</p>
+          <ChottuLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'templates' ? (
         <>

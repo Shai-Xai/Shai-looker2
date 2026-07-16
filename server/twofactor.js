@@ -184,7 +184,15 @@ function mount(app, { db, auth, rateLimit, meUser, onLoginFail }) {
   // Login step-up completion: exchange the pending token (issued by index.js's
   // login/reset/magic when 2FA is on) + a TOTP/backup code for a real session.
   // Rate-limited per-IP; a bad code feeds the shared brute-force detector.
-  app.post('/api/auth/2fa', rateLimit({ windowMs: 15 * 60_000, max: 12, by: 'ip', scope: '2fa-login' }), asyncHandler(async (req, res) => {
+  // Two limiters: per-IP (blocks a single noisy source) AND per pending-token
+  // (bounds a distributed-IP TOTP brute to this one sign-in attempt — a token is
+  // minted only after a valid password, so this is effectively per-account).
+  const perToken = rateLimit({
+    windowMs: 15 * 60_000, max: 12, scope: '2fa-token',
+    by: (req) => `tok:${crypto.createHash('sha256').update(String(req.body?.pendingToken || '')).digest('hex')}`,
+    message: 'Too many codes tried — start the sign-in again.',
+  });
+  app.post('/api/auth/2fa', rateLimit({ windowMs: 15 * 60_000, max: 12, by: 'ip', scope: '2fa-login' }), perToken, asyncHandler(async (req, res) => {
     const { pendingToken, code } = req.body || {};
     const user = auth.verify2faPending(pendingToken);
     if (!user) return res.status(401).json({ error: 'Your sign-in timed out — start again.' });

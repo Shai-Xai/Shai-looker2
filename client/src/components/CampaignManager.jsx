@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { viaBadge, viaChipStyle } from '../lib/createdVia.js';
 import UploadHint from './UploadHint.jsx';
 import { languageList } from '../lib/language.js';
 import EmailBuilder, { ThemePicker } from './EmailBuilder.jsx';
+import JourneyTree, { countDecisions as journeyDecisions, patchNode as journeyPatch, openingMessages as journeyOpening, flattenMessages as journeyFlatten, watchedSegments as journeyWatched } from './JourneyTree.jsx';
 
 // Format a money amount in the campaign's currency (ZAR → "R1,234.00").
 const money = (cur, n) => `${cur === 'ZAR' || !cur ? 'R' : `${cur} `}${Number(n || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -52,7 +54,10 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     let cancelled = false;
     (async () => {
       let pool = templates;
-      if (initialType && initialDashboardId) {
+      // Scope the recipe to the suggestion's event whenever we know it — a suite
+      // alone is enough (a suggestion can carry an event without a dashboard), so
+      // the audience never falls through to another event's abandoned-cart tile.
+      if (initialType && (initialDashboardId || initialSuiteId)) {
         try {
           const r = await api.getActionTemplates(entityId, { dashboard: initialDashboardId, suite: initialSuiteId });
           if (r.templates) pool = r.templates;
@@ -121,6 +126,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>{a.title || a.config.subject || 'Untitled campaign'}</span>
           <ChannelChip channel={a.config?.channel} />
+          {a.config?.journey?.nodes?.length > 0 && <span title="Built as a journey with the Owl — the full branching tree lives on the Journeys tab" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#b45309', background: 'rgba(245,158,11,0.14)' }}>🧭 Journey</span>}
           {a.config?.category && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: 'var(--brand)', background: 'rgba(var(--brand-rgb,255,56,92),0.10)' }}>{a.config.category}</span>}
           {a.config?.source === 'owl-whatsapp' && <span title="Drafted by the Owl from a WhatsApp chat" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 980, color: '#1d8a4f', background: 'rgba(37,211,102,0.14)' }}>💬 via WhatsApp</span>}
           {viaBadge(a.createdVia) && a.config?.source !== 'owl-whatsapp' && <span title="Where this draft was created" style={viaChipStyle}>{viaBadge(a.createdVia).icon} via {viaBadge(a.createdVia).label}</span>}
@@ -133,6 +139,8 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             ? `Automation active · checks daily${a.lastCheck ? ` · last check ${fmt(a.lastCheck)}` : ''}`
             : a.status === 'draft'
             ? (a.createdBy === 'automation' ? `⏳ Queued by automation · awaiting approval · ${fmt(a.createdAt)}` : `Draft · created ${fmt(a.createdAt)} by ${a.createdBy}`)
+            : a.status === 'approved'
+            ? `Approved by ${a.approvedBy} · ready for you to send`
             : `Approved by ${a.approvedBy} · ${fmt(a.approvedAt)}`}
         </div>
         {a.config?.campaignMode === 'sequence' && a.status === 'auto' ? (
@@ -142,7 +150,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             <span style={{ color: 'var(--success,#10b981)' }}>✓ {a.results?.converted ?? 0} converted</span>
             {a.promoCodes && <span style={{ color: 'var(--muted)' }}>🎟 {a.promoCodes.available}/{a.promoCodes.total} codes left</span>}
           </div>
-        ) : a.status !== 'draft' && (
+        ) : !['draft', 'approved'].includes(a.status) && (
           <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 12.5, fontWeight: 600, flexWrap: 'wrap' }}>
             <span>📤 {a.results.sent ?? 0}/{a.results.total ?? a.audienceCount} sent</span>
             {(a.results.failed ?? 0) > 0 && <span style={{ color: 'var(--error,#ef4444)' }}>✗ {a.results.failed} failed</span>}
@@ -157,6 +165,9 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
             {a.approval.approvers.filter((x) => x.approved).length}/{a.approval.approvers.length} approved · waiting on {a.approval.approvers.filter((x) => !x.approved).map((x) => x.label).join(', ') || '—'}
           </div>
         )}
+        {a.status === 'approved' && (
+          <div style={{ fontSize: 12, color: '#15803d', marginTop: 4 }}>✅ Approved — it won’t send on its own. Open it to send when you’re ready.</div>
+        )}
         {a.status === 'scheduled' && a.config?.scheduledAt && (
           <div style={{ fontSize: 12, color: '#0a66c2', marginTop: 4 }}>🕒 Sends {new Date(a.config.scheduledAt).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
         )}
@@ -165,11 +176,11 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
       {(() => {
         // One primary action + a ⋯ overflow menu, to keep rows tidy.
         const sent = ['done', 'running', 'failed'].includes(a.status);
-        const editable = ['draft', 'auto', 'pending', 'scheduled'].includes(a.status);
+        const editable = ['draft', 'auto', 'pending', 'scheduled', 'approved'].includes(a.status);
         const primary = sent
           ? { label: '📊 Report', onClick: () => setReporting(a) }
           : editable
-            ? { label: a.createdBy === 'automation' || a.status === 'pending' ? 'Review' : a.status === 'scheduled' ? 'Reschedule' : 'Edit', onClick: () => setEditing(a) }
+            ? { label: a.status === 'approved' ? 'Review & send' : a.createdBy === 'automation' || a.status === 'pending' ? 'Review' : a.status === 'scheduled' ? 'Reschedule' : 'Edit', onClick: () => setEditing(a) }
             : null;
         const items = [];
         if (a.config?.campaignMode === 'sequence' && a.status === 'auto') items.push({ label: '🪜 Journey', onClick: () => setJourney(a) });
@@ -214,6 +225,7 @@ export default function CampaignManager({ entityId, scope = 'admin', initialGoal
     { value: 'all', label: 'All' },
     { value: 'draft', label: 'Drafts', n: countBy((a) => stateBucket(a) === 'draft') },
     { value: 'pending', label: 'Pending', n: countBy((a) => stateBucket(a) === 'pending') },
+    { value: 'approved', label: 'Approved', n: countBy((a) => stateBucket(a) === 'approved') },
     { value: 'scheduled', label: 'Scheduled', n: countBy((a) => stateBucket(a) === 'scheduled') },
     { value: 'sent', label: 'Sent', n: countBy((a) => stateBucket(a) === 'sent') },
     { value: 'automated', label: 'Automated', n: countBy((a) => stateBucket(a) === 'automated') },
@@ -329,9 +341,11 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const ta = tpl?.audience || {};        // the template's pre-resolved audience source
   const [f, setF] = useState(() => ({
     title: action?.title || (tpl ? tpl.label : ''),
+    journey: cfg.journey || null, // full branching tree when this campaign was built as a journey
     goal: cfg.goal || tp.goal || initialGoal || 'Re-engage customers who abandoned their ticket checkout and get them to complete the purchase.',
     recurring: action?.recurring || false,
     channel: cfg.channel || 'email', // email | sms
+    channelTag: cfg.channelTag || '', // what it drives: app | ticketing | cashless | web | other ('' = untagged)
     phoneField: cfg.audience?.phoneField || '',
     audienceMode: cfg.audience?.mode || ta.mode || 'tile',
     segmentId: cfg.audience?.segmentId || '', // when audienceMode = 'segment'
@@ -434,7 +448,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const [rates, setRates] = useState(null); // per-channel rate card → estimated cost before send
   useEffect(() => { api.getMyBilling(entityId).then(setRates).catch(() => setRates(null)); }, [entityId]);
   const [preview, setPreview] = useState('');
-  const [previewAll, setPreviewAll] = useState(false); // sequence: render every step
+  const [previewAll, setPreviewAll] = useState(() => !!cfg.journey?.nodes?.length); // sequence: render every step (journeys: on by default — branch emails must preview too)
   const [activeStep, setActiveStep] = useState(0); // sequence: which step the single preview shows
   const [previewSms, setPreviewSms] = useState(''); // rendered SMS text (channel = sms)
   const [stepPreviews, setStepPreviews] = useState([]); // [{label, html|sms}]
@@ -470,8 +484,9 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
     ctaUrl: f.ctaUrl, utm: f.utm, recurring: f.recurring,
     eventSuiteId: f.eventSuiteId, language: f.language, contentMode: f.contentMode, heroImage: f.heroImage, customHtml: f.customHtml, blocks: f.blocks, theme: f.theme,
     templateKey: f.templateKey, category: f.category, master: f.master, approvers: f.approvers,
-    channel: f.channel,
+    channel: f.channel, channelTag: f.channelTag,
     campaignMode: f.campaignMode, steps: f.steps,
+    journey: f.journey || undefined, // journey campaigns: keep the full branching tree through editor saves
     dripStart: f.dripStart, freshHours: f.freshHours,
     sample: aud?.sample?.[0] || null, // a real recipient for merge-field previews (ignored on save)
     ignoreConsent: f.ignoreConsent,
@@ -523,7 +538,12 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   // Editor sections behave as an exclusive accordion — opening one collapses the rest.
   const [openSection, setOpenSection] = useState(null);
   const acc = (key) => ({ open: openSection === key, onToggle: () => setOpenSection((s) => (s === key ? null : key)) });
+  const { user } = useAuth();
   const isPending = action?.status === 'pending';
+  const isApproved = action?.status === 'approved';
+  // Only the campaign's creator (the sender) may actually send an approved
+  // campaign — approvers sign off, the sender pulls the trigger.
+  const isSender = !!action?.createdBy && (user?.email || '').toLowerCase() === action.createdBy.toLowerCase();
   const isScheduled = action?.status === 'scheduled';
   // For Email+SMS campaigns, the two content sub-sections are collapsible — but
   // default OPEN so the separate SMS editor is obviously available (it was easy
@@ -562,22 +582,27 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), JSON.stringify(f.theme), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Preview EVERY step of a sequence together (rendered each with its own copy).
+  // Journey campaigns preview the WHOLE tree — every message node, branches
+  // included, labelled with its branch path — not just the opening trunk.
   useEffect(() => {
     if (!previewAll || !isSequence) return;
     let alive = true;
     const base = payload();
+    const isJourney = f.journey?.nodes?.length > 0;
+    const list = isJourney
+      ? journeyFlatten(f.journey.nodes).map((n, i) => ({ ...n, __label: `${i + 1}. ${n.branchPath ? `if ${n.branchPath} · ` : ''}${n.channel === 'sms' ? 'SMS' : 'Email'} · +${n.delayHours % 24 === 0 && n.delayHours >= 24 ? `${n.delayHours / 24}d` : `${n.delayHours}h`}` }))
+      : f.steps.map((st, i) => ({ ...st, __label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}` }));
     (async () => {
       const out = [];
-      for (let i = 0; i < f.steps.length; i++) {
-        const st = f.steps[i];
-        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '' };
-        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: `Step ${i + 1} · +${st.delayHours % 24 === 0 && st.delayHours >= 24 ? `${st.delayHours / 24}d` : `${st.delayHours}h`}`, html: r.html || '', sms: r.sms || '' }); }
-        catch { out.push({ label: `Step ${i + 1}`, html: '', sms: '' }); }
+      for (const st of list) {
+        const p = { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || (st.channel === 'sms' ? st.body : ''), ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', ...(st.channel ? { channel: st.channel } : {}), ...(st.ctaUrl ? { ctaUrl: st.ctaUrl } : {}) };
+        try { const r = await api.actionPreviewEmail(entityId, p); out.push({ label: st.__label, html: r.html || '', sms: r.sms || '' }); }
+        catch { out.push({ label: st.__label, html: '', sms: '' }); }
       }
       if (alive) setStepPreviews(out);
     })();
     return () => { alive = false; };
-  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [previewAll, isSequence, JSON.stringify(f.steps), JSON.stringify(f.journey), JSON.stringify(f.promo), f.ctaUrl, f.heroImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = async () => {
     setDrafting(true);
@@ -729,12 +754,15 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
       ? `\n\nRecipients:\n• ${who.join('\n• ')}${aud.count > who.length ? `\n• …and ${aud.count - who.length} more` : ''}`
       : '';
     const src = f.audienceMode === 'tile' ? `the “${dash?.tiles?.find((t) => t.tileId === f.tileId)?.title || 'selected'}” tile` : 'your pasted list';
-    if (!confirm(`Send this campaign to ${aud.count} recipient${aud.count === 1 ? '' : 's'} from ${src}?${recipientList}\n\nThis sends real emails now and cannot be undone.`)) return;
+    const verb = isApproved ? 'Send this approved campaign' : 'Send this campaign';
+    if (!confirm(`${verb} to ${aud.count} recipient${aud.count === 1 ? '' : 's'} from ${src}?${recipientList}\n\nThis sends real emails now and cannot be undone.`)) return;
     setApproveState('working');
     try {
       let id = action?.id;
-      if (id) await api.updateAction(entityId, id, payload());
-      else { const r = await api.createAction(entityId, payload()); id = r.action.id; }
+      // An already-approved campaign is locked — send its approved content as-is
+      // (re-saving is blocked server-side and would bypass the sign-off anyway).
+      if (id && !isApproved) await api.updateAction(entityId, id, payload());
+      else if (!id) { const r = await api.createAction(entityId, payload()); id = r.action.id; }
       const r = await api.approveAction(entityId, id);
       setApproveState(`✓ Sending to ${r.sendingTo}`);
       setTimeout(onSaved, 900);
@@ -743,6 +771,50 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
 
   const dash = tiles?.dashboards?.find((d) => d.dashboardId === f.dashboardId);
   const convDash = tiles?.dashboards?.find((d) => d.dashboardId === f.convDashboardId);
+
+  // ── Journey editor block — shared by the full-width strip (default) and the
+  // full-screen overlay (⛶ Expand). Same tree, same edit handler; the tree just
+  // gets more room. Layout-only; no data/engine impact.
+  const isJourneyCampaign = isSequence && f.journey?.nodes?.length > 0;
+  const [journeyFull, setJourneyFull] = useState(false);
+  useEffect(() => {
+    if (!journeyFull) return;
+    const onKey = (e) => { if (e.key === 'Escape') setJourneyFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [journeyFull]);
+  const onJourneyEdit = (id, patch) => setF((s) => {
+    const nodes = journeyPatch(s.journey.nodes, id, patch);
+    // Mirror the opening (pre-decision) trunk into `steps` so the email preview
+    // + the linear fallback stay coherent with tree edits.
+    const steps = journeyOpening(nodes).map((n) => ({ delayHours: n.delayHours, subject: n.subject, body: n.body, ctaText: n.ctaText, heroImage: n.heroImage || '' }));
+    return { ...s, journey: { ...s.journey, nodes }, steps: steps.length ? steps : s.steps, subject: steps[0]?.subject ?? s.subject, body: steps[0]?.body ?? s.body, ctaText: steps[0]?.ctaText ?? s.ctaText };
+  });
+  const journeyWatchedSummary = () => {
+    if (!isJourneyCampaign) return null;
+    const watched = journeyWatched(f.journey.nodes);
+    return (
+      <div style={{ fontSize: 12, border: '1px solid var(--hairline)', borderRadius: 9, padding: '7px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <div><strong>Who enters:</strong> the audience configured{f.audienceMode === 'segment' ? ' (a saved segment)' : ''} — everyone enrolled starts at the top of the tree.</div>
+        {watched.length > 0
+          ? watched.map((w, i) => (
+            <div key={i}><strong>Watched list:</strong> <a href="/engage/segments" style={{ color: 'var(--brand)', fontWeight: 700 }}>👥 “{w.segmentName}”</a>{w.segmentId ? '' : <span style={{ color: '#dc2626', fontWeight: 700 }}> ⚠ not linked to a saved segment — this branch will never fire</span>} — decides “{w.branch}” at “{w.question}”</div>
+          ))
+          : <div style={{ color: 'var(--muted)' }}><strong>Watched lists:</strong> none — decisions here use opens, clicks and the campaign’s conversion source.</div>}
+      </div>
+    );
+  };
+  const journeyStrip = () => (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--elevated, var(--card))', padding: '14px 16px 8px', marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>🧭 Journey <span style={{ color: 'var(--muted)', fontWeight: 600 }}>(every message is editable — branches included{journeyDecisions(f.journey.nodes) > 0 ? ` · ◆ ${journeyDecisions(f.journey.nodes)}` : ''})</span></span>
+        <button type="button" onClick={() => setJourneyFull(true)} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, padding: '5px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>⛶ Expand</button>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Edit any message right here — subject, copy, artwork, button and its link, or apply a template. To change the flow (branches, timing), ask the Owl on the Journeys tab.</div>
+      {journeyWatchedSummary()}
+      <JourneyTree nodes={f.journey.nodes} templates={templates} onEdit={onJourneyEdit} />
+    </div>
+  );
 
   return (
     <div>
@@ -770,11 +842,43 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
         </div>
       )}
+      {/* Approved banner — sign-off is complete; only the sender may now send it. */}
+      {isApproved && (
+        <div style={{ border: '1px solid rgba(21,128,61,0.4)', background: 'rgba(52,199,89,0.10)', borderRadius: 12, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#15803d' }}>✅ Approved — ready to send</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
+            {action.approvedBy ? `Approved by ${action.approvedBy}. ` : ''}This campaign won’t send on its own — {isSender ? 'review it below, then send when you’re ready.' : `only the sender (${action.createdBy}) can send it.`}
+          </div>
+          {isSender && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
+                {approveState === 'working' ? 'Sending…' : `Send now${aud?.count ? ` to ${aud.count}` : ''}`}
+              </button>
+              {(approveState && approveState !== 'working') && <span style={{ fontSize: 12.5, color: approveState.startsWith('✓') ? 'var(--success,#10b981)' : 'var(--error,#ef4444)' }}>{approveState}</span>}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Journey campaigns: the tree spans the FULL editor width (Option A) — the
+          narrow form column can't show a branching tree. ⛶ Expand goes full-screen. */}
+      {isJourneyCampaign && journeyStrip()}
       {/* Mobile-first: controls + preview stack into one column on phones. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) minmax(0,1fr)', gap: 20, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Accordion title="Setup" {...acc('setup')}>
           <Field label="Campaign name"><input style={input} value={f.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Abandoned cart — Pretoria show" /></Field>
+
+          <Field label="What does it drive? (optional · tags the campaign for channel reporting)">
+            <select style={input} value={f.channelTag} onChange={(e) => set('channelTag', e.target.value)}>
+              <option value="">Untagged (auto-detect from content)</option>
+              <option value="app">📲 App — drives people into the Howler app</option>
+              <option value="ticketing">🎟️ Ticketing</option>
+              <option value="cashless">💳 Cashless</option>
+              <option value="web">🌐 Web</option>
+              <option value="other">📦 Other</option>
+            </select>
+            <div style={hintS}>App-tagged campaigns show as markers on the App analytics charts. Untagged campaigns count as App when their content carries an app link.</div>
+          </Field>
 
           <Field label="Master campaign (optional · groups & reports segments together)">
             <input style={input} value={f.master} onChange={(e) => set('master', e.target.value)} placeholder="e.g. Bushfire — abandoned cart" list="master-campaign-list" />
@@ -870,7 +974,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                       <select style={{ ...input, flex: 1 }} value={f.nameField} onChange={(e) => set('nameField', e.target.value)}>
-                        <option value="">Name column (optional)</option>
+                        <option value="">Name column (auto-detected — enables {'{{name}}'})</option>
                         {aud.fields.map((fl) => <option key={fl.name} value={fl.name}>{fl.label}</option>)}
                       </select>
                     </div>
@@ -1034,7 +1138,10 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
             </Field>
           )}
 
-          {isSequence && (
+          {/* Journey tree lives in the full-width strip above (Option A) + the
+              ⛶ full-screen overlay — not in this narrow column. */}
+
+          {isSequence && !isJourneyCampaign && (
             <Field label={smsOnly ? 'Texts in the sequence' : f.channel === 'both' ? 'Emails & texts in the sequence' : 'Emails in the sequence'}>
               <SequenceSteps steps={f.steps} setStep={setStep} addStep={addStep} removeStep={removeStep} activeStep={activeStep} onActive={setActiveStep} email={hasEmail} sms={hasSms} onDraft={draftStep} drafting={drafting} anchorLabel={f.dripStart === 'send' ? 'from start of campaign' : 'after abandonment'} />
             </Field>
@@ -1216,25 +1323,32 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
 
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-            <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>
+            {!isApproved && <button style={mini} onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</button>}
             <button
               type="button" style={mini} disabled={testState === 'sending'}
               onClick={async () => {
                 let testPhone = '';
                 if (hasSms) { testPhone = window.prompt('Send the test SMS to which number?', ''); if (!testPhone) return; }
+                let testEmails = '';
+                if (hasEmail) {
+                  testEmails = window.prompt('Send the test email to which address(es)?\nSeparate multiple with commas — they don’t have to be Pulse users.\nLeave blank to send to yourself.', '');
+                  if (testEmails === null) return; // cancelled
+                }
                 setTestState('sending');
-                try { const r = await api.actionTestSend(entityId, { ...previewPayload(), testPhone }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
+                try { const r = await api.actionTestSend(entityId, { ...previewPayload(), testPhone, testEmails }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
               }}
-            >{testState === 'sending' ? 'Sending…' : 'Send test to me'}</button>
-            {!requireApproval && (
+            >{testState === 'sending' ? 'Sending…' : 'Send test…'}</button>
+            {!requireApproval && !isApproved && (
               <button className="liquid-btn" style={{ ...primary, background: '#15803d' }} onClick={approve} disabled={approveState === 'working' || (!f.recurring && !isSequence && !aud?.count)}>
                 {approveState === 'working' ? 'Approving…' : isSequence ? '⚡ Activate sequence' : f.recurring ? '⚙ Activate automation' : `Approve & send${aud?.count ? ` to ${aud.count}` : ''}`}
               </button>
             )}
-            <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
-              📩 Send for approval
-            </button>
-            {!requireApproval && !isSequence && !f.recurring && (
+            {!isApproved && (
+              <button className="liquid-btn" style={{ ...primary, background: requireApproval ? '#15803d' : 'var(--brand)' }} onClick={submitForApproval} disabled={approveState === 'working' || !f.approvers.length}>
+                📩 Send for approval
+              </button>
+            )}
+            {!requireApproval && !isSequence && !f.recurring && !isApproved && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} style={{ ...input, width: 'auto', padding: '7px 10px' }} />
                 <button style={mini} onClick={scheduleSend} disabled={approveState === 'working' || !aud?.count}>🕒 {isScheduled ? 'Reschedule' : 'Schedule'}</button>
@@ -1271,6 +1385,29 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
           )}
         </div>
       </div>
+
+      {/* ⛶ Full-screen journey editor (Option B) — the whole tree, room to work.
+          Same editable JourneyTree + shared form state; Esc / ✕ / Save closes. */}
+      {journeyFull && isJourneyCampaign && (
+        <div role="dialog" aria-modal="true" aria-label="Journey full-screen editor"
+          style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(20,20,24,0.5)', display: 'flex', padding: isMobile ? 8 : 18, boxSizing: 'border-box' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setJourneyFull(false); }}>
+          <div style={{ flex: 1, maxWidth: 1400, margin: '0 auto', background: 'var(--bg)', borderRadius: 16, boxShadow: '0 8px 30px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: '1px solid var(--hairline)', background: 'var(--card)', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>🧭 {f.title || 'Journey'}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{journeyDecisions(f.journey.nodes) > 0 ? `◆ ${journeyDecisions(f.journey.nodes)} decision${journeyDecisions(f.journey.nodes) === 1 ? '' : 's'} · ` : ''}every message editable</span>
+              <button type="button" onClick={() => setJourneyFull(false)} style={{ marginLeft: 'auto', border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', borderRadius: 9, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Done · Esc</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '18px 12px' : '28px 24px', display: 'flex', justifyContent: 'safe center', alignItems: 'flex-start' }}>
+              <div>
+                {journeyWatchedSummary()}
+                <JourneyTree nodes={f.journey.nodes} templates={templates} onEdit={onJourneyEdit} />
+              </div>
+            </div>
+            <div style={{ padding: '9px 18px', borderTop: '1px solid var(--hairline)', background: 'var(--card)', fontSize: 12, color: 'var(--muted)' }}>Edits save with the campaign — close and hit Save. On a live journey the funnel (👁 opened · 🖱 clicked · ⏳ waiting) shows here too.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1653,7 +1790,62 @@ export function ImageField({ label, value, onChange }) {
   );
 }
 
-// Custom HTML: upload an .html file or paste/edit markup directly.
+// Syntax-highlight colours for the HTML editor — chosen to read on BOTH the light
+// and dark card background. Merge tokens ({{name}}…) get the brand colour so
+// they're easy to spot amongst the markup.
+const HL = { tag: '#2f81f7', attr: '#0d9488', val: '#c2601a', com: '#8a94a6', doc: '#8b5cf6', tok: 'var(--brand, #ff385c)' };
+const escH = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const hlTokens = (escaped) => escaped.replace(/\{\{[^}]+\}\}/g, (x) => `<span style="color:${HL.tok};font-weight:700">${x}</span>`);
+function hlTag(tag) {
+  const mm = /^(<\/?)([a-zA-Z][\w:-]*)([\s\S]*?)(\/?>)$/.exec(tag);
+  if (!mm) return `<span style="color:${HL.tag}">${escH(tag)}</span>`;
+  const [, open, name, attrs, close] = mm;
+  let a = ''; let m2;
+  // Walk the attribute string ONCE, emitting escaped+coloured pieces (never re-scan output).
+  const ar = /(\s+)|([a-zA-Z_:][\w:.-]*)(\s*=\s*)?("[^"]*"|'[^']*'|[^\s"'>]+)?|([\s\S])/g;
+  while ((m2 = ar.exec(attrs))) {
+    if (m2[0] === '') break;
+    if (m2[1]) a += m2[1];
+    else if (m2[2]) { a += `<span style="color:${HL.attr}">${escH(m2[2])}</span>`; if (m2[3]) a += escH(m2[3]); if (m2[4]) a += `<span style="color:${HL.val}">${hlTokens(escH(m2[4]))}</span>`; }
+    else if (m2[4]) a += `<span style="color:${HL.val}">${hlTokens(escH(m2[4]))}</span>`;
+    else if (m2[5]) a += escH(m2[5]);
+  }
+  return `<span style="color:${HL.tag}">${escH(open + name)}</span>${a}<span style="color:${HL.tag}">${escH(close)}</span>`;
+}
+// Turn an HTML source string into coloured, fully-escaped markup for the overlay.
+// The value is ESCAPED throughout — only our own <span> wrappers are live HTML —
+// so there's no way for the edited content to inject DOM.
+function highlightHtmlSource(code) {
+  const out = [];
+  const re = /(<!--[\s\S]*?-->)|(<!DOCTYPE[^>]*>)|(<\/?[a-zA-Z][\w:-]*(?:"[^"]*"|'[^']*'|[^>])*>)/gi;
+  let last = 0; let m;
+  while ((m = re.exec(code))) {
+    if (m.index > last) out.push(hlTokens(escH(code.slice(last, m.index))));
+    if (m[1]) out.push(`<span style="color:${HL.com}">${escH(m[1])}</span>`);
+    else if (m[2]) out.push(`<span style="color:${HL.doc}">${escH(m[2])}</span>`);
+    else out.push(hlTag(m[3]));
+    last = re.lastIndex;
+  }
+  if (last < code.length) out.push(hlTokens(escH(code.slice(last))));
+  return out.join('');
+}
+// Lightweight syntax-highlighted editor: a coloured <pre> behind a transparent-text
+// <textarea> (same metrics), so the caret + selection stay native. No dependency.
+function HtmlCodeEditor({ value, onChange }) {
+  const taRef = useRef(null);
+  const preRef = useRef(null);
+  const sync = () => { const ta = taRef.current; const pre = preRef.current; if (ta && pre) { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; } };
+  const shared = { margin: 0, border: 0, padding: '10px 12px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', tabSize: 2, boxSizing: 'border-box', letterSpacing: 0 };
+  const overlay = value ? highlightHtmlSource(value) + '\n' : `<span style="color:var(--muted)">&lt;html&gt;…&lt;/html&gt; — paste your HTML, or upload a file above</span>`;
+  return (
+    <div style={{ position: 'relative', border: '1.5px solid var(--hairline)', borderRadius: 8, background: 'var(--card)', overflow: 'hidden' }}>
+      <pre ref={preRef} aria-hidden="true" style={{ ...shared, position: 'absolute', inset: 0, overflow: 'auto', color: 'var(--text)', pointerEvents: 'none' }} dangerouslySetInnerHTML={{ __html: overlay }} />
+      <textarea ref={taRef} value={value} spellCheck={false} onChange={(e) => onChange(e.target.value)} onScroll={sync}
+        style={{ ...shared, position: 'relative', display: 'block', width: '100%', minHeight: 200, resize: 'vertical', background: 'transparent', color: 'transparent', caretColor: 'var(--text)', outline: 'none', overflow: 'auto' }} />
+    </div>
+  );
+}
+// Custom HTML: upload an .html file or paste/edit markup directly (syntax-highlighted).
 export function HtmlField({ value, onChange }) {
   const ref = useRef(null);
   const onFile = (e) => {
@@ -1663,6 +1855,7 @@ export function HtmlField({ value, onChange }) {
     reader.readAsText(file);
     e.target.value = '';
   };
+  const Swatch = ({ c, children }) => <span style={{ color: c, fontWeight: 600 }}>{children}</span>;
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -1670,7 +1863,10 @@ export function HtmlField({ value, onChange }) {
         {value && <button type="button" style={{ ...mini, color: 'var(--error,#ef4444)' }} onClick={() => onChange('')}>Clear</button>}
         <input ref={ref} type="file" accept=".html,text/html" style={{ display: 'none' }} onChange={onFile} />
       </div>
-      <textarea style={{ ...input, resize: 'vertical', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }} rows={8} value={value} onChange={(e) => onChange(e.target.value)} placeholder="<html>…</html> — or upload a file above" />
+      <HtmlCodeEditor value={value} onChange={onChange} />
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Swatch c={HL.tag}>tags</Swatch><Swatch c={HL.attr}>attributes</Swatch><Swatch c={HL.val}>values</Swatch><Swatch c={HL.com}>comments</Swatch><Swatch c={HL.tok}>{'{{merge fields}}'}</Swatch>
+      </div>
     </div>
   );
 }
@@ -1794,6 +1990,7 @@ function StatusChip({ status }) {
     done: { bg: 'rgba(52,199,89,0.15)', c: '#2da44e', t: 'Sent' },
     scheduled: { bg: 'rgba(10,132,255,0.13)', c: '#0a66c2', t: '🕒 Scheduled' },
     pending: { bg: 'rgba(245,158,11,0.16)', c: '#b45309', t: '⏳ Awaiting approval' },
+    approved: { bg: 'rgba(52,199,89,0.15)', c: '#15803d', t: '✅ Approved — ready to send' },
     failed: { bg: 'rgba(239,68,68,0.12)', c: '#dc2626', t: 'Failed' },
   }[status] || { bg: 'rgba(128,128,128,0.14)', c: 'var(--muted)', t: status };
   return <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: map.bg, color: map.c }}>{map.t}</span>;
