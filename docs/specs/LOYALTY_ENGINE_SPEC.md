@@ -197,11 +197,14 @@ Two consequences:
 Howler already runs preregistration lists — this engine plugs into that
 mechanic rather than inventing one:
 
-1. **Native (primary).** The Howler prereg list per event, surfaced to Pulse —
-   ideally as another source in the curated Looker explore (join on
-   email/phone), else an API pull per event. Open question for the prereg
-   owner: what identity does it capture (email only? phone?) and where does
-   the data land — that decides Looker-join vs API integration.
+1. **Native (primary) — RESOLVED (2026-07-16): it's a Looker guestlist.**
+   Preregistration lives as a **guestlist attached to the event** in the
+   ticketing system, queryable through Looker — so the `preregistered` signal
+   is one more scoped lookup at verification time (email ∈ the event's
+   guestlist), no new pipeline. Two build notes: the guestlist fields need
+   adding to the curated slice (server-side-only, like the customer-lookup
+   fields), and "attach the prereg guestlist to the event" becomes a client
+   setup step — wire it into the Setup wizard when this ships (per CLAUDE.md).
 2. **Pulse-native.** An existing `fan_profiles` row with no matching purchase
    history IS a preregistrant — someone who chatted with the Owl, left their
    email, didn't buy. The comeback moment ("you asked about camping in March —
@@ -217,7 +220,18 @@ and the Owl can greet it by name with a live early-bird code.
 ## 5. Promo pools & codes
 
 Codes are **generated in the Howler ticketing system** (discount enforcement
-happens at checkout, not in Pulse) and **uploaded into pools**:
+happens at checkout, not in Pulse) and **uploaded into pools**. Confirmed
+2026-07-16: bulk generation exists (manual for now; auto-provisioning comes
+when the Howler API is linked) with **min quantity, expiry, and single- or
+multi-use** as native options. That gives pools two modes:
+
+- **Unique-code stock** (single-use codes): one code per grant, stock = the
+  hard budget — the default for discounts.
+- **Shared multi-use code**: ONE code many fans receive; ticketing enforces
+  its rules, Pulse enforces the budget by capping GRANTS (one per profile,
+  pool grant limit). Cheaper to provision, right for broad offers (prereg
+  comeback, wheel small-wins) — but treat the cap as softer, since the code
+  itself can leak beyond the Owl.
 
 - **Pool** = event (suite) + name + target (tier/signal combination **or a
   saved segment**) + reward kind (discount / upgrade / add-on / prize /
@@ -352,9 +366,11 @@ changelog) and wire new client-setup steps into the Setup wizard, per
 
 1. **Prereg data plumbing** — where does the native list live, what identity
    fields, Looker join or API? (Owner: whoever runs the prereg mechanic.)
-2. **Code generation ergonomics** — can ticketing bulk-generate codes with
-   min-qty / ticket-type constraints, and can Pulse read redemption events
-   (webhook or nightly data), or is v1 reconciliation from purchase rows?
+2. ~~Code generation ergonomics~~ **PARTLY RESOLVED (2026-07-16):** bulk
+   generation confirmed, manual for now (Howler API link automates later),
+   with min qty + expiry + single/multi-use options (§5). Still open: can
+   Pulse READ redemptions (does the purchase explore carry the promo code
+   used?), or is pool ROI reconciled another way?
 3. **Budget denomination** — is a pool's budget best expressed as code count ×
    face value (simple, v1) or monetary cap (needs redemption feed)?
 4. **Legal review** — per-market prize-promo rules before the first wheel
@@ -367,19 +383,22 @@ changelog) and wire new client-setup steps into the Setup wizard, per
    can't be code-issued, but ticketing can bundle tickets + credit as a
    product — the credit reward ships as a ticket+credit bundle (§5).
    Remaining detail: how bundle margin/breakage shows in the pool ROI view.
-8. **App engagement definition** — data lives in PostHog + the Social+
-   community (both have APIs). Remaining: which events count as "engaged"
-   (opens? favourites? lineup saves? community posts?), whether PostHog
-   persons are identified by the same email, and the pull cadence.
+8. ~~App engagement definition~~ **RESOLVED (2026-07-16):** "engaged" =
+   active users in the app (PostHog) + Social+ interactions — post
+   impressions, reactions/comments on posts, comments in chats. Suggested
+   shape: two levels — `app_active` (any app activity, window ~90 days) and
+   `community_contributor` (reacted/commented/chatted — the stronger signal,
+   worth the better perk). Remaining detail: identity match (same email in
+   PostHog/Social+?) and thresholds/window, tuned when the pull is built.
 9. **Brand-wide (multi-profile) loyalty** — depends on the portfolio spec's
    `entity_groups` + customer-master identity resolution. Which pilot brand
    actually needs it, and does its tier maths differ per profile (a fan loyal
    to one of the brand's festivals vs the brand overall)?
-10. **Holder / transfer data for companions** — does the ticketing explore
-    expose per-ticket holder identity and transfer-target (and can the curated
-    slice carry them server-side-only, like the customer-lookup fields)?
-    Needed for the companions memory (§3); until then group patterns come
-    from basket size alone.
+10. ~~Holder / transfer data for companions~~ **RESOLVED (2026-07-16):**
+    Looker DOES carry ticket-holder details. The companions memory (§3) is
+    buildable — remaining work is adding the holder fields to the curated
+    slice as server-side-only (customer-lookup pattern), then the privacy
+    lines in §3 govern how they surface.
 
 ## 10. Risks
 
