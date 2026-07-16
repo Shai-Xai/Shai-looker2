@@ -134,7 +134,7 @@ function mobileTileHeight(tile) {
 }
 
 
-function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, onHideTile, carouselHandlers }) {
+function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onApplyTileQuery, onDuplicateTile, onRemoveTile, onHideTile, carouselHandlers }) {
   // Viewers don't see hidden tiles (or carousels left with nothing visible).
   const visTiles = editable ? tiles : tiles.filter((t) => !t.hidden);
   const visCarousels = editable ? carousels : carousels.filter((c) => (c.tiles || []).some((t) => !t.hidden));
@@ -180,6 +180,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
             filterValues={filterValues}
             editable={editable}
             onEdit={() => onEditTile?.(tile.id)}
+            onApplyQuery={onApplyTileQuery ? (query) => onApplyTileQuery(tile.id, query) : undefined}
             onDuplicate={() => onDuplicateTile?.(tile.id)}
             onRemove={() => onRemoveTile?.(tile.id)}
             onToggleHide={onHideTile ? () => onHideTile(tile.id) : undefined}
