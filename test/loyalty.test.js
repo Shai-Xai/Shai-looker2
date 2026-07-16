@@ -12,6 +12,7 @@ const { errorMiddleware } = require('../server/http');
 const { createLoyalty, deriveProfile } = require('../server/loyalty');
 
 delete process.env.ANTHROPIC_API_KEY; // never call out from tests
+process.env.FANOWL_ADMIN_ALLOW = 'all'; // open the settings dogfood gate for the preview test
 
 // ── deriveProfile (pure) ─────────────────────────────────────────────────────────
 const row = (ev, date, type, sold, rev, cur = 'ZAR', count = sold) => ({
@@ -182,6 +183,18 @@ test('staging test code: works ONLY with the outbound brake on; no email sent', 
   assert.equal((await l2.confirmVerification(site, s2, { code: '123456' })).reason, 'wrong_code');
   assert.equal((await l2.confirmVerification(site, s2, { code: '424242' })).ok, true);
   delete process.env.OUTBOUND_DISABLED; delete process.env.FAN_OTP_TEST_CODE;
+});
+
+test('context preview returns the EXACT chat instructions (admin, per site)', async () => {
+  const admin = h.makeAdmin('loyalty-admin@test.local');
+  const r = await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview?url=https://fest.example/`, { as: admin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.siteId, site.id);
+  assert.match(r.body.instructions, /EVENT CONTEXT: Loyalty Fest/);
+  assert.match(r.body.instructions, /CATALOGUE/);
+  assert.match(r.body.system, /booking guide|the Owl/i);
+  // Anonymous callers never see it.
+  assert.equal((await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview`)).status, 401);
 });
 
 // ── Flag gating + the boot chip ──────────────────────────────────────────────────

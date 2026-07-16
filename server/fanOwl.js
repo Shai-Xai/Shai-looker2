@@ -1026,28 +1026,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.json({ ok: true });
   });
 
-  // ── POST /api/fan/chat — the conversational layer (the only LLM path). Streams
-  // plain text with the same STATUS/FOLLOWUPS markers as the organiser Owl, plus
-  // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
-  const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
-  const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
-  const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
-  const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
-  app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
-    const b = req.body || {};
-    const session = getSession.get(String(b.sessionId || ''));
-    const site = session && siteById.get(session.site_id);
-    if (!site || !site.enabled) return res.status(404).json({ error: 'Session not found — reopen the assistant.' });
-    const message = String(b.message || '').trim().slice(0, 1000);
-    if (!message) return res.status(400).json({ error: 'Empty message.' });
-    // Per-site daily LLM budget → graceful "ribbon-only" degrade (spec §2.3).
-    const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
-    if ((todayUserMsgs.get(site.id, dayStart)?.c || 0) >= site.daily_budget) {
-      return res.status(429).json({ error: 'The Owl is resting — please use the tickets page, or try again tomorrow.' });
-    }
-    const apiKey = anthropicKeyForEntity(site.entity_id);
-    if (!insights.isConfigured(apiKey)) return res.status(503).json({ error: 'The assistant isn’t available right now.' });
-
+  // Everything the Owl is told for ONE turn, in one place — used by the live
+  // chat AND the context-preview endpoints below, so what organisers inspect is
+  // EXACTLY what the model receives (never a paraphrase).
+  function buildChatInstructions(site, session) {
     const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
     const { page, items } = offerFor(site, session.page_url);
     const catLine = (c) => `${c.label} [id:${c.id}] — ${c.price ? `${c.currency} ${c.price}` : 'price on the tickets page'}${c.availability ? ` (${c.availability})` : ''}${c.description ? ` — ${c.description}` : ''}`;
@@ -1080,7 +1062,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       } catch { /* locks are best-effort context */ }
       return '';
     })();
-    const instructions = [
+    return [
       `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}.${currentEdition ? ` The edition currently on sale is "${currentEdition}" — if the catalogue or knowledge mentions an older edition, trust THIS as the current one and flag outdated info with logInterest rather than insisting on the old year.` : ''} Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
       (site.default_lang || session.lang)
@@ -1113,6 +1095,46 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       })(),
       'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
     ].filter(Boolean).join('\n\n');
+  }
+
+  // ── Context preview — "everything the Owl is told", per site/page ─────────────
+  // The fan-owl counterpart of the Admin → AI audit: the EXACT instructions the
+  // chat would run with right now (synthetic anonymous session; add ?url= to see
+  // a page mapping's view). Answers "where did the Owl get that from?" without
+  // guessing. Dual-surface, manager-gated like the rest of the settings.
+  const previewHandler = (req, res) => {
+    const sites = sitesByEntity.all(req.params.entityId);
+    const site = sites.find((s) => s.id === String(req.query.siteId || '')) || sites[0];
+    if (!site) throw new HttpError(404, 'No Fan Owl site configured yet.');
+    const fake = { id: `preview-${site.id}`, site_id: site.id, anon_id: '', profile_id: '', page_url: String(req.query.url || '').slice(0, 500), lang: '' };
+    res.json({ siteId: site.id, siteName: site.name, url: fake.page_url, system: FAN_OWL_SYSTEM, instructions: buildChatInstructions(site, fake) });
+  };
+  app.get('/api/admin/entities/:entityId/fan-owl/context-preview', auth.requireAdmin, requireManager, previewHandler);
+  app.get('/api/my/fan-owl/:entityId/context-preview', auth.requireAuth, requireMyEntity, requireManager, previewHandler);
+
+  // ── POST /api/fan/chat — the conversational layer (the only LLM path). Streams
+  // plain text with the same STATUS/FOLLOWUPS markers as the organiser Owl, plus
+  // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
+  const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
+  const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
+  const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
+  const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
+  app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
+    const b = req.body || {};
+    const session = getSession.get(String(b.sessionId || ''));
+    const site = session && siteById.get(session.site_id);
+    if (!site || !site.enabled) return res.status(404).json({ error: 'Session not found — reopen the assistant.' });
+    const message = String(b.message || '').trim().slice(0, 1000);
+    if (!message) return res.status(400).json({ error: 'Empty message.' });
+    // Per-site daily LLM budget → graceful "ribbon-only" degrade (spec §2.3).
+    const dayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
+    if ((todayUserMsgs.get(site.id, dayStart)?.c || 0) >= site.daily_budget) {
+      return res.status(429).json({ error: 'The Owl is resting — please use the tickets page, or try again tomorrow.' });
+    }
+    const apiKey = anthropicKeyForEntity(site.entity_id);
+    if (!insights.isConfigured(apiKey)) return res.status(503).json({ error: 'The assistant isn’t available right now.' });
+
+    const instructions = buildChatInstructions(site, session);
 
     const tools = fanTools(site, session);
     const toolSchemas = Object.values(tools).map((t) => t.schema);
