@@ -4,6 +4,9 @@ import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useProfile } from '../lib/profile.jsx';
+import DashboardPrintHeader from './DashboardPrintHeader.jsx';
+import { PdfButton } from './AppAnalytics.jsx';
 
 // Social+ (social.plus) in-app community analytics — the SAME component on both
 // surfaces via the scope prop ('my' | 'admin-client'), like QueueItCard:
@@ -34,6 +37,9 @@ const TODAY_METRICS = [
 
 export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
+  // Tenant name for the branded PDF cover (falls back gracefully off-profile).
+  const { entities, active } = useProfile();
+  const entityName = (entities.find((e) => e.id === entityId) || active)?.name || '';
   const [days, setDays] = useState(30);   // 'today' | 7 | 30 | 90
   const [metric, setMetric] = useState('members');
   const [selected, setSelected] = useState([]); // community ids; [] = all linked communities
@@ -120,7 +126,14 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
 
   return (
     <div style={scope === 'admin-client' ? card : undefined}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+      {/* Print-only branded cover — same look as every Pulse Download PDF. */}
+      <DashboardPrintHeader
+        title="App community"
+        entityName={entityName}
+        filters={[{ name: 'window', title: 'Window' }, { name: 'communities', title: 'Communities' }]}
+        values={{ window: hourly ? 'Today (hourly)' : `Last ${days} days`, communities: selected.length ? `${selected.length} selected` : 'All linked' }}
+      />
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {scope === 'admin-client'
           ? <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>👥 Social+ — in-app communities</div>
           : <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>Your fan communities and chats inside the Howler app.</span>}
@@ -129,6 +142,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
           : s.lastAt && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Updated {new Date(s.lastAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
         <Chip on={hourly} onClick={() => { setDays('today'); if (!TODAY_METRICS.some(([k]) => k === metric)) setMetric('members'); }}>Today</Chip>
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
+        <PdfButton />
         {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
       {(data.allCommunities || []).length > 1 && (

@@ -111,3 +111,15 @@ test('ensureSuperAdmins bootstrap: with none configured, the oldest admin is pro
   h.auth.ensureSuperAdmins();
   assert.equal(h.db.listUsers().filter((u) => h.roles.isSuperAdmin(u)).length, 1, 'still just one');
 });
+
+test('ensureSuperAdmins: the platform owner is always granted, even with supers already present', () => {
+  const owner = h.makeAdmin('shai.evian@howler.co.za');
+  assert.equal(h.roles.isSuperAdmin(h.db.getUser(owner.id)), false, 'not tagged yet');
+  h.auth.ensureSuperAdmins();
+  assert.equal(h.roles.isSuperAdmin(h.db.getUser(owner.id)), true, 'owner granted on boot');
+
+  // Revoking in the DB doesn't stick past the next boot — the owner is baked in.
+  h.db.updateUser(owner.id, { roles: [] });
+  h.auth.ensureSuperAdmins();
+  assert.equal(h.roles.isSuperAdmin(h.db.getUser(owner.id)), true, 're-granted after a revoke');
+});
