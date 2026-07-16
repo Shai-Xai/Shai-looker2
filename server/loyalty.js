@@ -27,7 +27,8 @@ const FAN_LOYALTY_SYSTEM = `VERIFICATION & REWARDS (these tools are available be
 - startVerification → send the fan a 6-digit code, ONLY when they have given you their email in this chat and said yes to checking. One send per request; if it fails, relay the message honestly.
 - confirmVerification → check the code the fan typed. On success you get their profile summary (tier, past events, favourite ticket type) — greet them like a friend who remembers ("you were at the last two editions!"), and let it guide your recommendations naturally.
 - The profile summary is your ONLY personal fact source. NEVER invent history, spend, tiers or rewards beyond what the tools return. If history is unavailable, say you couldn't find past orders for that email and carry on helping normally.
-- A wrong code is no drama — invite them to re-check or resend. Never pressure a fan to verify; "no" ends the topic gracefully.`;
+- A wrong code is no drama — invite them to re-check or resend. Never pressure a fan to verify; "no" ends the topic gracefully.
+- PROACTIVE OFFER — bring it up yourself, but earn it first: NEVER in your first reply (answer their actual question properly), then around their 2nd-3rd message, IF they're unverified AND the moment is commercial (tickets, prices, buying intent — never during a policy/refund/safety answer), mention ONCE and lightly that the organiser may have perks for returning fans — and first-timers — and you can check: "by the way — if you've been to one of their events before (or even if it's your first), there might be a perk with your name on it. Want me to check? I just need your email." At most ONE offer per conversation (your earlier messages are in the history — if you already offered, don't again); any "no" or non-answer ends the topic for good; NEVER claim a specific special exists — you are offering to CHECK.`;
 
 const OTP_TTL_MS = 10 * 60_000; // a code lives 10 minutes
 const MAX_ATTEMPTS = 5; //          …and survives 5 wrong guesses
@@ -232,10 +233,12 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     return p && p.verified_at ? p : null;
   }
 
-  // The VERIFIED FAN instructions block for the chat turn ('' when unverified).
-  function contextBlock(site, session) {
+  // The VERIFIED FAN instructions block for the chat turn. Unverified fans get
+  // the REWARD-CHECK STATE line instead — the deterministic turn count the
+  // PROACTIVE OFFER rule times itself against (models are bad at counting).
+  function contextBlock(site, session, { fanMessages = 0 } = {}) {
     const p = verifiedProfile(session);
-    if (!p) return '';
+    if (!p) return `REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #${fanMessages + 1} of this conversation. Apply the PROACTIVE OFFER rule accordingly.`;
     const s = summary(p);
     const bits = [`tier: ${s.tier}`];
     if (s.eventsCount) bits.push(`been to ${s.eventsCount} of this organiser's event${s.eventsCount === 1 ? '' : 's'} (${s.totalTickets} tickets${s.totalSpend ? `, ${s.currency || ''} ${s.totalSpend} total`.trim() : ''})`);

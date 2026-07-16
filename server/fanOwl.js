@@ -886,6 +886,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     // Chips: the current page's configured starters (set by hand or drafted by the
     // website reader) win; otherwise sensible generic defaults.
     const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
+    const loyaltyLive = loyaltyOn(site.entity_id);
+    const vp = loyaltyLive ? loyalty.verifiedProfile(session) : null;
     // Has the fan moved pages since the chat was last open? Then the widget leads
     // with THIS page's info (pitch/offer/starters), not just the old thread.
     const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
@@ -904,14 +906,16 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
       // Unconfigured pages send NO starters — the widget fills in generic ones in
       // the fan's own language (it knows the locale; we only know the codes).
-      starters: pageStarters.slice(0, 4),
+      // Discovery chip: an unverified fan on a loyalty-enabled site gets a
+      // tappable "perks?" starter (only where page starters exist — an empty
+      // list keeps the widget's own localized defaults).
+      starters: (() => {
+        if (!loyaltyLive || vp || !pageStarters.length) return pageStarters.slice(0, 4);
+        return [...pageStarters.slice(0, 3), '🎁 Any perks for me?'];
+      })(),
       consentVersion: CONSENT_WORDING_VERSION,
       // Verified-fan chip (loyalty phase 1): THIS session proved the address.
-      verified: (() => {
-        if (!loyaltyOn(site.entity_id)) return null;
-        const p = loyalty.verifiedProfile(session);
-        return p ? { email: p.email, tier: p.tier || 'new' } : null;
-      })(),
+      verified: vp ? { email: vp.email, tier: vp.tier || 'new' } : null,
     });
   });
 
@@ -1073,7 +1077,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Loyalty (flag-gated): the verification rules + this session's verified
       // profile (server-derived; raw history never reaches the model).
       loyaltyOn(site.entity_id) ? require('./loyalty').FAN_LOYALTY_SYSTEM : '',
-      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session) : '',
+      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session, { fanMessages: listMsgs.all(session.id).filter((m) => m.role === 'user').length }) : '',
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
       (() => {
         const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));

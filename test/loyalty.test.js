@@ -200,6 +200,19 @@ test('context preview returns the EXACT chat instructions (admin, per site)', as
   assert.equal((await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview`)).status, 401);
 });
 
+test('unverified + flag on → the proactive-offer rules + turn counter reach the context', async () => {
+  const flags = require('../server/flags');
+  flags.init(h.db);
+  h.db.db.prepare('INSERT OR REPLACE INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)')
+    .run(entity.id, 'fanowl.loyalty', 'on', 'test', new Date().toISOString());
+  const admin = h.makeAdmin('loyalty-admin2@test.local');
+  const r = await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview`, { as: admin });
+  assert.match(r.body.instructions, /PROACTIVE OFFER/);
+  assert.match(r.body.instructions, /REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #1/);
+  // Leave the flag as we found it — the defaults-off test below depends on it.
+  h.db.db.prepare('DELETE FROM feature_flags WHERE entity_id = ? AND flag = ?').run(entity.id, 'fanowl.loyalty');
+});
+
 // ── Flag gating + the boot chip ──────────────────────────────────────────────────
 test('fanowl.loyalty defaults OFF; boot omits the chip until flag on + verified', async () => {
   const flags = require('../server/flags');
