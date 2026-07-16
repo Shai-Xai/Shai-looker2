@@ -92,7 +92,9 @@ longer they use Pulse, the better it gets."
   with the client's own **logo + brand colours**, the dashboard title and the
   **exact filters/date range** currently applied, then the charts and tiles — so
   the file explains itself. Works from a phone, and only ever exports the tenant's
-  own data.
+  own data. The **App page** (Analytics / Audience / Community) has its own
+  **⤓ PDF** button next to the date controls — same branded cover, on both the
+  client page and Admin → App analytics.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
@@ -1078,6 +1080,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-16** — **Branded PDF reaches the App pages** ✅ (App): the App page's
+  Analytics, Audience and Community tabs (and Admin → App analytics) now carry
+  their own **⤓ PDF** button with the same branded cover — the original export
+  only lived on the shared dashboard viewer, so the bespoke App surfaces from
+  ticket #45 didn't actually have it.
+- **2026-07-16** — **Super Admins visible & owner locked in** ✅ (Admin): the
+  Users directory now badges every **★ SUPER** holder, and the platform owner
+  is always re-granted Super Admin on boot so the global controls can never be
+  locked away from them.
 - **2026-07-16** — **Inspect query → Explore-style, edit-mode only** ✅ (Dashboards):
   the 🔍 now lives with a tile's EDIT-mode controls (viewers no longer see it), and
   the panel is rebuilt to read like Looker's Explore: a **fields-in-use rail**
