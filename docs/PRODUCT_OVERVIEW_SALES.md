@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-16 (🦉 Fan Owl loyalty & rewards 🧪: verified fan recognition + budgeted reward pools · previously: Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -197,6 +197,18 @@ marketing plan and it reads those too."
 The Owl's first **consumer-facing** surface: a widget the promoter drops onto their
 public event website with **one script tag**, where it guides fans to the right
 ticket like a well-informed friend who's already going.
+- **Loyalty & rewards (flag-gated)** 🧪 — the Owl can now *recognise* fans:
+  they verify their email with a 6-digit code and it greets them from their
+  real history with that organiser ("you were at the last two editions — you
+  usually buy GA"), including their own itemised past orders on request.
+  Organisers load **reward pools** (promo codes from ticketing, unique stock
+  or one shared code) targeted by tier — new / returning / loyal — and
+  signals like group buyer or comp guest; the Owl offers the right code to
+  the right fan, one per person, and **stops dead when the budget runs out**.
+  It only ever brings rewards up when pools are actually live, after it has
+  answered the fan's real questions first. Every verified fan is a real,
+  consented contact for the client's CRM. Setup: Fan Owl → 🎁 Rewards
+  (admin + client self-service); switched on per client from the flag matrix.
 - **Knows the page the fan is on** — on an artist page it leads with the ticket
   that gets you to that artist; on the tickets page, the best options; plus a
   no-AI "ribbon" teaser (offer + live availability tag) on every page.
@@ -1069,6 +1081,13 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-16** — **Fan Owl: loyalty & rewards engine** 🧪 (staging, flag-gated):
+  email-verified fan recognition (tier + history-aware guidance + itemised past
+  orders), budgeted reward pools (unique-code stock or shared multi-use code)
+  targeted by tier/signals with a comps include/exclude rule, one grant per fan,
+  burn-down views, and a proactive-but-earned offer that only fires when pools
+  are live. New 🎁 Rewards tab in the Fan Owl editor, both surfaces.
 
 - **2026-07-15** — **Download as branded PDF** ✅ (new): every dashboard's ⋯ menu now
   produces a shareable PDF that opens with the client's **logo + brand colours**, the
