@@ -48,10 +48,11 @@ function deriveProfile(rows) {
     // Attendance counts ANY active ticket: sold_tickets excludes complimentary
     // tickets (right for revenue, wrong for loyalty — a comp guest still
     // attended), so take the larger of sold vs the incl-comps count.
-    const sold = Math.max(num(r['core_tickets.sold_tickets']), num(r['core_tickets.count']));
+    const paid = num(r['core_tickets.sold_tickets']);
+    const sold = Math.max(paid, num(r['core_tickets.count']));
     const spend = num(r['core_tickets.sum_revenue_decimal']);
-    const e = byEvent.get(ev) || { tickets: 0, spend: 0, date: '' };
-    e.tickets += sold; e.spend += spend;
+    const e = byEvent.get(ev) || { tickets: 0, paid: 0, spend: 0, date: '' };
+    e.tickets += sold; e.paid += paid; e.spend += spend;
     const d = String(r['core_events.start_date'] || '');
     if (d > e.date) e.date = d;
     byEvent.set(ev, e);
@@ -61,6 +62,9 @@ function deriveProfile(rows) {
   }
   const events = [...byEvent.entries()].filter(([, e]) => e.tickets > 0);
   const eventsCount = events.length;
+  // Paid vs comp views kept SEPARATE so phase-2 reward pools can include or
+  // exclude comps from eligibility (spec §5) — the tier here counts attendance.
+  const paidEventsCount = events.filter(([, e]) => e.paid > 0).length;
   const totalTickets = events.reduce((n, [, e]) => n + e.tickets, 0);
   const totalSpend = events.reduce((n, [, e]) => n + e.spend, 0);
   const last = events.sort((a, b) => (a[1].date < b[1].date ? 1 : -1))[0] || null;
@@ -68,9 +72,9 @@ function deriveProfile(rows) {
   const maxBasket = events.reduce((n, [, e]) => Math.max(n, e.tickets), 0);
   return {
     tier: eventsCount >= 2 ? 'loyal' : eventsCount >= 1 ? 'returning' : 'new',
-    signals: { group_buyer: maxBasket >= 4 },
+    signals: { group_buyer: maxBasket >= 4, comp_guest: eventsCount > paidEventsCount },
     traits: {
-      eventsCount, totalTickets,
+      eventsCount, paidEventsCount, totalTickets,
       totalSpend: Math.round(totalSpend * 100) / 100, currency,
       favTicketType: favType ? favType[0] : '',
       lastEvent: last ? { name: last[0], date: last[1].date } : null,

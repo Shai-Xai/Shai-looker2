@@ -59,6 +59,9 @@ test('deriveProfile: a comp ticket still counts as attendance (sold=0, count=1)'
   assert.equal(d.tier, 'returning');
   assert.equal(d.traits.totalTickets, 1);
   assert.equal(d.traits.totalSpend, 0);
+  // …but the paid view stays separate, so reward pools can exclude comps.
+  assert.equal(d.traits.paidEventsCount, 0);
+  assert.equal(d.signals.comp_guest, true);
 });
 
 // ── The OTP flow + profile cache (against the real test DB) ─────────────────────

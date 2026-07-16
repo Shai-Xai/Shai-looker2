@@ -241,6 +241,15 @@ happens at checkout, not in Pulse) and **uploaded into pools**:
   types, expiry — captured at upload so the Owl only offers a code when the
   fan's intent matches its rules (a group code goes to someone buying for 4,
   not a solo buyer).
+- **Comps: include or exclude (decided 2026-07-16).** A comp guest attended
+  but didn't pay — organisers choose per pool whether comps EARN rewards. The
+  derived profile keeps both views (`eventsCount` counts attendance incl.
+  comps — that's what the Owl greets from; `paidEventsCount` + spend count
+  paid only; `comp_guest` flags the gap), and each pool's target gets a
+  `comps: count | ignore` rule — eligibility maths use the paid view when
+  comps are ignored. Default: `count` for recognition-style rewards, but the
+  pool editor should nudge discounts toward `ignore` ("reward buyers, greet
+  guests").
 - **Issuance:** one grant per profile per pool; grant is recorded before the
   code is revealed; redeemed status reconciles back from ticketing data
   (v1: matched via the code's appearance in purchase rows / manual CSV; the
