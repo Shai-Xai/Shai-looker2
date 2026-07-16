@@ -444,6 +444,64 @@ const SCENARIOS = [
         expect: { status: 'done', got: [] } }, // both emails (opener + nudge) skipped; still completes
     ],
   },
+  {
+    name: 'Competing segment-watch branches — authored order wins',
+    flow: [
+      '✉  opener  →  ◆ which list are they on after a day?',
+      '   ├─ On "VIP buyers"  → ✉ VIP thanks',
+      '   ├─ On "GA buyers"   → ✉ GA thanks',
+      '   └─ No response      → ✉ Still time',
+      '   Someone on BOTH lists must take the FIRST matching branch (VIP).',
+    ],
+    journey: {
+      name: 'Two watched lists',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'On a buyers list after a day?', waitHours: 24, branches: [
+          { label: 'VIP buyers', when: 'in_segment', segmentName: 'VIP buyers', segmentId: 'seg-vip', nodes: [msg({ subject: 'VIP thanks' })] },
+          { label: 'GA buyers', when: 'in_segment', segmentName: 'GA buyers', segmentId: 'seg-ga', nodes: [msg({ subject: 'GA thanks' })] },
+          { label: 'No response', nodes: [msg({ subject: 'Still time' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Val', email: 'val@x.com', behaviour: 'on BOTH VIP and GA lists → takes VIP (first match)',
+        drive: [(s, e) => { s.addToSegment('seg-vip', e); s.addToSegment('seg-ga', e); }],
+        expect: { status: 'done', got: ['opener', 'VIP thanks'] } },
+      { name: 'Gil', email: 'gil@x.com', behaviour: 'on the GA list only',
+        drive: [(s, e) => s.addToSegment('seg-ga', e)],
+        expect: { status: 'done', got: ['opener', 'GA thanks'] } },
+      { name: 'Nod', email: 'nod@x.com', behaviour: 'on neither list',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Still time'] } },
+    ],
+  },
+  {
+    name: 'Split value matching is case- and whitespace-insensitive',
+    flow: [
+      '◆ ticket type?  ├─ values ["VIP"] → VIP flow   └─ everyone else → GA flow',
+      '   A ticket recorded as "  vip " (messy casing/spacing) must still match VIP.',
+    ],
+    journey: {
+      name: 'Messy split value',
+      nodes: [
+        { type: 'decision', kind: 'split', question: 'Ticket type?', field: 'core_ticket_types.name', branches: [
+          { label: 'VIP', values: ['VIP'], nodes: [msg({ subject: 'VIP flow' })] },
+          { label: 'Everyone else', nodes: [msg({ subject: 'GA flow' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Mia', email: 'mia@x.com', behaviour: 'ticket recorded as "  vip " (mixed case + spaces)',
+        attributes: { 'core_ticket_types.name': '  vip ' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['VIP flow'] } },
+      { name: 'Sol', email: 'sol@x.com', behaviour: 'ticket "General"',
+        attributes: { 'core_ticket_types.name': 'General' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['GA flow'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
