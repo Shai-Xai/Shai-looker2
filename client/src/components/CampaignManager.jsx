@@ -511,6 +511,18 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   const addStep = (delayHours = 24) => setF((s) => ({ ...s, steps: [...s.steps, { delayHours, subject: '', body: '', smsBody: '', ctaText: s.steps[0]?.ctaText || '', contentMode: 'template', customHtml: '', blocks: [], heroImage: '' }] }));
   const removeStep = (i) => setF((s) => ({ ...s, steps: s.steps.filter((_, j) => j !== i) }));
   const isSequence = f.campaignMode === 'sequence';
+  // The payload that matches exactly what the preview pane renders. In sequence
+  // mode each step carries its OWN content (contentMode/customHtml/blocks/hero),
+  // so a preview — and a test send — must render the active step, not just the
+  // top-level copy (which only mirrors step 1's subject/body/cta). Both the
+  // preview effect and "Send test to me" use this so the two never diverge.
+  const previewPayload = () => {
+    const base = payload();
+    const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
+    return st
+      ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', blocks: st.blocks || [] }
+      : base;
+  };
   // Columns available to pick the abandonment-time anchor from (tile fields or a list's headers).
   const anchorOptions = (aud?.fields?.length ? aud.fields.map((fl) => ({ value: fl.name, label: fl.label })) : (aud?.columns || []).map((c) => ({ value: c, label: c })));
   const hasEmail = f.channel !== 'sms';   // email or both
@@ -564,10 +576,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
   useEffect(() => {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(() => {
-      const base = payload();
-      const st = isSequence ? (f.steps[activeStep] || f.steps[0]) : null;
-      const p = st ? { ...base, subject: st.subject, body: st.body, smsBody: st.smsBody || '', ctaText: st.ctaText, contentMode: st.contentMode || 'template', customHtml: st.customHtml || '', heroImage: st.heroImage || '', blocks: st.blocks || [] } : base;
-      api.actionPreviewEmail(entityId, p).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
+      api.actionPreviewEmail(entityId, previewPayload()).then((r) => { setPreview(r.html || ''); setPreviewSms(r.sms || ''); }).catch(() => {});
     }, 350);
     return () => clearTimeout(debounce.current);
   }, [f.subject, f.body, f.smsBody, f.ctaText, f.ctaUrl, f.contentMode, f.customHtml, f.heroImage, JSON.stringify(f.blocks), JSON.stringify(f.theme), f.campaignMode, f.eventSuiteId, activeStep, JSON.stringify(f.steps), JSON.stringify(f.promo), f.anchorField]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1326,7 +1335,7 @@ function CampaignEditor({ entityId, isAdmin, action, initialGoal = '', initialSu
                   if (testEmails === null) return; // cancelled
                 }
                 setTestState('sending');
-                try { const r = await api.actionTestSend(entityId, { ...payload(), testPhone, testEmails }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
+                try { const r = await api.actionTestSend(entityId, { ...previewPayload(), testPhone, testEmails }); setTestState(`✓ Test sent to ${r.to}`); } catch (e) { setTestState(`✗ ${e.message}`); }
               }}
             >{testState === 'sending' ? 'Sending…' : 'Send test…'}</button>
             {!requireApproval && !isApproved && (
