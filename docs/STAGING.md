@@ -51,7 +51,15 @@ Either way, then:
 
 1. **Create the `staging` branch** (once): from `main`, `git push origin main:staging`.
 2. **Set staging secrets** in the Render dashboard for the staging service:
-   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — a staging-only login.
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — a staging-only login. **This is the ONLY
+     way into staging**: password-reset emails can't send (the outbound brake),
+     so "Forgot password" is a dead end there — log in with these seeded
+     credentials.
+   - `APP_URL` — set to the staging URL (e.g.
+     `https://howler-pulse-staging.onrender.com`). It defaults to PRODUCTION's
+     URL, so without it any link staging renders (reset links, email previews,
+     MCP/connector URLs) silently points at prod — the classic "I thought I was
+     on staging" trap.
    - `LOOKER_*` — ideally a **read-only** Looker connection (staging only reads
      data; it never writes to Looker anyway).
    - `ANTHROPIC_API_KEY` — a separate or spend-capped key is wise.
