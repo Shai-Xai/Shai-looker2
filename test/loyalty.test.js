@@ -157,6 +157,25 @@ test('attempts lock after 5 wrong guesses; expired codes are dead; resend recove
   assert.equal(expired.ok, false); assert.equal(expired.reason, 'expired');
 });
 
+test('staging test code: works ONLY with the outbound brake on; no email sent', async () => {
+  sent = []; lookerCalls = []; lookerRows = [];
+  const noMailer = { isConfigured: () => false, send: async () => { throw new Error('must not send'); } };
+  const l2 = createLoyalty({ db: h.db, auth: h.auth, mailer: noMailer, runQuery: stubRunQuery });
+  // Test code WITHOUT the outbound brake → ignored (fails closed, like prod).
+  process.env.FAN_OTP_TEST_CODE = '424242';
+  delete process.env.OUTBOUND_DISABLED;
+  const s1 = mkSession();
+  assert.equal((await l2.startVerification(site, s1, { email: 'qa@howler.co.za' })).reason, 'unavailable');
+  // Brake on + test code → verifies with the shared code, zero sends.
+  process.env.OUTBOUND_DISABLED = '1';
+  const s2 = mkSession();
+  const start = await l2.startVerification(site, s2, { email: 'qa@howler.co.za' });
+  assert.equal(start.ok, true); assert.equal(start.sent, false);
+  assert.equal((await l2.confirmVerification(site, s2, { code: '123456' })).reason, 'wrong_code');
+  assert.equal((await l2.confirmVerification(site, s2, { code: '424242' })).ok, true);
+  delete process.env.OUTBOUND_DISABLED; delete process.env.FAN_OTP_TEST_CODE;
+});
+
 // ── Flag gating + the boot chip ──────────────────────────────────────────────────
 test('fanowl.loyalty defaults OFF; boot omits the chip until flag on + verified', async () => {
   const flags = require('../server/flags');

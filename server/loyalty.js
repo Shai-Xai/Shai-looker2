@@ -156,17 +156,24 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
   async function startVerification(site, session, { email }) {
     const em = String(email || '').trim().toLowerCase();
     if (!/.+@.+\..+/.test(em)) return { ok: false, reason: 'bad_email', message: 'That doesn’t look like a valid email address — ask the fan to re-check it.' };
-    if (!mailer.isConfigured()) return { ok: false, reason: 'unavailable', message: 'Verification emails aren’t available right now — carry on helping without it.' };
+    // Staging test mode (docs/STAGING.md): OUTBOUND_DISABLED=1 hard-kills all
+    // email, which would make this flow untestable there — so a staging server
+    // may set FAN_OTP_TEST_CODE (6 digits) and that shared code verifies WITHOUT
+    // any send. Double-gated: ignored unless the outbound brake is ALSO on, so
+    // it can never weaken production.
+    const testCode = process.env.OUTBOUND_DISABLED === '1' && /^\d{6}$/.test(process.env.FAN_OTP_TEST_CODE || '') ? process.env.FAN_OTP_TEST_CODE : '';
+    if (!mailer.isConfigured() && !testCode) return { ok: false, reason: 'unavailable', message: 'Verification emails aren’t available right now — carry on helping without it.' };
     const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     const hourAgo = new Date(Date.now() - 3600_000).toISOString();
     if (sql.prepare('SELECT COUNT(*) c FROM fan_verifications WHERE session_id = ? AND created_at >= ?').get(session.id, tenMinAgo).c >= 3
       || sql.prepare('SELECT COUNT(*) c FROM fan_verifications WHERE entity_id = ? AND email = ? AND created_at >= ?').get(site.entity_id, em, hourAgo).c >= 5) {
       return { ok: false, reason: 'rate_limited', message: 'Too many codes sent just now — ask the fan to check their inbox (and spam), or try again in a few minutes.' };
     }
-    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const code = testCode || String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const id = uid();
     sql.prepare('INSERT INTO fan_verifications (id,entity_id,session_id,email,code_hash,expires_at,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(id, site.entity_id, session.id, em, hash(id, code), new Date(Date.now() + OTP_TTL_MS).toISOString(), now());
+    if (testCode) return { ok: true, sent: false, message: 'TEST MODE (staging server, no email sent): ask the fan to type the 6-digit code — the test team knows the shared staging code. Never state the code yourself.' };
     const eventName = site.name || 'the event';
     try {
       await mailer.send({
