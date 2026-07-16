@@ -47,6 +47,8 @@ test('deriveProfile: 4+ tickets at one event → group_buyer; favourite type by 
   assert.equal(d.traits.favTicketType, 'GA');
   assert.equal(d.traits.maxTicketsOneEvent, 5);
   assert.equal(d.traits.currency, 'ZAR');
+  // Itemised history: event × ticket-type grain, biggest type first.
+  assert.deepEqual(d.traits.history[0].types, ['4× GA', '1× VIP']);
 });
 
 test('deriveProfile: zero-ticket rows (refund noise) do not count as events', () => {

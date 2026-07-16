@@ -150,7 +150,20 @@ Two axes, all computed server-side from data we already hold:
   conversion
 - `interests[]` — already logged by `logInterest` / `captureLead`
 - traits: favourite ticket type, ticket + on-site spend bands, last event
-  attended
+  attended, and `history[]` — the fan's OWN orders itemised at event ×
+  ticket-type grain (added 2026-07-16: a verified fan asking "what did I buy
+  last year?" deserves a real answer; still derived — no per-ticket rows)
+
+**Companions (design note, 2026-07-16 — build with holder/transfer data):**
+tickets a fan bought FOR someone or transferred carry the companion's
+identity in ticketing. Hugely valuable memory ("going with the same crew
+again? want the group code?") — with hard privacy lines: companion names may
+only ever be reflected back to the purchaser who supplied them (first names
+at most), never listed to anyone else, never used to CONTACT the companions
+(they get marketed to only via their own consent), and the derived form
+should usually be the pattern, not the names ("you usually bring the same 4
+people"). Needs holder/transfer fields added to the curated slice (§9 Q10)
+— the current explore deliberately excludes per-person PII.
 
 **Pools target a combination** ("preregistered AND never bought" → comeback
 offer; "returning AND group_buyer" → group-leader code), which is barely more
@@ -362,6 +375,11 @@ changelog) and wire new client-setup steps into the Setup wizard, per
    `entity_groups` + customer-master identity resolution. Which pilot brand
    actually needs it, and does its tier maths differ per profile (a fan loyal
    to one of the brand's festivals vs the brand overall)?
+10. **Holder / transfer data for companions** — does the ticketing explore
+    expose per-ticket holder identity and transfer-target (and can the curated
+    slice carry them server-side-only, like the customer-lookup fields)?
+    Needed for the companions memory (§3); until then group patterns come
+    from basket size alone.
 
 ## 10. Risks
 

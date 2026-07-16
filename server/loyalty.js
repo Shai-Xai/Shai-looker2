@@ -52,12 +52,13 @@ function deriveProfile(rows) {
     const paid = num(r['core_tickets.sold_tickets']);
     const sold = Math.max(paid, num(r['core_tickets.count']));
     const spend = num(r['core_tickets.sum_revenue_decimal']);
-    const e = byEvent.get(ev) || { tickets: 0, paid: 0, spend: 0, date: '' };
+    const e = byEvent.get(ev) || { tickets: 0, paid: 0, spend: 0, date: '', types: new Map() };
     e.tickets += sold; e.paid += paid; e.spend += spend;
     const d = String(r['core_events.start_date'] || '');
     if (d > e.date) e.date = d;
-    byEvent.set(ev, e);
     const ty = String(r['core_ticket_types.name'] || '').trim();
+    if (ty && sold > 0) e.types.set(ty, (e.types.get(ty) || 0) + sold);
+    byEvent.set(ev, e);
     if (ty) byType.set(ty, (byType.get(ty) || 0) + sold);
     if (!currency && r['core_events.currency']) currency = String(r['core_events.currency']);
   }
@@ -80,6 +81,13 @@ function deriveProfile(rows) {
       favTicketType: favType ? favType[0] : '',
       lastEvent: last ? { name: last[0], date: last[1].date } : null,
       maxTicketsOneEvent: maxBasket,
+      // Itemised view — the fan's OWN orders at event × ticket-type grain, so a
+      // verified fan asking "what did I buy last year?" gets a real answer.
+      // Still derived (no per-ticket rows/holders/timestamps), capped for tokens.
+      history: events.slice(0, 10).map(([name, e]) => ({
+        name, date: e.date, spend: Math.round(e.spend * 100) / 100,
+        types: [...e.types.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, q]) => `${q}× ${t}`),
+      })),
     },
   };
 }
@@ -246,7 +254,8 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     if (s.favTicketType) bits.push(`usually buys: ${s.favTicketType}`);
     if (s.signals?.group_buyer) bits.push('tends to buy for a group (4+ tickets)');
     if (s.historyUnavailable) bits.push('purchase history unavailable — treat as a new fan');
-    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.`;
+    const orders = (s.history || []).map((ev) => `${ev.name}${ev.date ? ` (${String(ev.date).slice(0, 10)})` : ''}: ${ev.types.join(', ') || 'tickets'}`);
+    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.${orders.length ? `\nTHEIR PAST ORDERS (their own, verified — you may share these with them when asked): ${orders.join(' · ')}` : ''}`;
   }
 
   // The Owl's two new tools (offered by fanOwl.js only when fanowl.loyalty is on).
