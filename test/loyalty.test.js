@@ -14,9 +14,10 @@ const { createLoyalty, deriveProfile } = require('../server/loyalty');
 delete process.env.ANTHROPIC_API_KEY; // never call out from tests
 
 // ── deriveProfile (pure) ─────────────────────────────────────────────────────────
-const row = (ev, date, type, sold, rev, cur = 'ZAR') => ({
+const row = (ev, date, type, sold, rev, cur = 'ZAR', count = sold) => ({
   'core_events.name': ev, 'core_events.start_date': date, 'core_events.currency': cur,
-  'core_ticket_types.name': type, 'core_tickets.sold_tickets': sold, 'core_tickets.sum_revenue_decimal': rev,
+  'core_ticket_types.name': type, 'core_tickets.sold_tickets': sold, 'core_tickets.count': count,
+  'core_tickets.sum_revenue_decimal': rev,
 });
 
 test('deriveProfile: no history → new tier, no signals', () => {
@@ -47,9 +48,16 @@ test('deriveProfile: 4+ tickets at one event → group_buyer; favourite type by 
   assert.equal(d.traits.currency, 'ZAR');
 });
 
-test('deriveProfile: zero-sold rows (refund noise) do not count as events', () => {
+test('deriveProfile: zero-ticket rows (refund noise) do not count as events', () => {
   const d = deriveProfile([row('Fest A', '2025-08-01', 'GA', 0, 0)]);
   assert.equal(d.tier, 'new');
+});
+
+test('deriveProfile: a comp ticket still counts as attendance (sold=0, count=1)', () => {
+  const d = deriveProfile([row('Fest A', '2025-08-01', 'GA', 0, 0, 'ZAR', 1)]);
+  assert.equal(d.tier, 'returning');
+  assert.equal(d.traits.totalTickets, 1);
+  assert.equal(d.traits.totalSpend, 0);
 });
 
 // ── The OTP flow + profile cache (against the real test DB) ─────────────────────

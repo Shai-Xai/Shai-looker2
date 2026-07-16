@@ -45,7 +45,10 @@ function deriveProfile(rows) {
   for (const r of R) {
     const ev = String(r['core_events.name'] || '').trim();
     if (!ev) continue;
-    const sold = num(r['core_tickets.sold_tickets']);
+    // Attendance counts ANY active ticket: sold_tickets excludes complimentary
+    // tickets (right for revenue, wrong for loyalty — a comp guest still
+    // attended), so take the larger of sold vs the incl-comps count.
+    const sold = Math.max(num(r['core_tickets.sold_tickets']), num(r['core_tickets.count']));
     const spend = num(r['core_tickets.sum_revenue_decimal']);
     const e = byEvent.get(ev) || { tickets: 0, spend: 0, date: '' };
     e.tickets += sold; e.spend += spend;
@@ -128,7 +131,7 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
         const rows = await looker()('/queries/run/json', {
           model: catalogue.model, view: catalogue.explore,
           fields: ['core_events.name', 'core_events.start_date', 'core_events.currency', 'core_ticket_types.name',
-            'core_tickets.sold_tickets', 'core_tickets.sum_revenue_decimal'],
+            'core_tickets.sold_tickets', 'core_tickets.count', 'core_tickets.sum_revenue_decimal'],
           filters: { 'core_purchasers.email': profile.email, ...locks },
           limit: 500,
         });
@@ -210,7 +213,9 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     }
     sql.prepare('UPDATE fan_profiles SET verified_at = ?, verified_channel = ? WHERE id = ?').run(now(), 'email', profile.id);
     sql.prepare('UPDATE fan_sessions SET profile_id = ? WHERE id = ?').run(profile.id, session.id);
-    profile = await refreshProfile(site.entity_id, profile);
+    // A fresh explicit verification always re-derives (don't serve a stale cache
+    // to the one fan who just proved who they are; the query layer still caches).
+    profile = await refreshProfile(site.entity_id, profile, { force: true });
     return { ok: true, verified: true, profile: summary(profile) };
   }
 

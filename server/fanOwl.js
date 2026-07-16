@@ -1069,8 +1069,19 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       if (all.length) bits.push(`they've shown interest in: ${all.join(', ')}`);
       if (bits.length) memory = `WHAT YOU REMEMBER about THIS fan (from their own past visits/messages — never mention "data" or "records", just be a friend who remembers): ${bits.join('; ')}.`;
     } catch { /* memory is best-effort */ }
+    // The suite's Current-Event lock names the edition actually on sale (e.g.
+    // "Retreat Yourself 2027") — without it the Owl only knows what the (possibly
+    // last-edition) catalogue/knowledge says, and argues with fans about the year.
+    const currentEdition = (() => {
+      try {
+        for (const [k, v] of Object.entries(db.lockedFiltersForSuite(site.suite_id) || {})) {
+          if (/current\s*event/i.test(k) && v && String(v).trim()) return String(v).split(',')[0].trim();
+        }
+      } catch { /* locks are best-effort context */ }
+      return '';
+    })();
     const instructions = [
-      `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
+      `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}.${currentEdition ? ` The edition currently on sale is "${currentEdition}" — if the catalogue or knowledge mentions an older edition, trust THIS as the current one and flag outdated info with logInterest rather than insisting on the old year.` : ''} Today's date is ${new Date().toISOString().slice(0, 10)}.`,
       `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
       (site.default_lang || session.lang)
         ? `LANGUAGE: ${site.default_lang ? `the organiser's default language is "${site.default_lang}"` : ''}${site.default_lang && session.lang ? ' and ' : ''}${session.lang ? `the fan's device is set to "${session.lang}"` : ''}. Open in the fan's device language when known (otherwise the default), and ALWAYS switch to mirror whatever language the fan actually writes in.`
