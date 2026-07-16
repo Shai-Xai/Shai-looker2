@@ -2105,6 +2105,10 @@ function UsersTab() {
     return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
   };
   const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  // Who holds the keys: a filled badge on every Super Admin so the holders are
+  // visible at a glance (the role itself is granted in the user editor).
+  const superBadge = (u) => u.role === 'admin' && (u.roles || []).includes('super_admin')
+    && <span style={{ ...howlerBadge, background: 'var(--brand)', color: '#fff' }} title="Super Admin — global billing, integrations, status notices & backup/restore">★ SUPER</span>;
   // 📱 marker when the user has opened Pulse as an installed app (PWA on their phone).
   const installMark = (u) => { const i = installs[u.id]; return i ? <span title={`📱 App installed · last opened ${fmtWhen(i.lastAt)}`} style={{ fontSize: 13, cursor: 'help' }}>📱</span> : null; };
   const lastActiveCell = (u) => (
@@ -2145,7 +2149,7 @@ function UsersTab() {
           {sorted.map((u) => (
             <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
               <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {superBadge(u)} {installMark(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
@@ -2166,7 +2170,7 @@ function UsersTab() {
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</div>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {superBadge(u)} {installMark(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
                 <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
