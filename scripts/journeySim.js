@@ -502,6 +502,64 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['GA flow'] } },
     ],
   },
+  {
+    name: 'A split with no catch-all still never strands anyone — last branch absorbs the unmatched',
+    flow: [
+      '◆ ticket type?  ├─ ["VIP"] → VIP flow   └─ ["GA"] → GA flow   (NO explicit "everyone else")',
+      '   Validation makes the LAST branch the catch-all, so an unknown ticket',
+      '   ("Comp") lands there instead of dangling active forever.',
+    ],
+    journey: {
+      name: 'Split without a catch-all',
+      nodes: [
+        { type: 'decision', kind: 'split', question: 'Ticket type?', field: 'core_ticket_types.name', branches: [
+          { label: 'VIP', values: ['VIP'], nodes: [msg({ subject: 'VIP flow' })] },
+          { label: 'GA', values: ['GA'], nodes: [msg({ subject: 'GA flow' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Mia', email: 'mia@x.com', behaviour: 'VIP ticket → matches the first branch',
+        attributes: { 'core_ticket_types.name': 'VIP' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['VIP flow'] } },
+      { name: 'Nix', email: 'nix@x.com', behaviour: 'unknown "Comp" ticket → last branch catches it, not stranded',
+        attributes: { 'core_ticket_types.name': 'Comp' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['GA flow'] } },
+      { name: 'Sol', email: 'sol@x.com', behaviour: 'GA ticket → the last branch (now the catch-all)',
+        attributes: { 'core_ticket_types.name': 'GA' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['GA flow'] } },
+    ],
+  },
+  {
+    name: 'Someone already unsubscribed before the journey starts receives nothing',
+    flow: [
+      '✉ opener  →  ◆ clicked?  ├─ Clicked → ✉ nice   └─ No response → 💬 last call',
+      '   A person on the suppression list before Day 0 is ejected on the first',
+      '   tick — never gets even the opener.',
+    ],
+    journey: {
+      name: 'Pre-suppressed guard',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked?', waitHours: 24, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'nice' })] },
+          { label: 'No response', nodes: [msg({ channel: 'sms', body: 'last call' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Kip', email: 'kip@x.com', behaviour: 'already unsubscribed before Day 0 → gets nothing, exits',
+        pre: [(s, e) => s.unsub(e)],
+        drive: [() => {}],
+        expect: { status: 'unsubscribed', got: [] } },
+      { name: 'Lou', email: 'lou@x.com', behaviour: 'reachable, ghosts → opener then the SMS last call',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'last call'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
@@ -512,6 +570,7 @@ async function simulate(scn) {
   for (const p of scn.personas) {
     sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
     if (p.consent) sim.consent(p.email, p.consent); // e.g. no SMS consent
+    for (const step of p.pre || []) step(sim, p.email); // state BEFORE the first send (e.g. already unsubscribed)
   }
   await sim.run('Day 0 · sent');                 // openers + everyone parks at the first wait
   for (const p of scn.personas) for (const step of p.drive || []) step(sim, p.email); // inject behaviours
