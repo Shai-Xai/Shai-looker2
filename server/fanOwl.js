@@ -247,6 +247,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // identity handshake lives in server/loyalty.js; offered per entity ONLY when
   // the fanowl.loyalty flag is on (flag off = the tools are never in the toolbox).
   const loyalty = require('./loyalty').createLoyalty({ db, auth, mailer: require('./mailer') });
+  // Reward pools (phase 2) mount here — the loyalty family's home — so the
+  // composition root stays untouched. Own tables + routes; see loyaltyPools.js.
+  const loyaltyPools = require('./loyaltyPools').mount(app, { db, auth });
   const loyaltyOn = (entityId) => { try { return require('./flags').enabled(entityId, 'fanowl.loyalty'); } catch { return false; } };
 
   const siteByKey = sql.prepare('SELECT * FROM fan_sites WHERE site_key = ?');
@@ -979,8 +982,20 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
           return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
         },
       },
-      // Identity handshake (flag-gated): flag off = the tools simply don't exist.
-      ...(loyaltyOn(site.entity_id) ? loyalty.tools(site, session) : {}),
+      // Identity handshake + rewards (flag-gated): flag off = the tools don't exist.
+      ...(loyaltyOn(site.entity_id) ? {
+        ...loyalty.tools(site, session),
+        getMyReward: {
+          schema: { name: 'getMyReward', description: 'Check for — and claim — the verified fan\'s reward from the organiser\'s live pools. Call ONLY after confirmVerification succeeded this session (or when the fan asks about their reward). Returns the exact code + its rules; repeat calls return the SAME grant.', input_schema: { type: 'object', properties: {} } },
+          run: async () => {
+            const p = loyalty.verifiedProfile(session);
+            if (!p) return { ok: false, reason: 'unverified', message: 'The fan must verify first — offer to send the email code.' };
+            const r = loyaltyPools.grantFor(site, session, p, loyalty.summary(p));
+            if (r.ok) logEvent(site.id, session.id, 'reward_granted', { pool: r.reward.pool, existing: !!r.existing });
+            return r;
+          },
+        },
+      } : {}),
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -1077,7 +1092,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Loyalty (flag-gated): the verification rules + this session's verified
       // profile (server-derived; raw history never reaches the model).
       loyaltyOn(site.entity_id) ? require('./loyalty').FAN_LOYALTY_SYSTEM : '',
-      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session, { fanMessages: listMsgs.all(session.id).filter((m) => m.role === 'user').length }) : '',
+      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session, { fanMessages: listMsgs.all(session.id).filter((m) => m.role === 'user').length, liveRewards: loyaltyPools.hasLiveRewards(site) }) : '',
       `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
       (() => {
         const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));

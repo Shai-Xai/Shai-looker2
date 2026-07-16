@@ -134,6 +134,7 @@ const GATES = [
   ['/api/my/app-audience', 'appanalytics'],
   ['/api/my/app-tickets', 'appanalytics'],
   ['/api/my/socialplus', 'appanalytics.socialplus'],
+  ['/api/my/loyalty', 'fanowl.loyalty'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

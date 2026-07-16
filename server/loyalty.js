@@ -28,7 +28,8 @@ const FAN_LOYALTY_SYSTEM = `VERIFICATION & REWARDS (these tools are available be
 - confirmVerification → check the code the fan typed. On success you get their profile summary (tier, past events, favourite ticket type) — greet them like a friend who remembers ("you were at the last two editions!"), and let it guide your recommendations naturally.
 - The profile summary is your ONLY personal fact source. NEVER invent history, spend, tiers or rewards beyond what the tools return. If history is unavailable, say you couldn't find past orders for that email and carry on helping normally.
 - A wrong code is no drama — invite them to re-check or resend. Never pressure a fan to verify; "no" ends the topic gracefully.
-- PROACTIVE OFFER — bring it up yourself, but earn it first: NEVER in your first reply (answer their actual question properly), then around their 2nd-3rd message, IF they're unverified AND the moment is commercial (tickets, prices, buying intent — never during a policy/refund/safety answer), mention ONCE and lightly that the organiser may have perks for returning fans — and first-timers — and you can check: "by the way — if you've been to one of their events before (or even if it's your first), there might be a perk with your name on it. Want me to check? I just need your email." At most ONE offer per conversation (your earlier messages are in the history — if you already offered, don't again); any "no" or non-answer ends the topic for good; NEVER claim a specific special exists — you are offering to CHECK.`;
+- PROACTIVE OFFER — bring it up yourself, but earn it first: NEVER in your first reply (answer their actual question properly), then around their 2nd-3rd message, IF they're unverified AND the moment is commercial (tickets, prices, buying intent — never during a policy/refund/safety answer), mention ONCE and lightly that the organiser may have perks for returning fans — and first-timers — and you can check: "by the way — if you've been to one of their events before (or even if it's your first), there might be a perk with your name on it. Want me to check? I just need your email." At most ONE offer per conversation (your earlier messages are in the history — if you already offered, don't again); any "no" or non-answer ends the topic for good; NEVER claim a specific special exists before getMyReward returns one. The REWARD-CHECK STATE line is authoritative: if it says no pools are live, do NOT proactively offer.
+- getMyReward → after a successful verification (or when a verified fan asks), call it ONCE to check and claim their reward. Present EXACTLY what it returns — the code verbatim, its expiry and any minimum-quantity/ticket-type rules ("valid on 4+ GA tickets, expires 31 Aug"). Repeat calls return the same grant — never promise a different or better one, and if it returns nothing, say so warmly and move on.`;
 
 const OTP_TTL_MS = 10 * 60_000; // a code lives 10 minutes
 const MAX_ATTEMPTS = 5; //          …and survives 5 wrong guesses
@@ -244,9 +245,13 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
   // The VERIFIED FAN instructions block for the chat turn. Unverified fans get
   // the REWARD-CHECK STATE line instead — the deterministic turn count the
   // PROACTIVE OFFER rule times itself against (models are bad at counting).
-  function contextBlock(site, session, { fanMessages = 0 } = {}) {
+  function contextBlock(site, session, { fanMessages = 0, liveRewards = false } = {}) {
     const p = verifiedProfile(session);
-    if (!p) return `REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #${fanMessages + 1} of this conversation. Apply the PROACTIVE OFFER rule accordingly.`;
+    if (!p) {
+      return `REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #${fanMessages + 1} of this conversation. ${liveRewards
+        ? 'Live reward pools EXIST for this event — a proactive offer to check is genuinely backed. Apply the PROACTIVE OFFER rule.'
+        : 'NO reward pools are live right now — do NOT proactively offer a reward check (verification remains available if the fan asks about their own history or rewards).'}`;
+    }
     const s = summary(p);
     const bits = [`tier: ${s.tier}`];
     if (s.eventsCount) bits.push(`been to ${s.eventsCount} of this organiser's event${s.eventsCount === 1 ? '' : 's'} (${s.totalTickets} tickets${s.totalSpend ? `, ${s.currency || ''} ${s.totalSpend} total`.trim() : ''})`);
@@ -255,7 +260,7 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     if (s.signals?.group_buyer) bits.push('tends to buy for a group (4+ tickets)');
     if (s.historyUnavailable) bits.push('purchase history unavailable — treat as a new fan');
     const orders = (s.history || []).map((ev) => `${ev.name}${ev.date ? ` (${String(ev.date).slice(0, 10)})` : ''}: ${ev.types.join(', ') || 'tickets'}`);
-    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.${orders.length ? `\nTHEIR PAST ORDERS (their own, verified — you may share these with them when asked): ${orders.join(' · ')}` : ''}`;
+    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.${orders.length ? `\nTHEIR PAST ORDERS (their own, verified — you may share these with them when asked): ${orders.join(' · ')}` : ''}${liveRewards ? '\nREWARDS: live pools exist — call getMyReward (once) to check and claim theirs; if nothing applies, say so warmly.' : '\nREWARDS: no pools are live right now — if asked, say there\'s nothing running at the moment.'}`;
   }
 
   // The Owl's two new tools (offered by fanOwl.js only when fanowl.loyalty is on).
