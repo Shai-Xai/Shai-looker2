@@ -498,6 +498,7 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
   const [picked, setPicked] = useState(() => new Set(assigned));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [tab, setTab] = useState('communities'); // 'communities' | 'chats' — one list at a time
   // The parent re-polls data after a save (background re-sync), which refreshes
   // `assigned` every few seconds — without the dirty guard those polls clobbered
   // ticks made mid-edit, which read as "the picker won't let me change anything".
@@ -520,38 +521,54 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
     <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, marginTop: 14 }}>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 36, background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left', color: 'var(--text)' }}>
         <span style={{ width: 12, fontSize: 9, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>Communities linked to this client {assigned.length ? `· ${assigned.length}` : ''}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>Communities & event chats linked to this client {assigned.length ? `· ${assigned.length}` : ''}</span>
       </button>
       {open && (
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 8px' }}>
             Tick only THIS client's communities and event chats — unticked ones stay invisible to them. You can come back anytime: tick more, untick to remove, then Save again (it re-syncs immediately). Only admins ever see this list; the client just sees what you tick.
-            {' '}<b>Chat messages come from the Event chats groups</b> — a client with only communities ticked will show 0 chat messages.
+            {' '}<b>Chat messages come from the 💬 Event chats tab</b> — a client with only communities ticked will show 0 chat messages.
           </div>
           {dirErr && <div style={errBox}>{dirErr}</div>}
           {!dir && !dirErr && <div style={mutedTxt}>Loading the Social+ directory…</div>}
-          {dir && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 380, overflowY: 'auto' }}>
-              {(dir.communities || []).length > 0 && <div style={groupLbl}>Communities</div>}
-              {(dir.communities || []).map((c) => (
-                <label key={c.id} style={pickRow}>
-                  <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                  <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>👥 {fmt(c.members)}</span>
-                </label>
-              ))}
-              {(dir.channelGroups || []).length > 0 && <div style={groupLbl}>Event chats</div>}
-              {(dir.channelGroups || []).map((g) => (
-                <label key={g.id} style={pickRow}>
-                  <input type="checkbox" checked={picked.has(g.id)} onChange={() => toggle(g.id)} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name || g.id} <span style={{ color: 'var(--muted)' }}>· {g.channels} chat{g.channels === 1 ? '' : 's'}</span></span>
-                  <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>💬 {fmt(g.messages)}</span>
-                </label>
-              ))}
-            </div>
-          )}
+          {dir && (() => {
+            // Two tabs, one list each — communities and event chats are different
+            // things to link, and a buried section header wasn't findable. Each
+            // tab badges how many of ITS entries are ticked; Save stores both.
+            const comms = dir.communities || [];
+            const chats = dir.channelGroups || [];
+            const tickedComms = comms.filter((c) => picked.has(c.id)).length;
+            const tickedChats = chats.filter((g) => picked.has(g.id)).length;
+            const rows = tab === 'chats' ? chats : comms;
+            return (
+              <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <Chip on={tab === 'communities'} onClick={() => setTab('communities')}>👥 Communities{tickedComms ? ` · ${tickedComms} linked` : ''}</Chip>
+                  <Chip on={tab === 'chats'} onClick={() => setTab('chats')}>💬 Event chats{tickedChats ? ` · ${tickedChats} linked` : ''}</Chip>
+                </div>
+                {tab === 'chats' && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>One tick covers ALL of that event's chats (announcements, line-up, FAQ…) — including ones added later.</div>}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 380, overflowY: 'auto' }}>
+                  {!rows.length && <div style={mutedTxt}>{tab === 'chats' ? 'No event chat groups on the network yet.' : 'No communities on the network yet.'}</div>}
+                  {tab === 'communities' && comms.map((c) => (
+                    <label key={c.id} style={pickRow}>
+                      <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>👥 {fmt(c.members)}</span>
+                    </label>
+                  ))}
+                  {tab === 'chats' && chats.map((g) => (
+                    <label key={g.id} style={pickRow}>
+                      <input type="checkbox" checked={picked.has(g.id)} onChange={() => toggle(g.id)} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name || g.id} <span style={{ color: 'var(--muted)' }}>· {g.channels} chat{g.channels === 1 ? '' : 's'}</span></span>
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>💬 {fmt(g.messages)}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-            <button type="button" style={btn} disabled={busy || !dir} onClick={save}>{busy ? 'Saving…' : 'Save linked communities'}</button>
+            <button type="button" style={btn} disabled={busy || !dir} onClick={save}>{busy ? 'Saving…' : 'Save linked communities & chats'}</button>
             {saved && <span style={okTxt}>✓ Saved & re-synced</span>}
           </div>
         </>
