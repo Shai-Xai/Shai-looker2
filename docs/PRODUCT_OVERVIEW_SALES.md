@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-15 (🔍 Inspect query: read-only panel on every tile showing the dimensions, measures & filters driving the number — plain summary for clients, raw internals for staff · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-16 (🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -79,12 +79,14 @@ longer they use Pulse, the better it gets."
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
   insight/summary panels hands the finding off to **email, WhatsApp or Slack** in
   one tap, with room to add a personal note and a link back to the view.
-- **Inspect query** ✅ — a 🔍 on any tile opens a read-only panel showing exactly
-  what drives the number: its **dimensions, measures and the filters** in effect
-  (both the tile's own and the dashboard filters currently applied). If a figure
-  looks off, you can audit the logic in-app instead of asking us to "check Looker".
-  Clients see a plain, labelled summary; Howler staff get the raw query internals
-  (model/explore, field names, filter expressions) for debugging.
+- **Inspect query** ✅ (dashboard editors) — in **edit mode**, a 🔍 in any queryable
+  tile's controls opens a read-only, Looker-Explore-style view of exactly what
+  drives the number: the **fields in use** (dimensions/measures, grouped by view),
+  the **filters** in effect as condition + value chips (tile-baked vs dashboard,
+  tagged by source), a **bar visualization** of the first measure, and the **result
+  grid** behind the tile. If a figure looks off, the logic can be audited in-app
+  instead of "checking Looker"; staff also get the raw internals (model/explore,
+  field names, sorts, row limit).
 - **Download as branded PDF** ✅ — the dashboard's ⋯ menu has a **Download PDF** that
   produces a clean, shareable report for stakeholders who aren't on Pulse. It opens
   with the client's own **logo + brand colours**, the dashboard title and the
@@ -1076,6 +1078,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-16** — **Inspect query → Explore-style, edit-mode only** ✅ (Dashboards):
+  the 🔍 now lives with a tile's EDIT-mode controls (viewers no longer see it), and
+  the panel is rebuilt to read like Looker's Explore: a **fields-in-use rail**
+  (grouped by view, measures tinted, filtered fields marked), the **filters** as
+  condition + value chips with an AND rail, a **bar visualization** of the first
+  measure, and the **results grid** with warm measure columns and a row-limit
+  banner — all read-only, straight from the tile's own query + last result.
 - **2026-07-15** — **Inspect query panel** ✅ (Dashboards): every queryable tile now
   carries a 🔍 that opens a read-only side panel (bottom sheet on mobile) listing the
   **dimensions, measures and filters** driving the number — including the dashboard
