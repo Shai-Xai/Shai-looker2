@@ -2477,9 +2477,8 @@ const billing = require('./billing').mount(app, { db, auth });
 // e.g. abandoned cart). Audience = a dashboard tile's query, run with the SAME
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
-const journeySync = require('./journeyAudiences')({ db, meta, tiktok }); // journey sync-node → Meta/TikTok (no-op unless connected)
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi, syncJourneyAudience: journeySync,
+  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi, syncJourneyAudience: require('./journeyAudiences')({ db, meta, tiktok }), // journey sync-node → Meta/TikTok (no-op unless connected)
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {
