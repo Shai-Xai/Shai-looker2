@@ -49,11 +49,23 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
   const [catNote, setCatNote] = useState('');
   const [navBusy, setNavBusy] = useState(false);
   const [navNote, setNavNote] = useState(null); // { i, text }
-  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['nav', '🧭 Navigation'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['reports', '📊 Reports']];
+  const TABS = [['sites', '🌐 Sites'], ['persona', '🪄 Personality'], ['nav', '🧭 Navigation'], ['pages', '📄 Pages'], ['catalogue', '🎟️ Catalogue'], ['knowledge', '❓ FAQs'], ['rewards', '🎁 Rewards'], ['reports', '📊 Reports']];
+  // Reward pools (loyalty phase 2) — their own routes; 403 = the fanowl.loyalty
+  // flag is off for this client, and the tab explains that instead of erroring.
+  const loyaltyBase = scope === 'my' ? `/api/my/loyalty/${entityId}` : `/api/admin/entities/${entityId}/loyalty`;
+  const [pools, setPools] = useState(null);
+  const [poolsDenied, setPoolsDenied] = useState(false);
+  const [poolsSaving, setPoolsSaving] = useState(false);
+  const [poolsSavedAt, setPoolsSavedAt] = useState(0);
+  const [codesDraft, setCodesDraft] = useState({}); // pool index → pasted codes
+  const [codesNote, setCodesNote] = useState(null); // { i, text }
 
   useEffect(() => {
     let on = true;
     fetch(base).then((r) => r.json()).then((c) => { if (on) setCfg(c); }).catch(() => {});
+    fetch(`${loyaltyBase}/pools`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => { if (on) setPools(d.pools || []); })
+      .catch((e) => { if (on && e.message === '403') setPoolsDenied(true); });
     fetch(`${base}/insights`).then((r) => r.json()).then((s) => { if (on) setStats(s); }).catch(() => {});
     const suitesUrl = scope === 'my' ? '/api/my/suites' : '/api/admin/suites';
     fetch(suitesUrl).then((r) => r.json()).then((rows) => {
@@ -61,7 +73,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       if (on) setSuites(list.filter((s) => scope === 'my' || s.entityId === entityId).map((s) => ({ id: s.id, name: s.name })));
     }).catch(() => {});
     return () => { on = false; };
-  }, [base, scope, entityId]);
+  }, [base, loyaltyBase, scope, entityId]);
 
   const set = (patch) => setCfg((c) => ({ ...c, ...patch }));
   const setSite = (i, patch) => set({ sites: cfg.sites.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
@@ -643,6 +655,32 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
         </>
       )}
 
+      {tab === 'rewards' && (
+        poolsDenied ? <p style={small}>🎁 Rewards ride the <strong>Loyalty & verification</strong> flag (Admin → Product → Flags → Fan Owl) — it's off for this client.</p>
+          : !pools ? <p style={small}>Loading reward pools…</p> : (
+            <RewardPools pools={pools} setPools={setPools} suites={suites} isMobile={isMobile}
+              saving={poolsSaving} savedAt={poolsSavedAt} codesDraft={codesDraft} setCodesDraft={setCodesDraft} codesNote={codesNote}
+              onSave={async () => {
+                setPoolsSaving(true);
+                try {
+                  const r = await fetch(`${loyaltyBase}/pools`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pools }) });
+                  const d = await r.json();
+                  if (r.ok) { setPools(d.pools || []); setPoolsSavedAt(Date.now()); }
+                } finally { setPoolsSaving(false); }
+              }}
+              onUpload={async (i) => {
+                const pool = pools[i];
+                if (!pool.id || String(pool.id).length < 30) { setCodesNote({ i, text: 'Save the pool first, then upload its codes.' }); return; }
+                const r = await fetch(`${loyaltyBase}/pools/${pool.id}/codes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codes: codesDraft[i] || '' }) });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) { setCodesNote({ i, text: `⚠️ ${d.error || 'Upload failed.'}` }); return; }
+                setPools((ps) => ps.map((p, j) => (j === i ? { ...p, stock: d.stock } : p)));
+                setCodesDraft((c) => ({ ...c, [i]: '' }));
+                setCodesNote({ i, text: `Added ${d.added} code${d.added === 1 ? '' : 's'} ✓ (${d.stock.available} now available).` });
+              }} />
+          )
+      )}
+
       {tab === 'reports' && (
         stats ? <Flywheel stats={stats} leads={leads} loadLeads={() => fetch(`${base}/leads`).then((r) => r.json()).then((d) => setLeads(d.leads || [])).catch(() => setLeads([]))} />
           : <p style={small}>Loading reports…</p>
@@ -671,6 +709,133 @@ function downscaleImage(file, max = 1600, quality = 0.8) {
     reader.onerror = () => reject(new Error('Couldn’t read that file.'));
     reader.readAsDataURL(file);
   });
+}
+
+// ── Reward pools editor (loyalty phase 2, spec §5) ───────────────────────────────
+// Budgeted pools of promo codes the Owl may grant to VERIFIED fans. Codes are
+// generated in the ticketing system; this holds the stock, the target and the
+// rules — issuance itself is server-side and one-per-fan.
+const REWARD_KINDS_UI = [['discount', '💸 Discount'], ['upgrade', '⬆️ Upgrade'], ['addon', '➕ Add-on'], ['credit_bundle', '🍺 Ticket+credit bundle'], ['merch', '👕 Merch'], ['prize', '🏆 Prize']];
+const TIER_OPTS = [['new', 'New'], ['returning', 'Returning'], ['loyal', 'Loyal']];
+const SIGNAL_OPTS = [['group_buyer', 'Group buyer (4+)'], ['comp_guest', 'Comp guest'], ['lead_no_purchase', 'Registered, never bought'], ['preregistered', 'Preregistered']];
+
+function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
+  const setPool = (i, patch) => setPools(pools.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const burn = (s = {}) => {
+    const total = (s.available || 0) + (s.issued || 0);
+    const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
+    return (
+      <div>
+        <div style={{ display: 'flex', height: 8, borderRadius: 999, overflow: 'hidden', background: 'var(--hairline)' }}>
+          <span style={{ width: `${pct(s.redeemed || 0)}%`, background: 'var(--ok, #12a150)' }} />
+          <span style={{ width: `${pct(Math.max(0, (s.issued || 0) - (s.redeemed || 0)))}%`, background: 'var(--brand, #ff385c)' }} />
+        </div>
+        <div style={{ ...small, marginTop: 4 }}>{s.granted || 0} granted · {s.redeemed || 0} redeemed · <strong>{s.available || 0} left</strong></div>
+      </div>
+    );
+  };
+  const checks = (i, list, key) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {list.map(([val, label]) => {
+        const arr = pools[i].target?.[key] || [];
+        const on = arr.includes(val);
+        return (
+          <label key={val} style={{ fontSize: 12.5, border: '1px solid var(--hairline)', borderRadius: 999, padding: '6px 11px', cursor: 'pointer', background: on ? 'var(--text)' : 'transparent', color: on ? 'var(--bg, #fff)' : 'var(--text)' }}>
+            <input type="checkbox" checked={on} style={{ display: 'none' }}
+              onChange={() => setPool(i, { target: { ...pools[i].target, [key]: on ? arr.filter((x) => x !== val) : [...arr, val] } })} />
+            {label}
+          </label>
+        );
+      })}
+    </div>
+  );
+  return (
+    <>
+      <p style={small}>Budgeted pools of promo codes the Owl offers to <strong>verified</strong> fans that match the target — the server grants one per fan and stops dead when the stock runs out. Codes come from the ticketing system (min-quantity, ticket types and expiry are enforced at checkout by the code itself). Empty target = every verified fan qualifies.</p>
+      {pools.map((p, i) => (
+        <div key={p.id || i} style={{ border: '1px solid var(--hairline)', borderRadius: 12, padding: 14, marginTop: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={small}>Pool name</div>
+              <input style={input} value={p.name} onChange={(e) => setPool(i, { name: e.target.value })} placeholder="e.g. Loyal-fan VIP upgrade" />
+            </div>
+            <div>
+              <div style={small}>Reward kind</div>
+              <select style={input} value={p.rewardKind} onChange={(e) => setPool(i, { rewardKind: e.target.value })}>
+                {REWARD_KINDS_UI.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={small}>Event (blank = any of yours)</div>
+              <select style={input} value={p.suiteId || ''} onChange={(e) => setPool(i, { suiteId: e.target.value })}>
+                <option value="">— portfolio-wide —</option>
+                {suites.map((su) => <option key={su.id} value={su.id}>{su.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={small}>Value (what the fan is told)</div>
+              <input style={input} value={p.valueLabel || ''} onChange={(e) => setPool(i, { valueLabel: e.target.value })} placeholder="e.g. 25% off VIP upgrade" />
+            </div>
+            <div>
+              <div style={small}>Expiry (optional)</div>
+              <input type="date" style={input} value={(p.rules?.expiresAt || '').slice(0, 10)} onChange={(e) => setPool(i, { rules: { ...p.rules, expiresAt: e.target.value } })} />
+            </div>
+            <div>
+              <div style={small}>Comps</div>
+              <select style={input} value={p.rules?.comps || 'count'} onChange={(e) => setPool(i, { rules: { ...p.rules, comps: e.target.value } })}>
+                <option value="count">Comp visits count</option>
+                <option value="ignore">Paid history only</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ ...small, marginTop: 8 }}>Who qualifies (tier — any ticked matches):</div>
+          {checks(i, TIER_OPTS, 'tiers')}
+          <div style={{ ...small, marginTop: 6 }}>…and must have ALL of (optional):</div>
+          {checks(i, SIGNAL_OPTS, 'signals')}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8, marginTop: 10 }}>
+            <div>
+              <div style={small}>Code mode</div>
+              <select style={input} value={p.mode || 'unique'} onChange={(e) => setPool(i, { mode: e.target.value })}>
+                <option value="unique">Unique codes (upload a stock — stock = budget)</option>
+                <option value="shared">One shared multi-use code (cap the grants)</option>
+              </select>
+            </div>
+            {p.mode === 'shared' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+                <div>
+                  <div style={small}>Shared code{p.sharedCodeSet ? ' (set ✓ — retype to change)' : ''}</div>
+                  <input style={input} value={p.sharedCode || ''} onChange={(e) => setPool(i, { sharedCode: e.target.value })} placeholder="e.g. BLOOM-EARLY" />
+                </div>
+                <div>
+                  <div style={small}>Grant cap (0 = ∞)</div>
+                  <input type="number" min="0" style={input} value={p.grantCap || 0} onChange={(e) => setPool(i, { grantCap: Number(e.target.value) })} />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={small}>Add codes (paste from ticketing — one per line)</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <textarea style={{ ...input, resize: 'vertical' }} rows={1} value={codesDraft[i] || ''} onChange={(e) => setCodesDraft((c) => ({ ...c, [i]: e.target.value }))} placeholder={'VIP-A1B2\nVIP-C3D4'} />
+                  <button type="button" style={btn} onClick={() => onUpload(i)}>Upload</button>
+                </div>
+              </div>
+            )}
+          </div>
+          {codesNote && codesNote.i === i && <p style={small}>{codesNote.text}</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 180 }}>{burn(p.stock)}</div>
+            <label style={{ fontSize: 12.5 }}><input type="checkbox" checked={p.active !== false} onChange={(e) => setPool(i, { active: e.target.checked })} /> Active</label>
+            <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => setPools(pools.filter((_, j) => j !== i))}>Delete pool</button>
+          </div>
+        </div>
+      ))}
+      <button type="button" style={{ ...btn, marginTop: 10 }} onClick={() => setPools([...pools, { name: '', rewardKind: 'discount', valueLabel: '', target: { tiers: [], signals: [] }, rules: { comps: 'count' }, mode: 'unique', active: true, stock: {} }])}>+ New pool</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+        <button type="button" style={primaryBtn} disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save reward pools'}</button>
+        {savedAt > 0 && Date.now() - savedAt < 4000 && <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Saved ✓</span>}
+      </div>
+    </>
+  );
 }
 
 function Flywheel({ stats, leads, loadLeads }) {
@@ -719,12 +884,14 @@ function Flywheel({ stats, leads, loadLeads }) {
         {leads && (leads.length === 0 ? <p style={small}>No fans captured yet.</p> : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
-              <thead><tr>{['Email', 'Name', 'Marketing opt-in', 'Interests', 'When'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid var(--hairline)', fontWeight: 700 }}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Email', 'Name', 'Verified', 'Tier', 'Marketing opt-in', 'Interests', 'When'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid var(--hairline)', fontWeight: 700 }}>{h}</th>)}</tr></thead>
               <tbody>
                 {leads.map((l) => (
                   <tr key={l.id}>
                     <td style={{ padding: '6px 10px' }}>{l.email}</td>
                     <td style={{ padding: '6px 10px' }}>{l.name}</td>
+                    <td style={{ padding: '6px 10px' }}>{l.verified ? '✅' : '—'}</td>
+                    <td style={{ padding: '6px 10px' }}>{l.tier ? { new: '🆕 new', returning: '↻ returning', loyal: '★ loyal' }[l.tier] || l.tier : '—'}</td>
                     <td style={{ padding: '6px 10px' }}>{l.consentMarketing ? '✅' : '—'}</td>
                     <td style={{ padding: '6px 10px' }}>{(l.preferences || []).join(', ')}</td>
                     <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>{String(l.at || '').slice(0, 10)}</td>
