@@ -16,6 +16,7 @@
 const RESERVED = new Set([
   'reset', 'magic', 'login', 'logout', 'admin', 'dashboards', 'settings', 'goals', 'alerts',
   'social', 'settlements', 'documents', 'inbox', 'digests', 'engage', 'ask', 'actions', 'segments',
+  'reports', 'r', 'report-assets',
   'suite', 'd', 'clone', 'preview', 'api', 'assets', 'mail-assets', 'sw.js', 'manifest.webmanifest',
   'index.html', 'robots.txt', 'favicon.ico',
 ]);

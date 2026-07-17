@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-16 (Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-17 (📑 Report Studio: shareable block-based client reports — tiles + AI analysis, share link + PDF, one-off or scheduled) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -339,6 +339,22 @@ on top of the event without logging in."
 **Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
 who you are and what your account can do, and it only ever describes features
 that have actually shipped."
+## 2c. Report Studio — shareable custom reports  🧪
+- Compose a **polished, client-branded report** from building blocks: dashboard
+  **tiles** (rendered as a chart, KPI chip or table), **section headings**, free
+  **text**, **images**, **link buttons** and **✨ AI analysis** blocks (per section
+  or a whole-report executive summary, with an optional focus prompt).
+- Generating **freezes the numbers into a snapshot** — a stakeholder opening it
+  weeks later sees exactly what was reported, not drifted data. Each snapshot gets
+  its own **public share link** (`/r/…`, no Pulse login — built for sponsors,
+  partners and execs) and a **Download PDF**.
+- **One-off or recurring:** set a daily / weekly / monthly schedule and Pulse
+  regenerates the report with fresh data and emails the recipients each run.
+- **Dual-surface:** Howler builds reports for a client (Admin → client → Reports),
+  and clients build their own at **/reports** (role-gated, mobile-first editor).
+
+**Pitch:** "Turn the dashboards into a branded report your client can forward to
+their sponsors — one link, always on-message, with the analysis already written."
 
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
@@ -1079,6 +1095,13 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-17** — **📑 Report Studio** 🧪 (new): build custom, shareable reports
+  from dashboard tiles + headings + text + images + **AI analysis** blocks; each
+  generate freezes a snapshot with a **public share link** (no login — for
+  sponsors/stakeholders) and **PDF download**; one-off or **recurring**
+  (daily/weekly/monthly, emailed). Dual-surface: Admin → client → Reports, and
+  client self-service at /reports. (Spec: docs/specs/REPORT_STUDIO_SPEC.md.)
 
 - **2026-07-16** — **Campaigns — test send fix** ✅: "Send test to me" now sends
   the exact content shown in the preview pane. Previously, for a **drip sequence**

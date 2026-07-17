@@ -37,6 +37,8 @@ const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
 const EventOpsCallPage = lazy(() => import('./pages/EventOpsCallPage.jsx'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'));
+const ReportViewPage = lazy(() => import('./pages/ReportViewPage.jsx'));
 import Logo from './components/Logo.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import { api } from './lib/api.js';
@@ -322,6 +324,7 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/product" element={<MyReportsPage />} />
                 <Route path="/journey" element={<JourneyPage />} />
                 <Route path="/engage" element={<EngagePage />} />
@@ -354,6 +357,7 @@ function Shell() {
                 <Route path="/documents/:id" element={<DocumentViewPage />} />
                 <Route path="/inbox" element={<InboxPage />} />
                 <Route path="/digests" element={<DigestsPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/product" element={<MyReportsPage />} />
                 <Route path="/journey" element={<JourneyPage />} />
                 <Route path="/engage" element={<EngagePage />} />
@@ -385,6 +389,19 @@ export default function App() {
       <RootErrorBoundary>
         <Suspense fallback={<ScreenFallback />}>
           <FanOwlEmbedPage />
+        </Suspense>
+      </RootErrorBoundary>
+    );
+  }
+  // PUBLIC report viewer (/r/:token) — Report Studio share links open for
+  // stakeholders with no Pulse login, so it mounts OUTSIDE AuthProvider/router.
+  // The token is the capability; the page fetches the frozen snapshot only.
+  const reportShare = window.location.pathname.match(/^\/r\/([^/]+)$/);
+  if (reportShare) {
+    return (
+      <RootErrorBoundary>
+        <Suspense fallback={<div style={{ minHeight: '100dvh' }} />}>
+          <ReportViewPage token={decodeURIComponent(reportShare[1])} />
         </Suspense>
       </RootErrorBoundary>
     );

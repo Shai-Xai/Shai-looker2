@@ -53,6 +53,7 @@ const REGISTRY = [
     { key: 'appanalytics.socialplus', name: 'Community (Social+)', def: true, beta: true, desc: 'The client\'s in-app communities & chats from Social+ — members, messages, posts & reactions, as a tab on the App page. Needs communities linked to the client.' },
   ] },
   { key: 'digests', emoji: '🗓', name: 'Digests', def: true, desc: 'Scheduled role-based briefing emails.' },
+  { key: 'reports', emoji: '📑', name: 'Report Studio', def: false, beta: true, desc: 'Block-based shareable client reports — tiles + AI analysis, share link + PDF, one-off or scheduled.' },
   { key: 'settlements', emoji: '🧾', name: 'Settlements', def: true, desc: 'Settlements, invoices and documents.', kids: [
     { key: 'settlements.settlements', name: 'Settlements', def: true, desc: 'Interactive settlement views.' },
     { key: 'settlements.documents', name: 'Documents', def: true, desc: 'Invoices & event documents.' },
@@ -117,6 +118,7 @@ const GATES = [
   ['/api/alerts', 'alerts.alerts'],
   ['/api/livepulse', 'alerts.livepulse'],
   ['/api/my/digests', 'digests'],
+  ['/api/my/reports', 'reports'],
   ['/api/actions', 'engage.campaigns'],
   ['/api/actions-summary', 'engage.campaigns'],
   ['/api/segments', 'engage.segments'],

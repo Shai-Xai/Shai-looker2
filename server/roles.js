@@ -18,6 +18,7 @@ const PERMISSIONS = {
   GOALS_MANAGE: 'goals.manage',              // set/edit event goals + targets (Results)
   ALERTS_MANAGE: 'alerts.manage',            // create/edit metric alerts (threshold/low-stock/sold-out)
   DIGESTS_MANAGE: 'digests.manage',          // create/edit scheduled digests
+  REPORTS_MANAGE: 'reports.manage',          // build/share/schedule Report Studio reports
   SETTLEMENTS_VIEW: 'settlements.view',      // see settlements + documents
   SETTLEMENTS_MANAGE: 'settlements.manage',  // (reserved) edit settlement notes etc.
   BRANDING_MANAGE: 'branding.manage',        // edit branding / colours / logo
@@ -39,17 +40,17 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.REPORTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',
     description: 'Marketing & ticketing dashboards and campaigns, with a marketing briefing focus.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.REPORTS_MANAGE],
   },
   {
     key: 'finance', label: 'Finance', lens: 'finance',
     description: 'Finance, revenue & settlement dashboards, with a finance briefing focus. No campaigns.',
-    permissions: [P.DASHBOARDS_VIEW, P.SETTLEMENTS_VIEW, P.SETTLEMENTS_MANAGE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.SETTLEMENTS_VIEW, P.SETTLEMENTS_MANAGE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.REPORTS_MANAGE],
   },
   {
     key: 'viewer', label: 'Viewer', lens: 'exec',

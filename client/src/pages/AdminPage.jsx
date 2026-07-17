@@ -18,6 +18,7 @@ import QueueItCard from '../components/QueueItCard.jsx';
 import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
 import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
+import ReportStudio from '../components/ReportStudio.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
@@ -3073,7 +3074,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -3144,6 +3145,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Scheduled, role-personalised briefing emails for <b>{entity.name}</b>. Clients can also manage these themselves.</p>
               <DigestManager entityId={entity.id} scope="admin" logins={users} />
+            </div>
+          )}
+          {section === 'reports' && (
+            <div>
+              <p style={hint}>Report Studio for <b>{entity.name}</b> — compose shareable reports from their dashboard tiles, text and AI analysis (share link + PDF, one-off or scheduled). Clients can also build these themselves.</p>
+              <ReportStudio entityId={entity.id} scope="admin" logins={users} />
             </div>
           )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
