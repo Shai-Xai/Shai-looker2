@@ -26,8 +26,29 @@
 // TO REMOVE: delete this file + its mount line in index.js, drop the two tables.
 
 const crypto = require('crypto');
-const { HttpError } = require('./http');
+const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags'); // per-client gate: engage.surveys (default OFF, beta)
+
+// The Howler backend the APP lists events from — a survey may only be published
+// for an event that actually exists there (checked at publish time, fail-closed).
+const HOWLER_GQL = process.env.HOWLER_GRAPHQL_URL || 'https://www.howlerstaging.co.za/api/v6/graphql';
+async function defaultLookupEvent(eventId) {
+  if (process.env.OUTBOUND_DISABLED) return { skipped: true }; // staging service has no outbound
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(HOWLER_GQL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+      body: JSON.stringify({ query: `{ node(id: "gid://howler/Event/${Number(eventId)}") { ... on Event { id name ticketTypes { nodes { id name } } } } }` }),
+    });
+    const node = ((await r.json()) || {}).data?.node;
+    if (!node) return { ok: false };
+    const ticketTypes = ((node.ticketTypes || {}).nodes || []).map((t) => ({
+      id: String(t.id || '').split('/').pop(), name: String(t.name || ''),
+    })).filter((t) => t.name);
+    return { ok: true, name: String(node.name || ''), ticketTypes };
+  } finally { clearTimeout(t); }
+}
 
 const QUESTION_TYPES = ['rating', 'single_choice', 'multiple_choice', 'text'];
 const CHOICE_TYPES = new Set(['single_choice', 'multiple_choice']);
@@ -103,12 +124,30 @@ function normalizeSurveyFields(body, { partial = false } = {}) {
       out[k === 'opensAt' ? 'opens_at' : 'closes_at'] = v ? new Date(v).toISOString() : null;
     }
   }
+  if (has('audienceTicketTypes')) {
+    const raw = body.audienceTicketTypes;
+    if (raw != null && !Array.isArray(raw)) throw new HttpError(400, 'audienceTicketTypes must be an array of ticket-type names');
+    const list = [...new Set((raw || []).map((t) => str(t, 80)).filter(Boolean))];
+    if (list.length > 20) throw new HttpError(400, 'A survey can target at most 20 ticket types');
+    out.audience_ticket_types = JSON.stringify(list);
+  }
   if (has('questions')) out.questions = JSON.stringify(normalizeQuestions(body.questions));
   return out;
 }
 
-function mount(app, { db, auth, rateLimit }) {
+function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent }) {
   const sql = db.db;
+
+  // Publish gate: the event must be listed in the Howler app. Returns the app's
+  // listing name (authoritative) or null when the check is skipped (no outbound).
+  async function assertEventListed(eventId) {
+    let found;
+    try { found = await lookupEvent(String(eventId)); }
+    catch { throw new HttpError(502, 'Could not reach Howler to verify the event — please try again shortly.'); }
+    if (found && found.skipped) return null;
+    if (!found || !found.ok) throw new HttpError(400, `Event ${eventId} isn't listed in the Howler app — surveys can only be published for listed events.`);
+    return found.name || null;
+  }
 
   sql.exec(`
     CREATE TABLE IF NOT EXISTS surveys (
@@ -152,8 +191,20 @@ function mount(app, { db, auth, rateLimit }) {
   };
   addCol('survey_responses', 'ticket_type', "TEXT NOT NULL DEFAULT ''");    // contract v1.2: fan's ticket type name ("General", "VIP")
   addCol('survey_responses', 'ticket_type_id', "TEXT NOT NULL DEFAULT ''"); // optional stable id alongside the display name
+  addCol('surveys', 'audience_ticket_types', "TEXT NOT NULL DEFAULT '[]'"); // contract v1.3: targeting — [] = everyone, else ticket-type names
 
   const enabled = () => db.getSetting('surveys_enabled', '1') !== '0'; // global kill switch
+  const audienceOf = (row) => { try { return JSON.parse(row.audience_ticket_types || '[]') || []; } catch { return []; } };
+  // Targeting match: blanket surveys ([] audience) reach everyone; targeted ones
+  // only fans whose ticket type is named. Case-insensitive. `fanTypes` = the
+  // type(s) the app declared for this fan (comma-separated) — none declared
+  // means only blanket surveys match (old app builds never leak targeted ones).
+  const audienceMatches = (row, fanTypes) => {
+    const audience = audienceOf(row);
+    if (!audience.length) return true;
+    const declared = String(fanTypes || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    return declared.some((d) => audience.some((a) => a.toLowerCase() === d));
+  };
   // Per-client flag — the REAL boundary for the public surface: a client whose
   // engage.surveys flag is off must be invisible to the app entirely.
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'engage.surveys'); } catch { return false; } };
@@ -178,7 +229,8 @@ function mount(app, { db, auth, rateLimit }) {
     return out;
   }
   function publicSurvey(row) {
-    return {
+    const audience = audienceOf(row);
+    const out = {
       contractVersion: 1,
       id: row.id,
       eventId: String(row.event_id),
@@ -189,8 +241,12 @@ function mount(app, { db, auth, rateLimit }) {
       layout: LAYOUTS.includes(row.layout) ? row.layout : 'form',
       opensAt: row.opens_at || null,
       closesAt: row.closes_at || null,
-      questions: questionsOf(row).map(publicQuestion),
     };
+    // v1.3, additive: key present only on TARGETED surveys, so blanket surveys
+    // stay byte-identical to the v1.1 wire shape the app's tests are locked to.
+    if (audience.length) out.audienceTicketTypes = audience;
+    out.questions = questionsOf(row).map(publicQuestion);
+    return out;
   }
 
   // Internal (admin/client) shape — richer than the public one, camelCase.
@@ -208,6 +264,7 @@ function mount(app, { db, auth, rateLimit }) {
       layout: row.layout,
       opensAt: row.opens_at || null,
       closesAt: row.closes_at || null,
+      audienceTicketTypes: audienceOf(row),
       questions: questionsOf(row),
       responseCount: responseCount(row.id),
       publishedAt: row.published_at || null,
@@ -294,7 +351,8 @@ function mount(app, { db, auth, rateLimit }) {
     const eventId = str(req.query.eventId, 32);
     if (!/^[0-9]{1,32}$/.test(eventId)) return res.status(400).json({ error: 'eventId (numeric) is required' });
     const rows = sql.prepare("SELECT * FROM surveys WHERE event_id=? AND status='live' ORDER BY created_at").all(eventId);
-    res.json({ surveys: rows.filter((r) => effectiveState(r) === 'live' && flagOn(r.entity_id)).map(publicSurvey) });
+    const fanTypes = str(req.query.ticketType, 400); // v1.3: fan's ticket type(s), comma-separated
+    res.json({ surveys: rows.filter((r) => effectiveState(r) === 'live' && flagOn(r.entity_id) && audienceMatches(r, fanTypes)).map(publicSurvey) });
   });
 
   app.get('/api/app/surveys/:id', readLimit, (req, res) => {
@@ -312,6 +370,12 @@ function mount(app, { db, auth, rateLimit }) {
     if (state === 'closed') return res.status(409).json({ error: 'This survey has closed' });
     if (state === 'scheduled') return res.status(409).json({ error: 'This survey is not open yet' });
     const clean = validateAnswers(row, req.body || {}); // throws HttpError(400) — sync, caught by Express
+    // Targeted surveys: a declared, non-matching ticket type is rejected; an
+    // undeclared one is accepted (old app builds can't say — fail open here,
+    // since the survey was only ever SERVED to matching/blanket audiences).
+    if (clean.ticketType && !audienceMatches(row, clean.ticketType)) {
+      return res.status(400).json({ error: `This survey is for ${audienceOf(row).join(' / ')} ticket holders` });
+    }
     const t = nowIso();
     const existing = sql.prepare('SELECT id FROM survey_responses WHERE survey_id=? AND howler_user_id=?').get(row.id, clean.howlerUserId);
     const id = existing ? existing.id : rid('rsp');
@@ -331,11 +395,11 @@ function mount(app, { db, auth, rateLimit }) {
     const fields = normalizeSurveyFields(body || {});
     const t = nowIso();
     const id = rid('srv');
-    sql.prepare(`INSERT INTO surveys (id, entity_id, suite_id, event_id, event_name, title, description, status, layout, opens_at, closes_at, questions, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    sql.prepare(`INSERT INTO surveys (id, entity_id, suite_id, event_id, event_name, title, description, status, layout, opens_at, closes_at, audience_ticket_types, questions, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, fields.suite_id || '', fields.event_id, fields.event_name || '', fields.title,
         fields.description || '', 'draft', fields.layout || 'form', fields.opens_at || null, fields.closes_at || null,
-        fields.questions || '[]', t, t);
+        fields.audience_ticket_types || '[]', fields.questions || '[]', t, t);
     return internalSurvey(getSurvey(id));
   }
 
@@ -380,6 +444,7 @@ function mount(app, { db, auth, rateLimit }) {
       layout: row.layout,
       opensAt: row.opens_at,
       closesAt: row.closes_at,
+      audienceTicketTypes: audienceOf(row),
       questions: questionsOf(row),
     });
   }
@@ -574,10 +639,12 @@ function mount(app, { db, auth, rateLimit }) {
     const row = adminSurvey(req, res); if (!row) return;
     res.json(updateSurvey(row, req.body));
   });
-  app.post('/api/admin/entities/:entityId/surveys/:surveyId/publish', (req, res) => {
+  app.post('/api/admin/entities/:entityId/surveys/:surveyId/publish', asyncHandler(async (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
-    res.json(publishSurvey(row));
-  });
+    const listedName = await assertEventListed(row.event_id);
+    if (listedName) sql.prepare('UPDATE surveys SET event_name=? WHERE id=?').run(listedName, row.id);
+    res.json(publishSurvey(getSurvey(row.id)));
+  }));
   app.post('/api/admin/entities/:entityId/surveys/:surveyId/close', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
     res.json(closeSurvey(row));
@@ -607,6 +674,19 @@ function mount(app, { db, auth, rateLimit }) {
   });
 
   // ── Client self-service surface (/api/my) ────────────────────────────────────
+  // Event lookup for the builder: is this event listed in the Howler app?
+  // (Registered before any /:id route could ever shadow it.)
+  app.get('/api/my/surveys/event-lookup', asyncHandler(async (req, res) => {
+    if (!requireUser(req, res)) return;
+    const eventId = str(req.query.eventId, 32);
+    if (!/^[0-9]{1,32}$/.test(eventId)) return res.status(400).json({ error: 'eventId (numeric) is required' });
+    let found;
+    try { found = await lookupEvent(eventId); }
+    catch { return res.status(502).json({ error: 'Could not reach Howler to verify the event — please try again shortly.' }); }
+    if (found && found.skipped) return res.json({ ok: true, eventId, eventName: '', ticketTypes: [], unverified: true });
+    res.json(found && found.ok ? { ok: true, eventId, eventName: found.name || '', ticketTypes: found.ticketTypes || [] } : { ok: false, eventId });
+  }));
+
   app.get('/api/my/surveys', (req, res) => {
     const user = requireUser(req, res); if (!user) return;
     const eids = user.role === 'admin'
@@ -626,10 +706,12 @@ function mount(app, { db, auth, rateLimit }) {
     const row = mySurvey(req, res, P.manage); if (!row) return;
     res.json(updateSurvey(row, req.body));
   });
-  app.post('/api/my/surveys/:id/publish', (req, res) => {
+  app.post('/api/my/surveys/:id/publish', asyncHandler(async (req, res) => {
     const row = mySurvey(req, res, P.manage); if (!row) return;
-    res.json(publishSurvey(row));
-  });
+    const listedName = await assertEventListed(row.event_id);
+    if (listedName) sql.prepare('UPDATE surveys SET event_name=? WHERE id=?').run(listedName, row.id);
+    res.json(publishSurvey(getSurvey(row.id)));
+  }));
   app.post('/api/my/surveys/:id/close', (req, res) => {
     const row = mySurvey(req, res, P.manage); if (!row) return;
     res.json(closeSurvey(row));

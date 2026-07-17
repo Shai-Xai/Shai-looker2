@@ -29,6 +29,21 @@ backward-compatible: payloads keep `contractVersion: 1`; responses without
 them aggregate under **"Unknown"**. Pulse accepts + stores + reports these
 TODAY; the app starts sending them when its v1.2 build ships.
 
+**Doc revision v1.3 (additive, 2026-07-17):** ticket-type TARGETING. A survey
+may declare `audienceTicketTypes` (array of ticket-type names) — empty/absent
+= blanket (everyone with a ticket). The app passes the fan's ticket type(s)
+when listing: `GET /api/app/surveys?eventId=…&ticketType=General` (comma-
+separate multiple). Matching is case-insensitive; targeted surveys are only
+returned on a match, and a fan who declares a non-matching type on submit is
+rejected (400). **Backward-compatible fail-private default:** an app build
+that sends no `ticketType` only ever receives blanket surveys — targeted
+surveys never leak. On the wire the `audienceTicketTypes` key appears (after
+`closesAt`) ONLY on targeted surveys, so blanket surveys stay byte-identical
+to the v1.1 shape. Also in v1.3: **publish-time event verification** — Pulse
+only publishes a survey if its event is listed in the Howler backend the app
+reads from (`node(id: "gid://howler/Event/<id>")`), adopting the listing's
+event name and offering its real ticket types in the builder.
+
 ---
 
 ## 1. Principles

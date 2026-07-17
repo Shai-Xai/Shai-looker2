@@ -22,6 +22,7 @@ import ReportStudio from '../components/ReportStudio.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
+import SurveyManager from '../components/SurveyManager.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
@@ -3076,7 +3077,11 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
+<<<<<<< HEAD
   const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+=======
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+>>>>>>> origin/main
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -3135,6 +3140,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>ChottuLink deep links for <b>{entity.name}</b> — short links into the Howler app, tied to their events, with click counts. Clients manage these themselves in Engage → Links; the key/domain lives under Integrations.</p>
               <ChottuLinks entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'surveys' && (
+            <div>
+              <p style={hint}>Post-event fan surveys for <b>{entity.name}</b> — designed in Pulse, answered in the Howler app, results back here. Clients manage these themselves in Engage → Surveys once their <b>engage.surveys</b> flag is on (Product → Flags).</p>
+              <SurveyManager entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'eventops' && (

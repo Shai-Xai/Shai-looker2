@@ -1088,10 +1088,19 @@ list) and CSV export. One response per fan — resubmitting simply updates it.
 Per-survey **layout choice** (single form vs one-question-per-card) so
 organisers can A/B test presentation.
 
-**Status honestly:** 🧪 the Pulse↔app plumbing is LIVE end-to-end (the app side
-ships behind a flag); the survey **builder UI in Engage is in design** — until
-it lands, Howler staff can set surveys up on a client's behalf. Live surveys
-are locked (close & duplicate to change) so results always match what fans saw.
+**Targeting & trust built in:** a survey can go to **everyone** or only to
+specific **ticket types** (picked from the event's real ticket types — a VIP
+survey VIPs see and nobody else does), and a survey can only be **published
+for an event that actually exists in the Howler app** (checked live at
+publish). Results slice by ticket type and by day, with tap-to-drill-down
+into who said what.
+
+**Status honestly:** 🧪 live end-to-end — the **survey builder is in Engage →
+Surveys** (dual-surface: clients self-serve, admins can drive it for them),
+with a live phone preview while you build. The app side ships behind a flag;
+per-client rollout via the **engage.surveys** feature flag (default OFF).
+Live surveys are locked (close & duplicate to change) so results always match
+what fans saw.
 
 **The pitch:** "Know what fans actually thought — in the same place you watched
 the tickets sell." Feedback lands next to the sales data, ready for the Owl and
@@ -1134,6 +1143,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-17** — **📋 Fan surveys — builder UI, targeting & deep results** 🧪:
+  the **Engage → Surveys** builder is live (dual-surface, live phone preview,
+  form/cards layout picker). Surveys can **target specific ticket types** (picked
+  from the event's real ticket types via a live Howler lookup) or everyone;
+  **publish is blocked unless the event is listed in the Howler app**. Results
+  gained **responses-by-day**, a **by-ticket-type breakdown**, a whole-report
+  **ticket-type filter** (CSV included) and **tap-to-drill-down** to the
+  individual responses behind any bar. Contract v1.2 (ticketType on responses) +
+  v1.3 (targeting) — additive, app builds catch up behind a flag.
 - **2026-07-17** — **📑 Report Studio: live design canvas** 🧪: the report editor
   is now a **WYSIWYG canvas** — the report renders exactly as stakeholders will
   see it while you build it, with **live real-data previews** for every data
@@ -1163,8 +1181,7 @@ see "The continuous comms loop" above.)*
   option counts, comments, CSV) land back in Pulse. Four question types, per-survey
   form/cards layout for A/B testing, one response per fan (resubmit updates), live
   surveys immutable (close & duplicate to edit). API + results engine live
-  (`server/surveys.js`, contract `docs/specs/SURVEY_CONTRACT.md`); Engage builder
-  UI in design — admin-assisted setup until it ships.
+  (`server/surveys.js`, contract `docs/specs/SURVEY_CONTRACT.md`).
 - **2026-07-16** — **Fan Owl: loyalty & rewards engine** 🧪 (staging, flag-gated):
   email-verified fan recognition (tier + history-aware guidance + itemised past
   orders), budgeted reward pools (unique-code stock or shared multi-use code)

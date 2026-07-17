@@ -702,6 +702,17 @@ export const api = {
   chottuPreviewTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   chottuApplyTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // ── Surveys (Engage → Surveys · post-event fan feedback, docs/specs/SURVEY_CONTRACT.md) ──
+  listSurveys: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys` : '/api/my/surveys').then(json),
+  createSurvey: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys` : '/api/my/surveys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  updateSurvey: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  surveyAction: (scope, entityId, id, action) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + `/${action}`, { method: 'POST' }).then(json),
+  deleteSurvey: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`, { method: 'DELETE' }).then(json),
+  surveyResults: (scope, entityId, id, ticketType = '') => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/results' + (ticketType ? `?ticketType=${encodeURIComponent(ticketType)}` : '')).then(json),
+  surveyResponses: (scope, entityId, id, params = {}) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/responses?' + new URLSearchParams(params).toString()).then(json),
+  surveyCsvUrl: (scope, entityId, id, ticketType = '') => (scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/results.csv' + (ticketType ? `?ticketType=${encodeURIComponent(ticketType)}` : ''),
+  surveyEventLookup: (eventId) => fetch(`/api/my/surveys/event-lookup?eventId=${encodeURIComponent(eventId)}`).then(json),
+
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
