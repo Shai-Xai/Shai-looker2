@@ -718,7 +718,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     try { found = await lookupEvent(eventId); }
     catch { return res.status(502).json({ error: 'Could not reach Howler to verify the event — please try again shortly.' }); }
     if (found && found.skipped) return res.json({ ok: true, eventId, eventName: '', ticketTypes: [], unverified: true });
-    res.json(found && found.ok ? { ok: true, eventId, eventName: found.name || '', ticketTypes: found.ticketTypes || [] } : { ok: false, eventId });
+    res.json(found && found.ok ? { ok: true, eventId, eventName: found.name || '', ticketTypes: found.ticketTypes || [], source: found.source || '' } : { ok: false, eventId });
   }));
 
   // The client's own events for the builder's dropdown — ids come from the
