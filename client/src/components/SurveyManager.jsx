@@ -27,7 +27,7 @@ export default function SurveyManager({ entityId, scope = 'my' }) {
   useEffect(() => { setView({ mode: 'list' }); load(); }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (view.mode === 'edit') {
-    return <SurveyEditor entityId={entityId} scope={scope} survey={view.survey} onClose={(changed) => { setView({ mode: 'list' }); if (changed) load(); }} onResults={(s) => setView({ mode: 'results', survey: s })} />;
+    return <SurveyEditor entityId={entityId} scope={scope} survey={view.survey} prefill={view.prefill} onClose={(changed) => { setView({ mode: 'list' }); if (changed) load(); }} onResults={(s) => setView({ mode: 'results', survey: s })} />;
   }
   if (view.mode === 'results') {
     return <SurveyResults entityId={entityId} scope={scope} survey={view.survey} onClose={() => { setView({ mode: 'list' }); load(); }} />;
@@ -42,8 +42,36 @@ export default function SurveyManager({ entityId, scope = 'my' }) {
       {list === null ? null : list.length === 0 ? (
         <p style={{ color: 'var(--muted)', fontSize: 13, padding: '18px 0' }}>No surveys yet — create one for an upcoming (or just-finished) event.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {list.map((s) => <SurveyRow key={s.id} s={s} onEdit={() => setView({ mode: 'edit', survey: s })} onResults={() => setView({ mode: 'results', survey: s })} />)}
+        // ONE EVENT → its set of surveys (e.g. a blanket one, or one per ticket
+        // type). Grouped so the per-event story reads at a glance.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {(() => {
+            const groups = [];
+            const byEvent = new Map();
+            for (const s of list) {
+              if (!byEvent.has(s.eventId)) { byEvent.set(s.eventId, []); groups.push(s.eventId); }
+              byEvent.get(s.eventId).push(s);
+            }
+            return groups.map((eventId) => {
+              const surveys = byEvent.get(eventId);
+              const eventName = surveys.find((s) => s.eventName)?.eventName || `Event #${eventId}`;
+              const live = surveys.filter((s) => (s.effectiveState || s.status) === 'live').length;
+              const responses = surveys.reduce((n, s) => n + (s.responseCount || 0), 0);
+              return (
+                <div key={eventId}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 800, fontSize: 14.5 }}>🎫 {eventName}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>#{eventId} · {surveys.length} survey{surveys.length === 1 ? '' : 's'}{live ? ` · ${live} live` : ''}{responses ? ` · ${responses.toLocaleString()} responses` : ''}</span>
+                    <span style={{ flex: 1 }} />
+                    <button style={tiny} onClick={() => setView({ mode: 'edit', survey: null, prefill: { eventId, eventName: eventName.startsWith('Event #') ? '' : eventName } })}>+ Survey for this event</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {surveys.map((s) => <SurveyRow key={s.id} s={s} onEdit={() => setView({ mode: 'edit', survey: s })} onResults={() => setView({ mode: 'results', survey: s })} />)}
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
       )}
     </div>
@@ -89,14 +117,14 @@ function SurveyRow({ s, onEdit, onResults }) {
 
 // ── Editor with live phone preview ─────────────────────────────────────────────
 
-function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
+function SurveyEditor({ entityId, scope, survey, prefill, onClose, onResults }) {
   const isMobile = useIsMobile();
   const draft = !survey || survey.status === 'draft';
   const [f, setF] = useState({
     title: survey?.title || '',
     description: survey?.description || '',
-    eventId: survey?.eventId || '',
-    eventName: survey?.eventName || '',
+    eventId: survey?.eventId || prefill?.eventId || '',
+    eventName: survey?.eventName || prefill?.eventName || '',
     layout: survey?.layout || 'form',
     closesAt: survey?.closesAt ? survey.closesAt.slice(0, 10) : '',
     audienceTicketTypes: survey?.audienceTicketTypes || [],
@@ -118,7 +146,8 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
       .then((r) => {
         const events = r.events || [];
         setMyEvents(events);
-        if (survey?.eventId && !events.some((e) => e.eventId === String(survey.eventId))) setManualEvent(true);
+        const preset = survey?.eventId || prefill?.eventId;
+        if (preset && !events.some((e) => e.eventId === String(preset))) setManualEvent(true);
       })
       .catch(() => setMyEvents([]));
   }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -155,6 +184,7 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
       if (thenPublish) {
         const p = await api.surveyAction(scope, entityId, s.id, 'publish');
         if (p.error) throw new Error(p.error);
+        if (p.warning) alert(p.warning); // e.g. another live survey for this event overlaps this audience
       }
       onClose(true);
     } catch (e) { setErr(e.message || 'Something went wrong'); } finally { setBusy(''); }

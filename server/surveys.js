@@ -457,6 +457,22 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     return internalSurvey(getSurvey(row.id));
   }
 
+  // Several surveys may serve ONE event (e.g. one per ticket type). That's the
+  // intended model — but if two LIVE surveys' audiences overlap, matching fans
+  // see BOTH in the app. Surface that as a heads-up at publish time.
+  function audienceOverlapWarning(row) {
+    const siblings = sql.prepare("SELECT * FROM surveys WHERE event_id=? AND entity_id=? AND status='live' AND id != ?").all(row.event_id, row.entity_id, row.id)
+      .filter((s) => effectiveState(s) === 'live');
+    const mine = audienceOf(row).map((a) => a.toLowerCase());
+    const clashes = siblings.filter((s) => {
+      const theirs = audienceOf(s).map((a) => a.toLowerCase());
+      return !mine.length || !theirs.length || mine.some((a) => theirs.includes(a));
+    });
+    if (!clashes.length) return null;
+    const who = (s) => (audienceOf(s).length ? audienceOf(s).join(' / ') : 'everyone');
+    return `Heads-up: ${clashes.map((s) => `“${s.title}” (${who(s)})`).join(' and ')} ${clashes.length === 1 ? 'is' : 'are'} also live for this event — fans matching both audiences will see both surveys.`;
+  }
+
   function publishSurvey(row) {
     if (row.status === 'live') return internalSurvey(row);
     const qs = questionsOf(row);
@@ -692,7 +708,8 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     const row = adminSurvey(req, res); if (!row) return;
     const listedName = await assertEventListed(row.event_id);
     if (listedName) sql.prepare('UPDATE surveys SET event_name=? WHERE id=?').run(listedName, row.id);
-    res.json(publishSurvey(getSurvey(row.id)));
+    const out = publishSurvey(getSurvey(row.id));
+    res.json({ ...out, warning: audienceOverlapWarning(getSurvey(row.id)) });
   }));
   app.post('/api/admin/entities/:entityId/surveys/:surveyId/close', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
@@ -780,7 +797,8 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     const row = mySurvey(req, res, P.manage); if (!row) return;
     const listedName = await assertEventListed(row.event_id);
     if (listedName) sql.prepare('UPDATE surveys SET event_name=? WHERE id=?').run(listedName, row.id);
-    res.json(publishSurvey(getSurvey(row.id)));
+    const out = publishSurvey(getSurvey(row.id));
+    res.json({ ...out, warning: audienceOverlapWarning(getSurvey(row.id)) });
   }));
   app.post('/api/my/surveys/:id/close', (req, res) => {
     const row = mySurvey(req, res, P.manage); if (!row) return;
