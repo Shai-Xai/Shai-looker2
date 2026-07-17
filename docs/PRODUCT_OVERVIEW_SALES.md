@@ -1151,6 +1151,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-17** — **📋 Fan surveys: channels, channel results & event rollup** 🧪:
+  every survey now has **channel switches** (📱 in-app · ✉️ email · 🔗 web link —
+  e.g. an app-only VIP survey), results show and **filter by channel** alongside
+  ticket type, and a new **📊 Event results** view rolls up ALL of one event's
+  surveys (combined responses-by-day, ticket-type/channel splits, per-survey
+  summary cards, one long-format combined CSV). Survey list groups by event with
+  audience-overlap warnings at publish.
+
 - **2026-07-17** — **📋 Fan surveys — email & web channel** 🧪: surveys now reach
   fans OUTSIDE the app too. A live survey gets an **Email & links** panel: paste
   recipients (email, name, ticket type) → each gets a **private personalised

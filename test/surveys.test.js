@@ -371,6 +371,59 @@ test('ticket type (contract v1.2): stored, sliced by day/type, filterable, drill
   assert.ok(!csv.includes('f1'));
 });
 
+test('channels: an email-only survey never reaches the app; results carry channel', async () => {
+  const { owner } = seedClient();
+  const emailOnly = await makeLiveSurvey({ owner, eventId: '63001', extra: { channels: ['email'] } });
+  assert.deepEqual((await call('GET /api/app/surveys', { query: { eventId: '63001' } })).body, { surveys: [] });
+  assert.equal((await call('GET /api/app/surveys/:id', { params: { id: emailOnly.id } })).code, 404);
+  assert.equal((await call('POST /api/app/surveys/:id/responses', { params: { id: emailOnly.id }, body: { respondent: { howlerUserId: 'x' }, answers: [{ questionId: 'q_overall', rating: 4 }] } })).code, 404);
+  assert.deepEqual(emailOnly.channels, ['email']);
+  const appToo = await makeLiveSurvey({ owner, eventId: '63001' }); // default: all channels
+  assert.deepEqual((await call('GET /api/app/surveys', { query: { eventId: '63001' } })).body.surveys.map((s) => s.id), [appToo.id]);
+  assert.equal((await call('POST /api/my/surveys', { user: owner, body: { title: 'x', eventId: '63001', channels: [] } })).code, 400);
+  // Channel filter narrows results (all these responses are channel 'app').
+  await call('POST /api/app/surveys/:id/responses', { params: { id: appToo.id }, body: { respondent: { howlerUserId: 'c1' }, answers: [{ questionId: 'q_overall', rating: 5 }] } });
+  const filtered = (await call('GET /api/my/surveys/:id/results', { user: owner, params: { id: appToo.id }, query: { channel: 'email' } })).body;
+  assert.equal(filtered.responseCount, 0);
+  assert.equal(filtered.totalResponseCount, 1);
+  assert.equal(filtered.filter.channel, 'email');
+  const app = (await call('GET /api/my/surveys/:id/results', { user: owner, params: { id: appToo.id }, query: { channel: 'app' } })).body;
+  assert.equal(app.responseCount, 1);
+});
+
+test('event results: rollup across all of one event\'s surveys + long-format CSV', async () => {
+  const { entity, owner } = seedClient();
+  const vip = await makeLiveSurvey({ owner, eventId: '64001', extra: { audienceTicketTypes: ['VIP'] } });
+  const gen = await makeLiveSurvey({ owner, eventId: '64001', extra: { audienceTicketTypes: ['General'] } });
+  const submit = (sid, uid, ticketType, rating) => call('POST /api/app/surveys/:id/responses', {
+    params: { id: sid }, body: { respondent: { howlerUserId: uid, ticketType }, answers: [{ questionId: 'q_overall', rating }, { questionId: 'q_comments', text: `note from ${uid}` }] },
+  });
+  assert.equal((await submit(vip.id, 'v1', 'VIP', 5)).code, 200);
+  assert.equal((await submit(vip.id, 'v2', 'VIP', 4)).code, 200);
+  assert.equal((await submit(gen.id, 'g1', 'General', 3)).code, 200);
+
+  const r = (await call('GET /api/my/surveys/event-results', { user: owner, query: { entityId: entity.id, eventId: '64001' } })).body;
+  assert.equal(r.responseCount, 3);
+  assert.equal(r.avgRating, 4); // (5+4+3)/3
+  assert.equal(r.byDay[0].count, 3);
+  assert.deepEqual(r.byTicketType.map((t) => [t.ticketType, t.count]), [['VIP', 2], ['General', 1]]);
+  assert.deepEqual(r.byChannel, [{ channel: 'app', count: 3 }]);
+  assert.equal(r.surveys.length, 2);
+  assert.equal(r.surveys.find((s) => s.id === vip.id).avgRating, 4.5);
+  assert.equal(r.surveys.find((s) => s.id === gen.id).comments, 1);
+  // Filter narrows the rollup too.
+  const vipOnly = (await call('GET /api/my/surveys/event-results', { user: owner, query: { entityId: entity.id, eventId: '64001', ticketType: 'VIP' } })).body;
+  assert.equal(vipOnly.responseCount, 2);
+  // Long-format CSV: one row per ANSWER, survey + channel columns.
+  const csv = (await call('GET /api/my/surveys/event-results.csv', { user: owner, query: { entityId: entity.id, eventId: '64001' } })).text;
+  assert.match(csv.split('\n')[0], /survey,response_id.*channel.*question,answer/);
+  assert.equal(csv.split('\n').length, 1 + 6); // header + 3 responses × 2 answers
+  assert.match(csv, /note from g1/);
+  // Outsiders blocked.
+  const { outsider } = { outsider: null };
+  assert.equal((await call('GET /api/my/surveys/event-results', { user: null, query: { entityId: entity.id, eventId: '64001' } })).code, 401);
+});
+
 // ── Lifecycle & immutability ──────────────────────────────────────────────────
 
 test('published surveys are immutable; only closesAt may move while live', async () => {
