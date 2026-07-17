@@ -30,7 +30,7 @@ function mount() {
   const routes = {};
   const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h[h.length - 1]; };
   const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE') };
-  surveys.mount(app, { db, auth, rateLimit, lookupEvent });
+  surveys.mount(app, { db, auth, rateLimit, lookupEvent, listEntityEventIds: async () => ['19203', '31001', UNLISTED] });
   return routes;
 }
 const routes = mount();
@@ -185,6 +185,17 @@ test('event-lookup endpoint verifies an event and returns its ticket types', asy
   assert.deepEqual(miss.body, { ok: false, eventId: UNLISTED });
   assert.equal((await call('GET /api/my/surveys/event-lookup', { user: owner, query: {} })).code, 400);
   assert.equal((await call('GET /api/my/surveys/event-lookup', { user: null, query: { eventId: '1' } })).code, 401);
+});
+
+test('events dropdown endpoint: entity-scoped, only app-listed events, named', async () => {
+  const { owner, outsider } = seedClient();
+  const r = await call('GET /api/my/surveys/events', { user: owner, query: { entityId: owner.entityIds[0] } });
+  assert.equal(r.code, 200);
+  // The unlisted id is dropped; the rest come back named, sorted.
+  assert.deepEqual(r.body.events.map((e) => e.eventId).sort(), ['19203', '31001']);
+  assert.ok(r.body.events.every((e) => e.name.startsWith('Howler Event ')));
+  // Another client's entity → 403.
+  assert.equal((await call('GET /api/my/surveys/events', { user: outsider, query: { entityId: owner.entityIds[0] } })).code, 403);
 });
 
 // ── Ticket-type targeting (v1.3) ──────────────────────────────────────────────

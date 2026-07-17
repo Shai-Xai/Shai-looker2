@@ -29,15 +29,19 @@ const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags'); // per-client gate: engage.surveys (default OFF, beta)
 
-// The Howler backend the APP lists events from — a survey may only be published
-// for an event that actually exists there (checked at publish time, fail-closed).
-const HOWLER_GQL = process.env.HOWLER_GRAPHQL_URL || 'https://www.howlerstaging.co.za/api/v6/graphql';
-async function defaultLookupEvent(eventId) {
-  if (process.env.OUTBOUND_DISABLED) return { skipped: true }; // staging service has no outbound
+// The Howler backends the APP lists events from — a survey may only be published
+// for an event that actually exists on one of them (checked at publish time,
+// fail-closed). Real client events live on PRODUCTION; the Dev Fork / test app
+// points at STAGING — so check production first, then staging.
+const HOWLER_GQLS = (process.env.HOWLER_GRAPHQL_URLS
+  || 'production=https://api.howlerapp.com/api/v6/graphql,staging=https://www.howlerstaging.co.za/api/v6/graphql')
+  .split(',').map((s) => { const [source, ...u] = s.split('='); return { source: source.trim(), url: u.join('=').trim() }; });
+
+async function lookupOnBackend(url, eventId) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const r = await fetch(HOWLER_GQL, {
+    const r = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
       body: JSON.stringify({ query: `{ node(id: "gid://howler/Event/${Number(eventId)}") { ... on Event { id name ticketTypes { nodes { id name } } } } }` }),
     });
@@ -48,6 +52,21 @@ async function defaultLookupEvent(eventId) {
     })).filter((t) => t.name);
     return { ok: true, name: String(node.name || ''), ticketTypes };
   } finally { clearTimeout(t); }
+}
+
+async function defaultLookupEvent(eventId) {
+  if (process.env.OUTBOUND_DISABLED) return { skipped: true }; // staging service has no outbound
+  let failures = 0, lastErr = null;
+  for (const { source, url } of HOWLER_GQLS) {
+    try {
+      const found = await lookupOnBackend(url, eventId);
+      if (found.ok) return { ...found, source };
+    } catch (e) { failures += 1; lastErr = e; }
+  }
+  // Only claim "not listed" when EVERY backend actually ANSWERED not-found; any
+  // unreachable backend surfaces as an error, never a false negative.
+  if (failures > 0) throw lastErr || new Error('event lookup failed');
+  return { ok: false };
 }
 
 const QUESTION_TYPES = ['rating', 'single_choice', 'multiple_choice', 'text'];
@@ -135,8 +154,19 @@ function normalizeSurveyFields(body, { partial = false } = {}) {
   return out;
 }
 
-function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent }) {
+function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, listEntityEventIds = null }) {
   const sql = db.db;
+
+  // Small TTL cache so the builder's event dropdown / verify-as-you-type don't
+  // hammer the Howler backends (one entry per event id).
+  const lookupCache = new Map(); // eventId -> { at, value }
+  async function cachedLookup(eventId) {
+    const hit = lookupCache.get(eventId);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.value;
+    const value = await lookupEvent(String(eventId));
+    lookupCache.set(eventId, { at: Date.now(), value });
+    return value;
+  }
 
   // Publish gate: the event must be listed in the Howler app. Returns the app's
   // listing name (authoritative) or null when the check is skipped (no outbound).
@@ -462,7 +492,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent }) {
   // Responses for a survey, optionally narrowed to one ticket type ('Unknown'
   // matches responses that arrived without one — pre-contract-v1.2 app builds).
   function responsesFor(surveyId, { ticketType = '' } = {}) {
-    const all = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC').all(surveyId);
+    const all = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC, id').all(surveyId);
     return ticketType ? all.filter((r) => ticketLabel(r) === ticketType) : all;
   }
 
@@ -496,7 +526,11 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent }) {
       if (!types.has(label)) types.set(label, bucket());
       tally(types.get(label), parseAnswers(r));
     }
-    const byTicketType = [...types.entries()].map(([label, b]) => ({ ticketType: label, ...finish(b) })).sort((a, b) => b.count - a.count);
+    const byTicketType = [...types.entries()].map(([label, b]) => ({ ticketType: label, ...finish(b) }))
+      // Deterministic: count desc, then "Unknown" last among ties, then A→Z
+      // (response timestamps can collide to the millisecond, so insertion order
+      // out of SQLite is not stable enough to sort on).
+      .sort((a, b) => b.count - a.count || ((a.ticketType === 'Unknown') - (b.ticketType === 'Unknown')) || a.ticketType.localeCompare(b.ticketType));
     const byQ = new Map();
     for (const { row: r, answers } of parsed) {
       for (const a of answers) {
@@ -685,6 +719,27 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent }) {
     catch { return res.status(502).json({ error: 'Could not reach Howler to verify the event — please try again shortly.' }); }
     if (found && found.skipped) return res.json({ ok: true, eventId, eventName: '', ticketTypes: [], unverified: true });
     res.json(found && found.ok ? { ok: true, eventId, eventName: found.name || '', ticketTypes: found.ticketTypes || [] } : { ok: false, eventId });
+  }));
+
+  // The client's own events for the builder's dropdown — ids come from the
+  // App-analytics (PostHog) event mapping for this entity, names + backend from
+  // the Howler lookup. Empty when PostHog isn't configured/mapped — the UI then
+  // falls back to a manual event-id field.
+  app.get('/api/my/surveys/events', asyncHandler(async (req, res) => {
+    const entityId = str(req.query.entityId, 60);
+    if (!myEntityCheck(req, res, entityId, P.view)) return;
+    let ids = [];
+    try { ids = listEntityEventIds ? await listEntityEventIds(entityId) : []; } catch { ids = []; }
+    const events = [];
+    for (const id of [...new Set((ids || []).map((i) => String(i)))].slice(0, 25)) {
+      if (!/^[0-9]{1,32}$/.test(id)) continue;
+      try {
+        const found = await cachedLookup(id);
+        if (found && found.ok) events.push({ eventId: id, name: found.name || `Event #${id}`, source: found.source || '' });
+      } catch { /* backend unreachable — skip; manual entry still works */ }
+    }
+    events.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ events });
   }));
 
   app.get('/api/my/surveys', (req, res) => {
