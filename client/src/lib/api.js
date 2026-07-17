@@ -361,6 +361,15 @@ export const api = {
   adminDraftHelpArticles: () => fetch('/api/admin/help/draft', { method: 'POST' }).then(json),
   adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
   adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  // Admin — Product → Support Owl: the customer-support knowledge spine
+  // (server/supportOwl.js, P0a) — HelpDocs sync + platform-tier curation.
+  adminSupportOwl: () => fetch('/api/admin/support-owl').then(json),
+  adminSupportOwlSettings: (s) => fetch('/api/admin/support-owl/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminSupportOwlSync: () => fetch('/api/admin/support-owl/sync', { method: 'POST' }).then(json),
+  adminSupportOwlSearch: (q, entityId = '') => fetch(`/api/admin/support-owl/search?${new URLSearchParams({ q, entityId })}`).then(json),
+  adminCreateSupportKnowledge: (k) => fetch('/api/admin/support-owl/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(k) }).then(json),
+  adminUpdateSupportKnowledge: (id, k) => fetch(`/api/admin/support-owl/knowledge/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(k) }).then(json),
+  adminDeleteSupportKnowledge: (id) => fetch(`/api/admin/support-owl/knowledge/${id}`, { method: 'DELETE' }),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
