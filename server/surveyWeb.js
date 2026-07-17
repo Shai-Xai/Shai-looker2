@@ -25,7 +25,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const emailOk = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 const str = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
 
-function mount(app, { db, auth, rateLimit, mailer, surveys }) {
+function mount(app, { db, auth, rateLimit, mailer, surveys, getSegmentsApi = () => null }) {
   const sql = db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS survey_links (
@@ -125,59 +125,104 @@ function mount(app, { db, auth, rateLimit, mailer, surveys }) {
     return row;
   }
 
+  // Recipients can come from an Engage SEGMENT (always-current audience,
+  // resolved via the same engine campaigns use — consent-aware) or an explicit
+  // list (pasted / CSV-parsed in the UI). Segment resolution respects emailOk.
+  async function recipientsFromSegment(row, segmentId, user) {
+    const segs = getSegmentsApi();
+    if (!segs || !segs.resolveSegment) throw new Error('Segments are not available');
+    const resolved = await segs.resolveSegment(row.entity_id, String(segmentId), user);
+    if (!resolved) return null;
+    return (resolved.list || [])
+      .filter((r) => r.email && r.emailOk !== false)
+      .map((r) => ({ email: r.email, displayName: r.name || '', ticketType: r.ticket || r.ticketType || '' }));
+  }
+
   async function emailHandler(req, res) {
     const row = guard(req, res, 'campaigns.approve'); if (!row) return;
     if (row.status !== 'live') return res.status(409).json({ error: 'Publish the survey before emailing it out' });
     const body = req.body || {};
-    const raw = Array.isArray(body.recipients) ? body.recipients.slice(0, 500) : [];
-    if (!raw.length) return res.status(400).json({ error: 'recipients required — [{ email, displayName?, ticketType? }]' });
+    let raw;
+    if (body.segmentId) {
+      let fromSeg;
+      try { fromSeg = await recipientsFromSegment(row, body.segmentId, req.user); }
+      catch (e) { return res.status(502).json({ error: e.message || 'Could not resolve the segment — try again.' }); }
+      if (fromSeg === null) return res.status(404).json({ error: 'Segment not found' });
+      raw = fromSeg.slice(0, 2000);
+      if (body.preview) {
+        return res.json({ ok: true, preview: true, count: raw.length, sample: raw.slice(0, 5).map((r) => r.email.replace(/^(..).*(@.*)$/, '$1…$2')) });
+      }
+      if (!raw.length) return res.status(400).json({ error: 'That segment has no emailable members (no addresses, or no email consent)' });
+    } else {
+      raw = Array.isArray(body.recipients) ? body.recipients.slice(0, 500) : [];
+    }
+    if (!raw.length) return res.status(400).json({ error: 'recipients required — [{ email, displayName?, ticketType? }] or a segmentId' });
     const subject = str(body.subject, 150) || `How was ${row.event_name || 'the event'}?`;
     const message = str(body.message, 1000) || row.description || 'It only takes 2 minutes — tell us how it went.';
     const doSend = body.send !== false;
 
+    // Phase 1 — validate + mint links (fast, DB-only). Idempotent per recipient.
     const seen = new Set();
-    const results = [];
+    const skippedPre = [];
+    const toSend = []; // { email, link }
     for (const rec of raw) {
       const email = str(rec && rec.email, 200).toLowerCase();
-      if (!emailOk(email)) { results.push({ email: email || '(blank)', status: 'skipped', reason: 'invalid email' }); continue; }
+      if (!emailOk(email)) { skippedPre.push({ email: email || '(blank)', status: 'skipped', reason: 'invalid email' }); continue; }
       if (seen.has(email)) continue;
       seen.add(email);
       const ticketType = str(rec.ticketType, 80);
       if (ticketType && !surveys.audienceMatches(row, ticketType)) {
-        results.push({ email, status: 'skipped', reason: `survey targets ${surveys.audienceOf(row).join(' / ')}` });
+        skippedPre.push({ email, status: 'skipped', reason: `survey targets ${surveys.audienceOf(row).join(' / ')}` });
         continue;
       }
-      // Idempotent per recipient: same fan keeps the same personal link.
       let link = sql.prepare('SELECT * FROM survey_links WHERE survey_id=? AND email=?').get(row.id, email);
       if (!link) {
         link = { token: newToken(), survey_id: row.id, email, display_name: str(rec.displayName, 200), ticket_type: ticketType, ticket_type_id: str(rec.ticketTypeId, 40), source: 'email', created_at: nowIso() };
         sql.prepare('INSERT INTO survey_links (token, survey_id, email, display_name, ticket_type, ticket_type_id, source, created_at) VALUES (?,?,?,?,?,?,?,?)')
           .run(link.token, link.survey_id, link.email, link.display_name, link.ticket_type, link.ticket_type_id, link.source, link.created_at);
       }
-      let status = 'link only', reason = '';
-      if (doSend) {
-        try {
-          const b = mailer.resolveBranding(row.entity_id);
-          const greeting = link.display_name ? `Hi ${link.display_name} — ` : '';
-          const { html, text } = mailer.notificationEmail({
-            entityId: row.entity_id,
-            title: row.title,
-            body: `${greeting}${message}`,
-            ctaPath: `/s/${link.token}`,
-            ctaText: 'Start the survey',
-            preheader: message,
-          });
-          const sent = await mailer.send({ to: email, subject, html, text, fromName: b.senderName, kind: 'survey', entity: row.entity_id });
-          status = sent && sent.ok ? 'sent' : 'skipped';
-          reason = sent && sent.ok ? '' : (sent && sent.reason) || (sent && sent.error) || 'send failed';
-        } catch (e) { status = 'skipped'; reason = e.message || 'send failed'; }
-      }
-      sql.prepare('UPDATE survey_links SET email_status=? WHERE token=?').run(reason ? `${status}: ${reason}` : status, link.token);
-      results.push({ email, status, reason: reason || undefined, url: linkUrl(link.token) });
+      toSend.push({ email, link });
     }
-    const sent = results.filter((x) => x.status === 'sent').length;
-    const skipped = results.filter((x) => x.status === 'skipped');
-    res.json({ ok: true, total: results.length, sent, skipped, links: results.filter((x) => x.url).map(({ email, url, status }) => ({ email, url, status })) });
+
+    // Phase 2 — send. One branded mail per link via mailer (suppression-aware).
+    const sendOne = async ({ email, link }) => {
+      let status = 'sent', reason = '';
+      try {
+        const b = mailer.resolveBranding(row.entity_id);
+        const greeting = link.display_name ? `Hi ${link.display_name} — ` : '';
+        const { html, text } = mailer.notificationEmail({
+          entityId: row.entity_id,
+          title: row.title,
+          body: `${greeting}${message}`,
+          ctaPath: `/s/${link.token}`,
+          ctaText: 'Start the survey',
+          preheader: message,
+        });
+        const sent = await mailer.send({ to: email, subject, html, text, fromName: b.senderName, kind: 'survey', entity: row.entity_id });
+        if (!sent || !sent.ok) { status = 'skipped'; reason = (sent && sent.reason) || (sent && sent.error) || 'send failed'; }
+      } catch (e) { status = 'skipped'; reason = e.message || 'send failed'; }
+      sql.prepare('UPDATE survey_links SET email_status=? WHERE token=?').run(reason ? `${status}: ${reason}` : status, link.token);
+      return { email, status, reason: reason || undefined, url: linkUrl(link.token) };
+    };
+
+    if (!doSend) {
+      for (const t of toSend) sql.prepare("UPDATE survey_links SET email_status='link only' WHERE token=? AND email_status=''").run(t.link.token);
+      return res.json({ ok: true, total: toSend.length + skippedPre.length, sent: 0, skipped: skippedPre, links: toSend.map((t) => ({ email: t.email, url: linkUrl(t.link.token), status: 'link only' })) });
+    }
+    if (toSend.length <= 100) {
+      const results = [];
+      for (const t of toSend) results.push(await sendOne(t));
+      const sent = results.filter((x) => x.status === 'sent').length;
+      const skipped = [...skippedPre, ...results.filter((x) => x.status === 'skipped')];
+      return res.json({ ok: true, total: toSend.length + skippedPre.length, sent, skipped, links: results.map(({ email, url, status }) => ({ email, url, status })) });
+    }
+    // Big audience (a segment): answer NOW, deliver in the background. The
+    // per-link email_status + the links endpoint's counters show live progress.
+    res.json({ ok: true, queued: toSend.length, total: toSend.length + skippedPre.length, skipped: skippedPre, background: true });
+    (async () => {
+      for (const t of toSend) { try { await sendOne(t); } catch { /* recorded on the link */ } }
+      console.log(`[surveys] background email send finished: ${toSend.length} recipients, survey ${row.id}`);
+    })();
   }
 
   function shareLinkHandler(req, res) {
@@ -197,6 +242,8 @@ function mount(app, { db, auth, rateLimit, mailer, surveys }) {
       total: rows.length,
       responded: rows.filter((l) => l.responded_at).length,
       opened: rows.filter((l) => l.opened_at).length,
+      sent: rows.filter((l) => l.email_status === 'sent').length,
+      pending: rows.filter((l) => l.email === '' ? false : !l.email_status).length, // queued, not yet attempted
       links: rows.slice(0, 200).map((l) => ({ email: l.email, displayName: l.display_name, ticketType: l.ticket_type, source: l.source, status: l.email_status, opened: !!l.opened_at, responded: !!l.responded_at, url: linkUrl(l.token) })),
     });
   }

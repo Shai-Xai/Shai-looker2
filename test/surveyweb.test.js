@@ -25,12 +25,25 @@ const mailerStub = {
   send: async ({ to }) => (String(to).includes('bounce@') ? { skipped: true, reason: 'suppressed (bounced)' } : (sentMails.push(to), { ok: true, id: 'm_' + sentMails.length })),
 };
 
+// Segment stub: 'seg_ok' resolves to two consenting members + one without
+// email consent + one with no address; anything else is unknown.
+const segmentsStub = {
+  resolveSegment: async (entityId, segmentId) => (segmentId === 'seg_ok'
+    ? { list: [
+        { email: 'seg1@fans.test', name: 'Seg One', ticket: 'VIP', emailOk: true },
+        { email: 'seg2@fans.test', name: 'Seg Two', ticket: '', emailOk: true },
+        { email: 'noconsent@fans.test', name: 'No Consent', emailOk: false },
+        { email: '', name: 'No Address', emailOk: true },
+      ] }
+    : null),
+};
+
 const routes = {};
 {
   const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h[h.length - 1]; };
   const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE') };
   const surveys = surveysMod.mount(app, { db, auth, rateLimit, lookupEvent });
-  surveyWeb.mount(app, { db, auth, rateLimit, mailer: mailerStub, surveys });
+  surveyWeb.mount(app, { db, auth, rateLimit, mailer: mailerStub, surveys, getSegmentsApi: () => segmentsStub });
 }
 
 async function call(key, { user, params = {}, body = {}, query = {} } = {}) {
@@ -105,6 +118,24 @@ test('targeted surveys refuse recipients with a non-matching ticket type', async
   });
   assert.equal(r.body.sent, 1);
   assert.match(r.body.skipped[0].reason, /targets VIP/);
+});
+
+test('segment audience: preview counts emailable members; send mints + mails only them', async () => {
+  const { owner, survey } = await seedLive();
+  const before = sentMails.length;
+  const preview = await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: survey.id }, body: { segmentId: 'seg_ok', preview: true } });
+  assert.equal(preview.code, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.count, 2); // consent-less + address-less members excluded
+  assert.match(preview.body.sample[0], /…@fans\.test$/); // masked
+  const send = await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: survey.id }, body: { segmentId: 'seg_ok' } });
+  assert.equal(send.body.sent, 2);
+  assert.equal(sentMails.length, before + 2);
+  // Ticket type rode in from the segment row → tagged on the link.
+  const links = await call('GET /api/my/surveys/:id/links', { user: owner, params: { id: survey.id } });
+  assert.equal(links.body.links.find((l) => l.email === 'seg1@fans.test').ticketType, 'VIP');
+  assert.equal(links.body.sent, 2);
+  // Unknown segment → 404.
+  assert.equal((await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: survey.id }, body: { segmentId: 'seg_nope' } })).code, 404);
 });
 
 test('hosted page: renders escaped survey, marks opened; junk/draft tokens 404; closed 409', async () => {
