@@ -34,12 +34,12 @@ You are given the data behind the report tiles in scope (one section, or the who
 - Be honest — if a figure looks implausible or the data is too sparse to conclude much, say so briefly and cautiously.
 
 Rules: synthesize ACROSS tiles, don't describe each tile in turn. 1-3 short paragraphs of plain prose — no headings, no bullet lists, no preamble, no meta commentary about "the data provided". Write for an external reader: no internal jargon or tool names.`;
-const BLOCK_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'tile', 'ai']);
+const BLOCK_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'tile', 'ai', 'campaign', 'app']);
 const MAX_BLOCKS = 60;
-const MAX_TILE_BLOCKS = 20;
+const MAX_TILE_BLOCKS = 20;   // tile + campaign + app blocks share this data-block cap
 const MAX_AI_BLOCKS = 8;
 
-function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps }) {
+function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, campaignsFor, appReportFor, anthropicKeyForEntity, aiInstructionsFor, notifyOps }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -97,7 +97,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
     const out = [];
     for (const [i, b] of arr.slice(0, MAX_BLOCKS).entries()) {
       if (!b || !BLOCK_TYPES.has(b.type)) continue;
-      if (b.type === 'tile' && ++tiles > MAX_TILE_BLOCKS) continue;
+      if (['tile', 'campaign', 'app'].includes(b.type) && ++tiles > MAX_TILE_BLOCKS) continue;
       if (b.type === 'ai' && ++ais > MAX_AI_BLOCKS) continue;
       out.push({
         id: String(b.id || `b${i}`).slice(0, 40),
@@ -112,6 +112,9 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         display: ['auto', 'chart', 'value', 'table'].includes(b.display) ? b.display : 'auto',
         scope: b.scope === 'report' ? 'report' : 'section',
         focus: String(b.focus || '').slice(0, 1000),
+        campaignId: String(b.campaignId || '').slice(0, 60),
+        appView: ['summary', 'trend', 'events'].includes(b.appView) ? b.appView : 'summary',
+        days: [7, 14, 28, 90].includes(Number(b.days)) ? Number(b.days) : 28,
       });
     }
     return out;
@@ -232,6 +235,28 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
     return { columns, rows, more: Math.max(0, (fact.rows || []).length - maxRows) };
   }
 
+  // Big-number formatting for KPI chips ("6,830"); money via the client's currency.
+  const fmtNum = (v) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString('en-US') : String(v ?? '—'));
+  // Synthesize a fact (the shape buildFactsFromTiles emits) from label/value pairs
+  // or a daily series, so campaign + app blocks feed the AI analysis like tiles do.
+  const metricsFact = (title, visType, metrics) => ({
+    title, visType, context: '',
+    fields: { dimensions: [{ name: 'metric', label: 'Metric' }], measures: [{ name: 'value', label: 'Value' }] },
+    rows: metrics.map(([k, v]) => ({ metric: { value: k, rendered: k }, value: { value: v, rendered: String(v) } })),
+    pivots: [],
+  });
+  const appSeriesFact = (title, series) => ({
+    title, visType: 'looker_line', context: '',
+    fields: { dimensions: [{ name: 'date', label: 'Day' }], measures: [{ name: 'uniques', label: 'App users' }, { name: 'views', label: 'Views' }, { name: 'ctaTaps', label: 'CTA taps' }] },
+    rows: (series || []).map((r) => ({
+      date: { value: r.date, rendered: r.date },
+      uniques: { value: r.uniques || 0, rendered: String(r.uniques || 0) },
+      views: { value: r.views || 0, rendered: String(r.views || 0) },
+      ctaTaps: { value: r.ctaTaps || 0, rendered: String(r.ctaTaps || 0) },
+    })),
+    pivots: [],
+  });
+
   // Resolve a template's author blocks into an immutable snapshot. Sequential by
   // design (one Looker query at a time — same as the digest fact builder).
   async function generateSnapshot(tpl, { byEmail = '' } = {}) {
@@ -263,6 +288,60 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         // Not chartable: tables render as tables, single values as KPI chips.
         const isTable = /table/i.test(String(fact.visType || '')) || ((fact.rows || []).length > 1 && (fact.fields?.dimensions || []).length >= 1);
         resolved.push(isTable && b.display !== 'value' ? asTable() : asKpi());
+        continue;
+      }
+      // Campaign block: headline results for ONE Engage campaign, frozen as a
+      // sub-heading + KPI chips (same resolved vocabulary as tiles — the viewer,
+      // PDF and email renderers need no special handling). Also feeds AI scope.
+      if (b.type === 'campaign') {
+        let c = null;
+        try { c = (campaignsFor ? campaignsFor(entityId) : []).find((x) => x.id === b.campaignId) || null; }
+        catch (e) { console.error('[reports] campaign resolve failed', b.campaignId, e.message); }
+        if (!c) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'Campaign unavailable' }); continue; }
+        const r = c.results || {};
+        const sent = r.sent || 0;
+        const ctr = sent > 0 ? Math.min(100, Math.round(((r.clicks || 0) / sent) * 100)) : 0;
+        const title = c.title || c.config?.subject || 'Campaign';
+        const metrics = [['Audience', c.audienceCount || 0], ['Sent', sent], ['Opens', r.opens || 0], ['Clicks', r.clicks || 0], ['Click rate', `${ctr}%`], ['Converted', r.converted || 0]];
+        factsByIdx.push(metricsFact(`Campaign — ${title}${c.status ? ` (${c.status})` : ''}`, 'campaign', metrics));
+        resolved.push({ type: 'heading', text: `📣 ${title}`, level: 2 });
+        for (const [k, v] of metrics) resolved.push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
+        continue;
+      }
+      // App analytics block: the client's native-app engagement (PostHog rollup,
+      // flag-gated + scoped to their events by appReportFor). Three views:
+      // summary KPI chips, a daily trend chart, or a per-event table.
+      if (b.type === 'app') {
+        let rep = null;
+        try { rep = appReportFor ? await appReportFor(entityId, { days: b.days || 28 }) : null; }
+        catch (e) { console.error('[reports] app analytics resolve failed', e.message); }
+        if (!rep || !rep.scoped) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'App analytics unavailable' }); continue; }
+        const t = rep.totals || {};
+        const label = `App engagement — last ${rep.days} days`;
+        if (b.appView === 'trend') {
+          const fact = appSeriesFact(label, rep.series);
+          factsByIdx.push(fact);
+          const png = tileimg ? tileimg.renderTilePng({ title: label, vis: { type: 'looker_line' } }, fact, branding) : null;
+          if (png) { resolved.push({ type: 'tile', kind: 'chart', title: label, assetToken: putAsset(snapshotId, 'image/png', png) }); continue; }
+          resolved.push({ type: 'tile', kind: 'missing', title: `${label} — not enough data to chart` });
+          continue;
+        }
+        if (b.appView === 'events') {
+          const rows = (rep.events || []).slice(0, 12);
+          factsByIdx.push(metricsFact(label, 'app', rows.map((e) => [e.eventName || e.eventRef, `${e.uniques || 0} users / ${e.views || 0} views / ${e.purchases || 0} purchases`])));
+          resolved.push({
+            type: 'tile', kind: 'table', title: `App engagement by event — last ${rep.days} days`,
+            columns: ['Event', 'App users', 'Views', 'CTA taps', 'Purchases'],
+            rows: rows.map((e) => [String(e.eventName || e.eventRef || ''), fmtNum(e.uniques || 0), fmtNum(e.views || 0), fmtNum(e.ctaTaps || 0), fmtNum(e.purchases || 0)]),
+            more: Math.max(0, (rep.events || []).length - 12),
+          });
+          continue;
+        }
+        const metrics = [['App users', t.uniques || 0], ['Views', t.views || 0], ['Interactions', t.interactions || 0], ['CTA taps', t.ctaTaps || 0], ['Purchases', t.purchases || 0]];
+        if (t.purchaseValue) metrics.push(['Purchase value', currency.format(t.purchaseValue, mailer.resolveBranding(entityId).currency)]);
+        factsByIdx.push(metricsFact(label, 'app', metrics));
+        resolved.push({ type: 'heading', text: `📱 ${label}`, level: 2 });
+        for (const [k, v] of metrics) resolved.push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
         continue;
       }
       factsByIdx.push(null);

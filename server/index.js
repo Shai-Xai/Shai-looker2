@@ -2447,7 +2447,14 @@ function recentMessages(entityId, userId, limit = 6) {
 // here, after its content builder (buildDigestContent) + role lenses exist.
 waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
 // Report Studio: block-based client reports (tiles + text + images + AI analysis) with share links, PDF export and recurring schedules → server/reports.js (spec: docs/specs/REPORT_STUDIO_SPEC.md)
-require('./reports').mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps: (m) => ops.alert('report', m) });
+require('./reports').mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps: (m) => ops.alert('report', m),
+  campaignsFor: (eid) => actionsApi.listForEntity(eid), // campaign blocks: same rows the Engage API reads
+  appReportFor: async (eid, { days } = {}) => { // app blocks: PostHog rollup, appanalytics-flag-gated + scoped to the client's events (fail closed)
+    if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null;
+    const ids = await posthogApi.eventIdsForEntity(eid);
+    if (!ids.length) return null;
+    return posthogApi.entityReport(eid, { days: days || 28 }, ids);
+  } });
 
 // Onboarding journey — the phased client onboarding pack (auto-detected steps,
 // welcome pack + phase-completion emails on both surfaces), plus the badges &
