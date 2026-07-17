@@ -306,23 +306,63 @@ function DistributionPanel({ entityId, scope, survey }) {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(null);
   const [share, setShare] = useState('');
+  const [source, setSource] = useState('list'); // 'segment' | 'list'
+  const [segments, setSegments] = useState(null);
+  const [segmentId, setSegmentId] = useState('');
+  const [segPreview, setSegPreview] = useState(null);
   const loadStats = () => api.surveyLinks(scope, entityId, survey.id).then(setStats).catch(() => {});
   useEffect(() => { loadStats(); }, [survey.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    api.listSegments(entityId).then((r) => setSegments(r.segments || [])).catch(() => setSegments([]));
+  }, [entityId]);
+  // Preview the segment's emailable reach before anything sends.
+  useEffect(() => {
+    setSegPreview(null);
+    if (!segmentId) return;
+    let alive = true;
+    api.surveySendEmails(scope, entityId, survey.id, { segmentId, preview: true })
+      .then((r) => { if (alive) setSegPreview(r.error ? { error: r.error } : r); })
+      .catch((e) => { if (alive) setSegPreview({ error: e.message }); });
+    return () => { alive = false; };
+  }, [segmentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parse = () => recipients.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
     const [email, displayName, ticketType] = l.split(',').map((x) => (x || '').trim());
     return { email, displayName, ticketType };
   });
 
+  // CSV upload feeds the SAME editable list — you always see exactly who gets it.
+  const onUpload = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const lines = String(reader.result || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const parsed = [];
+      for (const line of lines) {
+        const cells = line.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ''));
+        const email = cells.find((c) => c.includes('@'));
+        if (!email) continue; // header rows / junk
+        const rest = cells.filter((c) => c !== email && c);
+        parsed.push([email, rest[0] || '', rest[1] || ''].filter(Boolean).join(', '));
+      }
+      if (!parsed.length) { setOutcome({ error: 'No email addresses found in that file — expected columns like email, name, ticket type.' }); return; }
+      setRecipients((cur) => (cur ? cur + '\n' : '') + parsed.join('\n'));
+      setOutcome({ info: `Loaded ${parsed.length} recipient${parsed.length === 1 ? '' : 's'} from ${file.name} — review below, then send.` });
+    };
+    reader.readAsText(file);
+  };
+
   const sendEmails = async () => {
-    const list = parse();
-    if (!list.length) { setOutcome({ error: 'Paste at least one recipient first.' }); return; }
-    if (!confirm(`Send the survey email to ${list.length} recipient${list.length === 1 ? '' : 's'} now?`)) return;
+    const fromSegment = source === 'segment';
+    const list = fromSegment ? null : parse();
+    const n = fromSegment ? (segPreview && segPreview.count) : list.length;
+    if (fromSegment && !segmentId) { setOutcome({ error: 'Pick a segment first.' }); return; }
+    if (!fromSegment && !list.length) { setOutcome({ error: 'Add at least one recipient first.' }); return; }
+    if (!confirm(`Send the survey email to ${n != null ? n : 'the segment’s'} recipient${n === 1 ? '' : 's'} now?`)) return;
     setBusy(true); setOutcome(null);
     try {
-      const r = await api.surveySendEmails(scope, entityId, survey.id, { recipients: list, subject, message });
+      const r = await api.surveySendEmails(scope, entityId, survey.id, fromSegment ? { segmentId, subject, message } : { recipients: list, subject, message });
       if (r.error) throw new Error(r.error);
-      setOutcome(r); setRecipients(''); loadStats();
+      setOutcome(r); if (!fromSegment) setRecipients(''); loadStats();
     } catch (e) { setOutcome({ error: e.message }); } finally { setBusy(false); }
   };
   const makeShare = async () => {
@@ -337,7 +377,7 @@ function DistributionPanel({ entityId, scope, survey }) {
     <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px', marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 700, fontSize: 13.5 }}>📧 Email & links</span>
-        {stats && stats.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{stats.total} link{stats.total === 1 ? '' : 's'} · {stats.opened} opened · {stats.responded} responded</span>}
+        {stats && stats.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{stats.total} link{stats.total === 1 ? '' : 's'}{stats.sent ? ` · ${stats.sent} sent` : ''}{stats.pending ? ` · ${stats.pending} sending…` : ''} · {stats.opened} opened · {stats.responded} responded</span>}
         <span style={{ flex: 1 }} />
         <button style={tiny} onClick={makeShare}>🔗 {share ? 'Copied!' : 'Copy public link'}</button>
         <button style={tiny} onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : '✉️ Email it out'}</button>
@@ -345,20 +385,56 @@ function DistributionPanel({ entityId, scope, survey }) {
       {share && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 0', wordBreak: 'break-all' }}>{share} — anyone with this link can answer (QR codes, socials, WhatsApp).</p>}
       {open && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Chip on={source === 'segment'} onClick={() => setSource('segment')} label="🥧 Saved segment" />
+            <Chip on={source === 'list'} onClick={() => setSource('list')} label="📋 List (paste or upload)" />
+          </div>
+          {source === 'segment' ? (
+            <div>
+              <label style={label}>Audience — one of your saved segments</label>
+              {segments === null ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Loading segments…</p>
+                : segments.length === 0 ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>No saved segments yet — build one in Engage → Segments, or switch to a list.</p>
+                : (
+                  <select style={input} value={segmentId} onChange={(e) => setSegmentId(e.target.value)}>
+                    <option value="">— pick a segment —</option>
+                    {segments.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
+              {segPreview && (segPreview.error
+                ? <p style={evHint('var(--error, #d70015)')}>{segPreview.error}</p>
+                : <p style={evHint('var(--success, #1d8a3b)')}>✓ {segPreview.count.toLocaleString()} emailable member{segPreview.count === 1 ? '' : 's'}{segPreview.sample?.length ? ` (e.g. ${segPreview.sample.slice(0, 3).join(', ')})` : ''} — consent &amp; suppression respected</p>)}
+            </div>
+          ) : (
           <div>
-            <label style={label}>Recipients — one per line: email, name, ticket type</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              <label style={{ ...label, marginBottom: 0 }}>Recipients — one per line: email, name, ticket type</label>
+              <span style={{ flex: 1 }} />
+              <label style={{ ...tiny, display: 'inline-block', cursor: 'pointer' }}>
+                ⬆ Upload CSV
+                <input type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onUpload(e.target.files[0]); e.target.value = ''; }} />
+              </label>
+            </div>
             <textarea style={{ ...input, minHeight: 90, fontFamily: 'ui-monospace, monospace', fontSize: 12.5 }} placeholder={'thandi@example.com, Thandi, VIP\nsipho@example.com'} value={recipients} onChange={(e) => setRecipients(e.target.value)} />
           </div>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px' }}><label style={label}>Subject</label><input style={input} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
             <div style={{ flex: '2 1 280px' }}><label style={label}>Message</label><input style={input} value={message} onChange={(e) => setMessage(e.target.value)} /></div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <button style={primary} disabled={busy} onClick={sendEmails}>{busy ? 'Sending…' : `Send to ${parse().length || '…'} recipient${parse().length === 1 ? '' : 's'}`}</button>
+            <button style={primary} disabled={busy || (source === 'segment' && (!segmentId || !segPreview || segPreview.error))} onClick={sendEmails}>
+              {busy ? 'Sending…' : source === 'segment'
+                ? `Send to segment${segPreview && segPreview.count != null ? ` (${segPreview.count.toLocaleString()})` : ''}`
+                : `Send to ${parse().length || '…'} recipient${parse().length === 1 ? '' : 's'}`}
+            </button>
             <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Each fan gets their own private link — their answers arrive already tagged with name & ticket type. Suppressed/unsubscribed addresses are skipped automatically.</span>
           </div>
           {outcome && (outcome.error
             ? <p style={{ color: 'var(--error, #d70015)', fontSize: 12.5, fontWeight: 600, margin: 0 }}>{outcome.error}</p>
+            : outcome.info
+            ? <p style={{ fontSize: 12.5, color: 'var(--muted-2, var(--text))', fontWeight: 600, margin: 0 }}>{outcome.info}</p>
+            : outcome.background
+            ? <p style={{ fontSize: 12.5, color: 'var(--success, #1d8a3b)', fontWeight: 600, margin: 0 }}>✓ Queued {outcome.queued.toLocaleString()} emails — sending in the background now; the counters above update as they go out.</p>
             : <p style={{ fontSize: 12.5, color: 'var(--success, #1d8a3b)', fontWeight: 600, margin: 0 }}>
                 ✓ Sent {outcome.sent} of {outcome.total}{outcome.skipped?.length ? ` — skipped: ${outcome.skipped.map((s) => `${s.email} (${s.reason})`).join(', ')}` : ''}
               </p>)}
