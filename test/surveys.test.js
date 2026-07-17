@@ -221,6 +221,52 @@ test('option text is snapshotted onto stored answers (results + CSV read it back
   assert.match(csv, /snap1/);
 });
 
+test('ticket type (contract v1.2): stored, sliced by day/type, filterable, drillable', () => {
+  const { owner } = seedClient();
+  const s = makeLiveSurvey({ owner, eventId: '19214' });
+  const submit = (uid, ticketType, rating, improve) => call('POST /api/app/surveys/:id/responses', {
+    params: { id: s.id },
+    body: {
+      respondent: { howlerUserId: uid, ticketType },
+      answers: [{ questionId: 'q_overall', rating }, ...(improve ? [{ questionId: 'q_improve', selectedIndices: improve }] : [])],
+    },
+  });
+  assert.equal(submit('f1', 'General', 5, [0]).code, 200);
+  assert.equal(submit('f2', 'General', 3, [0, 2]).code, 200);
+  assert.equal(submit('f3', 'VIP', 4, null).code, 200);
+  assert.equal(submit('f4', '', 2, null).code, 200); // pre-v1.2 app build → Unknown
+
+  const all = call('GET /api/my/surveys/:id/results', { user: owner, params: { id: s.id } }).body;
+  assert.equal(all.responseCount, 4);
+  assert.equal(all.byDay.length, 1); // all submitted today
+  assert.equal(all.byDay[0].count, 4);
+  assert.equal(all.byDay[0].avgRating, 3.5);
+  assert.deepEqual(all.byTicketType.map((t) => [t.ticketType, t.count]), [['General', 2], ['VIP', 1], ['Unknown', 1]]);
+  assert.deepEqual(all.ticketTypes, ['General', 'VIP', 'Unknown']);
+
+  // Filter narrows the WHOLE report; the type breakdown stays whole-survey.
+  const gen = call('GET /api/my/surveys/:id/results', { user: owner, params: { id: s.id }, query: { ticketType: 'General' } }).body;
+  assert.equal(gen.responseCount, 2);
+  assert.equal(gen.totalResponseCount, 4);
+  assert.equal(gen.filter.ticketType, 'General');
+  assert.equal(gen.questions[0].average, 4); // (5+3)/2
+  assert.equal(gen.byTicketType.length, 3);
+
+  // Drill-down: who picked "Queues" (option 0 of q_improve)?
+  const drill = call('GET /api/my/surveys/:id/responses', { user: owner, params: { id: s.id }, query: { questionId: 'q_improve', optionIndex: '0' } }).body;
+  assert.equal(drill.total, 2);
+  assert.deepEqual(drill.responses.map((r) => r.howlerUserId).sort(), ['f1', 'f2']);
+  // …and only the VIPs who rated 4:
+  const drill2 = call('GET /api/my/surveys/:id/responses', { user: owner, params: { id: s.id }, query: { questionId: 'q_overall', rating: '4', ticketType: 'VIP' } }).body;
+  assert.deepEqual(drill2.responses.map((r) => r.howlerUserId), ['f3']);
+
+  // CSV: ticket_type column present + filter respected.
+  const csv = call('GET /api/my/surveys/:id/results.csv', { user: owner, params: { id: s.id }, query: { ticketType: 'VIP' } }).text;
+  assert.match(csv.split('\n')[0], /ticket_type/);
+  assert.match(csv, /f3,VIP/);
+  assert.ok(!csv.includes('f1'));
+});
+
 // ── Lifecycle & immutability ──────────────────────────────────────────────────
 
 test('published surveys are immutable; only closesAt may move while live', () => {

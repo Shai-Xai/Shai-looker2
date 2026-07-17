@@ -19,6 +19,16 @@ survey object (§2) — presentation is chosen per survey in Pulse so
 organisers can A/B test. Additive and backward-compatible: payloads keep
 `contractVersion: 1`; surveys without `layout` render as `"form"`.
 
+**Doc revision v1.2 (additive, 2026-07-17):** optional `ticketType` (display
+name, e.g. `"General"`, `"VIP"`) and `ticketTypeId` (stable id) on
+`respondent` (§3) — the fan's ticket type rides along with each response so
+Pulse can slice results by it (whole-report ticket-type filter, by-day and
+by-type breakdowns, drill-down, CSV column). The app sends the ticket type
+it already knows from the fan's ticket for that event. Additive and
+backward-compatible: payloads keep `contractVersion: 1`; responses without
+them aggregate under **"Unknown"**. Pulse accepts + stores + reports these
+TODAY; the app starts sending them when its v1.2 build ships.
+
 ---
 
 ## 1. Principles
@@ -117,7 +127,9 @@ Field rules:
   "respondent": {
     "howlerUserId": "662076",
     "displayName": null,
-    "email": null
+    "email": null,
+    "ticketType": "General",
+    "ticketTypeId": "tt_88410"
   },
   "client": { "platform": "ios", "appVersion": "3.78.1+214" },
   "answers": [
@@ -138,6 +150,9 @@ Rules:
 - Unanswered optional questions are simply omitted from `answers`.
 - `displayName`/`email` are null unless the app user has explicitly agreed
   to share them (not in v1 UI).
+- `ticketType`/`ticketTypeId` (v1.2, optional): the display name and stable
+  id of the fan's ticket type for this event, as the app already knows them.
+  Omit if unknown — Pulse reports such responses as "Unknown". Not PII.
 
 ## 4. Endpoints (all on the Pulse server)
 
@@ -161,7 +176,14 @@ closed, `429` rate-limited).
   their own, entity-scoped.
 - Results: `GET .../surveys/:id/results` — per-question aggregates
   (average rating, counts per option, text answers list) + response count +
-  CSV export.
+  `byDay` (responses + avg rating per day) + `byTicketType` breakdown.
+  Accepts `?ticketType=` which filters the WHOLE report (the byTicketType
+  card and the `ticketTypes` picker list always describe the full survey).
+- Drill-down: `GET .../surveys/:id/responses` — the individual responses
+  behind an aggregate; composable filters `ticketType`, `questionId` +
+  `optionIndex` (choice) or `rating` (rating), paged via `limit`/`offset`.
+- CSV export (`results.csv`) carries a `ticket_type` column and honours
+  `?ticketType=`.
 
 ## 5. App-side integration points (Howler repo)
 

@@ -146,6 +146,12 @@ function mount(app, { db, auth, rateLimit }) {
     );
     CREATE INDEX IF NOT EXISTS idx_survey_responses_survey ON survey_responses(survey_id);
   `);
+  // Additive columns (module-owned; idempotent on every boot, mirroring db.js addColumn).
+  const addCol = (table, col, decl) => {
+    if (!sql.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name=?').get(table, col)) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`);
+  };
+  addCol('survey_responses', 'ticket_type', "TEXT NOT NULL DEFAULT ''");    // contract v1.2: fan's ticket type name ("General", "VIP")
+  addCol('survey_responses', 'ticket_type_id', "TEXT NOT NULL DEFAULT ''"); // optional stable id alongside the display name
 
   const enabled = () => db.getSetting('surveys_enabled', '1') !== '0'; // global kill switch
   // Per-client flag — the REAL boundary for the public surface: a client whose
@@ -265,6 +271,8 @@ function mount(app, { db, auth, rateLimit }) {
       howlerUserId,
       displayName: str(respondent.displayName, 200),
       email: str(respondent.email, 200),
+      ticketType: str(respondent.ticketType, 80),     // contract v1.2, optional
+      ticketTypeId: str(respondent.ticketTypeId, 40), // contract v1.2, optional
       platform: str(client.platform, 40),
       appVersion: str(client.appVersion, 40),
       answers,
@@ -308,11 +316,11 @@ function mount(app, { db, auth, rateLimit }) {
     const existing = sql.prepare('SELECT id FROM survey_responses WHERE survey_id=? AND howler_user_id=?').get(row.id, clean.howlerUserId);
     const id = existing ? existing.id : rid('rsp');
     if (existing) {
-      sql.prepare('UPDATE survey_responses SET display_name=?, email=?, platform=?, app_version=?, answers=?, updated_at=? WHERE id=?')
-        .run(clean.displayName, clean.email, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, id);
+      sql.prepare('UPDATE survey_responses SET display_name=?, email=?, ticket_type=?, ticket_type_id=?, platform=?, app_version=?, answers=?, updated_at=? WHERE id=?')
+        .run(clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, id);
     } else {
-      sql.prepare('INSERT INTO survey_responses (id, survey_id, howler_user_id, display_name, email, platform, app_version, answers, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(id, row.id, clean.howlerUserId, clean.displayName, clean.email, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, t);
+      sql.prepare('INSERT INTO survey_responses (id, survey_id, howler_user_id, display_name, email, ticket_type, ticket_type_id, platform, app_version, answers, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, row.id, clean.howlerUserId, clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, t);
     }
     res.json({ ok: true, responseId: id });
   });
@@ -384,10 +392,46 @@ function mount(app, { db, auth, rateLimit }) {
     sql.prepare('DELETE FROM surveys WHERE id=?').run(row.id);
   }
 
-  // Results: per-question aggregates using the SNAPSHOTTED option text.
-  function surveyResults(row) {
-    const rows = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC').all(row.id);
-    const parsed = rows.map((r) => ({ row: r, answers: (() => { try { return JSON.parse(r.answers) || []; } catch { return []; } })() }));
+  const parseAnswers = (r) => { try { return JSON.parse(r.answers) || []; } catch { return []; } };
+  const ticketLabel = (r) => r.ticket_type || 'Unknown';
+  // Responses for a survey, optionally narrowed to one ticket type ('Unknown'
+  // matches responses that arrived without one — pre-contract-v1.2 app builds).
+  function responsesFor(surveyId, { ticketType = '' } = {}) {
+    const all = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC').all(surveyId);
+    return ticketType ? all.filter((r) => ticketLabel(r) === ticketType) : all;
+  }
+
+  // Results: per-question aggregates using the SNAPSHOTTED option text, plus
+  // responses-by-day and a by-ticket-type breakdown. `ticketType` filters the
+  // WHOLE report (aggregates, byDay, question breakdowns) — byTicketType and the
+  // ticketTypes picker list always describe the unfiltered survey.
+  function surveyResults(row, { ticketType = '' } = {}) {
+    const allRows = responsesFor(row.id);
+    const rows = ticketType ? allRows.filter((r) => ticketLabel(r) === ticketType) : allRows;
+    const parsed = rows.map((r) => ({ row: r, answers: parseAnswers(r) }));
+
+    // Overall rating per response = its first rating-type answer (the survey's
+    // headline "how was it" question in practice) — feeds byDay/byTicketType.
+    const ratingOf = (answers) => { const a = answers.find((x) => x.type === 'rating'); return a ? a.rating : null; };
+    const bucket = () => ({ count: 0, ratingSum: 0, ratingCount: 0 });
+    const finish = (b) => ({ count: b.count, avgRating: b.ratingCount ? Math.round((b.ratingSum / b.ratingCount) * 100) / 100 : null });
+    const tally = (b, answers) => { b.count += 1; const rt = ratingOf(answers); if (rt != null) { b.ratingSum += rt; b.ratingCount += 1; } };
+
+    const days = new Map();
+    for (const { row: r, answers } of parsed) {
+      const day = String(r.updated_at || '').slice(0, 10);
+      if (!days.has(day)) days.set(day, bucket());
+      tally(days.get(day), answers);
+    }
+    const byDay = [...days.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, b]) => ({ date, ...finish(b) }));
+
+    const types = new Map();
+    for (const r of allRows) { // ALWAYS unfiltered — this card is the filter's own overview
+      const label = ticketLabel(r);
+      if (!types.has(label)) types.set(label, bucket());
+      tally(types.get(label), parseAnswers(r));
+    }
+    const byTicketType = [...types.entries()].map(([label, b]) => ({ ticketType: label, ...finish(b) })).sort((a, b) => b.count - a.count);
     const byQ = new Map();
     for (const { row: r, answers } of parsed) {
       for (const a of answers) {
@@ -416,18 +460,53 @@ function mount(app, { db, auth, rateLimit }) {
     });
     return {
       surveyId: row.id, title: row.title, status: row.status, effectiveState: effectiveState(row),
-      responseCount: parsed.length, questions,
+      responseCount: parsed.length, totalResponseCount: allRows.length,
+      filter: { ticketType: ticketType || null },
+      ticketTypes: byTicketType.map((t) => t.ticketType),
+      byDay, byTicketType, questions,
+    };
+  }
+
+  // Drill-down: the individual responses behind an aggregate. Filters compose:
+  // ticketType narrows the pool; questionId+optionIndex (choice) or
+  // questionId+rating (rating) narrow to responses that gave that answer.
+  function listResponses(row, q = {}) {
+    const ticketType = str(q.ticketType, 80);
+    const questionId = str(q.questionId, 60);
+    const optionIndex = q.optionIndex !== undefined && q.optionIndex !== '' ? Number(q.optionIndex) : null;
+    const rating = q.rating !== undefined && q.rating !== '' ? Number(q.rating) : null;
+    let rows = responsesFor(row.id, { ticketType }).map((r) => ({ r, answers: parseAnswers(r) }));
+    if (questionId) {
+      rows = rows.filter(({ answers }) => answers.some((a) => {
+        if (a.questionId !== questionId) return false;
+        if (rating != null) return a.type === 'rating' && a.rating === rating;
+        if (optionIndex != null) {
+          if (a.type === 'single_choice') return a.selectedIndex === optionIndex;
+          if (a.type === 'multiple_choice') return (a.selectedIndices || []).includes(optionIndex);
+          return false;
+        }
+        return true; // just "answered this question"
+      }));
+    }
+    const limit = Math.min(Math.max(Number(q.limit) || 50, 1), 100);
+    const offset = Math.max(Number(q.offset) || 0, 0);
+    return {
+      total: rows.length, limit, offset,
+      responses: rows.slice(offset, offset + limit).map(({ r, answers }) => ({
+        id: r.id, howlerUserId: r.howler_user_id, ticketType: ticketLabel(r),
+        platform: r.platform, appVersion: r.app_version, submittedAt: r.updated_at, answers,
+      })),
     };
   }
 
   const csvCell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  function resultsCsv(row) {
+  function resultsCsv(row, { ticketType = '' } = {}) {
     const qs = questionsOf(row);
-    const rows = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at').all(row.id);
-    const head = ['response_id', 'howler_user_id', 'platform', 'app_version', 'submitted_at', ...qs.map((q) => q.text)];
+    const rows = responsesFor(row.id, { ticketType }).slice().reverse(); // oldest first
+    const head = ['response_id', 'howler_user_id', 'ticket_type', 'platform', 'app_version', 'submitted_at', ...qs.map((q) => q.text)];
     const lines = [head.map(csvCell).join(',')];
     for (const r of rows) {
-      let answers = []; try { answers = JSON.parse(r.answers) || []; } catch { /* skip */ }
+      const answers = parseAnswers(r);
       const byId = new Map(answers.map((a) => [a.questionId, a]));
       const cells = qs.map((q) => {
         const a = byId.get(q.id);
@@ -437,7 +516,7 @@ function mount(app, { db, auth, rateLimit }) {
         if (q.type === 'multiple_choice') return (a.selectedTexts || []).join('; ');
         return a.text;
       });
-      lines.push([r.id, r.howler_user_id, r.platform, r.app_version, r.updated_at, ...cells].map(csvCell).join(','));
+      lines.push([r.id, r.howler_user_id, ticketLabel(r), r.platform, r.app_version, r.updated_at, ...cells].map(csvCell).join(','));
     }
     return lines.join('\n');
   }
@@ -514,13 +593,17 @@ function mount(app, { db, auth, rateLimit }) {
   });
   app.get('/api/admin/entities/:entityId/surveys/:surveyId/results', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
-    res.json(surveyResults(row));
+    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80) }));
+  });
+  app.get('/api/admin/entities/:entityId/surveys/:surveyId/responses', (req, res) => {
+    const row = adminSurvey(req, res); if (!row) return;
+    res.json(listResponses(row, req.query));
   });
   app.get('/api/admin/entities/:entityId/surveys/:surveyId/results.csv', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="survey-${row.id}-results.csv"`);
-    res.send(resultsCsv(row));
+    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80) }));
   });
 
   // ── Client self-service surface (/api/my) ────────────────────────────────────
@@ -562,16 +645,20 @@ function mount(app, { db, auth, rateLimit }) {
   });
   app.get('/api/my/surveys/:id/results', (req, res) => {
     const row = mySurvey(req, res, P.view); if (!row) return;
-    res.json(surveyResults(row));
+    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80) }));
+  });
+  app.get('/api/my/surveys/:id/responses', (req, res) => {
+    const row = mySurvey(req, res, P.view); if (!row) return;
+    res.json(listResponses(row, req.query));
   });
   app.get('/api/my/surveys/:id/results.csv', (req, res) => {
     const row = mySurvey(req, res, P.view); if (!row) return;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="survey-${row.id}-results.csv"`);
-    res.send(resultsCsv(row));
+    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80) }));
   });
 
-  return { publicSurvey, effectiveState, validateAnswers, surveyResults, resultsCsv, createSurvey };
+  return { publicSurvey, effectiveState, validateAnswers, surveyResults, resultsCsv, listResponses, createSurvey };
 }
 
 module.exports = { mount, normalizeQuestions, normalizeSurveyFields };
