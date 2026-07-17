@@ -103,10 +103,12 @@ Howler API, in-widget checkout (phases 2–3).
 *"The Fan Owl sells; the Support Owl cares."*
 An AI support agent for end-customers (ticket-buyers) across **email, the event
 website and WhatsApp** — the Owl's **fourth door**. Grounded in a two-tier
-knowledge base (Howler's help docs platform-wide + each client's own
-FAQs/policies, client tier winning), escalating to humans on a
-draft-first autonomy ladder. **Freshdesk stays** as the human queue: phase 0
-drafts replies as private notes inside Freshdesk (webhook in, API out) while
+knowledge base (Howler's help docs, synced from HelpDocs, platform-wide +
+each client's own FAQs/policies, client tier winning), escalating to humans on
+a draft-first autonomy ladder. **Freshdesk stays** as the human queue: phase 0
+**AI-triages tickets to clients** (replacing today's brittle rule flags on the
+single shared inbox) and drafts replies as private notes (webhook in, API out)
+while
 Pulse manages the agent — knowledge, per-client config, escalation rules,
 monitoring and AI metering. Later phases: support mode in the Fan Owl widget,
 auto-send in bounds, WhatsApp path, verification-first order lookups. Spec
