@@ -7,7 +7,7 @@ import { useIsMobile } from '../lib/useIsMobile.js';
 // it can be dragged anywhere on the dashboard and resized with the grid's own
 // handles. Cards fill the band height; card width is set with the right-edge
 // drag handle. In edit mode it's also a drop target for existing tiles.
-export default function Carousel({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
+export default function Carousel({ carousel, filterValues, editable, onEditTile, onApplyTileQuery, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onChangeTileW }) {
   const trackRef = useRef(null);
   const isMobile = useIsMobile();
   const [dragOver, setDragOver] = useState(false);
@@ -182,6 +182,7 @@ export default function Carousel({ carousel, filterValues, editable, onEditTile,
                     editable={editable}
                     inCarousel={!isGrid}
                     onEdit={() => onEditTile?.(t.id)}
+                    onApplyQuery={onApplyTileQuery ? (query) => onApplyTileQuery(t.id, query) : undefined}
                     onRemove={() => onRemoveTile?.(t.id)}
                     onDuplicate={() => onDuplicateTile?.(t.id)}
                     onToggleHide={onToggleHide ? () => onToggleHide(t.id) : undefined}

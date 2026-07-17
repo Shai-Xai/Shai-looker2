@@ -289,20 +289,26 @@ function guardSuperAdminTag(req, res, next) {
   next();
 }
 // Boot-time bootstrap of the initial super admins. Idempotent. Grants the tag to
-// any admin whose email is listed in SUPER_ADMIN_EMAILS (comma-separated). If the
-// system still has NO super admin afterwards (fresh deploy, env unset), it
-// promotes the oldest admin so the platform's global controls are never locked
-// out — logged loudly. Existing admins otherwise keep exactly what they had.
+// the platform owner (always) plus any admin whose email is listed in
+// SUPER_ADMIN_EMAILS (comma-separated). If the system still has NO super admin
+// afterwards (fresh deploy, env unset), it promotes the oldest admin so the
+// platform's global controls are never locked out — logged loudly. Existing
+// admins otherwise keep exactly what they had.
+//
+// The owner is baked in rather than env-configured so a wiped env var, a fresh
+// environment or someone revoking the tag in the UI can never lock the owner
+// out of the global controls — the next boot re-grants it.
+const OWNER_SUPER_ADMINS = ['shai.evian@howler.co.za'];
 function ensureSuperAdmins() {
   const grant = (u) => {
     if (!u || u.role !== 'admin' || (u.roles || []).includes(roles.SUPER_ADMIN)) return;
     updateUser(u.id, { roles: [...(u.roles || []), roles.SUPER_ADMIN] });
     console.log(`[roles] granted Super Admin to ${u.email}`);
   };
-  const emails = String(process.env.SUPER_ADMIN_EMAILS || '')
-    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const emails = [...OWNER_SUPER_ADMINS, ...String(process.env.SUPER_ADMIN_EMAILS || '')
+    .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)];
   const all = db.listUsers();
-  for (const email of emails) grant(all.find((u) => u.email === email));
+  for (const email of emails) grant(all.find((u) => String(u.email).toLowerCase() === email));
   if (db.listUsers().some((u) => roles.isSuperAdmin(u))) return;
   const admins = db.listUsers().filter((u) => u.role === 'admin').sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
   if (admins[0]) { grant(admins[0]); console.warn(`[roles] no Super Admin configured — bootstrapped ${admins[0].email}. Set SUPER_ADMIN_EMAILS and assign the real ones.`); }

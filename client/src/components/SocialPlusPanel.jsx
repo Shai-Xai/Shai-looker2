@@ -4,6 +4,9 @@ import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useProfile } from '../lib/profile.jsx';
+import DashboardPrintHeader from './DashboardPrintHeader.jsx';
+import { PdfButton } from './AppAnalytics.jsx';
 
 // Social+ (social.plus) in-app community analytics — the SAME component on both
 // surfaces via the scope prop ('my' | 'admin-client'), like QueueItCard:
@@ -34,6 +37,9 @@ const TODAY_METRICS = [
 
 export default function SocialPlusPanel({ entityId, scope = 'my' }) {
   const isMobile = useIsMobile();
+  // Tenant name for the branded PDF cover (falls back gracefully off-profile).
+  const { entities, active } = useProfile();
+  const entityName = (entities.find((e) => e.id === entityId) || active)?.name || '';
   const [days, setDays] = useState(30);   // 'today' | 7 | 30 | 90
   const [metric, setMetric] = useState('members');
   const [selected, setSelected] = useState([]); // community ids; [] = all linked communities
@@ -120,7 +126,14 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
 
   return (
     <div style={scope === 'admin-client' ? card : undefined}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+      {/* Print-only branded cover — same look as every Pulse Download PDF. */}
+      <DashboardPrintHeader
+        title="App community"
+        entityName={entityName}
+        filters={[{ name: 'window', title: 'Window' }, { name: 'communities', title: 'Communities' }]}
+        values={{ window: hourly ? 'Today (hourly)' : `Last ${days} days`, communities: selected.length ? `${selected.length} selected` : 'All linked' }}
+      />
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {scope === 'admin-client'
           ? <div style={{ ...title, flex: 1, minWidth: 0, marginBottom: 0 }}>👥 Social+ — in-app communities</div>
           : <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>Your fan communities and chats inside the Howler app.</span>}
@@ -129,6 +142,7 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
           : s.lastAt && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Updated {new Date(s.lastAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>}
         <Chip on={hourly} onClick={() => { setDays('today'); if (!TODAY_METRICS.some(([k]) => k === metric)) setMetric('members'); }}>Today</Chip>
         {DAY_CHOICES.map((d) => <Chip key={d} on={days === d} onClick={() => setDays(d)}>{d}d</Chip>)}
+        <PdfButton />
         {scope === 'admin-client' && <button type="button" onClick={sync} disabled={busy} style={ghostBtn}>{busy ? 'Syncing…' : '↻ Sync'}</button>}
       </div>
       {(data.allCommunities || []).length > 1 && (
@@ -148,6 +162,15 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
       )}
       {err && <div style={errBox}>{err}</div>}
       {s.lastStatus === 'error' && <div style={errBox}>⚠ Last sync failed: {s.lastError}</div>}
+
+      {/* Community → client linking is ADMIN-ONLY (the picker lists the whole
+          Social+ directory — every organiser's communities — so it must never
+          render on the client surface, whichever key the client rides on). It
+          lives at the TOP of the admin view because it's the config and the
+          data blocks below get long; always editable — tick/untick + Save. */}
+      {scope === 'admin-client' && (
+        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={(started) => waitForSync(started)} />
+      )}
 
       {!s.assigned ? (
         <div style={card}>
@@ -184,6 +207,11 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
               ['Chat messages', t.messages],
             ]} />
           )}
+          {/* Admin-only diagnosis: chats live in event_<id> groups, so a client
+              with only communities ticked honestly shows 0 chat messages. */}
+          {scope === 'admin-client' && !filtered && !(t.messages > 0) && !(s.communityIds || []).some((x) => String(x).startsWith('event_')) && (
+            <p style={{ ...mutedTxt, fontSize: 12, margin: '6px 0 0' }}>💬 Chat messages are 0 because no <b>event chat groups</b> are linked for this client — tick them under "Communities linked to this client" above.</p>
+          )}
           <ActivityRow activity={s.todayActivity} isMobile={isMobile} />
           <PresenceCard presence={data.presence} isMobile={isMobile} />
           {/* 🎯 Member engagement (contribution-based) is HIDDEN for now — presence
@@ -205,12 +233,6 @@ export default function SocialPlusPanel({ entityId, scope = 'my' }) {
         </>
       )}
 
-      {/* Community → client linking is ADMIN-ONLY: the picker lists the whole
-          Social+ directory (every organiser's communities), so it must never
-          render on the client surface — whichever key the client rides on. */}
-      {scope === 'admin-client' && (
-        <CommunityLinking entityId={entityId} assigned={s.communityIds || []} onSaved={(started) => waitForSync(started)} />
-      )}
     </div>
   );
 }
@@ -476,17 +498,22 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
   const [picked, setPicked] = useState(() => new Set(assigned));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setPicked(new Set(assigned)); }, [assigned.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [tab, setTab] = useState('communities'); // 'communities' | 'chats' — one list at a time
+  // The parent re-polls data after a save (background re-sync), which refreshes
+  // `assigned` every few seconds — without the dirty guard those polls clobbered
+  // ticks made mid-edit, which read as "the picker won't let me change anything".
+  const dirty = useRef(false);
+  useEffect(() => { if (!dirty.current) setPicked(new Set(assigned)); }, [assigned.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open || dir) return;
     api.socialplusDirectory(entityId).then(setDir).catch((e) => setDirErr(e.message));
   }, [open, dir, entityId]);
-  const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id) => { dirty.current = true; setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
   const save = async () => {
     setBusy(true); setDirErr('');
     // The server answers as soon as the links are stored (the re-sync runs in
     // the background) — the parent polls the data in while we show ✓ Saved.
-    try { const r = await api.socialplusAssign(entityId, [...picked]); setSaved(true); setTimeout(() => setSaved(false), 2500); onSaved?.(r.started || new Date().toISOString()); }
+    try { const r = await api.socialplusAssign(entityId, [...picked]); dirty.current = false; setSaved(true); setTimeout(() => setSaved(false), 2500); onSaved?.(r.started || new Date().toISOString()); }
     catch (e) { setDirErr(e.message); }
     setBusy(false);
   };
@@ -494,37 +521,54 @@ function CommunityLinking({ entityId, assigned, onSaved }) {
     <div style={{ border: '1px dashed var(--hairline)', borderRadius: 10, padding: 12, marginTop: 14 }}>
       <button type="button" onClick={() => setOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 36, background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left', color: 'var(--text)' }}>
         <span style={{ width: 12, fontSize: 9, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
-        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>Communities linked to this client {assigned.length ? `· ${assigned.length}` : ''}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>Communities & event chats linked to this client {assigned.length ? `· ${assigned.length}` : ''}</span>
       </button>
       {open && (
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 8px' }}>
-            Tick only THIS client's communities and event chats — unticked ones stay invisible to them. Saving re-syncs their data immediately. Only admins ever see this list; the client just sees what you tick.
+            Tick only THIS client's communities and event chats — unticked ones stay invisible to them. You can come back anytime: tick more, untick to remove, then Save again (it re-syncs immediately). Only admins ever see this list; the client just sees what you tick.
+            {' '}<b>Chat messages come from the 💬 Event chats tab</b> — a client with only communities ticked will show 0 chat messages.
           </div>
           {dirErr && <div style={errBox}>{dirErr}</div>}
           {!dir && !dirErr && <div style={mutedTxt}>Loading the Social+ directory…</div>}
-          {dir && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 380, overflowY: 'auto' }}>
-              {(dir.communities || []).length > 0 && <div style={groupLbl}>Communities</div>}
-              {(dir.communities || []).map((c) => (
-                <label key={c.id} style={pickRow}>
-                  <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                  <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>👥 {fmt(c.members)}</span>
-                </label>
-              ))}
-              {(dir.channelGroups || []).length > 0 && <div style={groupLbl}>Event chats</div>}
-              {(dir.channelGroups || []).map((g) => (
-                <label key={g.id} style={pickRow}>
-                  <input type="checkbox" checked={picked.has(g.id)} onChange={() => toggle(g.id)} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name || g.id} <span style={{ color: 'var(--muted)' }}>· {g.channels} chat{g.channels === 1 ? '' : 's'}</span></span>
-                  <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>💬 {fmt(g.messages)}</span>
-                </label>
-              ))}
-            </div>
-          )}
+          {dir && (() => {
+            // Two tabs, one list each — communities and event chats are different
+            // things to link, and a buried section header wasn't findable. Each
+            // tab badges how many of ITS entries are ticked; Save stores both.
+            const comms = dir.communities || [];
+            const chats = dir.channelGroups || [];
+            const tickedComms = comms.filter((c) => picked.has(c.id)).length;
+            const tickedChats = chats.filter((g) => picked.has(g.id)).length;
+            const rows = tab === 'chats' ? chats : comms;
+            return (
+              <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <Chip on={tab === 'communities'} onClick={() => setTab('communities')}>👥 Communities{tickedComms ? ` · ${tickedComms} linked` : ''}</Chip>
+                  <Chip on={tab === 'chats'} onClick={() => setTab('chats')}>💬 Event chats{tickedChats ? ` · ${tickedChats} linked` : ''}</Chip>
+                </div>
+                {tab === 'chats' && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 6 }}>One tick covers ALL of that event's chats (announcements, line-up, FAQ…) — including ones added later.</div>}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 380, overflowY: 'auto' }}>
+                  {!rows.length && <div style={mutedTxt}>{tab === 'chats' ? 'No event chat groups on the network yet.' : 'No communities on the network yet.'}</div>}
+                  {tab === 'communities' && comms.map((c) => (
+                    <label key={c.id} style={pickRow}>
+                      <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>👥 {fmt(c.members)}</span>
+                    </label>
+                  ))}
+                  {tab === 'chats' && chats.map((g) => (
+                    <label key={g.id} style={pickRow}>
+                      <input type="checkbox" checked={picked.has(g.id)} onChange={() => toggle(g.id)} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name || g.id} <span style={{ color: 'var(--muted)' }}>· {g.channels} chat{g.channels === 1 ? '' : 's'}</span></span>
+                      <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--muted)' }}>💬 {fmt(g.messages)}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-            <button type="button" style={btn} disabled={busy || !dir} onClick={save}>{busy ? 'Saving…' : 'Save linked communities'}</button>
+            <button type="button" style={btn} disabled={busy || !dir} onClick={save}>{busy ? 'Saving…' : 'Save linked communities & chats'}</button>
             {saved && <span style={okTxt}>✓ Saved & re-synced</span>}
           </div>
         </>
@@ -553,4 +597,4 @@ const ghostBtn = { border: '1px solid var(--hairline)', background: 'transparent
 const th = { textAlign: 'left', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700, padding: '6px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
 const td = { padding: '8px', borderBottom: '1px solid var(--hairline)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
 const groupLbl = { fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', margin: '8px 0 2px' };
-const pickRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' };
+const pickRow = { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, minHeight: 40, cursor: 'pointer' };

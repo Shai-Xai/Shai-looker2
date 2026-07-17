@@ -18,7 +18,10 @@ const msg = (o) => ({ type: 'message', channel: 'email', delayHours: 0, subject:
 
 // A single simulation run over one journey + a cast of personas.
 class Sim {
-  constructor(journey) {
+  // opts.convSource: true (default) = an explicit conversion source (convSet);
+  // false = default mode, where "bought" means leaving the live audience.
+  constructor(journey, opts = {}) {
+    this.convSource = opts.convSource !== false;
     this.sql = new Database(':memory:');
     this.sql.exec(`
       CREATE TABLE action_enrollments (action_id TEXT, email TEXT, name TEXT DEFAULT '', ticket TEXT DEFAULT '', phone TEXT DEFAULT '',
@@ -28,15 +31,17 @@ class Sim {
       CREATE TABLE action_opens (action_id TEXT, email TEXT, at TEXT, step INTEGER DEFAULT -1);
       CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);`);
     this.reachable = new Map();
-    this.convSet = new Set();        // explicit conversion source = "bought"
+    this.convSet = this.convSource ? new Set() : null; // explicit conversion source, or null = "left the audience" mode
     this.segSets = {};               // segmentId -> Set(email) for in_segment branches
     this.emailByPhone = {};          // phone -> email (SMS sends arrive keyed by phone)
+    this.sup = new Set();            // unsubscribed emails
     this.sends = [];                 // { to, channel, subject, tick }
+    this.syncs = [];                 // { platform, audienceName, action, emails, tick }
     this.tick = '';
     this.action = { id: 'sim', entityId: 'e1', title: journey.name, config: { journey }, results: {} };
     const self = this;
     this.deps = {
-      sql: this.sql, now: () => new Date().toISOString(), reachable: this.reachable, convSet: this.convSet, sup: new Set(),
+      sql: this.sql, now: () => new Date().toISOString(), reachable: this.reachable, convSet: this.convSet, sup: this.sup,
       renderFor: (a, r, node) => ({ html: '<p>x</p>', text: node.body, subject: node.subject }),
       renderSmsFor: (a, r, node) => node.body,
       mailer: { send: async ({ to, subject }) => { self.sends.push({ to, channel: 'email', subject, tick: self.tick }); return { ok: true }; } },
@@ -45,6 +50,7 @@ class Sim {
       saveResults: () => {},
       sysUser: { role: 'admin' },
       audienceFor: async (eid, cfg) => ({ list: [...(self.segSets[cfg.audience?.segmentId] || [])].map((e) => ({ email: e })) }),
+      syncAudience: async ({ platform, audienceName, action, members }) => { self.syncs.push({ platform, audienceName, action, emails: members.map((m) => m.email), tick: self.tick }); return { ok: true }; },
     };
   }
   enrol(email, { name = email, phone, ticket = '', attributes = {} } = {}) {
@@ -57,6 +63,9 @@ class Sim {
   open(email) { this.sql.prepare("INSERT INTO action_opens (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   click(email) { this.open(email); this.sql.prepare("INSERT INTO action_clicks (action_id,email,at,step) VALUES ('sim',?,?,0)").run(email, new Date().toISOString()); }
   buy(email) { this.convSet.add(email.toLowerCase()); }
+  leave(email) { this.reachable.delete(email); } // default mode: leaving the live audience = "bought"
+  unsub(email) { this.sup.add(email); }
+  consent(email, patch) { this.reachable.set(email, { ...this.reachable.get(email), ...patch }); }
   addToSegment(segId, email) { (this.segSets[segId] = this.segSets[segId] || new Set()).add(email.toLowerCase()); }
   // Advance to the next due moment: everyone active becomes due, and (optionally)
   // any open wait window expires — then run one real engine tick.
@@ -69,6 +78,7 @@ class Sim {
   status(email) { return this.sql.prepare("SELECT status FROM action_enrollments WHERE action_id='sim' AND email=?").get(email)?.status; }
   // Match both email sends (keyed by email) and SMS sends (keyed by phone).
   received(email) { return this.sends.filter((s) => s.to === email || this.emailByPhone[s.to] === email); }
+  syncedFor(email) { return this.syncs.filter((s) => s.emails.includes(email)).map((s) => ({ platform: s.platform, action: s.action, audience: s.audienceName })); }
 }
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -173,19 +183,360 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['Early-bird is open', 'Last chance for early-bird'] } },
     ],
   },
+  {
+    name: 'Severity — a purchase beats a click beats an open',
+    flow: [
+      '✉  opener  →  ◆ what did they do?   (all four signals can be true at once)',
+      '   Purchased ‹ Clicked ‹ Opened ‹ No response   — the FIRST match wins',
+    ],
+    journey: {
+      name: 'Severity check',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'What did they do?', waitHours: 48, branches: [
+          { label: 'Purchased', nodes: [msg({ subject: 'You’re in! 🎉' })] },
+          { label: 'Clicked, no buy', nodes: [msg({ subject: 'Still thinking?' })] },
+          { label: 'Opened, no click', nodes: [msg({ subject: 'One more nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'We’ll miss you' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Whale', email: 'whale@x.com', behaviour: 'opens AND clicks AND buys (all at once)',
+        drive: [(s, e) => { s.click(e); s.buy(e); }],
+        expect: { status: 'converted', got: ['opener', 'You’re in! 🎉'] } },
+      { name: 'Ivy', email: 'ivy@x.com', behaviour: 'opens AND clicks, no buy',
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'Still thinking?'] } },
+    ],
+  },
+  {
+    name: 'Nested decisions (a decision inside a branch)',
+    flow: [
+      '✉  opener  →  ◆ Opened?',
+      '   ├─ Opened → ◆ Clicked?  →  ├─ Clicked → ✉ "See you there"',
+      '   │                          └─ No      → ✉ "Last nudge"',
+      '   └─ Didn’t open           →  ✉ "Did you get our email?"',
+    ],
+    journey: {
+      name: 'Nested',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Opened it?', waitHours: 48, branches: [
+          { label: 'Opened', nodes: [
+            { type: 'decision', question: 'Clicked?', waitHours: 24, branches: [
+              { label: 'Clicked', nodes: [msg({ subject: 'See you there' })] },
+              { label: 'No response', nodes: [msg({ subject: 'Last nudge' })] },
+            ] },
+          ] },
+          { label: 'Didn’t open', nodes: [msg({ subject: 'Did you get our email?' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Cleo', email: 'cleo@x.com', behaviour: 'opens, then clicks',
+        drive: [(s, e) => s.open(e), (s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'See you there'] } },
+      { name: 'Dan', email: 'dan@x.com', behaviour: 'opens but never clicks',
+        drive: [(s, e) => s.open(e)],
+        expect: { status: 'done', got: ['opener', 'Last nudge'] } },
+      { name: 'Eve', email: 'eve@x.com', behaviour: 'never opens',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Did you get our email?'] } },
+    ],
+  },
+  {
+    name: 'Safety net — consent gating & unsubscribe',
+    flow: [
+      '✉  opener  →  ◆ after 2 days  →  💬 "Last call" (SMS)',
+      '   • no SMS consent → the SMS is skipped, the journey still completes',
+      '   • unsubscribed   → ejected, no further messages',
+    ],
+    journey: {
+      name: 'Safety net',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Reacted after 2 days?', waitHours: 48, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'Nice one' })] },
+          { label: 'No response', nodes: [msg({ channel: 'sms', body: 'Last call — tap here' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Pia', email: 'pia@x.com', behaviour: 'ghosts, but has NO SMS consent',
+        consent: { smsOk: false },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener'] } }, // SMS node reached but skipped — no stall
+      { name: 'Rob', email: 'rob@x.com', behaviour: 'unsubscribes after the opener',
+        drive: [(s, e) => s.unsub(e)],
+        expect: { status: 'unsubscribed', got: ['opener'] } },
+    ],
+  },
+  {
+    name: 'A purchase exits even with NO “bought” branch',
+    flow: [
+      '✉  opener  →  ◆ Clicked?  →  ├─ Clicked → ✉ nudge',
+      '                              └─ No      → ✉ last chance',
+      '   (no Purchased branch) — someone who BUYS should still stop, not get nurtured',
+    ],
+    journey: {
+      name: 'Buyer exit',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked?', waitHours: 48, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Gus', email: 'gus@x.com', behaviour: 'buys, never clicks (no bought branch exists)',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener'] } }, // exits on purchase, gets no sales nudge
+      { name: 'Hana', email: 'hana@x.com', behaviour: 'ghosts',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'last chance'] } },
+    ],
+  },
+  {
+    name: 'Ad-audience sync from a branch (Meta + TikTok)',
+    flow: [
+      '✉  opener  →  ◆ bought after 2 days?',
+      '   ├─ Bought      → 🎯 REMOVE from "FF27 retargeting" (Meta+TikTok) → ✉ Thanks',
+      '   └─ No response → 🎯 ADD to "FF27 retargeting" (Meta+TikTok)    → 💬 Last call',
+      '   (stop paying to retarget a buyer; start retargeting the silent)',
+    ],
+    journey: {
+      name: 'Retargeting sync',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [
+            { type: 'sync', platform: 'both', action: 'remove', audienceName: 'FF27 retargeting' },
+            msg({ subject: 'Thanks — see you there!' }),
+          ] },
+          { label: 'No response', nodes: [
+            { type: 'sync', platform: 'both', action: 'add', audienceName: 'FF27 retargeting' },
+            msg({ channel: 'sms', body: 'Last call — grab your ticket' }),
+          ] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Bea', email: 'bea@x.com', behaviour: 'buys → removed from retargeting on both platforms, thanked',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks — see you there!'],
+          syncs: [{ platform: 'meta', action: 'remove', audience: 'FF27 retargeting' }, { platform: 'tiktok', action: 'remove', audience: 'FF27 retargeting' }] } },
+      { name: 'Cy', email: 'cy@x.com', behaviour: 'ghosts → added to retargeting on both platforms',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Last call — grab your ticket'],
+          syncs: [{ platform: 'meta', action: 'add', audience: 'FF27 retargeting' }, { platform: 'tiktok', action: 'add', audience: 'FF27 retargeting' }] } },
+    ],
+  },
+  {
+    name: 'Conversion by LEAVING the audience (default mode, no conversion source)',
+    convSource: false, // "bought" = no longer in the live audience (classic abandoned-cart)
+    flow: [
+      '✉  opener  →  ◆ after 2 days, still in the abandoned-cart audience?',
+      '   ├─ Bought (left the audience) → ✉ Thanks  → exits CONVERTED',
+      '   └─ No response                → ✉ Last chance',
+      '   (no separate conversion list — leaving the audience IS the purchase signal)',
+    ],
+    journey: {
+      name: 'Left-audience conversion',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [msg({ subject: 'Thanks!' })] },
+          { label: 'No response', nodes: [msg({ subject: 'Last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Nia', email: 'nia@x.com', behaviour: 'completes checkout → drops out of the abandoned-cart audience',
+        drive: [(s, e) => s.leave(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks!'] } },
+      { name: 'Ola', email: 'ola@x.com', behaviour: 'stays in the audience, never buys',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Last chance'] } },
+    ],
+  },
+  {
+    name: 'A late click after the window closed does NOT re-route',
+    flow: [
+      '✉  opener  →  ◆ clicked in 24h?',
+      '   ├─ Clicked → ✉ hot lead',
+      '   └─ No      → ✉ last chance   ← Uma lands here…',
+      '   …then Uma clicks a day LATE — she must STAY done, not jump to “hot lead”.',
+    ],
+    journey: {
+      name: 'Late click',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked in 24h?', waitHours: 24, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'hot lead' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Uma', email: 'uma@x.com', behaviour: 'ghosts through the window, then clicks a day late',
+        drive: [() => {}],
+        late: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'last chance'] } }, // late click ignored — already finished
+      { name: 'Vic', email: 'vic@x.com', behaviour: 'clicks inside the window',
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'hot lead'] } },
+    ],
+  },
+  {
+    name: 'A delayed follow-up INSIDE a branch fires later, not immediately',
+    flow: [
+      '✉  opener  →  ◆ bought after 2 days?',
+      '   ├─ Bought      → ✉ Thanks (converted)',
+      '   └─ No response → 💬 Quick reminder (now)  …then  ✉ Final call (+2 days)',
+      '   The final email must be SCHEDULED, then send on a later tick — not now.',
+    ],
+    journey: {
+      name: 'Delayed follow-up',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Bought after 2 days?', waitHours: 48, branches: [
+          { label: 'Bought', nodes: [msg({ subject: 'Thanks!' })] },
+          { label: 'No response', nodes: [
+            msg({ channel: 'sms', body: 'Quick reminder' }),
+            msg({ subject: 'Final call', delayHours: 48 }),
+          ] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Zed', email: 'zed@x.com', behaviour: 'ghosts → reminder now, final email two days later',
+        drive: [() => {}],
+        late: [() => {}], // the trailing tick fires the scheduled +2-day email
+        expect: { status: 'done', got: ['opener', 'Quick reminder', 'Final call'] } },
+      { name: 'Bea', email: 'bea2@x.com', behaviour: 'buys → thanked, no follow-ups',
+        drive: [(s, e) => s.buy(e)],
+        expect: { status: 'converted', got: ['opener', 'Thanks!'] } },
+    ],
+  },
+  {
+    name: 'Email consent revoked — the email node is skipped, journey continues',
+    flow: [
+      '✉  opener  →  ◆ clicked?  →  ├─ Clicked → ✉ nudge  (no email consent → skipped)',
+      '                              └─ No      → ✉ last chance',
+      '   No stall: an email with consent off is skipped and the person still finishes.',
+    ],
+    journey: {
+      name: 'Email consent',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'Clicked?', waitHours: 24, branches: [
+          { label: 'Clicked', nodes: [msg({ subject: 'nudge' })] },
+          { label: 'No response', nodes: [msg({ subject: 'last chance' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Wes', email: 'wes@x.com', behaviour: 'clicks, but has email consent OFF',
+        consent: { emailOk: false },
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: [] } }, // both emails (opener + nudge) skipped; still completes
+    ],
+  },
+  {
+    name: 'Competing segment-watch branches — authored order wins',
+    flow: [
+      '✉  opener  →  ◆ which list are they on after a day?',
+      '   ├─ On "VIP buyers"  → ✉ VIP thanks',
+      '   ├─ On "GA buyers"   → ✉ GA thanks',
+      '   └─ No response      → ✉ Still time',
+      '   Someone on BOTH lists must take the FIRST matching branch (VIP).',
+    ],
+    journey: {
+      name: 'Two watched lists',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'On a buyers list after a day?', waitHours: 24, branches: [
+          { label: 'VIP buyers', when: 'in_segment', segmentName: 'VIP buyers', segmentId: 'seg-vip', nodes: [msg({ subject: 'VIP thanks' })] },
+          { label: 'GA buyers', when: 'in_segment', segmentName: 'GA buyers', segmentId: 'seg-ga', nodes: [msg({ subject: 'GA thanks' })] },
+          { label: 'No response', nodes: [msg({ subject: 'Still time' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Val', email: 'val@x.com', behaviour: 'on BOTH VIP and GA lists → takes VIP (first match)',
+        drive: [(s, e) => { s.addToSegment('seg-vip', e); s.addToSegment('seg-ga', e); }],
+        expect: { status: 'done', got: ['opener', 'VIP thanks'] } },
+      { name: 'Gil', email: 'gil@x.com', behaviour: 'on the GA list only',
+        drive: [(s, e) => s.addToSegment('seg-ga', e)],
+        expect: { status: 'done', got: ['opener', 'GA thanks'] } },
+      { name: 'Nod', email: 'nod@x.com', behaviour: 'on neither list',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'Still time'] } },
+    ],
+  },
+  {
+    name: 'Split value matching is case- and whitespace-insensitive',
+    flow: [
+      '◆ ticket type?  ├─ values ["VIP"] → VIP flow   └─ everyone else → GA flow',
+      '   A ticket recorded as "  vip " (messy casing/spacing) must still match VIP.',
+    ],
+    journey: {
+      name: 'Messy split value',
+      nodes: [
+        { type: 'decision', kind: 'split', question: 'Ticket type?', field: 'core_ticket_types.name', branches: [
+          { label: 'VIP', values: ['VIP'], nodes: [msg({ subject: 'VIP flow' })] },
+          { label: 'Everyone else', nodes: [msg({ subject: 'GA flow' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Mia', email: 'mia@x.com', behaviour: 'ticket recorded as "  vip " (mixed case + spaces)',
+        attributes: { 'core_ticket_types.name': '  vip ' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['VIP flow'] } },
+      { name: 'Sol', email: 'sol@x.com', behaviour: 'ticket "General"',
+        attributes: { 'core_ticket_types.name': 'General' },
+        drive: [() => {}],
+        expect: { status: 'done', got: ['GA flow'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
 // behaviour, then let the windows expire — returning per-persona results.
 async function simulate(scn) {
   const journey = j.validateJourney(scn.journey);
-  const sim = new Sim(journey);
-  for (const p of scn.personas) sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
+  const sim = new Sim(journey, { convSource: scn.convSource });
+  for (const p of scn.personas) {
+    sim.enrol(p.email, { name: p.name, ticket: p.attributes?.['core_ticket_types.name'] || '', attributes: p.attributes || {} });
+    if (p.consent) sim.consent(p.email, p.consent); // e.g. no SMS consent
+  }
   await sim.run('Day 0 · sent');                 // openers + everyone parks at the first wait
-  for (const p of scn.personas) for (const step of p.drive) step(sim, p.email); // inject behaviours
+  for (const p of scn.personas) for (const step of p.drive || []) step(sim, p.email); // inject behaviours
   await sim.run('In-window · reacted');           // early-advancers route immediately
   await sim.run('Window closed', { expire: true }); // the silent take the timeout branch
-  return scn.personas.map((p) => ({ ...p, status: sim.status(p.email), got: sim.received(p.email) }));
+  // Optional LATE behaviour (e.g. a click after the window already closed) + one
+  // more tick — proves a finished person is never reprocessed / re-routed.
+  if (scn.personas.some((p) => p.late)) {
+    for (const p of scn.personas) for (const step of p.late || []) step(sim, p.email);
+    await sim.run('Later · stale signal');
+  }
+  return scn.personas.map((p) => ({ ...p, status: sim.status(p.email), got: sim.received(p.email), syncs: sim.syncedFor(p.email) }));
+}
+
+// Did a persona land exactly where expected — status, the messages received (in
+// order), and (if specified) the ad-audience syncs it triggered? Shared by the
+// report and the CI test.
+function personaOk(p) {
+  if (p.status !== p.expect.status) return false;
+  if (JSON.stringify(p.got.map((s) => s.subject)) !== JSON.stringify(p.expect.got)) return false;
+  if (p.expect.syncs) {
+    const norm = (a) => JSON.stringify([...a].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
+    if (norm(p.syncs) !== norm(p.expect.syncs)) return false;
+  }
+  return true;
 }
 
 // ── Pretty report (only when run directly) ────────────────────────────────────
@@ -204,22 +555,20 @@ async function report() {
     console.log('');
     const results = await simulate(scn);
     for (const p of results) {
-      const gotSubs = p.got.map((s) => s.subject);
-      const okStatus = p.status === p.expect.status;
-      const okMsgs = JSON.stringify(gotSubs) === JSON.stringify(p.expect.got);
-      const ok = okStatus && okMsgs;
+      const ok = personaOk(p);
       allOk = allOk && ok;
       console.log(`  👤 ${C.b(p.name)} ${C.dim('— ' + p.behaviour)}`);
       for (const s of p.got) console.log(`       ${C.dim(s.tick.padEnd(20))} ${s.channel === 'sms' ? '💬' : '✉ '}  ${s.subject}`);
+      for (const y of p.syncs) console.log(`       ${C.dim(''.padEnd(20))} 🎯  ${y.action === 'remove' ? 'remove from' : 'add to'} “${y.audience}” · ${y.platform}`);
       const exitTxt = p.status === 'converted' ? C.g('CONVERTED ✔') : `ended: ${p.status}`;
-      console.log(`       ${ok ? C.g('✓ ' + exitTxt) : C.r('✗ ' + exitTxt + ` — expected ${p.expect.status} / ${p.expect.got.join(', ')}`)}\n`);
+      console.log(`       ${ok ? C.g('✓ ' + exitTxt) : C.r('✗ ' + exitTxt + ` — expected ${p.expect.status} / ${p.expect.got.join(', ')}${p.expect.syncs ? ' / syncs ' + JSON.stringify(p.expect.syncs) : ''}`)}\n`);
     }
-    const pass = results.filter((p) => p.status === p.expect.status && JSON.stringify(p.got.map((s) => s.subject)) === JSON.stringify(p.expect.got)).length;
+    const pass = results.filter(personaOk).length;
     console.log(`  ${pass === results.length ? C.g(`RESULT: ${pass}/${results.length} routed exactly as expected ✓`) : C.r(`RESULT: ${pass}/${results.length} — see ✗ above`)}`);
   }
   console.log(`\n${allOk ? C.g(C.b('ALL SIMULATIONS PASSED ✓')) : C.r(C.b('SOME SIMULATIONS FAILED ✗'))}\n`);
   return allOk;
 }
 
-module.exports = { SCENARIOS, simulate, Sim };
+module.exports = { SCENARIOS, simulate, Sim, personaOk };
 if (require.main === module) report().then((ok) => process.exit(ok ? 0 : 1)).catch((e) => { console.error(e); process.exit(1); });

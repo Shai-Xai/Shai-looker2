@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-16 (🦉 Fan Owl loyalty & rewards 🧪: verified fan recognition + budgeted reward pools · previously: Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-16 (🦉 Fan Owl loyalty & rewards 🧪: verified fan recognition + budgeted reward pools · Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -79,12 +79,22 @@ longer they use Pulse, the better it gets."
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
   insight/summary panels hands the finding off to **email, WhatsApp or Slack** in
   one tap, with room to add a personal note and a link back to the view.
+- **Inspect query** ✅ (dashboard editors) — in **edit mode**, a 🔍 in any queryable
+  tile's controls opens a read-only, Looker-Explore-style view of exactly what
+  drives the number: the **fields in use** (dimensions/measures, grouped by view),
+  the **filters** in effect as condition + value chips (tile-baked vs dashboard,
+  tagged by source), a **bar visualization** of the first measure, and the **result
+  grid** behind the tile. If a figure looks off, the logic can be audited in-app
+  instead of "checking Looker"; staff also get the raw internals (model/explore,
+  field names, sorts, row limit).
 - **Download as branded PDF** ✅ — the dashboard's ⋯ menu has a **Download PDF** that
   produces a clean, shareable report for stakeholders who aren't on Pulse. It opens
   with the client's own **logo + brand colours**, the dashboard title and the
   **exact filters/date range** currently applied, then the charts and tiles — so
   the file explains itself. Works from a phone, and only ever exports the tenant's
-  own data.
+  own data. The **App page** (Analytics / Audience / Community) has its own
+  **⤓ PDF** button next to the date controls — same branded cover, on both the
+  client page and Admin → App analytics.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
@@ -1088,7 +1098,45 @@ see "The continuous comms loop" above.)*
   targeted by tier/signals with a comps include/exclude rule, one grant per fan,
   burn-down views, and a proactive-but-earned offer that only fires when pools
   are live. New 🎁 Rewards tab in the Fan Owl editor, both surfaces.
-
+- **2026-07-16** — **Campaigns — test send fix** ✅: "Send test to me" now sends
+  the exact content shown in the preview pane. Previously, for a **drip sequence**
+  (e.g. Abandoned Cart Recovery) the test email could arrive with an empty body
+  when the HTML lived in a step — the test-send used the top-level copy while the
+  preview rendered the active step. Both now render the same step, so a test send
+  faithfully validates what recipients will get.
+- **2026-07-16** — **Inspect query goes live-editable** ✅ (Dashboards): the
+  Explore-style inspect panel's controls now work — edit filter values (or add /
+  remove filters), add / remove fields from the explore's catalogue, change the
+  row limit, and hit **▶ Run** to re-query and watch the bars + grid update. A
+  sandbox: only the preview re-runs (server tenant-scoping still applies); the
+  tile keeps its saved query, and **Reset** returns to it. When the sandbox
+  looks right, **✓ Apply to tile** writes the query onto the tile in the editor
+  (the dashboard's Save publishes it) — dashboard-driven filter values that rode
+  in unchanged stay live-wired rather than being baked in.
+- **2026-07-16** — **Branded PDF reaches the App pages** ✅ (App): the App page's
+  Analytics, Audience and Community tabs (and Admin → App analytics) now carry
+  their own **⤓ PDF** button with the same branded cover — the original export
+  only lived on the shared dashboard viewer, so the bespoke App surfaces from
+  ticket #45 didn't actually have it.
+- **2026-07-16** — **Super Admins visible & owner locked in** ✅ (Admin): the
+  Users directory now badges every **★ SUPER** holder, and the platform owner
+  is always re-granted Super Admin on boot so the global controls can never be
+  locked away from them.
+- **2026-07-16** — **Inspect query → Explore-style, edit-mode only** ✅ (Dashboards):
+  the 🔍 now lives with a tile's EDIT-mode controls (viewers no longer see it), and
+  the panel is rebuilt to read like Looker's Explore: a **fields-in-use rail**
+  (grouped by view, measures tinted, filtered fields marked), the **filters** as
+  condition + value chips with an AND rail, a **bar visualization** of the first
+  measure, and the **results grid** with warm measure columns and a row-limit
+  banner — all read-only, straight from the tile's own query + last result.
+- **2026-07-15** — **Inspect query panel** ✅ (Dashboards): every queryable tile now
+  carries a 🔍 that opens a read-only side panel (bottom sheet on mobile) listing the
+  **dimensions, measures and filters** driving the number — including the dashboard
+  filters currently in effect, tagged by source. Clients get a plain labelled summary;
+  Howler staff get the raw query internals (model/explore, field names, filter
+  expressions, sorts, row limit) for troubleshooting. Lets discrepancies be audited
+  in-app rather than "checking Looker". Pulse owns the interface, so the metadata comes
+  straight from the tile's own Looker query + the last result — no logic duplicated.
 - **2026-07-15** — **Download as branded PDF** ✅ (new): every dashboard's ⋯ menu now
   produces a shareable PDF that opens with the client's **logo + brand colours**, the
   title and the **filters/date range currently applied**, then the charts and tiles —

@@ -277,6 +277,12 @@ const SALES_HTML = path.join(__dirname, '../docs/pulse-sales-v2.html');
 const SALES_FEATURES_HTML = path.join(__dirname, '../docs/pulse-sales-features-v2.html');
 const MOCKUPS_DIR = path.join(__dirname, '../docs/mockups'); // "see it in motion" concept pages
 const KEYNOTE_HTML = path.join(__dirname, '../docs/pulse-client-keynote.html');
+const API_GUIDE_HTML = path.join(__dirname, '../docs/client-api-guide.html');
+const API_GUIDE_MD = path.join(__dirname, '../docs/CLIENT_API_GUIDE.md');
+// Self-hosted markdown renderer shared by the living-doc pages above. Serving it
+// ourselves (rather than a CDN <script>) is what keeps these pages working when
+// outbound network access is blocked — see docs/vendor/md-lite.js (issue #42).
+const MD_LITE_JS = path.join(__dirname, '../docs/vendor/md-lite.js');
 
 // Stable slug for a `##` heading — survives status-emoji / punctuation edits.
 function slugify(heading) {
@@ -371,6 +377,25 @@ module.exports.mount = function mountProductSite(app, { db, auth }) {
       if (err) return res.status(404).send('# Overview unavailable');
       res.send(filterOverviewMd(md, readHidden().overview));
     });
+  });
+
+  // The client/developer API guide — same living-doc pattern, shareable at
+  // /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).
+  app.get(['/api-guide', '/client-api-guide', '/client-api-guide.html'], (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.sendFile(API_GUIDE_HTML);
+  });
+  app.get('/client-api-guide.md', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.type('text/markdown; charset=utf-8');
+    res.sendFile(API_GUIDE_MD);
+  });
+
+  // The self-hosted markdown renderer both living-doc pages load (no CDN).
+  app.get('/vendor/md-lite.js', (_req, res) => {
+    res.type('application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.sendFile(MD_LITE_JS);
   });
 
   // The public Pulse sales website: a value-led story page at /sales (its Owl

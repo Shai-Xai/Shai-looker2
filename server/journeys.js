@@ -64,6 +64,20 @@ function cleanNodes(nodes, depth = 0, ctx = { left: MAX_NODES, seq: 0, step: 0 }
         if (!branches.some((b) => b.when === 'timeout')) branches[branches.length - 1].when = 'timeout'; // someone must catch the silence
         out.push({ type: 'decision', kind, id, question: String(n.question || 'What did they do?').slice(0, 140), waitHours: Math.min(720, Math.max(1, Number(n.waitHours) || 48)), branches });
       }
+    } else if (n.type === 'sync') {
+      // Audience-sync node: as people flow through it, add (or remove) them to a
+      // Meta / TikTok custom audience — e.g. "non-buyers after 3 days → add to
+      // the retargeting audience", "buyers → remove from it". A pass-through
+      // (no wait, no message): the token syncs and moves on.
+      ctx.left -= 1;
+      out.push({
+        type: 'sync',
+        id: `y${(ctx.seq += 1)}`,
+        platform: ['meta', 'tiktok', 'both'].includes(n.platform) ? n.platform : 'meta',
+        action: n.action === 'remove' ? 'remove' : 'add',
+        audienceName: String(n.audienceName || 'Journey audience').slice(0, 120),
+        note: String(n.note || '').slice(0, 200),
+      });
     } else {
       ctx.left -= 1;
       out.push({
@@ -88,7 +102,7 @@ function countNodes(nodes) {
   let messages = 0; let decisions = 0;
   for (const n of nodes || []) {
     if (n.type === 'decision') { decisions += 1; for (const b of n.branches) { const c = countNodes(b.nodes); messages += c.messages; decisions += c.decisions; } }
-    else messages += 1;
+    else if (n.type === 'message') messages += 1; // sync nodes aren't messages
   }
   return { messages, decisions };
 }
@@ -249,7 +263,7 @@ function engineOn(sql) {
 // Same safety net as the classic loop: consent per channel per send, suppression
 // ejects, conversion routes (bought) rather than silently exiting.
 async function processAction(a, deps) {
-  const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser } = deps;
+  const { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser, syncAudience } = deps;
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN node_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   try { sql.exec("ALTER TABLE action_enrollments ADD COLUMN wait_until TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
   const { map, entryId } = compile(stampIfNeeded(a.config.journey).nodes);
@@ -274,6 +288,7 @@ async function processAction(a, deps) {
     opened: !!sql.prepare('SELECT 1 FROM action_opens WHERE action_id=? AND email=? LIMIT 1').get(a.id, email),
     inSegment: (b) => { const s = b.segmentId && segSets.get(b.segmentId); return !!(s && s.has(String(email || '').toLowerCase())); },
   });
+  const syncBatch = new Map(); // "platformaudienceaction" -> [{ email, phone }]
   for (const e of due) {
     if (sup.has(e.email)) { upd(e, { status: 'unsubscribed' }); continue; }
     const row = reachable.get(e.email) || {};
@@ -284,6 +299,17 @@ async function processAction(a, deps) {
       const cur = id ? map.get(id) : null;
       if (!cur) { upd(e, { status: boughtRouted ? 'converted' : 'done', node_id: id || '' }); converted += boughtRouted ? 1 : 0; break; }
       const n = cur.node;
+      if (n.type === 'sync') {
+        // Batch this person for the platform audience; the actual sync (deduped,
+        // hashed) fires once per tick after the walk. Then move on — no wait.
+        if (!syncBatch.has(n.id)) syncBatch.set(n.id, { platform: n.platform, audienceName: n.audienceName, action: n.action, members: [] });
+        syncBatch.get(n.id).members.push({ email: e.email, phone: e.phone });
+        id = cur.nextId; waitUntil = '';
+        const nx = id ? map.get(id) : null;
+        if (!nx) { upd(e, { status: boughtRouted ? 'converted' : 'done', node_id: '' }); converted += boughtRouted ? 1 : 0; break; }
+        if (nx.node.type === 'message' && nx.node.delayHours > 0) { upd(e, { node_id: id, next_at: new Date(Date.now() + nx.node.delayHours * 3600e3).toISOString(), wait_until: '' }); break; }
+        continue;
+      }
       if (n.type === 'message') {
         // A delayed message we only just arrived at: schedule it, don't send yet.
         if (n.delayHours > 0 && e.node_id !== n.id && hops > 0) { upd(e, { node_id: n.id, next_at: new Date(Date.now() + n.delayHours * 3600e3).toISOString(), wait_until: '' }); break; }
@@ -305,12 +331,26 @@ async function processAction(a, deps) {
       if (!waitUntil || e.node_id !== n.id) waitUntil = new Date(Date.now() + (n.waitHours || 48) * 3600e3).toISOString(); // just arrived — open the window
       const sig = signalsFor(e.email); sig.expired = now() >= waitUntil;
       const b = pickBranch(n, sig);
+      // A purchase ALWAYS exits — never keep selling to someone who bought. If the
+      // author gave a 'bought' branch, pickBranch chose it (a thank-you, then
+      // convert below); otherwise exit silently as converted rather than nurturing.
+      if (sig.bought && !(b && b.when === 'bought')) { upd(e, { status: 'converted', node_id: '' }); converted += 1; break; }
       if (!b) { upd(e, { node_id: n.id, wait_until: waitUntil, next_at: new Date(Date.now() + POLL_MS).toISOString() }); break; } // keep waiting, poll next tick
       if (b.when === 'bought') boughtRouted = true;
       id = (b.nodes[0] && b.nodes[0].id) || cur.nextId; waitUntil = '';
       continue;
     }
     await new Promise((r) => setTimeout(r, 120)); // gentle rate (matches the classic loop)
+  }
+  // Flush the tick's audience-sync batches: one hashed add/remove per platform +
+  // audience. 'both' fans out to Meta and TikTok. Best-effort — a connector error
+  // never stalls the journey.
+  for (const s of syncBatch.values()) {
+    if (!syncAudience || !s.members.length) continue;
+    for (const platform of s.platform === 'both' ? ['meta', 'tiktok'] : [s.platform]) {
+      try { await syncAudience({ entityId: a.entityId, platform, audienceName: s.audienceName, action: s.action, members: s.members }); }
+      catch (err) { console.error('[journeys] audience sync failed', a.id, platform, s.audienceName, err.message); }
+    }
   }
   if (sent || converted) {
     const res = a.results || {};

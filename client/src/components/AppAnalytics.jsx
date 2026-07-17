@@ -6,7 +6,9 @@ import echarts from '../lib/echarts.js';
 import { brandPrimary } from '../lib/brand.js';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import { useProfile } from '../lib/profile.jsx';
 import DashboardInsightModal from './DashboardInsightModal.jsx';
+import DashboardPrintHeader from './DashboardPrintHeader.jsx';
 import AiMark from './AiMark.jsx';
 
 // 📱 App analytics — the UI over server/posthog.js (direct PostHog integration).
@@ -19,6 +21,22 @@ import AiMark from './AiMark.jsx';
 // Uninstall with server/posthog.js — see that file's header.
 
 import { prettyDevice, DEVICE_KEYS } from '../lib/deviceNames.js';
+
+// ⤓ Download PDF — one branded print-to-PDF affordance for the App surfaces
+// (client page + admin tab + Community). Rides the same print stylesheet and
+// .pdf-cover as the dashboard viewer's Download PDF, so every Pulse export
+// carries the same branded look. Render a DashboardPrintHeader alongside it.
+export function PdfButton() {
+  return (
+    <button
+      type="button" className="no-print"
+      title="Download PDF — a branded report of this view (your logo + the active date range)"
+      aria-label="Download PDF"
+      onClick={() => setTimeout(() => window.print(), 100)}
+      style={{ minHeight: 32, padding: '5px 12px', borderRadius: 980, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--muted)' }}
+    >⤓ PDF</button>
+  );
+}
 
 const fmt = (n) => (n == null ? '—' : Intl.NumberFormat('en-ZA', { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n));
 // Rand amounts (in-app revenue tracked by PostHog) — compact above 100k.
@@ -281,13 +299,20 @@ export function AppAnalyticsAdmin() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+      <DashboardPrintHeader
+        title={perClient ? 'App analytics' : 'App analytics — whole app'}
+        entityName={clients.find((c) => c.id === entityId)?.name || 'Howler — all clients'}
+        filters={[{ name: 'range', title: 'Date range' }, { name: 'gran', title: 'Granularity' }]}
+        values={{ range: `${range.from} → ${range.to}`, gran: gran === 'day' ? 'Daily' : 'Hourly' }}
+      />
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <select style={{ ...input, width: 'auto', minWidth: 160 }} value={entityId} onChange={(e) => setEntityId(e.target.value)}>
           <option value="">All clients — whole app</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} />
+        <PdfButton />
         <OwlBtn onClick={() => (entityId
           ? setOwlSel({ ids: [entityId], label: clients.find((c) => c.id === entityId)?.name || 'This client' })
           : setOwlPick(true))} />
@@ -360,6 +385,9 @@ export function AppAnalyticsAdmin() {
 export function AppAnalyticsPanel({ entityId, scope = 'my', section = 'analytics' }) {
   const audience = section === 'audience'; // 🎟 Audience tab: who the users ARE (match, super fans, directory)
   const isMobile = useIsMobile();
+  // Tenant name for the branded PDF cover (falls back gracefully off-profile).
+  const { entities, active } = useProfile();
+  const entityName = (entities.find((e) => e.id === entityId) || active)?.name || '';
   const [gran, setGran] = useState('day');
   const [range, setRange] = useState(() => presetRange(28));
   const [data, setData] = useState(null);
@@ -394,11 +422,19 @@ export function AppAnalyticsPanel({ entityId, scope = 'my', section = 'analytics
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+      {/* Print-only branded cover — same look as every Pulse Download PDF. */}
+      <DashboardPrintHeader
+        title={audience ? 'App audience' : 'App analytics'}
+        entityName={entityName}
+        filters={[{ name: 'range', title: 'Date range' }, ...(audience ? [] : [{ name: 'gran', title: 'Granularity' }])]}
+        values={{ range: `${range.from} → ${range.to}`, gran: gran === 'day' ? 'Daily' : 'Hourly' }}
+      />
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {/* The intro sentence squeezes the control chips into ragged wrapping on
             phones — the page is titled "App", so the copy is desktop-only. */}
         {!isMobile && <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }} title="How your events perform inside the Howler app.">{audience ? 'Who your app users are — matched to your ticketing data.' : 'How your events perform inside the Howler app.'}</span>}
         <WindowControls gran={gran} setGran={setGran} range={range} setRange={setRange} hideGran={audience} />
+        <PdfButton />
         <OwlBtn onClick={() => setOwlOpen(true)} />
       </div>
       {owlOpen && (
@@ -426,7 +462,8 @@ export function AppAnalyticsPanel({ entityId, scope = 'my', section = 'analytics
       <>
       <StatRow isMobile={isMobile} stats={[
         ['Viewers today', data.live?.actives, true],
-        ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques, data.live?.windowUniques != null],
+        // No LIVE tag here — it's a window total, not a right-now number (the tag confused more than it informed).
+        ['Unique viewers', data.live?.windowUniques ?? data.totals?.uniques],
         ['Interactions', data.totals?.interactions],
         // unmapped/empty metrics stay hidden until they have data (see AppAnalyticsAdmin)
         ...[['Views', data.totals?.views], ['CTA taps', data.totals?.ctaTaps], ['Purchases', data.totals?.purchases], ['Notifications', data.totals?.notifications]].filter(([, v]) => v > 0),

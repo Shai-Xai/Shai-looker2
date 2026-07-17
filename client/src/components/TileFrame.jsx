@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import TextTile from './tiles/TextTile.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import InsightModal from './InsightModal.jsx';
+import InspectQueryModal from './InspectQueryModal.jsx';
 import AiMark from './AiMark.jsx';
 import { usePins } from '../lib/PinContext.jsx';
 import { useTileData, isRunnableQuery } from '../lib/useTileData.js';
@@ -24,9 +25,9 @@ import { loadTileZoom, setTileZoom } from '../lib/tileZoom.js';
 
 // Renders a single tile (vis or text). In edit mode it shows hover controls
 // (edit / duplicate / delete) and a drag handle on the title bar.
-export default function TileFrame({ tile, filterValues, editable, onEdit, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
+export default function TileFrame({ tile, filterValues, editable, onEdit, onApplyQuery, onDuplicate, onRemove, onMoveOut, onToggleHide, inCarousel }) {
   const { data, loading, error } = useTileData(tile, filterValues);
-  const { insightsEnabled } = useAuth();
+  const { insightsEnabled, isAdmin } = useAuth();
   const { entityId, dashboardId, suiteId, canLockTiles, tileLocks = {}, lockFilters = [], onSaveTileLock } = useScope();
   const [showTileLock, setShowTileLock] = useState(false);
   // Admin per-tile lock affordance: only when in a suite, the tile is queryable
@@ -37,6 +38,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
   const { can } = useAccess();
   const isMobile = useIsMobile();
   const [showInsight, setShowInsight] = useState(false);
+  const [showInspect, setShowInspect] = useState(false);
   const [showSegment, setShowSegment] = useState(false);
   // Per-user chart zoom ("last N points") — loaded from the user's prefs and
   // saved back on change; a personal lens, never a dashboard edit.
@@ -66,7 +68,24 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
     return f;
   }
 
+  // The query fields whose filter value comes from a live dashboard filter (vs
+  // baked into the tile) — so the Inspect panel can tag each filter's source.
+  function dashboardFilterFields() {
+    const out = [];
+    for (const [filterName, queryField] of Object.entries(tile.listenTo || {})) {
+      const val = filterValues?.[filterName];
+      if (val && val !== ANY_VALUE && String(val).trim()) out.push(queryField);
+    }
+    return out;
+  }
+
   const canInsight = insightsEnabled && tile.type !== 'text' && data && !loading && !error;
+  // Inspect query: an EDIT-mode tool (lives with the tile's edit controls, not
+  // on the viewing surface) for auditing a queryable tile Explore-style —
+  // fields in use, filters, a bar visualization and the result grid (see
+  // InspectQueryModal). Wait for a result so the fields & filters reflect the
+  // exact number on screen.
+  const canInspect = editable && tile.type !== 'text' && isRunnableQuery(tile.query) && data && !loading && !error;
 
   // "Segment from a tile": offer it (view mode only) when the tile lists people —
   // i.e. its data has an email-like column — and the viewer can manage campaigns.
@@ -165,6 +184,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
           {editable && (
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
               {inCarousel && <ReorderGrip tileId={tile.id} />}
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -226,6 +246,7 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
               ? <ReorderGrip tileId={tile.id} />
               : <span className="tile-drag-handle" title="Drag to move" style={{ cursor: 'move', color: '#999', fontSize: 13, padding: '2px 5px', lineHeight: 1.2 }}>✥</span>}
             <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} onMouseDown={(e) => e.stopPropagation()}>
+              {canInspect && <IconBtn title="Inspect query — dimensions, measures & filters driving this tile" onClick={() => setShowInspect(true)}>🔍</IconBtn>}
               <IconBtn title="Edit" onClick={onEdit}>✎</IconBtn>
               <IconBtn title="Duplicate" onClick={onDuplicate}>⧉</IconBtn>
               {onMoveOut && <IconBtn title="Move out to the dashboard grid" onClick={onMoveOut}>⤴</IconBtn>}
@@ -267,6 +288,17 @@ export default function TileFrame({ tile, filterValues, editable, onEdit, onDupl
       )}
       {showInsight && (
         <InsightModal tile={tile} data={data} filters={appliedFilters()} onClose={() => setShowInsight(false)} />
+      )}
+      {showInspect && (
+        <InspectQueryModal
+          tile={tile}
+          data={data}
+          filters={appliedFilters()}
+          dashboardFields={dashboardFilterFields()}
+          detailed={isAdmin}
+          onApply={onApplyQuery}
+          onClose={() => setShowInspect(false)}
+        />
       )}
       {showSegment && (
         <CreateSegmentModal

@@ -212,6 +212,15 @@ export default function EditorPage() {
       carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === updated.id ? updated : t)) })),
     }));
   }
+  // Inspect-panel "Apply to tile": write the sandboxed query back onto the tile.
+  // Only the local editor draft changes — Save publishes it like any other edit.
+  function applyTileQuery(tileId, query) {
+    mutate((d) => ({
+      ...d,
+      tiles: d.tiles.map((t) => (t.id === tileId ? { ...t, query } : t)),
+      carousels: (d.carousels || []).map((c) => ({ ...c, tiles: c.tiles.map((t) => (t.id === tileId ? { ...t, query } : t)) })),
+    }));
+  }
   // Hide / unhide a tile (grid or carousel): keeps it in the definition but it's
   // skipped when viewers see the dashboard. Shown dimmed in the editor.
   function toggleHideTile(tileId) {
@@ -380,6 +389,7 @@ export default function EditorPage() {
   const canvasInner = { flex: 1, overflowY: 'auto', padding: '16px 24px', ...(dark ? null : { '--tile-bg': theme.tileBackground || '#fff' }) };
   const carouselHandlers = (c) => ({
     onEditTile: setSelectedTileId,
+    onApplyTileQuery: applyTileQuery,
     onToggleHide: (tid) => toggleHideTile(tid),
     onRemoveTile: (tid) => removeTileFromCarousel(c.id, tid),
     onDuplicateTile: (tid) => duplicateTileInCarousel(c.id, tid),
@@ -491,6 +501,7 @@ export default function EditorPage() {
               editable
               onLayoutChange={applyLayout}
               onEditTile={setSelectedTileId}
+              onApplyTileQuery={applyTileQuery}
               onDuplicateTile={duplicateTile}
               onRemoveTile={removeTile}
               onHideTile={toggleHideTile}
