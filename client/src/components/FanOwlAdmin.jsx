@@ -716,7 +716,7 @@ function downscaleImage(file, max = 1600, quality = 0.8) {
 // generated in the ticketing system; this holds the stock, the target and the
 // rules — issuance itself is server-side and one-per-fan.
 const REWARD_KINDS_UI = [['discount', '💸 Discount'], ['upgrade', '⬆️ Upgrade'], ['addon', '➕ Add-on'], ['credit_bundle', '🍺 Ticket+credit bundle'], ['merch', '👕 Merch'], ['prize', '🏆 Prize']];
-const TIER_OPTS = [['new', 'New'], ['returning', 'Returning'], ['loyal', 'Loyal']];
+const TIER_OPTS = [['new', 'New (0 events)'], ['returning', 'Returning (1)'], ['loyal', 'Loyal (2–3)'], ['superfan', '👑 Superfan (4+)']];
 const SIGNAL_OPTS = [['group_buyer', 'Group buyer (4+)'], ['comp_guest', 'Comp guest'], ['lead_no_purchase', 'Registered, never bought'], ['preregistered', 'Preregistered']];
 
 function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
@@ -788,10 +788,16 @@ function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codes
               </select>
             </div>
           </div>
-          <div style={{ ...small, marginTop: 8 }}>Who qualifies (tier — any ticked matches):</div>
+          <div style={{ ...small, marginTop: 8 }}>Who qualifies (tier — any ticked matches; each fan sits on ONE rung, so tick every rung you want — Loyal does NOT include Superfans):</div>
           {checks(i, TIER_OPTS, 'tiers')}
           <div style={{ ...small, marginTop: 6 }}>…and must have ALL of (optional):</div>
           {checks(i, SIGNAL_OPTS, 'signals')}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <span style={small}>…and a streak of at least</span>
+            <input type="number" min="0" max="30" style={{ ...input, width: 70 }} value={p.rules?.minStreakYears || 0}
+              onChange={(e) => setPool(i, { rules: { ...p.rules, minStreakYears: Number(e.target.value) } })} />
+            <span style={small}>consecutive years attended (0 = off — e.g. 3 targets the "3 years running" crowd)</span>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8, marginTop: 10 }}>
             <div>
               <div style={small}>Code mode</div>
@@ -891,7 +897,7 @@ function Flywheel({ stats, leads, loadLeads }) {
                     <td style={{ padding: '6px 10px' }}>{l.email}</td>
                     <td style={{ padding: '6px 10px' }}>{l.name}</td>
                     <td style={{ padding: '6px 10px' }}>{l.verified ? '✅' : '—'}</td>
-                    <td style={{ padding: '6px 10px' }}>{l.tier ? { new: '🆕 new', returning: '↻ returning', loyal: '★ loyal' }[l.tier] || l.tier : '—'}</td>
+                    <td style={{ padding: '6px 10px' }}>{l.tier ? { new: '🆕 new', returning: '↻ returning', loyal: '★ loyal', superfan: '👑 superfan' }[l.tier] || l.tier : '—'}</td>
                     <td style={{ padding: '6px 10px' }}>{l.consentMarketing ? '✅' : '—'}</td>
                     <td style={{ padding: '6px 10px' }}>{(l.preferences || []).join(', ')}</td>
                     <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>{String(l.at || '').slice(0, 10)}</td>

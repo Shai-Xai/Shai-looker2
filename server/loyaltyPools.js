@@ -17,7 +17,7 @@
 const crypto = require('crypto');
 
 const REWARD_KINDS = new Set(['discount', 'upgrade', 'addon', 'credit_bundle', 'merch', 'prize']);
-const TIERS = new Set(['new', 'returning', 'loyal']);
+const TIERS = new Set(['new', 'returning', 'loyal', 'superfan']);
 const SIGNALS = new Set(['group_buyer', 'comp_guest', 'preregistered', 'lead_no_purchase', 'high_onsite_spender', 'app_active', 'community_contributor']);
 
 function mount(app, { db, auth }) {
@@ -98,6 +98,7 @@ function mount(app, { db, auth }) {
           ticketTypes: (Array.isArray(p.rules?.ticketTypes) ? p.rules.ticketTypes : []).map((t) => String(t).slice(0, 120)).slice(0, 20),
           comps: p.rules?.comps === 'ignore' ? 'ignore' : 'count', // spec §5: reward buyers, greet guests
           expiresAt: String(p.rules?.expiresAt || '').slice(0, 30),
+          minStreakYears: Math.max(0, Math.min(30, Number(p.rules?.minStreakYears) || 0)), // consecutive years attended
         };
         const mode = p.mode === 'shared' ? 'shared' : 'unique';
         const row = {
@@ -161,10 +162,13 @@ function mount(app, { db, auth }) {
     const rules = J(pool.rules, {});
     if (!pool.active) return false;
     if (rules.expiresAt && Date.parse(rules.expiresAt) < Date.now()) return false;
-    // Comps rule (spec §5): 'ignore' judges the fan by their PAID history only.
-    const paidTier = (s.paidEventsCount || 0) >= 2 ? 'loyal' : (s.paidEventsCount || 0) >= 1 ? 'returning' : 'new';
+    // Comps rule (spec §5): 'ignore' judges the fan by their PAID history only —
+    // same ladder thresholds as loyalty.deriveProfile.
+    const paid = s.paidEventsCount || 0;
+    const paidTier = paid >= 4 ? 'superfan' : paid >= 2 ? 'loyal' : paid >= 1 ? 'returning' : 'new';
     const tier = rules.comps === 'ignore' ? paidTier : (s.tier || 'new');
     if (Array.isArray(target.tiers) && target.tiers.length && !target.tiers.includes(tier)) return false;
+    if (rules.minStreakYears > 0 && (s.streakYears || 0) < rules.minStreakYears) return false;
     if (Array.isArray(target.signals) && target.signals.length) {
       for (const sig of target.signals) if (!s.signals?.[sig]) return false;
     }
