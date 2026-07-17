@@ -108,6 +108,20 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
   const [ev, setEv] = useState(null); // event lookup: null | {checking} | {ok, eventName, ticketTypes} | {ok:false}
   const [showPreview, setShowPreview] = useState(false);
   const lookupSeq = useRef(0);
+  // The client's own events (from the App-analytics/PostHog mapping) drive a
+  // dropdown; manual id entry stays as the fallback (or via "Other…").
+  const [myEvents, setMyEvents] = useState(null);
+  const [manualEvent, setManualEvent] = useState(false);
+  useEffect(() => {
+    if (!draft) { setMyEvents([]); return; }
+    api.surveyEntityEvents(entityId)
+      .then((r) => {
+        const events = r.events || [];
+        setMyEvents(events);
+        if (survey?.eventId && !events.some((e) => e.eventId === String(survey.eventId))) setManualEvent(true);
+      })
+      .catch(() => setMyEvents([]));
+  }, [entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Verify the event against the Howler app as the id changes (publish requires it).
   useEffect(() => {
@@ -190,13 +204,27 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
         {(!isMobile || !showPreview) && (
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ flex: '1 1 200px' }}>
-                <label style={label}>Howler event ID</label>
-                <input style={input} value={f.eventId} disabled={!draft} placeholder="e.g. 19203" onChange={(e) => set('eventId', e.target.value)} />
+              <div style={{ flex: '1 1 220px' }}>
+                <label style={label}>Event</label>
+                {myEvents === null ? (
+                  <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '6px 0' }}>Loading your events…</p>
+                ) : myEvents.length > 0 && !manualEvent ? (
+                  <select style={input} value={f.eventId} disabled={!draft}
+                    onChange={(e) => { if (e.target.value === '__manual') { setManualEvent(true); set('eventId', ''); } else set('eventId', e.target.value); }}>
+                    <option value="">— pick one of your events —</option>
+                    {myEvents.map((e) => <option key={e.eventId} value={e.eventId}>{e.name} · #{e.eventId}</option>)}
+                    <option value="__manual">Other — enter an event ID…</option>
+                  </select>
+                ) : (
+                  <>
+                    <input style={input} value={f.eventId} disabled={!draft} placeholder="Howler event ID, e.g. 19203" onChange={(e) => set('eventId', e.target.value)} />
+                    {myEvents.length > 0 && draft && <button style={{ ...tiny, marginTop: 6 }} onClick={() => setManualEvent(false)}>← pick from your events instead</button>}
+                  </>
+                )}
                 {ev?.checking ? <p style={evHint('var(--muted)')}>Checking the Howler app…</p>
-                  : ev?.ok ? <p style={evHint('var(--success, #1d8a3b)')}>✓ Listed in the app{ev.eventName ? `: ${ev.eventName}` : ''}{ev.unverified ? ' (check skipped in this environment)' : ''}</p>
+                  : ev?.ok ? <p style={evHint('var(--success, #1d8a3b)')}>✓ Listed in the app{ev.eventName ? `: ${ev.eventName}` : ''}{ev.source === 'staging' ? ' · staging backend' : ''}{ev.unverified ? ' (check skipped in this environment)' : ''}</p>
                   : ev ? <p style={evHint('var(--error, #d70015)')}>✗ Not listed in the Howler app — surveys can only be published for listed events</p>
-                  : <p style={evHint('var(--muted)')}>The numeric event ID from Howler — checked live against the app.</p>}
+                  : myEvents !== null && myEvents.length === 0 ? <p style={evHint('var(--muted)')}>No mapped events found for this client — enter the numeric Howler event ID; it's checked live against the app.</p> : null}
               </div>
               <div style={{ flex: '0 0 auto' }}>
                 <label style={label}>Fan layout</label>
