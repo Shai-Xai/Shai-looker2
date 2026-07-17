@@ -241,6 +241,29 @@ function mount(app, { db, auth }) {
     return res.status(403).json({ error: 'Not allowed.' });
   };
   const listHandler = (req, res) => res.json(listView(req.params.entityId));
+  // Who got a code from this pool (the audit trail): fan + tier + code + when.
+  // redeemedAt stays blank until the ticketing redemption feed exists (spec §9 Q2).
+  // fan_profiles belongs to fanOwl.js and mounts first in production — the lazy
+  // prepare + fallback keeps this module standalone (tests, future reshuffles).
+  const grantRows = (poolId) => {
+    try {
+      return sql.prepare(`SELECT g.code_text, g.surface, g.created_at, g.redeemed_at, f.email, f.name, f.tier
+        FROM promo_grants g LEFT JOIN fan_profiles f ON f.id = g.profile_id
+        WHERE g.pool_id = ? ORDER BY g.created_at DESC LIMIT 500`).all(poolId);
+    } catch {
+      return sql.prepare('SELECT code_text, surface, created_at, redeemed_at FROM promo_grants WHERE pool_id = ? ORDER BY created_at DESC LIMIT 500').all(poolId);
+    }
+  };
+  const grantsHandler = (req, res) => {
+    const pool = poolById.get(String(req.params.poolId || ''));
+    if (!pool || pool.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Pool not found.' });
+    return res.json({
+      grants: grantRows(pool.id).map((g) => ({
+        email: g.email || '(unknown)', name: g.name || '', tier: g.tier || '',
+        code: g.code_text, surface: g.surface, at: g.created_at, redeemedAt: g.redeemed_at || '',
+      })),
+    });
+  };
   const saveHandler = (req, res) => res.json(savePools(req.params.entityId, req.body || {}));
   const codesHandler = (req, res) => {
     const r = uploadCodes(req.params.entityId, String(req.params.poolId || ''), (req.body || {}).codes);
@@ -250,9 +273,11 @@ function mount(app, { db, auth }) {
   app.get('/api/admin/entities/:entityId/loyalty/pools', auth.requireAdmin, listHandler);
   app.put('/api/admin/entities/:entityId/loyalty/pools', auth.requireAdmin, saveHandler);
   app.post('/api/admin/entities/:entityId/loyalty/pools/:poolId/codes', auth.requireAdmin, codesHandler);
+  app.get('/api/admin/entities/:entityId/loyalty/pools/:poolId/grants', auth.requireAdmin, grantsHandler);
   app.get('/api/my/loyalty/:entityId/pools', auth.requireAuth, requireMyEntity, listHandler);
   app.put('/api/my/loyalty/:entityId/pools', auth.requireAuth, requireMyEntity, saveHandler);
   app.post('/api/my/loyalty/:entityId/pools/:poolId/codes', auth.requireAuth, requireMyEntity, codesHandler);
+  app.get('/api/my/loyalty/:entityId/pools/:poolId/grants', auth.requireAuth, requireMyEntity, grantsHandler);
 
   console.log('[loyaltyPools] reward pools module mounted');
   return { grantFor: grantFor_, hasLiveRewards, savePools, uploadCodes, listView }; // engine for fanOwl + tests

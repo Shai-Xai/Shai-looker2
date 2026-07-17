@@ -1137,6 +1137,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   const STATUS_OPEN = '<<<OWL_STATUS>>>'; const STATUS_CLOSE = '<<</OWL_STATUS>>>';
   const OFFERS_MARK = '\n<<<FAN_OFFERS>>>';
   const NAV_MARK = '\n<<<FAN_NAV>>>'; // a goToPage result → the "Take me there" card
+  const REWARD_MARK = '\n<<<FAN_REWARD>>>'; // a getMyReward grant → the 🎁 reward card
   const chatLimit = rateLimit({ windowMs: 60_000, max: 8, by: (req) => `fan:${(req.body || {}).sessionId || ''}`, scope: 'fan-chat', message: 'Give the Owl a second to catch up — try again in a moment.' });
   app.post('/api/fan/chat', rateLimit({ windowMs: 60_000, max: 20, by: 'ip', scope: 'fan-chat-ip' }), chatLimit, asyncHandler(async (req, res) => {
     const b = req.body || {};
@@ -1211,6 +1212,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // Navigation card: the last goToPage this turn (one destination per reply).
       const navs = trail.filter((t) => t.name === 'goToPage' && t.result?.ok).map((t) => t.result.page);
       if (navs.length) res.write(NAV_MARK + JSON.stringify(navs[navs.length - 1]));
+      // Reward card: a grant this turn renders as a proper card (code, value,
+      // rules), not just chat text — same server-appended pattern as offers.
+      const grants = trail.filter((t) => t.name === 'getMyReward' && t.result?.ok).map((t) => ({ ...t.result.reward, existing: !!t.result.existing }));
+      if (grants.length) res.write(REWARD_MARK + JSON.stringify(grants[grants.length - 1]));
       res.end();
     } catch (err) {
       console.error('[POST /api/fan/chat]', err.message);
