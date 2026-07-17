@@ -49,7 +49,7 @@ const localeFor = (bootLang) => LOCALES[(navigator.language || '').slice(0, 2).t
 // ── 🎁 Reward card — a granted code rendered as a proper card (loyalty phase 2):
 // gradient header, the value, a dashed tap-to-copy code box, and the rules the
 // code enforces at checkout. Strings fall back to English until localised.
-function RewardCard({ reward, brand, C, T }) {
+function RewardCard({ reward, brand, C, T, onClaim }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try { await navigator.clipboard.writeText(reward.code); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* unsupported */ }
@@ -59,6 +59,7 @@ function RewardCard({ reward, brand, C, T }) {
     (reward.rules?.ticketTypes || []).length ? `valid on ${reward.rules.ticketTypes.join(', ')}` : '',
     reward.rules?.expiresAt ? `expires ${String(reward.rules.expiresAt).slice(0, 10)}` : '',
   ].filter(Boolean).join(' · ');
+  const oneTap = !!reward.url; // 'promo' code type: the code rides the buy link — no copying
   return (
     <div style={{ border: `1.5px solid ${brand}55`, borderRadius: 16, overflow: 'hidden', marginTop: 8, maxWidth: '88%', background: C.card }}>
       <div style={{ background: `linear-gradient(120deg, ${brand}, ${brand}cc)`, color: '#fff', padding: '9px 13px', fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>
@@ -67,13 +68,23 @@ function RewardCard({ reward, brand, C, T }) {
       <div style={{ padding: '11px 13px', fontSize: 13.5, lineHeight: 1.45, color: C.ink }}>
         {reward.value && <div style={{ fontWeight: 700 }}>{reward.value}</div>}
         {reward.description && <div style={{ opacity: 0.85 }}>{reward.description}</div>}
-        <button type="button" onClick={copy}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', boxSizing: 'border-box', marginTop: 9, border: `1.5px dashed ${brand}88`, borderRadius: 10, padding: '8px 12px', background: 'transparent', color: C.ink, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '.06em', cursor: 'pointer' }}>
-          <span>{reward.code}</span>
-          <span style={{ fontSize: 11, color: brand, fontFamily: 'inherit', letterSpacing: '.02em' }}>{copied ? (T.copied || 'Copied ✓') : (T.tapCopy || 'Tap to copy')}</span>
-        </button>
+        {oneTap ? (
+          <>
+            <button type="button" onClick={() => onClaim && onClaim(reward)}
+              style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 9, border: 0, borderRadius: 999, padding: '11px 14px', background: brand, color: '#fff', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+              {T.claimReward || 'Claim it — code applied ↗'}
+            </button>
+            <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{reward.code}</div>
+          </>
+        ) : (
+          <button type="button" onClick={copy}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', boxSizing: 'border-box', marginTop: 9, border: `1.5px dashed ${brand}88`, borderRadius: 10, padding: '8px 12px', background: 'transparent', color: C.ink, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '.06em', cursor: 'pointer' }}>
+            <span>{reward.code}</span>
+            <span style={{ fontSize: 11, color: brand, fontFamily: 'inherit', letterSpacing: '.02em' }}>{copied ? (T.copied || 'Copied ✓') : (T.tapCopy || 'Tap to copy')}</span>
+          </button>
+        )}
         <div style={{ fontSize: 11, opacity: 0.65, marginTop: 7 }}>
-          {(rules ? `${rules} · ` : '') + (T.onePerFan || 'Applied at checkout · 1 per fan')}
+          {(rules ? `${rules} · ` : '') + (oneTap ? (T.codeInLink || 'The code rides the link · 1 per fan') : (T.onePerFan || 'Applied at checkout · 1 per fan'))}
           {reward.termsUrl ? <> · <a href={reward.termsUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{T.terms || 'T&Cs'}</a></> : null}
         </div>
       </div>
@@ -366,7 +377,12 @@ export default function FanOwlEmbedPage() {
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>{T.takeMe}</button>
               </div>
             )}
-            {m.reward && !m.streaming && <RewardCard reward={m.reward} brand={brand} C={C} T={T} />}
+            {m.reward && !m.streaming && (
+              <RewardCard reward={m.reward} brand={brand} C={C} T={T} onClaim={(r) => {
+                fetch('/api/fan/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, kind: 'reward_click', payload: { pool: r.pool } }) }).catch(() => {});
+                window.open(r.url, '_blank', 'noopener');
+              }} />
+            )}
           </div>
         ))}
         {navArrived && boot.page && (

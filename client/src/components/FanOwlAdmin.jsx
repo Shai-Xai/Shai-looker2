@@ -658,7 +658,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       {tab === 'rewards' && (
         poolsDenied ? <p style={small}>🎁 Rewards ride the <strong>Loyalty & verification</strong> flag (Admin → Product → Flags → Fan Owl) — it's off for this client.</p>
           : !pools ? <p style={small}>Loading reward pools…</p> : (
-            <RewardPools pools={pools} setPools={setPools} suites={suites} isMobile={isMobile} loyaltyBase={loyaltyBase}
+            <RewardPools pools={pools} setPools={setPools} suites={suites} catalogue={cfg?.catalogue || []} isMobile={isMobile} loyaltyBase={loyaltyBase}
               saving={poolsSaving} savedAt={poolsSavedAt} codesDraft={codesDraft} setCodesDraft={setCodesDraft} codesNote={codesNote}
               onSave={async () => {
                 setPoolsSaving(true);
@@ -719,7 +719,7 @@ const REWARD_KINDS_UI = [['discount', '💸 Discount'], ['upgrade', '⬆️ Upgr
 const TIER_OPTS = [['new', 'New (0 events)'], ['returning', 'Returning (1)'], ['loyal', 'Loyal (2–3)'], ['superfan', '👑 Superfan (4+)']];
 const SIGNAL_OPTS = [['group_buyer', 'Group buyer (4+)'], ['comp_guest', 'Comp guest'], ['lead_no_purchase', 'Registered, never bought'], ['preregistered', 'Preregistered']];
 
-function RewardPools({ pools, setPools, suites, isMobile, loyaltyBase, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
+function RewardPools({ pools, setPools, suites, catalogue, isMobile, loyaltyBase, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
   const setPool = (i, patch) => setPools(pools.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   // Issued-codes audit per pool: who got which code, their tier, and (once the
   // ticketing redemption feed exists) whether it was redeemed.
@@ -797,7 +797,25 @@ function RewardPools({ pools, setPools, suites, isMobile, loyaltyBase, saving, s
                 <option value="ignore">Paid history only</option>
               </select>
             </div>
+            <div>
+              <div style={small}>How the code applies (same as campaigns)</div>
+              <select style={input} value={p.codeType || 'discount'} onChange={(e) => setPool(i, { codeType: e.target.value })}>
+                <option value="discount">🛒 Basket discount — fan copies the code at checkout</option>
+                <option value="promo">🎟 Ticket promo — one-tap link (?promo=CODE)</option>
+              </select>
+            </div>
+            {(p.codeType || 'discount') === 'promo' && (
+              <div>
+                <div style={small}>Ticket the link opens (needs a buy link in the Catalogue)</div>
+                <select style={input} value={p.bundleItemId || ''} onChange={(e) => setPool(i, { bundleItemId: e.target.value })}>
+                  <option value="">— choose a catalogue item —</option>
+                  {(catalogue || []).filter((c) => c.deepLink).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+            )}
           </div>
+          {(p.codeType || 'discount') === 'promo' && !p.bundleItemId
+            && <p style={{ ...small, color: 'var(--warn, #b3261e)', fontWeight: 700 }}>⚠️ Ticket-promo pools need a catalogue item with a buy link — until one is chosen the card falls back to tap-to-copy.</p>}
           <div style={{ ...small, marginTop: 8 }}>Who qualifies (tier — any ticked matches; each fan sits on ONE rung, so tick every rung you want — Loyal does NOT include Superfans):</div>
           {checks(i, TIER_OPTS, 'tiers')}
           <div style={{ ...small, marginTop: 6 }}>…and must have ALL of (optional):</div>
