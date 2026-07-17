@@ -47,6 +47,7 @@ const REGISTRY = [
     { key: 'engage.templates', name: 'Templates', def: true, desc: 'Campaign templates.' },
     { key: 'engage.journeys', name: 'Journeys', def: false, beta: true, desc: 'Owl-built branching journeys — decisions, audience splits, per-mailer editing. OFF hides the tab + removes the Owl tool. (Branch EXECUTION additionally needs the JOURNEY_ENGINE switch.)' },
     { key: 'engage.links', name: 'Links', def: true, beta: true, desc: 'ChottuLink short links into the Howler app — created from Pulse, click-tracked. OFF hides the tab + removes the Owl link tools.' },
+    { key: 'engage.surveys', name: 'Surveys', def: false, beta: true, desc: 'Post-event fan surveys answered in the Howler app, results back in Pulse. OFF hides the tab AND stops the app being served this client\'s surveys.' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
   { key: 'appanalytics', emoji: '📱', name: 'App analytics', def: false, beta: true, desc: 'Howler-app engagement on the client\'s events, live from PostHog — views, CTAs, purchases, app users.', kids: [
@@ -126,6 +127,7 @@ const GATES = [
   ['/api/owl/act/draft-journey', 'engage.journeys'],
   ['/api/campaign-templates', 'engage.templates'],
   ['/api/my/chottu', 'engage.links'],
+  ['/api/my/surveys', 'engage.surveys'],
   ['/api/owl/act/create-chottu-link', 'engage.links'],
   ['/api/owl/act/apply-chottu-template', 'engage.links'],
   ['/api/my/onboarding', 'yourjourney'],
