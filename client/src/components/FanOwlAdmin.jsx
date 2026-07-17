@@ -828,6 +828,10 @@ function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codes
             )}
           </div>
           {codesNote && codesNote.i === i && <p style={small}>{codesNote.text}</p>}
+          {p.active !== false && (p.mode || 'unique') === 'unique' && !(p.stock?.available > 0)
+            && <p style={{ ...small, color: 'var(--warn, #b3261e)', fontWeight: 700 }}>⚠️ This pool has NO codes available — the Owl can't offer it. Save the pool, paste the codes, then hit Upload and check the count.</p>}
+          {p.active !== false && p.mode === 'shared' && !p.sharedCodeSet && !String(p.sharedCode || '').trim()
+            && <p style={{ ...small, color: 'var(--warn, #b3261e)', fontWeight: 700 }}>⚠️ No shared code set — the Owl can't offer this pool until you enter one and Save.</p>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 180 }}>{burn(p.stock)}</div>
             <label style={{ fontSize: 12.5 }}><input type="checkbox" checked={p.active !== false} onChange={(e) => setPool(i, { active: e.target.checked })} /> Active</label>
