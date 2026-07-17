@@ -237,6 +237,21 @@ test('targeted surveys only reach fans with a matching ticket type', async () =>
   assert.equal((await call('POST /api/app/surveys/:id/responses', { params: { id: vipOnly.id }, body: { respondent: { howlerUserId: 'u0' }, answers } })).code, 200);
 });
 
+test('publishing overlapping audiences for one event returns a heads-up warning', async () => {
+  const { owner } = seedClient();
+  await makeLiveSurvey({ owner, eventId: '62001', extra: { audienceTicketTypes: ['VIP'] } });
+  // Disjoint audience → no warning.
+  const gen = await call('POST /api/my/surveys', { user: owner, body: { title: 'General survey', eventId: '62001', questions: CONTRACT_QUESTIONS, audienceTicketTypes: ['General'] } });
+  const genPub = await call('POST /api/my/surveys/:id/publish', { user: owner, params: { id: gen.body.id } });
+  assert.equal(genPub.body.warning, null);
+  // Blanket survey overlaps BOTH live targeted ones → warning names them.
+  const all = await call('POST /api/my/surveys', { user: owner, body: { title: 'Everyone survey', eventId: '62001', questions: CONTRACT_QUESTIONS } });
+  const allPub = await call('POST /api/my/surveys/:id/publish', { user: owner, params: { id: all.body.id } });
+  assert.match(allPub.body.warning, /also live for this event/);
+  assert.match(allPub.body.warning, /VIP/);
+  assert.match(allPub.body.warning, /General survey/);
+});
+
 // ── Responses: happy path, upsert, validation ─────────────────────────────────
 
 test('POST response: contract shape in, { ok, responseId } out, upsert replaces', async () => {
