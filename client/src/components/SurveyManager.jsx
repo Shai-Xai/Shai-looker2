@@ -199,6 +199,7 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
       </div>
       {err && <p style={{ color: 'var(--error, #d70015)', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>{err}</p>}
       {!draft && <p style={{ fontSize: 12.5, color: 'var(--muted)', background: 'rgba(128,128,128,0.09)', borderRadius: 10, padding: '9px 12px', margin: '0 0 14px' }}>🔒 This survey is published, so its content is locked — answers reference these exact questions. You can still move the close date, close it, or duplicate it as an editable draft.</p>}
+      {survey && survey.status === 'live' && <DistributionPanel entityId={entityId} scope={scope} survey={survey} />}
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         {(!isMobile || !showPreview) && (
@@ -290,6 +291,79 @@ function SurveyEditor({ entityId, scope, survey, onClose, onResults }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Email & links for a LIVE survey: paste recipients → personal links + branded
+// emails via the mail engine; plus one public share link (QR/socials/WhatsApp).
+function DistributionPanel({ entityId, scope, survey }) {
+  const [open, setOpen] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [recipients, setRecipients] = useState('');
+  const [subject, setSubject] = useState(`How was ${survey.eventName || 'the event'}?`);
+  const [message, setMessage] = useState(survey.description || 'It only takes 2 minutes — tell us how it went.');
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState(null);
+  const [share, setShare] = useState('');
+  const loadStats = () => api.surveyLinks(scope, entityId, survey.id).then(setStats).catch(() => {});
+  useEffect(() => { loadStats(); }, [survey.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const parse = () => recipients.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [email, displayName, ticketType] = l.split(',').map((x) => (x || '').trim());
+    return { email, displayName, ticketType };
+  });
+
+  const sendEmails = async () => {
+    const list = parse();
+    if (!list.length) { setOutcome({ error: 'Paste at least one recipient first.' }); return; }
+    if (!confirm(`Send the survey email to ${list.length} recipient${list.length === 1 ? '' : 's'} now?`)) return;
+    setBusy(true); setOutcome(null);
+    try {
+      const r = await api.surveySendEmails(scope, entityId, survey.id, { recipients: list, subject, message });
+      if (r.error) throw new Error(r.error);
+      setOutcome(r); setRecipients(''); loadStats();
+    } catch (e) { setOutcome({ error: e.message }); } finally { setBusy(false); }
+  };
+  const makeShare = async () => {
+    const r = await api.surveyShareLink(scope, entityId, survey.id).catch(() => null);
+    if (r && r.url) {
+      setShare(r.url);
+      try { await navigator.clipboard.writeText(r.url); } catch { /* show it instead */ }
+    }
+  };
+
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 12, background: 'var(--card)', padding: '12px 14px', marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 13.5 }}>📧 Email & links</span>
+        {stats && stats.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{stats.total} link{stats.total === 1 ? '' : 's'} · {stats.opened} opened · {stats.responded} responded</span>}
+        <span style={{ flex: 1 }} />
+        <button style={tiny} onClick={makeShare}>🔗 {share ? 'Copied!' : 'Copy public link'}</button>
+        <button style={tiny} onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : '✉️ Email it out'}</button>
+      </div>
+      {share && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 0', wordBreak: 'break-all' }}>{share} — anyone with this link can answer (QR codes, socials, WhatsApp).</p>}
+      {open && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <label style={label}>Recipients — one per line: email, name, ticket type</label>
+            <textarea style={{ ...input, minHeight: 90, fontFamily: 'ui-monospace, monospace', fontSize: 12.5 }} placeholder={'thandi@example.com, Thandi, VIP\nsipho@example.com'} value={recipients} onChange={(e) => setRecipients(e.target.value)} />
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 220px' }}><label style={label}>Subject</label><input style={input} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+            <div style={{ flex: '2 1 280px' }}><label style={label}>Message</label><input style={input} value={message} onChange={(e) => setMessage(e.target.value)} /></div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button style={primary} disabled={busy} onClick={sendEmails}>{busy ? 'Sending…' : `Send to ${parse().length || '…'} recipient${parse().length === 1 ? '' : 's'}`}</button>
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Each fan gets their own private link — their answers arrive already tagged with name & ticket type. Suppressed/unsubscribed addresses are skipped automatically.</span>
+          </div>
+          {outcome && (outcome.error
+            ? <p style={{ color: 'var(--error, #d70015)', fontSize: 12.5, fontWeight: 600, margin: 0 }}>{outcome.error}</p>
+            : <p style={{ fontSize: 12.5, color: 'var(--success, #1d8a3b)', fontWeight: 600, margin: 0 }}>
+                ✓ Sent {outcome.sent} of {outcome.total}{outcome.skipped?.length ? ` — skipped: ${outcome.skipped.map((s) => `${s.email} (${s.reason})`).join(', ')}` : ''}
+              </p>)}
+        </div>
+      )}
     </div>
   );
 }
@@ -412,12 +486,18 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 8 }}>
         <Stat v={res.responseCount.toLocaleString()} k={`Responses${tt ? ` · ${tt}` : ''}`} />
         <Stat v={ratingQ && ratingQ.average != null ? `${ratingQ.average}/5` : '—'} k="Overall rating" />
         <Stat v={comments.toLocaleString()} k="Comments" />
         <Stat v={res.byDay.length ? `${fmtDate(res.byDay[0].date)} –` : '—'} k="Collecting since" />
       </div>
+      {(res.byChannel || []).length > 1 && (
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px' }}>
+          Answered via {res.byChannel.map((c) => `${{ app: '📱 app', email: '✉️ email', web: '🔗 web' }[c.channel] || c.channel} ${c.count.toLocaleString()}`).join(' · ')}
+        </p>
+      )}
+      {(res.byChannel || []).length <= 1 && <div style={{ marginBottom: 6 }} />}
 
       {res.byDay.length > 1 && (
         <div style={card}>

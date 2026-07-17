@@ -351,7 +351,8 @@ test('ticket type (contract v1.2): stored, sliced by day/type, filterable, drill
   // CSV: ticket_type column present + filter respected.
   const csv = (await call('GET /api/my/surveys/:id/results.csv', { user: owner, params: { id: s.id }, query: { ticketType: 'VIP' } })).text;
   assert.match(csv.split('\n')[0], /ticket_type/);
-  assert.match(csv, /f3,VIP/);
+  assert.match(csv.split('\n')[0], /email,ticket_type,channel/);
+  assert.match(csv, /f3,,VIP,app/); // howler_user_id, (no email), ticket_type, channel
   assert.ok(!csv.includes('f1'));
 });
 

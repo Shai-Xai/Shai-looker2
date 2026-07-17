@@ -222,6 +222,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   addCol('survey_responses', 'ticket_type', "TEXT NOT NULL DEFAULT ''");    // contract v1.2: fan's ticket type name ("General", "VIP")
   addCol('survey_responses', 'ticket_type_id', "TEXT NOT NULL DEFAULT ''"); // optional stable id alongside the display name
   addCol('surveys', 'audience_ticket_types', "TEXT NOT NULL DEFAULT '[]'"); // contract v1.3: targeting — [] = everyone, else ticket-type names
+  addCol('survey_responses', 'channel', "TEXT NOT NULL DEFAULT 'app'");     // where it was answered: app | email | web
 
   const enabled = () => db.getSetting('surveys_enabled', '1') !== '0'; // global kill switch
   const audienceOf = (row) => { try { return JSON.parse(row.audience_ticket_types || '[]') || []; } catch { return []; } };
@@ -406,18 +407,25 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     if (clean.ticketType && !audienceMatches(row, clean.ticketType)) {
       return res.status(400).json({ error: `This survey is for ${audienceOf(row).join(' / ')} ticket holders` });
     }
+    res.json({ ok: true, responseId: saveResponse(row, clean, 'app') });
+  });
+
+  // Upsert one response per (survey, respondent key). Returns the stable id.
+  // Channel records WHERE it was answered (app | email | web) — the web/email
+  // module calls this too, with its own respondent keys.
+  function saveResponse(row, clean, channel) {
     const t = nowIso();
     const existing = sql.prepare('SELECT id FROM survey_responses WHERE survey_id=? AND howler_user_id=?').get(row.id, clean.howlerUserId);
     const id = existing ? existing.id : rid('rsp');
     if (existing) {
-      sql.prepare('UPDATE survey_responses SET display_name=?, email=?, ticket_type=?, ticket_type_id=?, platform=?, app_version=?, answers=?, updated_at=? WHERE id=?')
-        .run(clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, id);
+      sql.prepare('UPDATE survey_responses SET display_name=?, email=?, ticket_type=?, ticket_type_id=?, platform=?, app_version=?, answers=?, channel=?, updated_at=? WHERE id=?')
+        .run(clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), channel, t, id);
     } else {
-      sql.prepare('INSERT INTO survey_responses (id, survey_id, howler_user_id, display_name, email, ticket_type, ticket_type_id, platform, app_version, answers, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(id, row.id, clean.howlerUserId, clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), t, t);
+      sql.prepare('INSERT INTO survey_responses (id, survey_id, howler_user_id, display_name, email, ticket_type, ticket_type_id, platform, app_version, answers, channel, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, row.id, clean.howlerUserId, clean.displayName, clean.email, clean.ticketType, clean.ticketTypeId, clean.platform, clean.appVersion, JSON.stringify(clean.answers), channel, t, t);
     }
-    res.json({ ok: true, responseId: id });
-  });
+    return id;
+  }
 
   // ── Shared management core (admin + my routes both land here) ────────────────
 
@@ -526,6 +534,13 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
       if (!types.has(label)) types.set(label, bucket());
       tally(types.get(label), parseAnswers(r));
     }
+    const channels = new Map();
+    for (const r of allRows) { // whole-survey, like byTicketType
+      const c = r.channel || 'app';
+      channels.set(c, (channels.get(c) || 0) + 1);
+    }
+    const byChannel = [...channels.entries()].map(([channel, count]) => ({ channel, count })).sort((a, b) => b.count - a.count || a.channel.localeCompare(b.channel));
+
     const byTicketType = [...types.entries()].map(([label, b]) => ({ ticketType: label, ...finish(b) }))
       // Deterministic: count desc, then "Unknown" last among ties, then A→Z
       // (response timestamps can collide to the millisecond, so insertion order
@@ -562,7 +577,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
       responseCount: parsed.length, totalResponseCount: allRows.length,
       filter: { ticketType: ticketType || null },
       ticketTypes: byTicketType.map((t) => t.ticketType),
-      byDay, byTicketType, questions,
+      byDay, byTicketType, byChannel, questions,
     };
   }
 
@@ -592,8 +607,8 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     return {
       total: rows.length, limit, offset,
       responses: rows.slice(offset, offset + limit).map(({ r, answers }) => ({
-        id: r.id, howlerUserId: r.howler_user_id, ticketType: ticketLabel(r),
-        platform: r.platform, appVersion: r.app_version, submittedAt: r.updated_at, answers,
+        id: r.id, howlerUserId: r.howler_user_id, email: r.email || '', ticketType: ticketLabel(r),
+        channel: r.channel || 'app', platform: r.platform, appVersion: r.app_version, submittedAt: r.updated_at, answers,
       })),
     };
   }
@@ -602,7 +617,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   function resultsCsv(row, { ticketType = '' } = {}) {
     const qs = questionsOf(row);
     const rows = responsesFor(row.id, { ticketType }).slice().reverse(); // oldest first
-    const head = ['response_id', 'howler_user_id', 'ticket_type', 'platform', 'app_version', 'submitted_at', ...qs.map((q) => q.text)];
+    const head = ['response_id', 'howler_user_id', 'email', 'ticket_type', 'channel', 'platform', 'app_version', 'submitted_at', ...qs.map((q) => q.text)];
     const lines = [head.map(csvCell).join(',')];
     for (const r of rows) {
       const answers = parseAnswers(r);
@@ -615,7 +630,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
         if (q.type === 'multiple_choice') return (a.selectedTexts || []).join('; ');
         return a.text;
       });
-      lines.push([r.id, r.howler_user_id, ticketLabel(r), r.platform, r.app_version, r.updated_at, ...cells].map(csvCell).join(','));
+      lines.push([r.id, r.howler_user_id, r.email, ticketLabel(r), r.channel || 'app', r.platform, r.app_version, r.updated_at, ...cells].map(csvCell).join(','));
     }
     return lines.join('\n');
   }
@@ -795,7 +810,11 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80) }));
   });
 
-  return { publicSurvey, effectiveState, validateAnswers, surveyResults, resultsCsv, listResponses, createSurvey };
+  return {
+    publicSurvey, effectiveState, validateAnswers, surveyResults, resultsCsv, listResponses, createSurvey,
+    // for server/surveyWeb.js (email/web channel — same tables, same rules):
+    getSurvey, flagOn, audienceOf, audienceMatches, saveResponse, questionsOf, enabled,
+  };
 }
 
 module.exports = { mount, normalizeQuestions, normalizeSurveyFields };
