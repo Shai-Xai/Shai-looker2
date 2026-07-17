@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-17 (📑 Report Studio: shareable block-based client reports — tiles + AI analysis, share link + PDF, one-off or scheduled) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-17 (📑 Report Studio: block-based shareable client reports with a live WYSIWYG canvas — tiles + campaigns + app/goals/social/live blocks + AI analysis, share link + PDF, one-off or scheduled · 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1078,6 +1078,27 @@ and celebrates each milestone on the way."
 
 ---
 
+## 15. Fan surveys — post-event feedback in the Howler app  🧪
+
+**What it is:** design a short post-event survey in Pulse (star ratings,
+pick-one, pick-many, free text — max ~2 minutes for a fan) and it appears in
+the **Howler app** for that event's ticket holders; answers flow straight back
+into Pulse with results per question (average rating, option counts, comment
+list) and CSV export. One response per fan — resubmitting simply updates it.
+Per-survey **layout choice** (single form vs one-question-per-card) so
+organisers can A/B test presentation.
+
+**Status honestly:** 🧪 the Pulse↔app plumbing is LIVE end-to-end (the app side
+ships behind a flag); the survey **builder UI in Engage is in design** — until
+it lands, Howler staff can set surveys up on a client's behalf. Live surveys
+are locked (close & duplicate to change) so results always match what fans saw.
+
+**The pitch:** "Know what fans actually thought — in the same place you watched
+the tickets sell." Feedback lands next to the sales data, ready for the Owl and
+next year's planning.
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates. *(The conversational/agentic
 Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
@@ -1113,6 +1134,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-17** — **📑 Report Studio: live design canvas** 🧪: the report editor
+  is now a **WYSIWYG canvas** — the report renders exactly as stakeholders will
+  see it while you build it, with **live real-data previews** for every data
+  block, **inline editing** of the title/headings/text right on the page, and
+  **drag-and-drop** block rearranging.
+
 - **2026-07-17** — **📑 Report Studio: goals, social & live-pulse blocks** 🧪:
   reports can now also carry the client's **🎯 goals** (live progress table),
   **🌐 organic social** (accounts / metric trend chart / top posts) and the
@@ -1131,6 +1158,13 @@ see "The continuous comms loop" above.)*
   (daily/weekly/monthly, emailed). Dual-surface: Admin → client → Reports, and
   client self-service at /reports. (Spec: docs/specs/REPORT_STUDIO_SPEC.md.)
 
+- **2026-07-17** — **📋 Fan surveys (post-event feedback)** 🧪 (new): surveys built
+  in Pulse are answered by fans **inside the Howler app** and results (avg rating,
+  option counts, comments, CSV) land back in Pulse. Four question types, per-survey
+  form/cards layout for A/B testing, one response per fan (resubmit updates), live
+  surveys immutable (close & duplicate to edit). API + results engine live
+  (`server/surveys.js`, contract `docs/specs/SURVEY_CONTRACT.md`); Engage builder
+  UI in design — admin-assisted setup until it ships.
 - **2026-07-16** — **Fan Owl: loyalty & rewards engine** 🧪 (staging, flag-gated):
   email-verified fan recognition (tier + history-aware guidance + itemised past
   orders), budgeted reward pools (unique-code stock or shared multi-use code)

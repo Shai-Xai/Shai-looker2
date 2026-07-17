@@ -278,6 +278,35 @@ test("'auto' display on a chartable tile renders a PNG chart asset", async () =>
   assert.equal(png.slice(1, 4).toString(), 'PNG');
 });
 
+test('canvas preview: resolves real data with srcId mapping, inline charts, AI placeholder — persists nothing', async () => {
+  const before = sql.prepare('SELECT COUNT(*) n FROM report_snapshots').get().n;
+  const beforeAssets = sql.prepare('SELECT COUNT(*) n FROM report_assets').get().n;
+  const r = await app.req('POST', `/api/my/reports/${ent.id}/preview`, { as: manager, body: { title: 'Preview', blocks: [
+    { id: 'h1', type: 'heading', text: 'Sales', level: 1 },
+    { id: 't1', type: 'tile', dashboardId: 'dash1', tileId: 'kpi1', display: 'value' },
+    { id: 't2', type: 'tile', dashboardId: 'dash1', tileId: 'chart1', display: 'auto' },
+    { id: 'c1', type: 'campaign', campaignId: 'camp1' },
+    { id: 'a1', type: 'ai', scope: 'section' },
+  ] } });
+  assert.equal(r.status, 200);
+  const blocks = r.body.blocks;
+  // every resolved block maps back to its author block
+  assert.ok(blocks.every((b) => b.srcId));
+  assert.equal(blocks.find((b) => b.srcId === 't1').value, '8,430');
+  // chart comes back INLINE (data URL), not as a stored asset
+  const chart = blocks.find((b) => b.srcId === 't2');
+  assert.match(chart.dataUrl, /^data:image\/png;base64,/);
+  assert.equal(chart.assetToken, undefined);
+  // campaign resolved with real numbers; AI is a placeholder (no model call)
+  assert.ok(blocks.filter((b) => b.srcId === 'c1').some((b) => b.kind === 'kpi' && b.value === '5,100'));
+  assert.match(blocks.find((b) => b.srcId === 'a1').note, /written fresh/i);
+  // nothing persisted
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM report_snapshots').get().n, before);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM report_assets').get().n, beforeAssets);
+  // permission gate holds on preview too
+  assert.equal((await app.req('POST', `/api/my/reports/${ent.id}/preview`, { as: viewer, body: { blocks: [] } })).status, 403);
+});
+
 test('send emails every recipient the branded snapshot with the share link', async () => {
   const c = await app.req('POST', `/api/my/reports/${ent.id}`, { as: manager, body: { title: 'Send me', blocks: BLOCKS, recipients: ['a@x.com', 'b@x.com'] } });
   const s = await app.req('POST', `/api/my/reports/${ent.id}/${c.body.template.id}/send`, { as: manager });

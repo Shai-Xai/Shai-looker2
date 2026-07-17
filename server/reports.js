@@ -262,7 +262,12 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
 
   // Resolve a template's author blocks into an immutable snapshot. Sequential by
   // design (one Looker query at a time — same as the digest fact builder).
-  async function generateSnapshot(tpl, { byEmail = '' } = {}) {
+  // `preview` resolves WITHOUT persisting: nothing is written (no snapshot row,
+  // no assets — chart PNGs come back as inline data: URLs), AI blocks become a
+  // styled placeholder (they are written fresh at generate time), and every
+  // resolved block carries `srcId` (the author block id) so the live canvas can
+  // frame + reorder them. The stored-snapshot path is unchanged.
+  async function generateSnapshot(tpl, { byEmail = '', preview = false } = {}) {
     const entityId = tpl.entityId;
     let user = byEmail ? db.getUserByEmail(byEmail) : (tpl.createdBy ? db.getUserByEmail(tpl.createdBy) : null);
     if (!user || (user.role !== 'admin' && !(user.entityIds || []).includes(entityId))) {
@@ -274,23 +279,25 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
 
     const snapshotId = uuid();
     const resolved = [];
-    const factsByIdx = []; // parallel to resolved: the fact behind each tile block (for AI scoping)
+    const factsByIdx = []; // parallel to author blocks: the fact behind each data block (for AI scoping)
     for (const b of tpl.blocks) {
+      const push = (blk) => resolved.push({ ...blk, srcId: b.id });
+      const chartRef = (png) => (preview ? { dataUrl: `data:image/png;base64,${png.toString('base64')}` } : { assetToken: putAsset(snapshotId, 'image/png', png) });
       if (b.type === 'tile') {
         let fact = null;
         try { fact = ((await buildFactsFromTiles(user, entityId, [{ dashboardId: b.dashboardId, tileId: b.tileId }])).tiles || [])[0] || null; }
         catch (e) { console.error('[reports] tile resolve failed', b.dashboardId, b.tileId, e.message); }
-        if (!fact) { resolved.push({ type: 'tile', kind: 'missing', title: b.text || 'Tile unavailable' }); factsByIdx.push(null); continue; }
+        if (!fact) { push({ type: 'tile', kind: 'missing', title: b.text || 'Tile unavailable' }); factsByIdx.push(null); continue; }
         factsByIdx.push(fact);
         const asKpi = () => ({ type: 'tile', kind: 'kpi', title: fact.title, value: String(factValueLabel(fact) || '—') });
         const asTable = () => ({ type: 'tile', kind: 'table', title: fact.title, ...factToTable(fact) });
-        if (b.display === 'value') { resolved.push(asKpi()); continue; }
-        if (b.display === 'table') { resolved.push(asTable()); continue; }
+        if (b.display === 'value') { push(asKpi()); continue; }
+        if (b.display === 'table') { push(asTable()); continue; }
         const png = tileimg ? tileimg.renderTilePng({ title: fact.title, vis: { type: fact.visType } }, fact, branding) : null;
-        if (png && b.display !== 'value') { resolved.push({ type: 'tile', kind: 'chart', title: fact.title, assetToken: putAsset(snapshotId, 'image/png', png) }); continue; }
+        if (png && b.display !== 'value') { push({ type: 'tile', kind: 'chart', title: fact.title, ...chartRef(png) }); continue; }
         // Not chartable: tables render as tables, single values as KPI chips.
         const isTable = /table/i.test(String(fact.visType || '')) || ((fact.rows || []).length > 1 && (fact.fields?.dimensions || []).length >= 1);
-        resolved.push(isTable && b.display !== 'value' ? asTable() : asKpi());
+        push(isTable && b.display !== 'value' ? asTable() : asKpi());
         continue;
       }
       // Campaign block: headline results for ONE Engage campaign, frozen as a
@@ -300,15 +307,15 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         let c = null;
         try { c = (campaignsFor ? campaignsFor(entityId) : []).find((x) => x.id === b.campaignId) || null; }
         catch (e) { console.error('[reports] campaign resolve failed', b.campaignId, e.message); }
-        if (!c) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'Campaign unavailable' }); continue; }
+        if (!c) { factsByIdx.push(null); push({ type: 'tile', kind: 'missing', title: 'Campaign unavailable' }); continue; }
         const r = c.results || {};
         const sent = r.sent || 0;
         const ctr = sent > 0 ? Math.min(100, Math.round(((r.clicks || 0) / sent) * 100)) : 0;
         const title = c.title || c.config?.subject || 'Campaign';
         const metrics = [['Audience', c.audienceCount || 0], ['Sent', sent], ['Opens', r.opens || 0], ['Clicks', r.clicks || 0], ['Click rate', `${ctr}%`], ['Converted', r.converted || 0]];
         factsByIdx.push(metricsFact(`Campaign — ${title}${c.status ? ` (${c.status})` : ''}`, 'campaign', metrics));
-        resolved.push({ type: 'heading', text: `📣 ${title}`, level: 2 });
-        for (const [k, v] of metrics) resolved.push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
+        push({ type: 'heading', text: `📣 ${title}`, level: 2 });
+        for (const [k, v] of metrics) push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
         continue;
       }
       // App analytics block: the client's native-app engagement (PostHog rollup,
@@ -318,21 +325,21 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         let rep = null;
         try { rep = appReportFor ? await appReportFor(entityId, { days: b.days || 28 }) : null; }
         catch (e) { console.error('[reports] app analytics resolve failed', e.message); }
-        if (!rep || !rep.scoped) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'App analytics unavailable' }); continue; }
+        if (!rep || !rep.scoped) { factsByIdx.push(null); push({ type: 'tile', kind: 'missing', title: 'App analytics unavailable' }); continue; }
         const t = rep.totals || {};
         const label = `App engagement — last ${rep.days} days`;
         if (b.appView === 'trend') {
           const fact = appSeriesFact(label, rep.series);
           factsByIdx.push(fact);
           const png = tileimg ? tileimg.renderTilePng({ title: label, vis: { type: 'looker_line' } }, fact, branding) : null;
-          if (png) { resolved.push({ type: 'tile', kind: 'chart', title: label, assetToken: putAsset(snapshotId, 'image/png', png) }); continue; }
-          resolved.push({ type: 'tile', kind: 'missing', title: `${label} — not enough data to chart` });
+          if (png) { push({ type: 'tile', kind: 'chart', title: label, ...chartRef(png) }); continue; }
+          push({ type: 'tile', kind: 'missing', title: `${label} — not enough data to chart` });
           continue;
         }
         if (b.appView === 'events') {
           const rows = (rep.events || []).slice(0, 12);
           factsByIdx.push(metricsFact(label, 'app', rows.map((e) => [e.eventName || e.eventRef, `${e.uniques || 0} users / ${e.views || 0} views / ${e.purchases || 0} purchases`])));
-          resolved.push({
+          push({
             type: 'tile', kind: 'table', title: `App engagement by event — last ${rep.days} days`,
             columns: ['Event', 'App users', 'Views', 'CTA taps', 'Purchases'],
             rows: rows.map((e) => [String(e.eventName || e.eventRef || ''), fmtNum(e.uniques || 0), fmtNum(e.views || 0), fmtNum(e.ctaTaps || 0), fmtNum(e.purchases || 0)]),
@@ -343,8 +350,8 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         const metrics = [['App users', t.uniques || 0], ['Views', t.views || 0], ['Interactions', t.interactions || 0], ['CTA taps', t.ctaTaps || 0], ['Purchases', t.purchases || 0]];
         if (t.purchaseValue) metrics.push(['Purchase value', currency.format(t.purchaseValue, mailer.resolveBranding(entityId).currency)]);
         factsByIdx.push(metricsFact(label, 'app', metrics));
-        resolved.push({ type: 'heading', text: `📱 ${label}`, level: 2 });
-        for (const [k, v] of metrics) resolved.push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
+        push({ type: 'heading', text: `📱 ${label}`, level: 2 });
+        for (const [k, v] of metrics) push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
         continue;
       }
       // Goals block: the entity's event goals with LIVE progress (same resolver
@@ -354,7 +361,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         let goals = [];
         try { goals = goalsFor ? await goalsFor(entityId, user) : []; }
         catch (e) { console.error('[reports] goals resolve failed', e.message); }
-        if (!goals.length) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'Goals unavailable' }); continue; }
+        if (!goals.length) { factsByIdx.push(null); push({ type: 'tile', kind: 'missing', title: 'Goals unavailable' }); continue; }
         const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? fmtNum(v) : String(v)));
         const rows = goals.map((g) => {
           const pr = g.progress || {};
@@ -368,7 +375,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         });
         factsByIdx.push(metricsFact('Event goals (progress already computed)', 'goals',
           goals.map((g) => { const pr = g.progress || {}; return [`${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}`, `${gf(pr.value)}/${gf(g.targetValue)}${pr.pct != null ? ` (${pr.pct}%)` : ''}${pr.status ? ` — pace ${pr.status}` : ''}`]; })));
-        resolved.push({ type: 'tile', kind: 'table', title: '🎯 Goals', columns: ['Goal', 'Current', 'Target', 'Progress', 'Pace'], rows, more: 0 });
+        push({ type: 'tile', kind: 'table', title: '🎯 Goals', columns: ['Goal', 'Current', 'Target', 'Progress', 'Pace'], rows, more: 0 });
         continue;
       }
       // Social block: organic social performance (social-flag-gated). Three views:
@@ -391,12 +398,12 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
             factsByIdx.push(fact);
             const png = tileimg ? tileimg.renderTilePng({ title: label, vis: { type: 'looker_line' } }, fact, branding) : null;
             if (!png) throw new Error('not enough data to chart');
-            resolved.push({ type: 'tile', kind: 'chart', title: label, assetToken: putAsset(snapshotId, 'image/png', png) });
+            push({ type: 'tile', kind: 'chart', title: label, ...chartRef(png) });
           } else if (b.socialView === 'posts') {
             const posts = social.posts(entityId, { limit: 8 });
             if (!posts || !posts.length) throw new Error('no post metrics yet');
             factsByIdx.push(metricsFact('Top social posts', 'social', posts.map((pst) => [`${pst.platform}: ${String(pst.caption || pst.postId || '').slice(0, 60)}`, `${pst.reach || 0} reach / ${pst.likes || 0} likes / ${pst.engagement || 0} engagement`])));
-            resolved.push({
+            push({
               type: 'tile', kind: 'table', title: '🌐 Top social posts',
               columns: ['Platform', 'Post', 'Reach', 'Likes', 'Engagement'],
               rows: posts.map((pst) => [String(pst.platform || ''), String(pst.caption || pst.postId || '').slice(0, 60), fmtNum(pst.reach || 0), fmtNum(pst.likes || 0), fmtNum(pst.engagement || 0)]),
@@ -406,7 +413,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
             const accts = social.accounts(entityId);
             if (!accts || !accts.length) throw new Error('no social accounts connected');
             factsByIdx.push(metricsFact('Social accounts', 'social', accts.map((a) => [`${a.platform} @${a.username || a.name || ''}`, `${a.followers || 0} followers, ${a.postsCount || 0} posts`])));
-            resolved.push({
+            push({
               type: 'tile', kind: 'table', title: '🌐 Social accounts',
               columns: ['Platform', 'Account', 'Followers', 'Posts'],
               rows: accts.map((a) => [String(a.platform || ''), `@${a.username || a.name || ''}`, fmtNum(a.followers || 0), fmtNum(a.postsCount || 0)]),
@@ -415,7 +422,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
           }
         } catch (e) {
           factsByIdx.push(null);
-          resolved.push({ type: 'tile', kind: 'missing', title: `Social data unavailable (${e.message})` });
+          push({ type: 'tile', kind: 'missing', title: `Social data unavailable (${e.message})` });
         }
         continue;
       }
@@ -425,25 +432,27 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         let run = null;
         try { run = liveLatestFor ? liveLatestFor(entityId, b.suiteId) : null; }
         catch (e) { console.error('[reports] live resolve failed', e.message); }
-        if (!run) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'No live updates for this event yet' }); continue; }
+        if (!run) { factsByIdx.push(null); push({ type: 'tile', kind: 'missing', title: 'No live updates for this event yet' }); continue; }
         const text = String(run.message || '').replace(/\*/g, '');
         factsByIdx.push(metricsFact(`Live update — ${run.pulseName || 'event day'} (${run.at})`, 'live', text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 20).map((l, li) => [`${li + 1}`, l])));
-        resolved.push({ type: 'heading', text: `⚡ ${run.pulseName || 'Live update'}`, level: 2 });
+        push({ type: 'heading', text: `⚡ ${run.pulseName || 'Live update'}`, level: 2 });
         const when = (() => { try { return new Date(run.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Johannesburg' }); } catch { return run.at; } })();
-        resolved.push({ type: 'text', text: `*As sent on ${when}:*\n\n${text}` });
+        push({ type: 'text', text: `*As sent on ${when}:*\n\n${text}` });
         continue;
       }
       factsByIdx.push(null);
       if (b.type === 'image') {
+        if (preview && b.url) { push({ type: 'image', url: b.url, alt: b.alt }); continue; }
         const m = /^data:([\w/+.-]+);base64,(.+)$/.exec(b.url || '');
         if (m) {
-          try { resolved.push({ type: 'image', assetToken: putAsset(snapshotId, m[1], Buffer.from(m[2], 'base64')), alt: b.alt }); continue; }
+          try { push({ type: 'image', assetToken: putAsset(snapshotId, m[1], Buffer.from(m[2], 'base64')), alt: b.alt }); continue; }
           catch (e) { console.error('[reports] image decode failed', e.message); }
         }
-        if (/^https?:\/\//.test(b.url || '')) { resolved.push({ type: 'image', url: b.url, alt: b.alt }); }
+        if (/^https?:\/\//.test(b.url || '')) { push({ type: 'image', url: b.url, alt: b.alt }); }
         continue;
       }
       if (b.type === 'ai') {
+        if (preview) { factsByIdx.push(null); push({ type: 'ai', scope: b.scope, text: '', note: '✨ AI analysis — written fresh from the live data when you generate.' }); continue; }
         // Scope: 'report' = every tile fact; 'section' = tile facts since the last
         // heading ABOVE this block (headings delimit sections).
         let facts;
@@ -458,24 +467,25 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
           }
           scopeLabel = heading ? `the "${heading}" section` : 'the tiles above';
         }
-        if (!facts.length) { resolved.push({ type: 'ai', scope: b.scope, text: '', note: 'No tile data in scope for this analysis.' }); continue; }
+        if (!facts.length) { push({ type: 'ai', scope: b.scope, text: '', note: 'No tile data in scope for this analysis.' }); continue; }
         const apiKey = anthropicKeyForEntity(entityId);
-        if (!insights.isConfigured(apiKey)) { resolved.push({ type: 'ai', scope: b.scope, text: '', note: 'AI is not configured for this client.' }); continue; }
+        if (!insights.isConfigured(apiKey)) { push({ type: 'ai', scope: b.scope, text: '', note: 'AI is not configured for this client.' }); continue; }
         const instructions = [aiInstructionsFor(null, entityId), currency.aiNote(branding.currency)].filter(Boolean).join('\n\n');
         try {
           const text = await aiUsage.run({ entityId, kind: 'report' }, () => reportAnalysis({ scopeLabel, reportTitle: tpl.title, focus: b.focus, tiles: facts, instructions, apiKey }));
-          resolved.push({ type: 'ai', scope: b.scope, text });
+          push({ type: 'ai', scope: b.scope, text });
         } catch (e) {
           console.error('[reports] analysis failed', e.message);
-          resolved.push({ type: 'ai', scope: b.scope, text: '', note: 'Analysis unavailable for this run.' });
+          push({ type: 'ai', scope: b.scope, text: '', note: 'Analysis unavailable for this run.' });
         }
         continue;
       }
       // heading / text / button / divider pass through as authored.
-      resolved.push({ type: b.type, text: b.text, level: b.level, href: b.href, alt: b.alt });
+      push({ type: b.type, text: b.text, level: b.level, href: b.href, alt: b.alt });
     }
 
     const content = { title: tpl.title || 'Report', generatedAt: now(), blocks: resolved };
+    if (preview) return { preview: true, content };
     sql.prepare('INSERT INTO report_snapshots (id, template_id, entity_id, title, content, token, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)')
       .run(snapshotId, tpl.id, entityId, content.title, JSON.stringify(content), newToken(), byEmail || tpl.createdBy || '', now());
     return sql.prepare('SELECT * FROM report_snapshots WHERE id=?').get(snapshotId);
@@ -594,6 +604,15 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
   app.delete('/api/admin/reports/:tplId', auth.requireAdmin, (req, res) => { if (!enabled()) return off(res); deleteTemplate(req.params.tplId); res.status(204).end(); });
   app.get('/api/admin/reports/:tplId/snapshots', auth.requireAdmin, (req, res) => enabled() ? snapsFor(req.params.tplId, res) : off(res));
   app.delete('/api/admin/report-snapshots/:id', auth.requireAdmin, (req, res) => { if (!enabled()) return off(res); deleteSnapshot(req.params.id); res.status(204).end(); });
+  // Live-canvas preview: resolve the CURRENT (possibly unsaved) blocks with real
+  // data, persisting nothing (charts return as inline data: URLs; AI blocks come
+  // back as placeholders). One Looker read per tile block — same cost as viewing
+  // the dashboard the tiles come from.
+  app.post('/api/admin/entities/:id/reports/preview', auth.requireAdmin, asyncHandler(async (req, res) => {
+    if (!enabled()) return off(res);
+    const t = { id: 'preview', entityId: req.params.id, ...clean(req.body || {}, req.params.id) };
+    res.json({ blocks: (await generateSnapshot(t, { byEmail: req.user.email, preview: true })).content.blocks });
+  }));
   app.post('/api/admin/reports/:tplId/generate', auth.requireAdmin, asyncHandler(async (req, res) => {
     if (!enabled()) return off(res);
     const t = getTpl(req.params.tplId); if (!t) throw new HttpError(404, 'Not found');
@@ -623,6 +642,11 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
     if (!s || s.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     deleteSnapshot(s.id); res.status(204).end();
   });
+  app.post('/api/my/reports/:entityId/preview', auth.requireAuth, canManage, asyncHandler(async (req, res) => {
+    if (!myGuard(req, res)) return;
+    const t = { id: 'preview', entityId: req.params.entityId, ...clean(req.body || {}, req.params.entityId) };
+    res.json({ blocks: (await generateSnapshot(t, { byEmail: req.user.email, preview: true })).content.blocks });
+  }));
   app.post('/api/my/reports/:entityId/:tplId/generate', auth.requireAuth, canManage, asyncHandler(async (req, res) => {
     if (!myGuard(req, res)) return;
     const t = myTpl(req, res); if (!t) return;
