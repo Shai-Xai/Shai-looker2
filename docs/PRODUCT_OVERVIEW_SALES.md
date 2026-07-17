@@ -1069,6 +1069,14 @@ per-client rollout via the **engage.surveys** feature flag (default OFF).
 Live surveys are locked (close & duplicate to change) so results always match
 what fans saw.
 
+**Beyond the app — email & web** 🧪: every live survey can also go out **by
+email** (paste/import recipients → each fan gets a private, personalised link
+to a **branded hosted survey page** that greets them by name and ticket type)
+and via one **public share link** for QR codes, socials or WhatsApp. Answers
+from every channel land in the SAME results with an app / email / web split.
+Email sends ride the platform mail engine (suppression lists + one-click
+unsubscribe respected).
+
 **The pitch:** "Know what fans actually thought — in the same place you watched
 the tickets sell." Feedback lands next to the sales data, ready for the Owl and
 next year's planning.
@@ -1110,6 +1118,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-17** — **📋 Fan surveys — email & web channel** 🧪: surveys now reach
+  fans OUTSIDE the app too. A live survey gets an **Email & links** panel: paste
+  recipients (email, name, ticket type) → each gets a **private personalised
+  link** to a branded, mobile-first **hosted survey page** (greets them by name
+  and ticket type — no login, no app needed), sent via the platform mail engine
+  (suppression + unsubscribe respected). Plus a **public share link** for QR /
+  socials / WhatsApp (anonymous answers). All channels land in the same results
+  with an **app / email / web split**, per-link open + response tracking, and
+  email + channel columns in the CSV. (`server/surveyWeb.js`.)
 - **2026-07-17** — **📋 Fan surveys — builder UI, targeting & deep results** 🧪:
   the **Engage → Surveys** builder is live (dual-surface, live phone preview,
   form/cards layout picker). Surveys can **target specific ticket types** (picked

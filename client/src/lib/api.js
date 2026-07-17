@@ -704,6 +704,9 @@ export const api = {
   surveyCsvUrl: (scope, entityId, id, ticketType = '') => (scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/results.csv' + (ticketType ? `?ticketType=${encodeURIComponent(ticketType)}` : ''),
   surveyEventLookup: (eventId) => fetch(`/api/my/surveys/event-lookup?eventId=${encodeURIComponent(eventId)}`).then(json),
   surveyEntityEvents: (entityId) => fetch(`/api/my/surveys/events?entityId=${encodeURIComponent(entityId)}`).then(json),
+  surveySendEmails: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  surveyShareLink: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/share-link', { method: 'POST' }).then(json),
+  surveyLinks: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/links').then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
