@@ -141,6 +141,30 @@ test('ladder targeting: superfan is its own rung; minStreakYears gates on the st
   assert.equal(pools.grantFor(s, session(), profile(), streaky).reward.code, 'STREAK3');
 });
 
+test('code types: a ticket promo rides its buy link as ?promo=CODE; discount stays copy-only', async () => {
+  // fan_catalogue belongs to fanOwl — create the minimal shape this module reads.
+  h.db.db.exec('CREATE TABLE IF NOT EXISTS fan_catalogue (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, deep_link TEXT NOT NULL DEFAULT \'\')');
+  h.db.db.prepare('INSERT OR REPLACE INTO fan_catalogue (id, entity_id, deep_link) VALUES (?,?,?)')
+    .run('item-1', entity.id, 'https://fest.example/buy?t=wk');
+  await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
+    as: admin,
+    body: { pools: [
+      { name: 'One-tap promo', rewardKind: 'discount', codeType: 'promo', bundleItemId: 'item-1', target: {}, rules: {}, mode: 'shared', sharedCode: 'TAPME', grantCap: 0 },
+    ] },
+  });
+  const s = site();
+  const r = pools.grantFor(s, session(), profile(), LOYAL);
+  assert.equal(r.ok, true);
+  assert.equal(r.reward.codeType, 'promo');
+  assert.match(r.reward.url, /^https:\/\/fest\.example\/buy\?t=wk&promo=TAPME&utm_source=howler-owl/);
+  // Discount pools carry no url — the card shows tap-to-copy instead.
+  await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
+    as: admin, body: { pools: [{ name: 'Copy me', rewardKind: 'discount', codeType: 'discount', target: {}, rules: {}, mode: 'shared', sharedCode: 'COPYME', grantCap: 0 }] },
+  });
+  const r2 = pools.grantFor(s, session(), profile(), LOYAL);
+  assert.equal(r2.reward.url, '');
+});
+
 test('expired pools and segment-targeted pools never grant (fail closed)', async () => {
   await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
     as: admin,

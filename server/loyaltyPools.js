@@ -26,6 +26,7 @@ function mount(app, { db, auth }) {
     CREATE TABLE IF NOT EXISTS promo_pools (
       id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, suite_id TEXT NOT NULL DEFAULT '',
       name TEXT NOT NULL, reward_kind TEXT NOT NULL DEFAULT 'discount',
+      code_type TEXT NOT NULL DEFAULT 'discount',
       value_label TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
       target TEXT NOT NULL DEFAULT '{}', rules TEXT NOT NULL DEFAULT '{}',
       mode TEXT NOT NULL DEFAULT 'unique', shared_code TEXT NOT NULL DEFAULT '',
@@ -48,6 +49,10 @@ function mount(app, { db, auth }) {
       UNIQUE(pool_id, profile_id)
     );
   `);
+  // Migration: how the code applies, mirroring campaigns (server/actions.js) —
+  // 'promo' rides the buy link as ?promo=CODE (one tap); 'discount' is typed
+  // into the basket at checkout (the card shows tap-to-copy).
+  try { sql.exec("ALTER TABLE promo_pools ADD COLUMN code_type TEXT NOT NULL DEFAULT 'discount'"); } catch { /* already present */ }
   const now = () => new Date().toISOString();
   const uid = () => crypto.randomUUID();
   const J = (s, d) => { try { const v = JSON.parse(s); return v == null ? d : v; } catch { return d; } };
@@ -68,7 +73,7 @@ function mount(app, { db, auth }) {
     const c = codeCounts.get(p.id) || {};
     const g = grantCounts.get(p.id) || {};
     return {
-      id: p.id, suiteId: p.suite_id, name: p.name, rewardKind: p.reward_kind,
+      id: p.id, suiteId: p.suite_id, name: p.name, rewardKind: p.reward_kind, codeType: p.code_type || 'discount',
       valueLabel: p.value_label, description: p.description,
       target: J(p.target, {}), rules: J(p.rules, {}), mode: p.mode,
       sharedCodeSet: !!p.shared_code, grantCap: p.grant_cap, bundleItemId: p.bundle_item_id,
@@ -104,6 +109,7 @@ function mount(app, { db, auth }) {
         const row = {
           suite_id: String(p.suiteId || '').slice(0, 60), name: String(p.name).trim().slice(0, 120),
           reward_kind: REWARD_KINDS.has(p.rewardKind) ? p.rewardKind : 'discount',
+          code_type: p.codeType === 'promo' ? 'promo' : 'discount',
           value_label: String(p.valueLabel || '').slice(0, 120), description: String(p.description || '').slice(0, 500),
           target: JSON.stringify(target), rules: JSON.stringify(rules), mode,
           // The shared code is write-only-ish: keep the stored one unless a new value arrives.
@@ -113,14 +119,14 @@ function mount(app, { db, auth }) {
           terms_url: String(p.termsUrl || '').trim().slice(0, 600), active: p.active === false ? 0 : 1,
         };
         if (existing && existing.entity_id === entityId) {
-          sql.prepare(`UPDATE promo_pools SET suite_id=@suite_id, name=@name, reward_kind=@reward_kind, value_label=@value_label,
+          sql.prepare(`UPDATE promo_pools SET suite_id=@suite_id, name=@name, reward_kind=@reward_kind, code_type=@code_type, value_label=@value_label,
             description=@description, target=@target, rules=@rules, mode=@mode, shared_code=@shared_code,
             grant_cap=@grant_cap, bundle_item_id=@bundle_item_id, terms_url=@terms_url, active=@active WHERE id=@id`)
             .run({ ...row, id });
         } else {
-          sql.prepare(`INSERT INTO promo_pools (id, entity_id, suite_id, name, reward_kind, value_label, description, target, rules,
+          sql.prepare(`INSERT INTO promo_pools (id, entity_id, suite_id, name, reward_kind, code_type, value_label, description, target, rules,
             mode, shared_code, grant_cap, bundle_item_id, terms_url, active, created_at)
-            VALUES (@id, @entity_id, @suite_id, @name, @reward_kind, @value_label, @description, @target, @rules,
+            VALUES (@id, @entity_id, @suite_id, @name, @reward_kind, @code_type, @value_label, @description, @target, @rules,
             @mode, @shared_code, @grant_cap, @bundle_item_id, @terms_url, @active, @created_at)`)
             .run({ ...row, id, entity_id: entityId, created_at: now() });
         }
@@ -196,11 +202,25 @@ function mount(app, { db, auth }) {
       VALUES (?,?,?,?,?,?,?,?)`).run(gid, pool.id, codeId, profileId, sessionId, surface, codeText, now());
     return gid;
   });
-  const rewardView = (pool, codeText) => {
+  // A 'promo'-type code rides its ticket's buy link as ?promo=CODE (the exact
+  // convention campaigns use) — one tap, no copying. Needs the pool's linked
+  // catalogue item to have a deep link; without one the card falls back to copy.
+  const claimUrl = (pool, code, site, session) => {
+    if ((pool.code_type || 'discount') !== 'promo' || !pool.bundle_item_id) return '';
+    try {
+      const item = sql.prepare('SELECT deep_link FROM fan_catalogue WHERE id = ? AND entity_id = ?').get(pool.bundle_item_id, pool.entity_id);
+      const base = item?.deep_link;
+      if (!base) return '';
+      const glue = (u) => (u.includes('?') ? '&' : '?');
+      return `${base}${glue(base)}promo=${encodeURIComponent(code)}&utm_source=howler-owl&utm_medium=assistant&utm_campaign=${encodeURIComponent(site?.id || '')}&utm_content=${encodeURIComponent(session?.id || '')}`;
+    } catch { return ''; } // fan_catalogue belongs to fanOwl — absent in standalone use
+  };
+  const rewardView = (pool, codeText, site, session) => {
     const rules = J(pool.rules, {});
     return {
-      pool: pool.name, rewardKind: pool.reward_kind, value: pool.value_label,
-      description: pool.description, code: codeText,
+      pool: pool.name, rewardKind: pool.reward_kind, codeType: pool.code_type || 'discount',
+      value: pool.value_label, description: pool.description, code: codeText,
+      url: claimUrl(pool, codeText, site, session),
       rules: { minQty: rules.minQty || 0, ticketTypes: rules.ticketTypes || [], expiresAt: rules.expiresAt || '' },
       bundleItemId: pool.bundle_item_id || '', termsUrl: pool.terms_url || '',
     };
@@ -211,12 +231,12 @@ function mount(app, { db, auth }) {
     // An existing grant always wins — the Owl re-presents it instead of double-granting.
     for (const p of pools) {
       const g = grantFor.get(p.id, profile.id);
-      if (g) return { ok: true, existing: true, reward: rewardView(p, g.code_text) };
+      if (g) return { ok: true, existing: true, reward: rewardView(p, g.code_text, site, session) };
     }
     for (const p of pools) {
       if (!eligible(p, summary)) continue;
       const gid = grantTx(p, profile.id, session.id, surface);
-      if (gid) return { ok: true, existing: false, reward: rewardView(p, poolById.get(p.id).mode === 'shared' ? p.shared_code : sql.prepare('SELECT code_text FROM promo_grants WHERE id = ?').get(gid).code_text) };
+      if (gid) return { ok: true, existing: false, reward: rewardView(p, p.mode === 'shared' ? p.shared_code : sql.prepare('SELECT code_text FROM promo_grants WHERE id = ?').get(gid).code_text, site, session) };
     }
     return { ok: false, reason: 'none', message: 'No reward applies to this fan right now — say so warmly and carry on helping (never invent a consolation offer).' };
   }

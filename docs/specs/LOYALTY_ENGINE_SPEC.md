@@ -272,6 +272,13 @@ multi-use** as native options. That gives pools two modes:
   already expresses "applies when buying X"). Merch is also a natural wheel
   slot (§7): high perceived value at product cost, and it walks around the
   event as marketing afterwards.
+- **Two code TYPES, mirroring campaigns (decided 2026-07-17):** a **ticket
+  promo** rides the buy link as `?promo=CODE` (the exact convention
+  `server/actions.js` uses) — the reward card shows a one-tap claim button
+  and the fan never copies anything; a **basket discount** is typed at
+  checkout — the card shows tap-to-copy. Promo-type pools link a catalogue
+  item (its deep link is the claim target); without one the card falls back
+  to copy.
 - **Code metadata matters:** min quantity (group codes), applicable ticket
   types, expiry — captured at upload so the Owl only offers a code when the
   fan's intent matches its rules (a group code goes to someone buying for 4,

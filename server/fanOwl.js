@@ -1036,7 +1036,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
 
   // POST /api/fan/event — interaction beacons from the widget (deep-link clicks
   // etc.), the funnel's client-side half. Whitelisted kinds only.
-  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close', 'nav_click']);
+  const BEACONS = new Set(['deeplink_click', 'reco_click', 'widget_open', 'widget_close', 'nav_click', 'reward_click']);
   app.post('/api/fan/event', rateLimit({ windowMs: 60_000, max: 60, by: 'ip', scope: 'fan-event' }), (req, res) => {
     const b = req.body || {};
     const session = getSession.get(String(b.sessionId || ''));
