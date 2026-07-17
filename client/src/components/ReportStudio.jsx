@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import TilePicker from './TilePicker.jsx';
+import { groupKpiRows, KpiRow, ReportBlockView } from './ReportBlocks.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Report Studio — build custom, shareable client reports from blocks: dashboard
@@ -26,6 +27,7 @@ export default function ReportStudio({ entityId, scope = 'admin', logins = [] })
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
     campaigns: () => api.listActions(entityId), // campaign picker (works for both surfaces; 403s fail-soft to an empty list)
     events: () => (isAdmin ? api.getDigestEvents(entityId) : api.getMyDigestEvents(entityId)),
+    preview: (b) => (isAdmin ? api.previewReport(entityId, b) : api.previewMyReport(entityId, b)),
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // template object or 'new'
@@ -89,6 +91,12 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
   const [lastSnap, setLastSnap] = useState(null);
   const fileRef = useRef(null);
   const imgTarget = useRef(null);
+  const [selected, setSelected] = useState(null); // author block id with its settings open
+  const [dragId, setDragId] = useState(null);
+  const [dropId, setDropId] = useState(null);     // block the dragged one will land BEFORE ('end' = append)
+  const [previewMap, setPreviewMap] = useState({}); // author block id -> resolved preview blocks
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSeq = useRef(0);
 
   useEffect(() => { A.tiles().then(setCatalogue).catch(() => setCatalogue({ dashboards: [] })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (campPicking && campaigns == null) A.campaigns().then((r) => setCampaigns(r.actions || r.campaigns || [])).catch(() => setCampaigns([])); }, [campPicking]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -113,7 +121,50 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
     if (i < 0 || j < 0 || j >= bs.length) return bs;
     const out = [...bs]; [out[i], out[j]] = [out[j], out[i]]; return out;
   });
-  const add = (b) => setBlocks((bs) => [...bs, { id: uid(), ...b }]);
+  const add = (b) => { const id = uid(); setBlocks((bs) => [...bs, { id, ...b }]); setSelected(id); };
+
+  // ── live data previews ──
+  // Data blocks resolve server-side with REAL numbers (debounced; one Looker read
+  // per tile block — same cost as viewing the dashboard). Text/layout blocks render
+  // locally so typing is instant. Stale previews stay visible while refreshing.
+  const DATA_TYPES = ['tile', 'campaign', 'app', 'goals', 'social', 'live'];
+  const dataSig = JSON.stringify(blocks.filter((b) => DATA_TYPES.includes(b.type))
+    .map((b) => [b.id, b.type, b.dashboardId, b.tileId, b.display, b.campaignId, b.appView, b.days, b.socialView, b.socialMetric, b.suiteId]));
+  useEffect(() => {
+    const dataBlocks = blocks.filter((b) => DATA_TYPES.includes(b.type));
+    if (!dataBlocks.length) { setPreviewMap({}); setPreviewBusy(false); return undefined; }
+    const seq = ++previewSeq.current;
+    setPreviewBusy(true);
+    const t = setTimeout(() => {
+      A.preview({ blocks: dataBlocks }).then((r) => {
+        if (seq !== previewSeq.current) return;
+        const map = {};
+        for (const rb of r.blocks || []) { if (rb.srcId) (map[rb.srcId] = map[rb.srcId] || []).push(rb); }
+        setPreviewMap(map);
+        setPreviewBusy(false);
+      }).catch(() => { if (seq === previewSeq.current) setPreviewBusy(false); });
+    }, 650);
+    return () => clearTimeout(t);
+  }, [dataSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── drag & drop reordering (native HTML5; ↑/↓ stay for touch) ──
+  const dropBefore = (id, beforeId) => setBlocks((bs) => {
+    const from = bs.findIndex((x) => x.id === id);
+    if (from < 0) return bs;
+    const out = [...bs];
+    const [moved] = out.splice(from, 1);
+    const to = beforeId === 'end' ? out.length : out.findIndex((x) => x.id === beforeId);
+    if (to < 0) return bs;
+    out.splice(to, 0, moved);
+    return out;
+  });
+  const dnd = {
+    dragId, dropId,
+    start: (id) => setDragId(id),
+    over: (id) => (e) => { e.preventDefault(); if (dragId && id !== dragId) setDropId(id); },
+    drop: (id) => (e) => { e.preventDefault(); if (dragId && id !== dragId) dropBefore(dragId, id); setDragId(null); setDropId(null); },
+    end: () => { setDragId(null); setDropId(null); },
+  };
 
   // "Add tiles" → TilePicker; whole-dashboard picks ('*') expand to that
   // dashboard's tiles from the catalogue so each becomes its own block.
@@ -192,125 +243,31 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
         </div>
       )}
 
-      <div style={card}>
-        <Field label="Report title"><input style={input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Weekly sponsor update" /></Field>
+      {/* ── live canvas: the report exactly as the share page renders it ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '2px 2px 6px' }}>
+        <div style={hintLbl}>Live canvas — design it as stakeholders will see it</div>
+        <span style={{ ...hintS, color: previewBusy ? 'var(--brand)' : 'var(--muted)' }}>{previewBusy ? '⟳ refreshing live data…' : 'drag ⠿ to rearrange · click a block to edit'}</span>
+      </div>
+      <div style={canvasS} onClick={() => setSelected(null)}>
+        <input style={canvasTitleS} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Report title…" onClick={(e) => e.stopPropagation()} />
+        <div style={{ fontSize: 13, color: '#86868b', margin: '2px 0 6px' }}>{new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+        <div style={{ borderTop: '2.5px solid var(--brand)', margin: '10px 0 18px' }} />
+        {blocks.length === 0 && <div style={{ textAlign: 'center', color: '#a1a1a6', fontSize: 13.5, padding: '26px 0' }}>Empty report — add blocks below and design it right here.</div>}
+        {blocks.map((b, i) => (
+          <CanvasBlock key={b.id} b={b} i={i} count={blocks.length} dnd={dnd}
+            selected={selected === b.id}
+            onSelect={(id) => setSelected(id)}
+            preview={previewMap[b.id]}
+            patch={patch} remove={(id) => { remove(id); if (selected === id) setSelected(null); }} move={move}
+            tileTitle={tileTitle} campaignTitle={campaignTitle} events={events}
+            onPickImage={(id) => { imgTarget.current = id; fileRef.current?.click(); }}
+          />
+        ))}
+        {/* end-of-canvas drop zone */}
+        {dragId && <div onDragOver={dnd.over('end')} onDrop={dnd.drop('end')} style={{ height: 34, borderRadius: 8, border: dropId === 'end' ? '2px dashed var(--brand)' : '2px dashed #d8d8de', margin: '6px 0' }} />}
       </div>
 
-      {/* ── blocks ── */}
-      <div style={{ ...hintLbl, marginTop: 4 }}>Content blocks</div>
-      {blocks.length === 0 && <div style={{ ...card, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Empty report — add tiles, headings, text or AI analysis below.</div>}
-      {blocks.map((b, i) => (
-        <div key={b.id} style={{ ...card, padding: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: ['divider'].includes(b.type) ? 0 : 8 }}>
-            <span style={blockTag}>{blockLabel(b)}</span>
-            <span style={{ flex: 1 }} />
-            <button style={iconBtn} title="Move up" disabled={i === 0} onClick={() => move(b.id, -1)}>↑</button>
-            <button style={iconBtn} title="Move down" disabled={i === blocks.length - 1} onClick={() => move(b.id, 1)}>↓</button>
-            <button style={iconBtn} title="Remove" onClick={() => remove(b.id)}>✕</button>
-          </div>
-          {b.type === 'heading' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...input, fontWeight: 700 }} value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} placeholder="Section heading" />
-              <select style={{ ...input, width: 92, flexShrink: 0 }} value={b.level || 1} onChange={(e) => patch(b.id, { level: Number(e.target.value) })}>
-                <option value={1}>Large</option><option value={2}>Small</option>
-              </select>
-            </div>
-          )}
-          {b.type === 'text' && <textarea style={{ ...input, minHeight: 74, resize: 'vertical' }} value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} placeholder="Write something… (**bold** and *italic* supported)" />}
-          {b.type === 'tile' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{tileTitle(b)}</span>
-              <select style={{ ...input, width: 170, flexShrink: 0 }} value={b.display || 'auto'} onChange={(e) => patch(b.id, { display: e.target.value })} title="How this tile appears in the report">
-                <option value="auto">Auto (chart / number)</option>
-                <option value="chart">Chart</option>
-                <option value="value">Number (KPI)</option>
-                <option value="table">Table</option>
-              </select>
-            </div>
-          )}
-          {b.type === 'ai' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <select style={{ ...input, maxWidth: 340 }} value={b.scope || 'section'} onChange={(e) => patch(b.id, { scope: e.target.value })}>
-                <option value="section">Analyse this section (tiles since the last heading)</option>
-                <option value="report">Analyse the whole report (executive summary)</option>
-              </select>
-              <input style={input} value={b.focus || ''} onChange={(e) => patch(b.id, { focus: e.target.value })} placeholder="Optional focus — e.g. “compare weekend vs weekday sales”" />
-              <div style={hintS}>Written fresh on every generate, from the live tile data — then frozen into the snapshot.</div>
-            </div>
-          )}
-          {b.type === 'image' && (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              {b.url ? <img src={b.url} alt={b.alt || ''} style={{ maxHeight: 72, maxWidth: 180, borderRadius: 8 }} /> : <span style={hintS}>No image yet.</span>}
-              <button style={chipBtn} onClick={() => { imgTarget.current = b.id; fileRef.current?.click(); }}>{b.url ? 'Replace image' : 'Upload image'}</button>
-              <input style={{ ...input, flex: 1, minWidth: 140 }} value={b.alt || ''} onChange={(e) => patch(b.id, { alt: e.target.value })} placeholder="Alt text" />
-            </div>
-          )}
-          {b.type === 'button' && (
-            <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column' : 'row' }}>
-              <input style={input} value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} placeholder="Link label — e.g. Book your stand" />
-              <input style={input} value={b.href || ''} onChange={(e) => patch(b.id, { href: e.target.value })} placeholder="https://…" />
-            </div>
-          )}
-          {b.type === 'campaign' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{campaignTitle(b)}</span>
-              <span style={hintS}>Audience, sent, opens, clicks, click-rate & conversions — frozen at generate time.</span>
-            </div>
-          )}
-          {b.type === 'app' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 170 }} value={b.appView || 'summary'} onChange={(e) => patch(b.id, { appView: e.target.value })}>
-                <option value="summary">Summary (KPI chips)</option>
-                <option value="trend">Daily trend (chart)</option>
-                <option value="events">By event (table)</option>
-              </select>
-              <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
-                <option value={7}>Last 7 days</option>
-                <option value={14}>Last 14 days</option>
-                <option value={28}>Last 28 days</option>
-                <option value={90}>Last 90 days</option>
-              </select>
-            </div>
-          )}
-          {b.type === 'goals' && (
-            <div style={hintS}>All the client's event goals with live progress (current vs target, % and pace) — frozen into the report as a table.</div>
-          )}
-          {b.type === 'social' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 160 }} value={b.socialView || 'accounts'} onChange={(e) => patch(b.id, { socialView: e.target.value })}>
-                <option value="accounts">Accounts (followers table)</option>
-                <option value="trend">Daily trend (chart)</option>
-                <option value="posts">Top posts (table)</option>
-              </select>
-              {b.socialView === 'trend' && (
-                <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.socialMetric || 'reach'} onChange={(e) => patch(b.id, { socialMetric: e.target.value })}>
-                  <option value="reach">Reach</option>
-                  <option value="followers">Followers</option>
-                  <option value="impressions">Impressions</option>
-                  <option value="engagement">Engagement</option>
-                </select>
-              )}
-              {b.socialView === 'trend' && (
-                <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
-                  <option value={7}>Last 7 days</option>
-                  <option value={14}>Last 14 days</option>
-                  <option value={28}>Last 28 days</option>
-                  <option value={90}>Last 90 days</option>
-                </select>
-              )}
-            </div>
-          )}
-          {b.type === 'live' && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 160 }} value={b.suiteId || ''} onChange={(e) => patch(b.id, { suiteId: e.target.value })}>
-                <option value="">Pick an event…</option>
-                {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
-              </select>
-              <span style={hintS}>Includes the most recent Live Pulse update sent for that event.</span>
-            </div>
-          )}
-        </div>
-      ))}
+      {/* ── add blocks ── */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 18px' }}>
         <button style={chipBtn} onClick={() => setPicking(true)}>+ 📊 Tiles</button>
         <button style={chipBtn} onClick={() => add({ type: 'ai', scope: 'section', focus: '' })}>+ ✨ AI analysis</button>
@@ -409,6 +366,162 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
     </div>
   );
 }
+
+// ─── canvas block: a report block rendered EXACTLY as the share page shows it,
+// wrapped in an edit frame (hover outline · ⠿ drag handle · ↑ ↓ ✕ · click to
+// open its settings). Text + headings edit inline right on the canvas; data
+// blocks show their live server-resolved preview (or a skeleton while loading).
+function CanvasBlock({ b, i, count, dnd, selected, onSelect, preview, patch, remove, move, tileTitle, campaignTitle, events, onPickImage }) {
+  const [hover, setHover] = useState(false);
+  const isData = ['tile', 'campaign', 'app', 'goals', 'social', 'live'].includes(b.type);
+  const resolved = isData ? preview : null;
+  // A lone KPI chip flows inline so consecutive KPI tiles sit side by side, like the final page.
+  const chipOnly = isData && resolved && resolved.length === 1 && resolved[0].kind === 'kpi';
+  const frame = {
+    position: 'relative', borderRadius: 10, padding: '2px 6px', margin: '0 0 2px',
+    display: chipOnly ? 'inline-block' : 'block', verticalAlign: 'top', marginRight: chipOnly ? 6 : 0,
+    outline: selected ? '2px solid var(--brand)' : hover ? '2px dashed #c9c9d2' : '2px dashed transparent',
+    borderTop: dnd.dropId === b.id ? '3px solid var(--brand)' : '3px solid transparent',
+    opacity: dnd.dragId === b.id ? 0.35 : 1,
+    cursor: 'default',
+  };
+  const content = () => {
+    if (isData) {
+      if (!resolved) {
+        return (
+          <div style={{ border: '1px dashed #d8d8de', borderRadius: 10, padding: 14, margin: '4px 0 14px', minWidth: 150 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#a1a1a6' }}>{blockLabel(b)}</div>
+            <div style={{ fontSize: 12.5, color: '#a1a1a6', marginTop: 4 }} className="pulse-soft">Loading live preview…</div>
+          </div>
+        );
+      }
+      return groupKpiRows(resolved).map((r, j) => (r.kind === 'kpis'
+        ? <KpiRow key={j} items={r.items} />
+        : <ReportBlockView key={j} b={r.b} accent="var(--brand)" />));
+    }
+    if (b.type === 'heading') {
+      return <input value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} placeholder="Section heading…"
+        onClick={(e) => { e.stopPropagation(); onSelect(b.id); }}
+        style={b.level === 2
+          ? { ...bareInput, fontSize: 15, fontWeight: 700, color: '#111', margin: '14px 0 6px' }
+          : { ...bareInput, fontSize: 19, fontWeight: 800, letterSpacing: '-0.01em', color: '#111', margin: '16px 0 8px' }} />;
+    }
+    if (b.type === 'text') {
+      return <textarea value={b.text} onChange={(e) => { patch(b.id, { text: e.target.value }); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }}
+        placeholder="Write something… (**bold** and *italic* supported)" rows={Math.max(2, String(b.text || '').split('\n').length)}
+        onClick={(e) => { e.stopPropagation(); onSelect(b.id); }}
+        style={{ ...bareInput, fontSize: 14.5, lineHeight: 1.65, color: '#3a3a3c', margin: '0 0 10px', resize: 'none', overflow: 'hidden' }} />;
+    }
+    if (b.type === 'image') {
+      return b.url
+        ? <ReportBlockView b={{ type: 'image', url: b.url, alt: b.alt }} accent="var(--brand)" />
+        : <div style={{ border: '1px dashed #d8d8de', borderRadius: 10, padding: 20, margin: '4px 0 14px', textAlign: 'center', color: '#a1a1a6', fontSize: 13 }}>No image yet — <button style={chipBtn} onClick={(e) => { e.stopPropagation(); onPickImage(b.id); }}>upload one</button></div>;
+    }
+    if (b.type === 'button') {
+      return b.text
+        ? <div style={{ margin: '4px 0 14px' }}><span style={{ display: 'inline-block', padding: '11px 24px', background: 'var(--brand)', color: '#fff', borderRadius: 980, fontSize: 13.5, fontWeight: 700 }}>{b.text}</span></div>
+        : <div style={{ fontSize: 13, color: '#a1a1a6', fontStyle: 'italic', margin: '4px 0 12px' }}>Link button — click to set the label + URL</div>;
+    }
+    if (b.type === 'ai') {
+      return <ReportBlockView b={{ type: 'ai', note: `✨ AI analysis of ${b.scope === 'report' ? 'the whole report' : 'this section'}${b.focus ? ` — “${b.focus}”` : ''} — written fresh from the live data when you generate.` }} accent="var(--brand)" />;
+    }
+    return <ReportBlockView b={{ type: b.type, text: b.text, level: b.level, href: b.href, alt: b.alt }} accent="var(--brand)" />;
+  };
+
+  // The settings strip for the selected block (also carries ↑/↓ for touch).
+  const controls = () => {
+    if (!selected) return null;
+    return (
+      <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', background: '#f5f5f7', border: '1px solid #e2e2e8', borderRadius: 9, padding: 7, margin: '2px 0 10px' }}>
+        <span style={{ ...blockTag, color: '#6b6b70' }}>{blockLabel(b)}</span>
+        {b.type === 'heading' && (
+          <select style={cSel} value={b.level || 1} onChange={(e) => patch(b.id, { level: Number(e.target.value) })}>
+            <option value={1}>Large</option><option value={2}>Small</option>
+          </select>
+        )}
+        {b.type === 'tile' && (<>
+          <span style={cLbl}>{tileTitle(b)}</span>
+          <select style={cSel} value={b.display || 'auto'} onChange={(e) => patch(b.id, { display: e.target.value })}>
+            <option value="auto">Auto</option><option value="chart">Chart</option><option value="value">Number (KPI)</option><option value="table">Table</option>
+          </select>
+        </>)}
+        {b.type === 'campaign' && <span style={cLbl}>{campaignTitle(b)}</span>}
+        {b.type === 'app' && (<>
+          <select style={cSel} value={b.appView || 'summary'} onChange={(e) => patch(b.id, { appView: e.target.value })}>
+            <option value="summary">Summary (KPIs)</option><option value="trend">Daily trend (chart)</option><option value="events">By event (table)</option>
+          </select>
+          <select style={cSel} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
+            <option value={7}>7 days</option><option value={14}>14 days</option><option value={28}>28 days</option><option value={90}>90 days</option>
+          </select>
+        </>)}
+        {b.type === 'social' && (<>
+          <select style={cSel} value={b.socialView || 'accounts'} onChange={(e) => patch(b.id, { socialView: e.target.value })}>
+            <option value="accounts">Accounts</option><option value="trend">Daily trend</option><option value="posts">Top posts</option>
+          </select>
+          {b.socialView === 'trend' && (
+            <select style={cSel} value={b.socialMetric || 'reach'} onChange={(e) => patch(b.id, { socialMetric: e.target.value })}>
+              <option value="reach">Reach</option><option value="followers">Followers</option><option value="impressions">Impressions</option><option value="engagement">Engagement</option>
+            </select>
+          )}
+          {b.socialView === 'trend' && (
+            <select style={cSel} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
+              <option value={7}>7 days</option><option value={14}>14 days</option><option value={28}>28 days</option><option value={90}>90 days</option>
+            </select>
+          )}
+        </>)}
+        {b.type === 'live' && (
+          <select style={cSel} value={b.suiteId || ''} onChange={(e) => patch(b.id, { suiteId: e.target.value })}>
+            <option value="">Pick an event…</option>
+            {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+          </select>
+        )}
+        {b.type === 'ai' && (<>
+          <select style={cSel} value={b.scope || 'section'} onChange={(e) => patch(b.id, { scope: e.target.value })}>
+            <option value="section">This section</option><option value="report">Whole report</option>
+          </select>
+          <input style={{ ...cSel, flex: 1, minWidth: 140 }} value={b.focus || ''} onChange={(e) => patch(b.id, { focus: e.target.value })} placeholder="Optional focus…" />
+        </>)}
+        {b.type === 'button' && (<>
+          <input style={{ ...cSel, flex: 1, minWidth: 110 }} value={b.text} onChange={(e) => patch(b.id, { text: e.target.value })} placeholder="Label" />
+          <input style={{ ...cSel, flex: 2, minWidth: 140 }} value={b.href || ''} onChange={(e) => patch(b.id, { href: e.target.value })} placeholder="https://…" />
+        </>)}
+        {b.type === 'image' && (<>
+          <button style={chipBtn} onClick={() => onPickImage(b.id)}>{b.url ? 'Replace image' : 'Upload image'}</button>
+          <input style={{ ...cSel, flex: 1, minWidth: 110 }} value={b.alt || ''} onChange={(e) => patch(b.id, { alt: e.target.value })} placeholder="Alt text" />
+        </>)}
+        <span style={{ flex: 1 }} />
+        <button style={cBtn} disabled={i === 0} onClick={() => move(b.id, -1)}>↑</button>
+        <button style={cBtn} disabled={i === count - 1} onClick={() => move(b.id, 1)}>↓</button>
+      </div>
+    );
+  };
+
+  return (
+    <div style={frame}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      onClick={(e) => { e.stopPropagation(); onSelect(selected ? null : b.id); }}
+      onDragOver={dnd.over(b.id)} onDrop={dnd.drop(b.id)}>
+      {(hover || selected) && (
+        <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: -12, right: 4, display: 'flex', gap: 4, background: '#fff', border: '1px solid #e2e2e8', borderRadius: 8, padding: 2, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', zIndex: 5 }}>
+          <span title="Drag to rearrange" draggable
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', b.id); dnd.start(b.id); }}
+            onDragEnd={dnd.end}
+            style={{ ...cBtn, cursor: 'grab', border: 'none', fontSize: 13 }}>⠿</span>
+          <button title="Remove" style={{ ...cBtn, border: 'none' }} onClick={() => remove(b.id)}>✕</button>
+        </div>
+      )}
+      {content()}
+      {controls()}
+    </div>
+  );
+}
+
+const bareInput = { display: 'block', width: '100%', boxSizing: 'border-box', border: 'none', outline: 'none', background: 'transparent', padding: 0, fontFamily: 'inherit' };
+const canvasS = { background: '#ffffff', border: '1px solid rgba(128,128,128,0.25)', borderRadius: 16, padding: 'clamp(14px, 3vw, 28px)', marginBottom: 10, color: '#111', fontFamily: "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" };
+const canvasTitleS = { ...bareInput, fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: '#111' };
+const cSel = { padding: '6px 8px', border: '1px solid #d8d8de', borderRadius: 7, fontSize: 12, background: '#fff', color: '#1d1d1f' };
+const cLbl = { fontSize: 12, fontWeight: 600, color: '#1d1d1f' };
+const cBtn = { width: 24, height: 24, borderRadius: 6, border: '1px solid #e2e2e8', background: '#fff', color: '#6b6b70', cursor: 'pointer', fontSize: 12, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
 
 function RecipientEditor({ recipients, setRecipients, addRecipient, logins }) {
   const [draft, setDraft] = useState('');

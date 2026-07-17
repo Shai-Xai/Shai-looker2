@@ -762,6 +762,8 @@ export const api = {
   sendReport: (tplId, b) => fetch(`/api/admin/reports/${tplId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
   getReportSnapshots: (tplId) => fetch(`/api/admin/reports/${tplId}/snapshots`).then(json),
   deleteReportSnapshot: (id) => fetch(`/api/admin/report-snapshots/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  previewReport: (entityId, b) => fetch(`/api/admin/entities/${entityId}/reports/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  previewMyReport: (entityId, b) => fetch(`/api/my/reports/${entityId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   getMyReports: (entityId) => fetch(`/api/my/reports/${entityId}`).then(json),
   createMyReport: (entityId, b) => fetch(`/api/my/reports/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   updateMyReport: (entityId, tplId, b) => fetch(`/api/my/reports/${entityId}/${tplId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

@@ -1101,6 +1101,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-17** — **📑 Report Studio: live design canvas** 🧪: the report editor
+  is now a **WYSIWYG canvas** — the report renders exactly as stakeholders will
+  see it while you build it, with **live real-data previews** for every data
+  block, **inline editing** of the title/headings/text right on the page, and
+  **drag-and-drop** block rearranging.
+
 - **2026-07-17** — **📑 Report Studio: goals, social & live-pulse blocks** 🧪:
   reports can now also carry the client's **🎯 goals** (live progress table),
   **🌐 organic social** (accounts / metric trend chart / top posts) and the

@@ -97,10 +97,14 @@ mid-run can miss at most one run, never double-send. Kill switch: settings key
 ## Client UI
 
 - `ReportStudio.jsx` — dual-surface manager (scope `admin|my`, mirrors
-  DigestManager): template list · block editor (add/reorder/delete blocks,
-  TilePicker to insert tile blocks, whole-dashboard expands to tile blocks) ·
-  schedule + recipients · Generate now / Send test · snapshot list with
-  view/copy-link/PDF.
+  DigestManager): template list · **live WYSIWYG canvas** (the report rendered
+  exactly as the share page shows it via the shared `ReportBlocks.jsx`
+  renderers; headings/text/title edit inline on the canvas; data blocks show
+  debounced REAL-data previews from `POST .../reports/preview` — a no-persist
+  resolve that returns srcId-tagged blocks with inline chart data-URLs and AI
+  placeholders; drag ⠿ to rearrange with native HTML5 dnd, ↑/↓ kept for touch;
+  click a block for its settings strip) · schedule + recipients · Generate now /
+  Send test · snapshot list with view/copy-link/PDF.
 - `ReportsPage.jsx` — client page at `/reports` (nav item gated by
   `reports.manage`).
 - `ReportViewPage.jsx` — the public viewer at `/r/:token`.
