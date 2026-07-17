@@ -560,6 +560,36 @@ const SCENARIOS = [
         expect: { status: 'done', got: ['opener', 'last call'] } },
     ],
   },
+  {
+    name: 'A behaviour decision with no "no response" branch never strands the silent',
+    flow: [
+      '✉ opener → ◆ what did they do?  ├─ Clicked → ✉ clicked   └─ Opened → ✉ opened',
+      '   No explicit timeout branch: validation makes the LAST branch ("Opened")',
+      '   the catch for silence — so a ghost AND a late-opener both land there on',
+      '   expiry, and nobody polls forever.',
+    ],
+    journey: {
+      name: 'Behaviour decision without a timeout branch',
+      nodes: [
+        msg({ subject: 'opener' }),
+        { type: 'decision', question: 'What did they do?', waitHours: 24, branches: [
+          { label: 'Clicked', when: 'clicked', nodes: [msg({ subject: 'clicked' })] },
+          { label: 'Opened', when: 'opened', nodes: [msg({ subject: 'opened' })] },
+        ] },
+      ],
+    },
+    personas: [
+      { name: 'Cara', email: 'cara@x.com', behaviour: 'clicks in-window → clicked branch immediately',
+        drive: [(s, e) => s.click(e)],
+        expect: { status: 'done', got: ['opener', 'clicked'] } },
+      { name: 'Dev', email: 'dev@x.com', behaviour: 'opens, never clicks → last branch (now the timeout catch) on expiry',
+        drive: [(s, e) => s.open(e)],
+        expect: { status: 'done', got: ['opener', 'opened'] } },
+      { name: 'Fin', email: 'fin@x.com', behaviour: 'total ghost → same catch branch, never stranded',
+        drive: [() => {}],
+        expect: { status: 'done', got: ['opener', 'opened'] } },
+    ],
+  },
 ];
 
 // Run a scenario: enrol everyone, send the opener/split, inject each persona's
