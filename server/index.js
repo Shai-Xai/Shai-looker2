@@ -2449,12 +2449,14 @@ waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, pu
 // Report Studio: block-based client reports (tiles + text + images + AI analysis) with share links, PDF export and recurring schedules → server/reports.js (spec: docs/specs/REPORT_STUDIO_SPEC.md)
 require('./reports').mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps: (m) => ops.alert('report', m),
   campaignsFor: (eid) => actionsApi.listForEntity(eid), // campaign blocks: same rows the Engage API reads
-  appReportFor: async (eid, { days } = {}) => { // app blocks: PostHog rollup, appanalytics-flag-gated + scoped to the client's events (fail closed)
-    if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null;
-    const ids = await posthogApi.eventIdsForEntity(eid);
-    if (!ids.length) return null;
-    return posthogApi.entityReport(eid, { days: days || 28 }, ids);
-  } });
+  // app blocks: PostHog rollup, appanalytics-flag-gated + scoped to the client's events (fail closed)
+  appReportFor: async (eid, { days } = {}) => { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); return ids.length ? posthogApi.entityReport(eid, { days: days || 28 }, ids) : null; },
+  // goals blocks: same live-progress resolver the Goals page + digests use (goals-flag-gated, cap 8)
+  goalsFor: async (eid, user) => { if (!require('./flags').enabled(eid, 'goals')) return []; const caches = goalsApi.makeGoalCaches(); const out = []; for (const su of (db.listSuitesForEntity(eid) || [])) for (const g of goalsApi.listGoals(su.id)) { if (out.length >= 8) return out; out.push({ ...(await goalsApi.attachProgress(g, user, caches)), suiteName: su.name }); } return out; },
+  // social blocks: organic social rollup (social-flag-gated, fail closed to empty)
+  social: { accounts: (eid) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accounts(eid) : []), series: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accountSeries(eid, o) : []), posts: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.topPosts(eid, o) : []) },
+  // live blocks: the newest sent Live Pulse run for the chosen event (livepulse-flag-gated; suite must belong to this client)
+  liveLatestFor: (eid, suiteId) => { if (!suiteId || !require('./flags').enabled(eid, 'alerts.livepulse')) return null; for (const p of livepulseApi.listForSuite(suiteId)) { if (p.entityId !== eid) continue; const r = livepulseApi.runsFor(p.id, 1).find((x) => x.status === 'sent'); if (r) return { pulseName: p.name || 'Live update', at: r.at, message: r.message }; } return null; } });
 
 // Onboarding journey — the phased client onboarding pack (auto-detected steps,
 // welcome pack + phase-completion emails on both surfaces), plus the badges &

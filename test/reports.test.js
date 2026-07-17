@@ -90,6 +90,18 @@ before(async () => {
         id: 'camp1', title: 'Early-bird push', status: 'done', audienceCount: 5200,
         results: { sent: 5100, opens: 2300, clicks: 612, converted: 89 },
       }],
+      goalsFor: async () => [
+        { name: 'Sell 10k tickets', unit: 'tickets', isNorthStar: true, targetValue: 10000, suiteName: 'Oasis', progress: { value: 6830, pct: 68, status: 'ahead' } },
+        { name: 'R5m revenue', targetValue: 5000000, suiteName: 'Oasis', progress: { value: 4920000, pct: 98, status: 'on track' } },
+      ],
+      social: {
+        accounts: () => [{ platform: 'instagram', username: 'oasisfest', followers: 48200, postsCount: 312 }],
+        series: (_eid, { days }) => Array.from({ length: Math.min(days, 10) }, (_, i) => ({ date: `2026-07-${String(i + 1).padStart(2, '0')}`, value: 5000 + i * 300 })),
+        posts: () => [{ platform: 'instagram', caption: 'Lineup drop 🔥', reach: 91000, likes: 8400, engagement: 9900 }],
+      },
+      liveLatestFor: (_eid, suiteId) => (suiteId === 'su1'
+        ? { pulseName: 'Gates & bars pulse', at: '2026-07-12T18:30:00.000Z', message: '*Gates in:* 12,480 (+540)\n*Bar revenue:* R1.9m' }
+        : null),
       appReportFor: async (_eid, { days }) => ({
         scoped: true, days,
         totals: { uniques: 4100, views: 18400, interactions: 9600, ctaTaps: 1200, purchases: 310, purchaseValue: 186000 },
@@ -217,6 +229,40 @@ test('campaign + app analytics blocks resolve to chips/chart/table and feed the 
   // AI (whole report) saw all four data facts (campaign + 3 app views)
   const ai = blocks.find((b) => b.type === 'ai');
   assert.match(ai.text, /over 4 tile/);
+});
+
+test('goals / social / live blocks resolve to tables, charts and text and feed the AI scope', async () => {
+  const c = await app.req('POST', `/api/my/reports/${ent.id}`, { as: manager, body: { title: 'Full wrap', blocks: [
+    { type: 'goals' },
+    { type: 'social', socialView: 'accounts' },
+    { type: 'social', socialView: 'trend', socialMetric: 'followers', days: 28 },
+    { type: 'social', socialView: 'posts' },
+    { type: 'live', suiteId: 'su1' },
+    { type: 'live', suiteId: 'other' },
+    { type: 'ai', scope: 'report' },
+  ] } });
+  const g = await app.req('POST', `/api/my/reports/${ent.id}/${c.body.template.id}/generate`, { as: manager });
+  assert.equal(g.status, 201);
+  const blocks = (await app.req('GET', `/api/public/reports/${g.body.snapshot.token}`, {})).body.blocks;
+  // Goals → table with live progress
+  const goals = blocks.find((b) => b.kind === 'table' && /Goals/.test(b.title));
+  assert.deepEqual(goals.columns, ['Goal', 'Current', 'Target', 'Progress', 'Pace']);
+  assert.match(goals.rows[0][0], /★ Sell 10k tickets \(Oasis\)/);
+  assert.deepEqual(goals.rows[0].slice(1), ['6,830', '10,000 tickets', '68%', 'ahead']);
+  // Social accounts table, followers trend chart, top-posts table
+  const accts = blocks.find((b) => b.kind === 'table' && /Social accounts/.test(b.title));
+  assert.deepEqual(accts.rows[0], ['instagram', '@oasisfest', '48,200', '312']);
+  assert.ok(blocks.find((b) => b.kind === 'chart' && /Social followers — last 28 days/.test(b.title)), 'social trend chart');
+  const posts = blocks.find((b) => b.kind === 'table' && /Top social posts/.test(b.title));
+  assert.equal(posts.rows[0][1], 'Lineup drop 🔥');
+  // Live → heading + verbatim message (WhatsApp bold markers stripped); unknown event → missing note
+  const liveHead = blocks.find((b) => b.type === 'heading' && /Gates & bars pulse/.test(b.text));
+  assert.ok(liveHead, 'live heading');
+  const liveText = blocks.find((b) => b.type === 'text' && /Gates in: 12,480/.test(b.text));
+  assert.ok(liveText && !liveText.text.includes('*Gates'), 'message included, markers stripped');
+  assert.ok(blocks.find((b) => b.kind === 'missing' && /No live updates/.test(b.title)));
+  // AI saw goals + 3 social + 1 live = 5 facts (the missing live block contributes none)
+  assert.match(blocks.find((b) => b.type === 'ai').text, /over 5 tile/);
 });
 
 test("'auto' display on a chartable tile renders a PNG chart asset", async () => {
