@@ -48,7 +48,7 @@ own policies, prices, logistics). So the KB is layered, exactly like settings:
 
 | Tier | What | Where it lives | Who maintains it |
 |---|---|---|---|
-| **Platform** | All Howler help docs — the general "how Howler works" corpus | new `support_knowledge` rows with `entity_id = ''` (platform-scoped) | Howler staff, in Admin → Support Owl. **Synced, not retyped**: pull from the Freshdesk Solutions (help-centre) API on a schedule, and/or crawl the public help centre with the existing `safeGetText` → AI-distil → human-review pipeline the Fan Owl already uses for event sites |
+| **Platform** | All Howler help docs — the general "how Howler works" corpus | new `support_knowledge` rows with `entity_id = ''` (platform-scoped) | Howler staff, in Admin → Support Owl. **Synced, not retyped**: the help docs live on **HelpDocs** (helpdocs.io), which has a clean read API — `GET https://api.helpdocs.io/v1/article` (`include_body=true`, read-only API key; docs: apidocs.helpdocs.io) — so a nightly sync + "Sync now" button mirrors them into Pulse. The public help-centre crawl (`safeGetText` → AI-distil → human-review, already built for the Fan Owl) is the fallback/top-up |
 | **Client** | The event's own FAQs/policies/catalogue/page info | the existing `fan_knowledge` + `fan_catalogue` + `fan_pages.content` — reused as-is, zero migration | the client (self-service) or Howler on their behalf — the surfaces already exist (`FanOwlAdmin`) |
 
 Retrieval searches both tiers; **the client tier wins on conflict** (their
@@ -56,11 +56,11 @@ refund policy beats the generic one). The prompt labels which tier an answer
 came from so the Owl says "Howler's policy" vs "the organisers' policy"
 correctly. Blank client tier ⇒ inherit platform, per the inheritance rule.
 
-Sync notes: Freshdesk Solutions API is a clean read
-(`GET /api/v2/solutions/articles`, folder structure intact) — store
-`source: 'freshdesk'`, `ext_id`, `synced_at` per entry so re-syncs upsert and
-human edits to synced entries are either locked or forked-on-edit (decide in
-workshop). A "Sync now" button + nightly scheduler job.
+Sync notes: store `source: 'helpdocs'`, `ext_id` (HelpDocs article id),
+`synced_at` per entry so re-syncs upsert cleanly, and human edits to synced
+entries are either locked or forked-on-edit (decide in workshop). Category
+structure comes over the same API. A "Sync now" button + a nightly
+`scheduler.js` job.
 
 ## 3. The three channels
 
@@ -112,12 +112,32 @@ can paste/edit → humans work exactly as today, just faster. Pulse's admin view
 shows every draft and what happened to it. Nothing customer-facing changes
 until acceptance data says it should.
 
-Per-client routing in (A): map a Freshdesk signal → `entity_id`. Options, in
-rough order of robustness: dedicated per-client support addresses forwarding
-into Freshdesk (`to` address ⇒ entity), Freshdesk **Company** on the ticket,
-or subject/domain heuristics as a last resort. Unmappable tickets ⇒ the Owl
-answers from the **platform tier only** (generic Howler help), which is still
-useful — or stays silent, per config.
+**Per-client routing — today's reality and the first win.** Today ALL inbound
+support lands in **one shared support address**, and Freshdesk automation
+rules flag tickets per client — keyword/rule-based, brittle, and admittedly
+"can be done better". That makes **AI triage the Owl's first job, before it
+drafts a single reply**: on every new ticket the Owl reads the message,
+matches it against Pulse's own client/event roster (entity + suite names,
+aliases, event dates — context Freshdesk rules will never have), and writes
+the classification back to the ticket (Company / a custom field / tags) via
+the API, with a confidence score. High confidence ⇒ tagged silently; low ⇒
+flagged "unroutable" for a human. This replaces the rule spaghetti with one
+maintained-nowhere-else source of truth (Pulse already knows the clients) and
+is shippable value **before** any customer-facing AI. Longer-term options if
+we want deterministic routing: dedicated per-client addresses forwarding into
+the same inbox (`to` address ⇒ entity). Unmappable tickets ⇒ the Owl answers
+from the **platform tier only** (generic Howler help), which is still useful —
+or stays silent, per config.
+
+**Freshdesk's integration surface (what we can lean on):** webhooks out of
+automation rules (our trigger in), a full REST API (our notes/replies/fields
+out), a **native WhatsApp Business channel** (WhatsApp messages become
+tickets — see §3.3), two first-party Slack apps, and a 1,000+ app marketplace
+(Teams, Shopify, Salesforce/HubSpot, Jira, telephony, Zapier) plus custom
+in-Freshdesk apps if we ever want a "Pulse context" sidebar in the agent view.
+Freshworks also sells its own AI agent (Freddy) — the reason to build ours
+instead is the whole point of this spec: Freddy will never know the client's
+event, catalogue, Pulse data or our two-tier KB.
 
 ### 3.2 Website — extend the Fan Owl widget
 
@@ -141,6 +161,15 @@ costs a number per client), a keyword/menu first-touch ("which event?"),
 or launch WhatsApp support only from client-site links
 (`wa.me/<number>?text=<event-code>`) that pre-seed the entity. Lean: start
 with the wa.me deep link from the event site + widget, so the entity rides in.
+
+Alternative shape worth weighing: **Freshdesk's native WhatsApp Business
+channel** turns WhatsApp messages into Freshdesk tickets — meaning the same
+Owl↔Freshdesk integration built for email (webhook in, note/reply out) would
+cover WhatsApp *for free*, with humans handling escalations in the queue they
+already staff. Trade-off: replies ride Freshdesk instead of our existing
+Clickatell plumbing (buttons, media, digests), and it needs a WhatsApp
+Business number connected to Freshdesk. Decide in workshop; the brain and KB
+are identical either way, so this is transport-only.
 
 ## 4. Per-customer context & order lookups
 
@@ -216,10 +245,14 @@ ultimately absorb it, but don't force a migration in phase 1.)
 
 ## 8. Phasing (each phase ships value alone)
 
-1. **P0 — Knowledge + email drafts (lowest risk, immediate value).**
-   Platform-tier KB + Freshdesk sync; Freshdesk webhook → support loop →
-   **private-note drafts** on real tickets; escalation = it just doesn't
-   draft. Humans send everything. Measures: draft acceptance rate, time saved.
+1. **P0 — Knowledge + triage + email drafts (lowest risk, immediate value).**
+   Platform-tier KB synced from HelpDocs; Freshdesk webhook → support loop.
+   First deliverable inside P0 is **AI triage** (classify ticket → client,
+   write it back to the ticket) — replaces the brittle rule flags and ships
+   value before anything customer-facing. Then **private-note drafts** on
+   real tickets; escalation = it just doesn't draft. Humans send everything.
+   Measures: triage accuracy vs the old rules, draft acceptance rate, time
+   saved.
 2. **P1 — Website support mode.** Support toolbox + platform tier join the
    Fan Owl widget; `escalateToHuman` → OS thread/Freshdesk ticket. Auto-answer
    with the always-escalate list active.
@@ -233,10 +266,16 @@ ultimately absorb it, but don't force a migration in phase 1.)
 
 ## 9. Open questions for the workshop
 
-1. Freshdesk routing signal per client — dedicated forward addresses vs
-   Company field? (Decides how clean P0 is.)
-2. Where do Howler's help docs canonically live today — Freshdesk Solutions,
-   a public help centre, or scattered? (Decides sync vs crawl vs both.)
+1. ~~Where do the help docs live?~~ **Answered 2026-07-17: HelpDocs
+   (helpdocs.io)** — sync via its read API. ~~Routing signal?~~ **Answered:
+   one shared support address + rule flags today; the Owl's AI triage
+   replaces the rules (P0), writing the client back onto the ticket.**
+   Remaining sub-question: which Freshdesk field carries it (Company vs
+   custom field vs tags), and do we ever add per-client forward addresses
+   for determinism?
+2. WhatsApp transport: our Clickatell door vs Freshdesk's native WhatsApp
+   channel (one integration covers email + WA, but replies lose our
+   buttons/media plumbing)? See §3.3.
 3. Auto-send appetite: is Howler comfortable with L2 auto-replies on web chat
    from day one (Fan Owl already answers fans live), and what's the bar for
    email?
