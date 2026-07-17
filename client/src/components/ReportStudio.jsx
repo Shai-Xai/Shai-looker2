@@ -24,6 +24,7 @@ export default function ReportStudio({ entityId, scope = 'admin', logins = [] })
     snapshots: (id) => (isAdmin ? api.getReportSnapshots(id) : api.getMyReportSnapshots(entityId, id)),
     removeSnapshot: (sid) => (isAdmin ? api.deleteReportSnapshot(sid) : api.deleteMyReportSnapshot(entityId, sid)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
+    campaigns: () => api.listActions(entityId), // campaign picker (works for both surfaces; 403s fail-soft to an empty list)
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // template object or 'new'
@@ -77,6 +78,8 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
   const [catalogue, setCatalogue] = useState(null);
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState([]);
+  const [campaigns, setCampaigns] = useState(null); // null = not loaded yet
+  const [campPicking, setCampPicking] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [savedId, setSavedId] = useState(tpl?.id || null);
@@ -86,6 +89,7 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
   const imgTarget = useRef(null);
 
   useEffect(() => { A.tiles().then(setCatalogue).catch(() => setCatalogue({ dashboards: [] })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (campPicking && campaigns == null) A.campaigns().then((r) => setCampaigns(r.actions || r.campaigns || [])).catch(() => setCampaigns([])); }, [campPicking]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadSnaps = (id) => A.snapshots(id).then((r) => setSnapshots(r.snapshots || [])).catch(() => setSnapshots([]));
   useEffect(() => { if (savedId) loadSnaps(savedId); }, [savedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -93,6 +97,10 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
     const d = (catalogue?.dashboards || []).find((x) => x.dashboardId === b.dashboardId);
     const t = d?.tiles?.find((x) => x.tileId === b.tileId);
     return t ? `${t.title}` : `${b.tileId}`;
+  };
+  const campaignTitle = (b) => {
+    const c = (campaigns || []).find((x) => x.id === b.campaignId);
+    return c ? (c.title || c.config?.subject || 'Campaign') : 'Campaign';
   };
   const patch = (id, p) => setBlocks((bs) => bs.map((b) => (b.id === id ? { ...b, ...p } : b)));
   const remove = (id) => setBlocks((bs) => bs.filter((b) => b.id !== id));
@@ -240,11 +248,34 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
               <input style={input} value={b.href || ''} onChange={(e) => patch(b.id, { href: e.target.value })} placeholder="https://…" />
             </div>
           )}
+          {b.type === 'campaign' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>{campaignTitle(b)}</span>
+              <span style={hintS}>Audience, sent, opens, clicks, click-rate & conversions — frozen at generate time.</span>
+            </div>
+          )}
+          {b.type === 'app' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 170 }} value={b.appView || 'summary'} onChange={(e) => patch(b.id, { appView: e.target.value })}>
+                <option value="summary">Summary (KPI chips)</option>
+                <option value="trend">Daily trend (chart)</option>
+                <option value="events">By event (table)</option>
+              </select>
+              <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
+                <option value={7}>Last 7 days</option>
+                <option value={14}>Last 14 days</option>
+                <option value={28}>Last 28 days</option>
+                <option value={90}>Last 90 days</option>
+              </select>
+            </div>
+          )}
         </div>
       ))}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 18px' }}>
         <button style={chipBtn} onClick={() => setPicking(true)}>+ 📊 Tiles</button>
         <button style={chipBtn} onClick={() => add({ type: 'ai', scope: 'section', focus: '' })}>+ ✨ AI analysis</button>
+        <button style={chipBtn} onClick={() => setCampPicking(true)}>+ 📣 Campaign</button>
+        <button style={chipBtn} onClick={() => add({ type: 'app', appView: 'summary', days: 28 })}>+ 📱 App analytics</button>
         <button style={chipBtn} onClick={() => add({ type: 'heading', text: '', level: 1 })}>+ Heading</button>
         <button style={chipBtn} onClick={() => add({ type: 'text', text: '' })}>+ Text</button>
         <button style={chipBtn} onClick={() => { imgTarget.current = null; fileRef.current?.click(); }}>+ Image</button>
@@ -259,6 +290,24 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button style={primary} onClick={confirmPick} disabled={!picked.length}>Add {picked.length || ''} selection{picked.length === 1 ? '' : 's'}</button>
             <button style={mini} onClick={() => { setPicked([]); setPicking(false); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {campPicking && (
+        <div style={card}>
+          <div style={{ ...hintLbl }}>Pick a campaign to add its results</div>
+          {campaigns == null ? <p style={hintS}>Loading campaigns…</p>
+            : campaigns.length === 0 ? <p style={hintS}>No campaigns found for this client (or Engage isn't enabled for them).</p>
+            : campaigns.slice(0, 30).map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--hairline)', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, flex: 1, minWidth: 150 }}>{c.title || c.config?.subject || 'Untitled campaign'}</span>
+                <span style={{ ...statusChip, ...(c.status === 'done' || c.status === 'running' ? activeChip : pausedChip) }}>{c.status}</span>
+                {c.results?.sent ? <span style={hintS}>{c.results.sent} sent</span> : null}
+                <button style={chipBtn} onClick={() => { add({ type: 'campaign', campaignId: c.id }); setCampPicking(false); }}>Add</button>
+              </div>
+            ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button style={mini} onClick={() => setCampPicking(false)}>Close</button>
           </div>
         </div>
       )}
@@ -349,7 +398,7 @@ function RecipientEditor({ recipients, setRecipients, addRecipient, logins }) {
   );
 }
 
-const blockLabel = (b) => ({ heading: 'Heading', text: 'Text', tile: '📊 Tile', ai: '✨ AI analysis', image: '🖼 Image', button: '🔗 Link', divider: 'Divider' }[b.type] || b.type);
+const blockLabel = (b) => ({ heading: 'Heading', text: 'Text', tile: '📊 Tile', ai: '✨ AI analysis', image: '🖼 Image', button: '🔗 Link', divider: 'Divider', campaign: '📣 Campaign', app: '📱 App analytics' }[b.type] || b.type);
 const scheduleSummary = (t) => t.cadence === 'daily' ? `daily ${t.timeOfDay}`
   : t.cadence === 'weekly' ? `${DAYS[t.weekday] || 'Monday'}s ${t.timeOfDay}`
   : t.cadence === 'monthly' ? `monthly (day ${t.monthday}) ${t.timeOfDay}` : 'one-off';

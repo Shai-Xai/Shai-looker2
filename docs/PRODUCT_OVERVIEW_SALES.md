@@ -341,9 +341,12 @@ who you are and what your account can do, and it only ever describes features
 that have actually shipped."
 ## 2c. Report Studio — shareable custom reports  🧪
 - Compose a **polished, client-branded report** from building blocks: dashboard
-  **tiles** (rendered as a chart, KPI chip or table), **section headings**, free
-  **text**, **images**, **link buttons** and **✨ AI analysis** blocks (per section
-  or a whole-report executive summary, with an optional focus prompt).
+  **tiles** (rendered as a chart, KPI chip or table), **📣 campaign results**
+  (audience, sent, opens, clicks, conversions from any Engage campaign),
+  **📱 native-app analytics** (app users, views, CTA taps, purchases — as KPIs, a
+  daily trend chart or a per-event table), **section headings**, free **text**,
+  **images**, **link buttons** and **✨ AI analysis** blocks (per section or a
+  whole-report executive summary, with an optional focus prompt).
 - Generating **freezes the numbers into a snapshot** — a stakeholder opening it
   weeks later sees exactly what was reported, not drifted data. Each snapshot gets
   its own **public share link** (`/r/…`, no Pulse login — built for sponsors,
@@ -1095,6 +1098,12 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-17** — **📑 Report Studio: campaign + app-analytics blocks** 🧪: reports
+  can now include **Engage campaign results** (audience/sent/opens/clicks/CTR/
+  conversions as KPI chips) and **native-app analytics** (summary KPIs, daily trend
+  chart, or per-event table over 7/14/28/90 days) alongside dashboard tiles — and
+  the ✨ AI analysis blocks read them too.
 
 - **2026-07-17** — **📑 Report Studio** 🧪 (new): build custom, shareable reports
   from dashboard tiles + headings + text + images + **AI analysis** blocks; each

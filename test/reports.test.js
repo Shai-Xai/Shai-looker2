@@ -84,6 +84,18 @@ before(async () => {
       anthropicKeyForEntity: () => 'sk-test',
       aiInstructionsFor: () => '',
       notifyOps: () => {},
+      // Engage campaigns + native-app analytics data sources (report blocks
+      // resolve through these exactly like index.js wires them).
+      campaignsFor: () => [{
+        id: 'camp1', title: 'Early-bird push', status: 'done', audienceCount: 5200,
+        results: { sent: 5100, opens: 2300, clicks: 612, converted: 89 },
+      }],
+      appReportFor: async (_eid, { days }) => ({
+        scoped: true, days,
+        totals: { uniques: 4100, views: 18400, interactions: 9600, ctaTaps: 1200, purchases: 310, purchaseValue: 186000 },
+        series: Array.from({ length: 10 }, (_, i) => ({ date: `2026-07-${String(i + 1).padStart(2, '0')}`, uniques: 300 + i * 20, views: 1500 + i * 40, ctaTaps: 90 + i * 5 })),
+        events: [{ eventRef: 'ev1', eventName: 'Oasis Festival', uniques: 4100, views: 18400, ctaTaps: 1200, purchases: 310 }],
+      }),
     });
   });
 });
@@ -167,6 +179,44 @@ test('end to end: create → generate → public viewer JSON → PDF → assets 
   // Junk tokens 404.
   assert.equal((await app.req('GET', '/api/public/reports/not-a-token', {})).status, 404);
   assert.equal((await fetch(`${app.base}/report-assets/not-a-token`)).status, 404);
+});
+
+test('campaign + app analytics blocks resolve to chips/chart/table and feed the AI scope', async () => {
+  const c = await app.req('POST', `/api/my/reports/${ent.id}`, { as: manager, body: { title: 'Engage wrap', blocks: [
+    { type: 'campaign', campaignId: 'camp1' },
+    { type: 'app', appView: 'summary', days: 28 },
+    { type: 'app', appView: 'trend', days: 14 },
+    { type: 'app', appView: 'events', days: 90 },
+    { type: 'ai', scope: 'report' },
+  ] } });
+  assert.equal(c.status, 201);
+  const g = await app.req('POST', `/api/my/reports/${ent.id}/${c.body.template.id}/generate`, { as: manager });
+  assert.equal(g.status, 201);
+  const pub = await app.req('GET', `/api/public/reports/${g.body.snapshot.token}`, {});
+  const blocks = pub.body.blocks;
+  // Campaign → sub-heading + 6 KPI chips (audience/sent/opens/clicks/rate/converted)
+  assert.equal(blocks[0].type, 'heading');
+  assert.match(blocks[0].text, /Early-bird push/);
+  const campChips = blocks.slice(1, 7);
+  assert.ok(campChips.every((b) => b.type === 'tile' && b.kind === 'kpi'));
+  assert.deepEqual(campChips.map((b) => b.title), ['Audience', 'Sent', 'Opens', 'Clicks', 'Click rate', 'Converted']);
+  assert.equal(campChips[1].value, '5,100');
+  assert.equal(campChips[4].value, '12%');
+  // App summary → sub-heading + KPI chips incl currency-formatted purchase value
+  const appHead = blocks.findIndex((b) => b.type === 'heading' && /App engagement — last 28 days/.test(b.text));
+  assert.ok(appHead > 0);
+  const appChips = blocks.slice(appHead + 1, appHead + 7);
+  assert.deepEqual(appChips.map((b) => b.title), ['App users', 'Views', 'Interactions', 'CTA taps', 'Purchases', 'Purchase value']);
+  assert.match(appChips[5].value, /R.?186[ ,]000/);
+  // Trend → a rendered chart asset; events → a table
+  const chart = blocks.find((b) => b.kind === 'chart' && /last 14 days/.test(b.title));
+  assert.ok(chart && chart.assetToken, 'trend chart rendered');
+  const table = blocks.find((b) => b.kind === 'table' && /by event/.test(b.title));
+  assert.deepEqual(table.columns, ['Event', 'App users', 'Views', 'CTA taps', 'Purchases']);
+  assert.equal(table.rows[0][0], 'Oasis Festival');
+  // AI (whole report) saw all four data facts (campaign + 3 app views)
+  const ai = blocks.find((b) => b.type === 'ai');
+  assert.match(ai.text, /over 4 tile/);
 });
 
 test("'auto' display on a chartable tile renders a PNG chart asset", async () => {

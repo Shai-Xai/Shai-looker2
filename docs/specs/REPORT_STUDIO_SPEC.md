@@ -37,7 +37,9 @@ Admin → client → Reports; clients self-serve at `/reports` (permission
 | `button` | text, href | link button |
 | `divider` | — | rule |
 | `tile` | dashboardId, tileId, display auto/chart/value/table | `chart` (PNG via tileimg) · `kpi` chip · `table` rows |
-| `ai` | scope section/report, focus | analyst paragraphs over the tiles in scope |
+| `campaign` | campaignId | sub-heading + KPI chips (audience, sent, opens, clicks, click-rate, conversions) from the Engage campaign's results |
+| `app` | appView summary/trend/events, days 7/14/28/90 | native-app engagement (PostHog rollup, appanalytics-flag-gated): KPI chips · daily trend chart · per-event table |
+| `ai` | scope section/report, focus | analyst paragraphs over the data blocks in scope (tiles + campaigns + app) |
 
 Tile data resolves through `buildFactsFromTiles` (briefing.js) — the same
 scope-enforced query path as dashboards/digests, so a report can never leak
@@ -105,7 +107,7 @@ mid-run can miss at most one run, never double-send. Kill switch: settings key
 
 - "➕ Add to report" straight from a dashboard tile (report basket).
 - Owl/AI-composed reports ("build me a post-event wrap") — emailDesign-style.
-- Goals / engagement / social / live-pulse block types.
+- Goals / social / live-pulse block types (campaign + app-analytics blocks shipped in V1.1).
 - Per-recipient personalisation; comments on the viewer; report themes.
 - PDF as an email *attachment* (mailer.send has no attachment support today).
 
