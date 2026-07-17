@@ -465,7 +465,7 @@ require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey, ge
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
-require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); // Product help knowledge: grounds the Owl's productHelp tool (published articles + release notes only) + admin curation + auto-drafts from published release notes → server/helpBot.js; kill switches help_enabled / help_draft_auto
+require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); require('./supportOwl').mount(app, { db, auth, rateLimit }); // Product help knowledge (Owl's productHelp tool + admin curation; kill switches help_enabled / help_draft_auto) → server/helpBot.js · Support Owl P0a: the customer-support knowledge spine, HelpDocs sync + platform-tier curation (docs/specs/SUPPORT_OWL_SPEC.md; kill switch support_owl_enabled) → server/supportOwl.js
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
@@ -623,7 +623,7 @@ const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, reso
 // Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
 require('./notices').mount(app, { db, auth, os, mailer, messaging });
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
-const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging, mailer }); const staffAlertsApi = require('./staffAlerts').mount(app, { db, auth, mailer, push, messaging }) || {}; staffInboundFn = staffAlertsApi.staffInbound; const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi, push, signalFlow: staffAlertsApi.signalFlow }); // device/station logistics + 🚨 staff alerts + Live Pulse recurring event-day updates (the Alerts page's "Live updates" tab) → server/eventops.js, server/staffAlerts.js, server/livepulse.js
+const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging, mailer }); const staffAlertsApi = require('./staffAlerts').mount(app, { db, auth, mailer, push, messaging }) || {}; staffInboundFn = staffAlertsApi.staffInbound; const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi, push, signalFlow: staffAlertsApi.signalFlow }); const surveysApi = require('./surveys').mount(app, { db, auth, rateLimit, listEntityEventIds: (eid) => posthogApi.eventIdsForEntity(eid) }); require('./surveyWeb').mount(app, { db, auth, rateLimit, mailer, surveys: surveysApi }); // device/station logistics + 🚨 staff alerts + Live Pulse recurring event-day updates (the Alerts page's "Live updates" tab) + post-event fan surveys (Pulse ⇄ Howler app, docs/specs/SURVEY_CONTRACT.md) → server/eventops.js, server/staffAlerts.js, server/livepulse.js, server/surveys.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
@@ -2446,6 +2446,17 @@ function recentMessages(entityId, userId, limit = 6) {
 // learning loop, and the scheduler mount (recurring digest delivery). Mounted
 // here, after its content builder (buildDigestContent) + role lenses exist.
 waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
+// Report Studio: block-based client reports (tiles + text + images + AI analysis) with share links, PDF export and recurring schedules → server/reports.js (spec: docs/specs/REPORT_STUDIO_SPEC.md)
+require('./reports').mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps: (m) => ops.alert('report', m),
+  campaignsFor: (eid) => actionsApi.listForEntity(eid), // campaign blocks: same rows the Engage API reads
+  // app blocks: PostHog rollup, appanalytics-flag-gated + scoped to the client's events (fail closed)
+  appReportFor: async (eid, { days } = {}) => { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); return ids.length ? posthogApi.entityReport(eid, { days: days || 28 }, ids) : null; },
+  // goals blocks: same live-progress resolver the Goals page + digests use (goals-flag-gated, cap 8)
+  goalsFor: async (eid, user) => { if (!require('./flags').enabled(eid, 'goals')) return []; const caches = goalsApi.makeGoalCaches(); const out = []; for (const su of (db.listSuitesForEntity(eid) || [])) for (const g of goalsApi.listGoals(su.id)) { if (out.length >= 8) return out; out.push({ ...(await goalsApi.attachProgress(g, user, caches)), suiteName: su.name }); } return out; },
+  // social blocks: organic social rollup (social-flag-gated, fail closed to empty)
+  social: { accounts: (eid) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accounts(eid) : []), series: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accountSeries(eid, o) : []), posts: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.topPosts(eid, o) : []) },
+  // live blocks: the newest sent Live Pulse run for the chosen event (livepulse-flag-gated; suite must belong to this client)
+  liveLatestFor: (eid, suiteId) => { if (!suiteId || !require('./flags').enabled(eid, 'alerts.livepulse')) return null; for (const p of livepulseApi.listForSuite(suiteId)) { if (p.entityId !== eid) continue; const r = livepulseApi.runsFor(p.id, 1).find((x) => x.status === 'sent'); if (r) return { pulseName: p.name || 'Live update', at: r.at, message: r.message }; } return null; } });
 
 // Onboarding journey — the phased client onboarding pack (auto-detected steps,
 // welcome pack + phase-completion emails on both surfaces), plus the badges &
@@ -2651,33 +2662,7 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles });
 });
 
-// ─── Share links ─────────────────────────────────────────────────────────────
-// Mint a short link to a dashboard + the sender's current filters. Never an
-// auth bypass: /s/:token just redirects; the dashboard route still requires
-// login and applies organiser scoping to the recipient.
-app.post('/api/share', auth.requireAuth, (req, res) => {
-  const { suiteId, dashboardId, filters } = req.body || {};
-  const def = store.get(dashboardId);
-  if (!def) return res.status(404).json({ error: 'Dashboard not found' });
-  if (!auth.canAccessDashboard(req.user, def)) return res.status(403).json({ error: 'Not allowed' });
-  if (suiteId && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
-  const clean = {};
-  for (const [k, v] of Object.entries(filters || {})) {
-    if (typeof v === 'string' && v.trim() !== '') clean[String(k).slice(0, 120)] = v.slice(0, 300);
-  }
-  const token = db.createShareLink({ suiteId: suiteId || '', dashboardId, filters: clean, createdBy: req.user.email });
-  res.status(201).json({ token, path: `/s/${token}` });
-});
-// Resolve a share token → redirect to the dashboard with filters in the URL.
-// No auth needed for the translation; if the visitor isn't logged in, the SPA
-// shows login and (URL preserved) lands them on the dashboard afterwards.
-app.get('/s/:token', (req, res) => {
-  const link = db.getShareLink(req.params.token);
-  if (!link) return res.redirect('/');
-  const qs = Object.keys(link.filters || {}).length ? `?f=${encodeURIComponent(JSON.stringify(link.filters))}` : '';
-  const target = link.suiteId ? `/suite/${link.suiteId}/d/${link.dashboardId}${qs}` : `/d/${link.dashboardId}${qs}`;
-  res.redirect(target);
-});
+require('./shareLinks').mount(app, { db, auth, store }); // dashboard share-by-link (/api/share + /s/:token) → server/shareLinks.js
 
 // ─── Briefing feedback ───────────────────────────────────────────────────────
 // like / dislike (+comment) / investigate (asks Howler to dig into the data).

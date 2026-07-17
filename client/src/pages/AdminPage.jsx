@@ -18,9 +18,11 @@ import QueueItCard from '../components/QueueItCard.jsx';
 import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
 import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
+import ReportStudio from '../components/ReportStudio.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
+import SurveyManager from '../components/SurveyManager.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
@@ -30,6 +32,7 @@ import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import FlagsMatrix from '../components/FlagsMatrix.jsx';
 import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
+import SupportOwlAdmin from '../components/SupportOwlAdmin.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
@@ -741,7 +744,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge'], ['supportowl', '🛟 Support Owl']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -756,6 +759,7 @@ function Product() {
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
       {sub === 'helpbot' && <HelpBotAdmin />}
+      {sub === 'supportowl' && <SupportOwlAdmin />}
     </div>
   );
 }
@@ -3073,7 +3077,11 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+<<<<<<< HEAD
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+=======
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+>>>>>>> origin/main
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -3134,6 +3142,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
               <ChottuLinks entityId={entity.id} scope="admin" />
             </div>
           )}
+          {section === 'surveys' && (
+            <div>
+              <p style={hint}>Post-event fan surveys for <b>{entity.name}</b> — designed in Pulse, answered in the Howler app, results back here. Clients manage these themselves in Engage → Surveys once their <b>engage.surveys</b> flag is on (Product → Flags).</p>
+              <SurveyManager entityId={entity.id} scope="admin" />
+            </div>
+          )}
           {section === 'eventops' && (
             <div>
               <p style={hint}>Event Ops pilot for <b>{entity.name}</b> — track devices &amp; stations live at an event. Switch it on per client; they can then run it themselves too.</p>
@@ -3144,6 +3158,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Scheduled, role-personalised briefing emails for <b>{entity.name}</b>. Clients can also manage these themselves.</p>
               <DigestManager entityId={entity.id} scope="admin" logins={users} />
+            </div>
+          )}
+          {section === 'reports' && (
+            <div>
+              <p style={hint}>Report Studio for <b>{entity.name}</b> — compose shareable reports from their dashboard tiles, text and AI analysis (share link + PDF, one-off or scheduled). Clients can also build these themselves.</p>
+              <ReportStudio entityId={entity.id} scope="admin" logins={users} />
             </div>
           )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}

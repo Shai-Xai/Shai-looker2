@@ -361,6 +361,15 @@ export const api = {
   adminDraftHelpArticles: () => fetch('/api/admin/help/draft', { method: 'POST' }).then(json),
   adminHelpSettings: () => fetch('/api/admin/help/settings').then(json),
   adminSaveHelpSettings: (s) => fetch('/api/admin/help/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  // Admin — Product → Support Owl: the customer-support knowledge spine
+  // (server/supportOwl.js, P0a) — HelpDocs sync + platform-tier curation.
+  adminSupportOwl: () => fetch('/api/admin/support-owl').then(json),
+  adminSupportOwlSettings: (s) => fetch('/api/admin/support-owl/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
+  adminSupportOwlSync: () => fetch('/api/admin/support-owl/sync', { method: 'POST' }).then(json),
+  adminSupportOwlSearch: (q, entityId = '') => fetch(`/api/admin/support-owl/search?${new URLSearchParams({ q, entityId })}`).then(json),
+  adminCreateSupportKnowledge: (k) => fetch('/api/admin/support-owl/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(k) }).then(json),
+  adminUpdateSupportKnowledge: (id, k) => fetch(`/api/admin/support-owl/knowledge/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(k) }).then(json),
+  adminDeleteSupportKnowledge: (id) => fetch(`/api/admin/support-owl/knowledge/${id}`, { method: 'DELETE' }),
   // Product feedback board — report a bug/improvement/idea (staff or client),
   // track your own, and (admin) run the live board + Copy-for-Claude hand-off.
   submitTicket: (b) => fetch('/api/my/tickets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
@@ -693,6 +702,21 @@ export const api = {
   chottuPreviewTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
   chottuApplyTemplate: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/chottu/templates` : `/api/my/chottu/${entityId}/templates`) + `/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 
+  // ── Surveys (Engage → Surveys · post-event fan feedback, docs/specs/SURVEY_CONTRACT.md) ──
+  listSurveys: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys` : '/api/my/surveys').then(json),
+  createSurvey: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys` : '/api/my/surveys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  updateSurvey: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  surveyAction: (scope, entityId, id, action) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + `/${action}`, { method: 'POST' }).then(json),
+  deleteSurvey: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`, { method: 'DELETE' }).then(json),
+  surveyResults: (scope, entityId, id, ticketType = '') => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/results' + (ticketType ? `?ticketType=${encodeURIComponent(ticketType)}` : '')).then(json),
+  surveyResponses: (scope, entityId, id, params = {}) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/responses?' + new URLSearchParams(params).toString()).then(json),
+  surveyCsvUrl: (scope, entityId, id, ticketType = '') => (scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/results.csv' + (ticketType ? `?ticketType=${encodeURIComponent(ticketType)}` : ''),
+  surveyEventLookup: (eventId) => fetch(`/api/my/surveys/event-lookup?eventId=${encodeURIComponent(eventId)}`).then(json),
+  surveyEntityEvents: (entityId) => fetch(`/api/my/surveys/events?entityId=${encodeURIComponent(entityId)}`).then(json),
+  surveySendEmails: (scope, entityId, id, body) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
+  surveyShareLink: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/share-link', { method: 'POST' }).then(json),
+  surveyLinks: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/links').then(json),
+
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),
@@ -753,6 +777,25 @@ export const api = {
   getDigestEvents: (entityId) => fetch(`/api/admin/entities/${entityId}/digest-events`).then(json),
   getFollowedTiles: (entityId) => fetch(`/api/admin/entities/${entityId}/followed-tiles`).then(json),
   getMyFollowedTiles: (entityId) => fetch(`/api/my/followed-tiles/${entityId}`).then(json),
+  // Report Studio — block-based client reports (admin + client self-service surfaces).
+  getReports: (entityId) => fetch(`/api/admin/entities/${entityId}/reports`).then(json),
+  createReport: (entityId, b) => fetch(`/api/admin/entities/${entityId}/reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateReport: (tplId, b) => fetch(`/api/admin/reports/${tplId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteReport: (tplId) => fetch(`/api/admin/reports/${tplId}`, { method: 'DELETE' }).then((r) => r.ok),
+  generateReport: (tplId) => fetch(`/api/admin/reports/${tplId}/generate`, { method: 'POST' }).then(json),
+  sendReport: (tplId, b) => fetch(`/api/admin/reports/${tplId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  getReportSnapshots: (tplId) => fetch(`/api/admin/reports/${tplId}/snapshots`).then(json),
+  deleteReportSnapshot: (id) => fetch(`/api/admin/report-snapshots/${id}`, { method: 'DELETE' }).then((r) => r.ok),
+  previewReport: (entityId, b) => fetch(`/api/admin/entities/${entityId}/reports/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  previewMyReport: (entityId, b) => fetch(`/api/my/reports/${entityId}/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  getMyReports: (entityId) => fetch(`/api/my/reports/${entityId}`).then(json),
+  createMyReport: (entityId, b) => fetch(`/api/my/reports/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  updateMyReport: (entityId, tplId, b) => fetch(`/api/my/reports/${entityId}/${tplId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  deleteMyReport: (entityId, tplId) => fetch(`/api/my/reports/${entityId}/${tplId}`, { method: 'DELETE' }).then((r) => r.ok),
+  generateMyReport: (entityId, tplId) => fetch(`/api/my/reports/${entityId}/${tplId}/generate`, { method: 'POST' }).then(json),
+  sendMyReport: (entityId, tplId, b) => fetch(`/api/my/reports/${entityId}/${tplId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) }).then(json),
+  getMyReportSnapshots: (entityId, tplId) => fetch(`/api/my/reports/${entityId}/${tplId}/snapshots`).then(json),
+  deleteMyReportSnapshot: (entityId, id) => fetch(`/api/my/reports/${entityId}/snapshots/${id}`, { method: 'DELETE' }).then((r) => r.ok),
   // Campaign billing — per-channel rate card + cost rollups.
   getBillingMaster: () => fetch('/api/billing/master').then(json),
   saveBillingMaster: (b) => fetch('/api/billing/master', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),

@@ -1058,6 +1058,7 @@ async function classifyDocument({ pdfBase64, apiKey }) {
 
 function promptRegistry() {
   return [
+    { key: 'report', label: 'Report analysis', scope: 'Report Studio: AI commentary over the tiles in a report section or the whole report', text: require('./reports').REPORT_SYSTEM },
     { key: 'tile', label: 'Tile insight', scope: 'Per-tile "Explain this" insight', text: SYSTEM },
     { key: 'dashboard', label: 'Dashboard summary', scope: 'Whole-dashboard AI summary', text: DASHBOARD_SYSTEM },
     { key: 'library', label: 'Tile-library descriptions', scope: 'Auto-describing tiles in the library', text: LIBRARY_SYSTEM },

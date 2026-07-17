@@ -10,6 +10,7 @@ import AudienceHub from '../components/AudienceHub.jsx';
 import TemplateManager from '../components/TemplateManager.jsx';
 import JourneyWizard from '../components/JourneyWizard.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
+import SurveyManager from '../components/SurveyManager.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -22,6 +23,7 @@ const TABS = [
   { key: 'audiences', label: 'Ad audiences', icon: '🎯', ready: true },
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'links', label: 'Links', icon: '🔗', ready: true },
+  { key: 'surveys', label: 'Surveys', icon: '📋', ready: true },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
@@ -39,7 +41,7 @@ export default function EngagePage() {
 
   // Feature-flagged tabs (Admin → Product → Flags): hidden when the client's
   // effective flag is off. Server routes enforce the same flags for real.
-  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links' };
+  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links', surveys: 'engage.surveys' };
   const myFlags = useMyFlags(entityId);
   const tabs = TABS.filter((t) => !TAB_FLAGS[t.key] || flagOn(myFlags, TAB_FLAGS[t.key]));
 
@@ -111,6 +113,11 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Short links into the Howler app — created from Pulse, tied to your events, with click counts. Share them in posts, bios, emails and QR codes.</p>
           <ChottuLinks entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
+      ) : active === 'surveys' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Post-event fan surveys — design them here, fans answer in the Howler app, results land back in Pulse. Target everyone or specific ticket types.</p>
+          <SurveyManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'templates' ? (
         <>
