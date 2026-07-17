@@ -114,7 +114,10 @@ monitoring and AI metering. Later phases: support mode in the Fan Owl widget,
 auto-send in bounds, WhatsApp path, verification-first order lookups. Spec
 (brainstorm): **`docs/specs/SUPPORT_OWL_SPEC.md`** (2026-07-17). Effort: L
 staged (phase 0 Freshdesk drafts: M).
-**Status:** 💡 — mapped, workshop pending (open questions in the spec §9).
+**Status:** 🏗️ — **P0a (knowledge spine) on staging 2026-07-17**:
+`server/supportOwl.js` (support_knowledge, HelpDocs sync + nightly refresh,
+two-tier retrieval, kill switch) + Admin → Product → 🛟 Support Owl. Workshop
+questions (spec §9) still open; next: P0b Freshdesk webhook + AI triage.
 
 ---
 

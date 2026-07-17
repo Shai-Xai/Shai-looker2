@@ -30,6 +30,7 @@ import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import FlagsMatrix from '../components/FlagsMatrix.jsx';
 import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
+import SupportOwlAdmin from '../components/SupportOwlAdmin.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
@@ -741,7 +742,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge'], ['supportowl', '🛟 Support Owl']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -756,6 +757,7 @@ function Product() {
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
       {sub === 'helpbot' && <HelpBotAdmin />}
+      {sub === 'supportowl' && <SupportOwlAdmin />}
     </div>
   );
 }

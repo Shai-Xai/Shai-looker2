@@ -4,6 +4,14 @@
 > this is the thinking surface for the workshop. Sibling of
 > `docs/specs/FAN_OWL_SPEC.md`; read that first for the widget mechanics and trust
 > boundary this builds on.
+>
+> **Build state:** P0a (the knowledge spine) is built and on **staging** —
+> `server/supportOwl.js` (`support_knowledge` table, HelpDocs sync via the read
+> API, nightly refresh, two-tier `searchKnowledge`, kill switch
+> `support_owl_enabled`) + Admin → Product → 🛟 Support Owl
+> (`SupportOwlAdmin.jsx`: write-only HelpDocs key, Sync now, manual platform
+> entries, retrieval preview). No AI calls yet. Next: P0b (Freshdesk webhook +
+> triage).
 
 ## 0. In plain English (read this first)
 
