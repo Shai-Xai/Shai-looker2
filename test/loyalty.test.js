@@ -28,7 +28,7 @@ test('deriveProfile: no history → new tier, no signals', () => {
   assert.equal(d.traits.eventsCount, 0);
 });
 
-test('deriveProfile: one event → returning; two → loyal', () => {
+test('deriveProfile: the ladder — 1 → returning, 2 → loyal, 4+ → superfan', () => {
   assert.equal(deriveProfile([row('Fest A', '2025-08-01', 'GA', 1, 950)]).tier, 'returning');
   const d = deriveProfile([row('Fest A', '2025-08-01', 'GA', 1, 950), row('Fest B', '2024-08-01', 'GA', 2, 1800)]);
   assert.equal(d.tier, 'loyal');
@@ -36,6 +36,16 @@ test('deriveProfile: one event → returning; two → loyal', () => {
   assert.equal(d.traits.totalTickets, 3);
   assert.equal(d.traits.totalSpend, 2750);
   assert.equal(d.traits.lastEvent.name, 'Fest A'); // most recent by start_date
+  const superfan = deriveProfile([1, 2, 3, 4].map((y) => row(`Fest ${y}`, `202${y}-08-01`, 'GA', 1, 950)));
+  assert.equal(superfan.tier, 'superfan');
+});
+
+test('deriveProfile: streak counts CONSECUTIVE years from the most recent; gaps break it', () => {
+  const streak = deriveProfile([row('F26', '2026-08-01', 'GA', 1, 1), row('F25', '2025-08-01', 'GA', 1, 1), row('F24', '2024-08-01', 'GA', 1, 1)]);
+  assert.equal(streak.traits.streakYears, 3);
+  const gap = deriveProfile([row('F26', '2026-08-01', 'GA', 1, 1), row('F23', '2023-08-01', 'GA', 1, 1)]);
+  assert.equal(gap.traits.streakYears, 1); // 2023 doesn't chain to 2026
+  assert.equal(deriveProfile([]).traits.streakYears, 0);
 });
 
 test('deriveProfile: 4+ tickets at one event → group_buyer; favourite type by volume', () => {

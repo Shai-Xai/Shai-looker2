@@ -68,16 +68,22 @@ function deriveProfile(rows) {
   // Paid vs comp views kept SEPARATE so phase-2 reward pools can include or
   // exclude comps from eligibility (spec §5) — the tier here counts attendance.
   const paidEventsCount = events.filter(([, e]) => e.paid > 0).length;
+  // Consecutive-years streak, anchored at the most recent attended year — "your
+  // 4th year running" is a different fan from "four times, ever". Gaps break it.
+  const years = [...new Set(events.map(([, e]) => Number(String(e.date).slice(0, 4))).filter((y) => y > 2000))].sort((a, b) => b - a);
+  let streakYears = years.length ? 1 : 0;
+  for (let i = 0; i < years.length - 1 && years[i] - years[i + 1] === 1; i++) streakYears++;
   const totalTickets = events.reduce((n, [, e]) => n + e.tickets, 0);
   const totalSpend = events.reduce((n, [, e]) => n + e.spend, 0);
   const last = events.sort((a, b) => (a[1].date < b[1].date ? 1 : -1))[0] || null;
   const favType = [...byType.entries()].sort((a, b) => b[1] - a[1])[0] || null;
   const maxBasket = events.reduce((n, [, e]) => Math.max(n, e.tickets), 0);
   return {
-    tier: eventsCount >= 2 ? 'loyal' : eventsCount >= 1 ? 'returning' : 'new',
+    // The ladder (one rung per fan): new → returning (1) → loyal (2-3) → superfan (4+).
+    tier: eventsCount >= 4 ? 'superfan' : eventsCount >= 2 ? 'loyal' : eventsCount >= 1 ? 'returning' : 'new',
     signals: { group_buyer: maxBasket >= 4, comp_guest: eventsCount > paidEventsCount },
     traits: {
-      eventsCount, paidEventsCount, totalTickets,
+      eventsCount, paidEventsCount, streakYears, totalTickets,
       totalSpend: Math.round(totalSpend * 100) / 100, currency,
       favTicketType: favType ? favType[0] : '',
       lastEvent: last ? { name: last[0], date: last[1].date } : null,
@@ -255,6 +261,7 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     const s = summary(p);
     const bits = [`tier: ${s.tier}`];
     if (s.eventsCount) bits.push(`been to ${s.eventsCount} of this organiser's event${s.eventsCount === 1 ? '' : 's'} (${s.totalTickets} tickets${s.totalSpend ? `, ${s.currency || ''} ${s.totalSpend} total`.trim() : ''})`);
+    if ((s.streakYears || 0) >= 2) bits.push(`on a ${s.streakYears}-year streak — this would be year ${s.streakYears + 1} running (worth celebrating naturally)`);
     if (s.lastEvent?.name) bits.push(`most recent: ${s.lastEvent.name}`);
     if (s.favTicketType) bits.push(`usually buys: ${s.favTicketType}`);
     if (s.signals?.group_buyer) bits.push('tends to buy for a group (4+ tickets)');

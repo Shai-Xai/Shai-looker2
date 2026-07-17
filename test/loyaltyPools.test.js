@@ -110,6 +110,25 @@ test('shared mode caps GRANTS; suite-scoped pools only apply to their event', as
   assert.equal(pools.hasLiveRewards(sA), false);
 });
 
+test('ladder targeting: superfan is its own rung; minStreakYears gates on the streak', async () => {
+  await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
+    as: admin,
+    body: { pools: [
+      POOL({ name: 'Superfans only', target: { tiers: ['superfan'] }, mode: 'shared', sharedCode: 'KING', grantCap: 0 }),
+      POOL({ name: '3yr streak', target: {}, rules: { minStreakYears: 3 }, mode: 'shared', sharedCode: 'STREAK3', grantCap: 0 }),
+    ] },
+  });
+  const s = site();
+  // A loyal (2-event) fan is NOT a superfan and has no 3-year streak → nothing.
+  assert.equal(pools.grantFor(s, session(), profile(), { tier: 'loyal', paidEventsCount: 2, streakYears: 2, signals: {} }).ok, false);
+  // A superfan on a 4-year streak matches the FIRST pool in order.
+  const superfan = { tier: 'superfan', paidEventsCount: 5, streakYears: 4, signals: {} };
+  assert.equal(pools.grantFor(s, session(), profile(), superfan).reward.code, 'KING');
+  // A loyal fan on a 3-year streak skips the superfan pool but earns the streak one.
+  const streaky = { tier: 'loyal', paidEventsCount: 3, streakYears: 3, signals: {} };
+  assert.equal(pools.grantFor(s, session(), profile(), streaky).reward.code, 'STREAK3');
+});
+
 test('expired pools and segment-targeted pools never grant (fail closed)', async () => {
   await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
     as: admin,

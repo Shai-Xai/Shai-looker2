@@ -119,11 +119,19 @@ Two axes, all computed server-side from data we already hold:
 
 **History tier** (from Looker purchase history, per entity):
 
-| Tier | v1 rule | Typical reward |
+| Tier | Rule (v2, 2026-07-17) | Typical reward |
 |---|---|---|
 | **New** | no purchase history | small welcome discount |
-| **Returning** | ≥ 1 past event | discount or add-on (camping, parking) |
-| **Loyal** | ≥ 2 events or top spend band | upgrade (GA→VIP), presale, meet & greet |
+| **Returning** | 1 past event | discount or add-on (camping, parking) |
+| **Loyal** | 2–3 events | upgrade (GA→VIP), presale |
+| **Superfan** | 4+ events | meet & greet, best presale, recognition |
+
+Plus **`streakYears`** — consecutive years attended, anchored at the most
+recent year (gaps break it): a pool can require a minimum streak
+(`rules.minStreakYears`), so "3 years running" fans get their own promo, and
+the Owl celebrates it naturally ("this would be your 4th year!"). Each fan
+sits on ONE rung — pool targeting is exact-match per rung (tick every rung
+you want; Loyal does not implicitly include Superfans).
 
 **Engagement signals** (booleans/traits on the profile):
 
