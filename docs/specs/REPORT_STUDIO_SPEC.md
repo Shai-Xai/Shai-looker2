@@ -39,7 +39,10 @@ Admin → client → Reports; clients self-serve at `/reports` (permission
 | `tile` | dashboardId, tileId, display auto/chart/value/table | `chart` (PNG via tileimg) · `kpi` chip · `table` rows |
 | `campaign` | campaignId | sub-heading + KPI chips (audience, sent, opens, clicks, click-rate, conversions) from the Engage campaign's results |
 | `app` | appView summary/trend/events, days 7/14/28/90 | native-app engagement (PostHog rollup, appanalytics-flag-gated): KPI chips · daily trend chart · per-event table |
-| `ai` | scope section/report, focus | analyst paragraphs over the data blocks in scope (tiles + campaigns + app) |
+| `goals` | — | table of the client's event goals with live progress (current, target, %, pace) — goals-flag-gated |
+| `social` | socialView accounts/trend/posts, socialMetric, days | organic social (social-flag-gated): accounts table · daily metric trend chart · top-posts table |
+| `live` | suiteId | the newest Live Pulse update sent for that event, verbatim (livepulse-flag-gated) |
+| `ai` | scope section/report, focus | analyst paragraphs over the data blocks in scope (tiles + campaigns + app + goals + social + live) |
 
 Tile data resolves through `buildFactsFromTiles` (briefing.js) — the same
 scope-enforced query path as dashboards/digests, so a report can never leak
@@ -107,7 +110,7 @@ mid-run can miss at most one run, never double-send. Kill switch: settings key
 
 - "➕ Add to report" straight from a dashboard tile (report basket).
 - Owl/AI-composed reports ("build me a post-event wrap") — emailDesign-style.
-- Goals / social / live-pulse block types (campaign + app-analytics blocks shipped in V1.1).
+- ~~Goals / social / live-pulse / campaign / app-analytics block types~~ — all shipped in V1.1.
 - Per-recipient personalisation; comments on the viewer; report themes.
 - PDF as an email *attachment* (mailer.send has no attachment support today).
 

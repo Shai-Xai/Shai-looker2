@@ -25,6 +25,7 @@ export default function ReportStudio({ entityId, scope = 'admin', logins = [] })
     removeSnapshot: (sid) => (isAdmin ? api.deleteReportSnapshot(sid) : api.deleteMyReportSnapshot(entityId, sid)),
     tiles: () => (isAdmin ? api.getDigestTiles(entityId) : api.getMyDigestTiles(entityId)),
     campaigns: () => api.listActions(entityId), // campaign picker (works for both surfaces; 403s fail-soft to an empty list)
+    events: () => (isAdmin ? api.getDigestEvents(entityId) : api.getMyDigestEvents(entityId)),
   };
   const [data, setData] = useState(null);
   const [editing, setEditing] = useState(null); // template object or 'new'
@@ -80,6 +81,7 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
   const [picked, setPicked] = useState([]);
   const [campaigns, setCampaigns] = useState(null); // null = not loaded yet
   const [campPicking, setCampPicking] = useState(false);
+  const [events, setEvents] = useState([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [savedId, setSavedId] = useState(tpl?.id || null);
@@ -90,6 +92,7 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
 
   useEffect(() => { A.tiles().then(setCatalogue).catch(() => setCatalogue({ dashboards: [] })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (campPicking && campaigns == null) A.campaigns().then((r) => setCampaigns(r.actions || r.campaigns || [])).catch(() => setCampaigns([])); }, [campPicking]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { A.events().then((r) => setEvents(r.events || [])).catch(() => setEvents([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const loadSnaps = (id) => A.snapshots(id).then((r) => setSnapshots(r.snapshots || [])).catch(() => setSnapshots([]));
   useEffect(() => { if (savedId) loadSnaps(savedId); }, [savedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -269,6 +272,43 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
               </select>
             </div>
           )}
+          {b.type === 'goals' && (
+            <div style={hintS}>All the client's event goals with live progress (current vs target, % and pace) — frozen into the report as a table.</div>
+          )}
+          {b.type === 'social' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 160 }} value={b.socialView || 'accounts'} onChange={(e) => patch(b.id, { socialView: e.target.value })}>
+                <option value="accounts">Accounts (followers table)</option>
+                <option value="trend">Daily trend (chart)</option>
+                <option value="posts">Top posts (table)</option>
+              </select>
+              {b.socialView === 'trend' && (
+                <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.socialMetric || 'reach'} onChange={(e) => patch(b.id, { socialMetric: e.target.value })}>
+                  <option value="reach">Reach</option>
+                  <option value="followers">Followers</option>
+                  <option value="impressions">Impressions</option>
+                  <option value="engagement">Engagement</option>
+                </select>
+              )}
+              {b.socialView === 'trend' && (
+                <select style={{ ...input, width: 'auto', flexShrink: 0 }} value={b.days || 28} onChange={(e) => patch(b.id, { days: Number(e.target.value) })}>
+                  <option value={7}>Last 7 days</option>
+                  <option value={14}>Last 14 days</option>
+                  <option value={28}>Last 28 days</option>
+                  <option value={90}>Last 90 days</option>
+                </select>
+              )}
+            </div>
+          )}
+          {b.type === 'live' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select style={{ ...input, width: 'auto', flex: 1, minWidth: 160 }} value={b.suiteId || ''} onChange={(e) => patch(b.id, { suiteId: e.target.value })}>
+                <option value="">Pick an event…</option>
+                {events.map((ev) => <option key={ev.id} value={ev.id}>{ev.name}</option>)}
+              </select>
+              <span style={hintS}>Includes the most recent Live Pulse update sent for that event.</span>
+            </div>
+          )}
         </div>
       ))}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '10px 0 18px' }}>
@@ -276,6 +316,9 @@ function ReportEditor({ tpl, A, logins, onClose, onSaved }) {
         <button style={chipBtn} onClick={() => add({ type: 'ai', scope: 'section', focus: '' })}>+ ✨ AI analysis</button>
         <button style={chipBtn} onClick={() => setCampPicking(true)}>+ 📣 Campaign</button>
         <button style={chipBtn} onClick={() => add({ type: 'app', appView: 'summary', days: 28 })}>+ 📱 App analytics</button>
+        <button style={chipBtn} onClick={() => add({ type: 'goals' })}>+ 🎯 Goals</button>
+        <button style={chipBtn} onClick={() => add({ type: 'social', socialView: 'accounts', socialMetric: 'reach', days: 28 })}>+ 🌐 Social</button>
+        <button style={chipBtn} onClick={() => add({ type: 'live', suiteId: '' })}>+ ⚡ Live update</button>
         <button style={chipBtn} onClick={() => add({ type: 'heading', text: '', level: 1 })}>+ Heading</button>
         <button style={chipBtn} onClick={() => add({ type: 'text', text: '' })}>+ Text</button>
         <button style={chipBtn} onClick={() => { imgTarget.current = null; fileRef.current?.click(); }}>+ Image</button>
@@ -398,7 +441,7 @@ function RecipientEditor({ recipients, setRecipients, addRecipient, logins }) {
   );
 }
 
-const blockLabel = (b) => ({ heading: 'Heading', text: 'Text', tile: '📊 Tile', ai: '✨ AI analysis', image: '🖼 Image', button: '🔗 Link', divider: 'Divider', campaign: '📣 Campaign', app: '📱 App analytics' }[b.type] || b.type);
+const blockLabel = (b) => ({ heading: 'Heading', text: 'Text', tile: '📊 Tile', ai: '✨ AI analysis', image: '🖼 Image', button: '🔗 Link', divider: 'Divider', campaign: '📣 Campaign', app: '📱 App analytics', goals: '🎯 Goals', social: '🌐 Social', live: '⚡ Live update' }[b.type] || b.type);
 const scheduleSummary = (t) => t.cadence === 'daily' ? `daily ${t.timeOfDay}`
   : t.cadence === 'weekly' ? `${DAYS[t.weekday] || 'Monday'}s ${t.timeOfDay}`
   : t.cadence === 'monthly' ? `monthly (day ${t.monthday}) ${t.timeOfDay}` : 'one-off';

@@ -34,12 +34,12 @@ You are given the data behind the report tiles in scope (one section, or the who
 - Be honest — if a figure looks implausible or the data is too sparse to conclude much, say so briefly and cautiously.
 
 Rules: synthesize ACROSS tiles, don't describe each tile in turn. 1-3 short paragraphs of plain prose — no headings, no bullet lists, no preamble, no meta commentary about "the data provided". Write for an external reader: no internal jargon or tool names.`;
-const BLOCK_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'tile', 'ai', 'campaign', 'app']);
+const BLOCK_TYPES = new Set(['heading', 'text', 'image', 'button', 'divider', 'tile', 'ai', 'campaign', 'app', 'goals', 'social', 'live']);
 const MAX_BLOCKS = 60;
 const MAX_TILE_BLOCKS = 20;   // tile + campaign + app blocks share this data-block cap
 const MAX_AI_BLOCKS = 8;
 
-function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, campaignsFor, appReportFor, anthropicKeyForEntity, aiInstructionsFor, notifyOps }) {
+function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, campaignsFor, appReportFor, goalsFor, social, liveLatestFor, anthropicKeyForEntity, aiInstructionsFor, notifyOps }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -97,7 +97,7 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
     const out = [];
     for (const [i, b] of arr.slice(0, MAX_BLOCKS).entries()) {
       if (!b || !BLOCK_TYPES.has(b.type)) continue;
-      if (['tile', 'campaign', 'app'].includes(b.type) && ++tiles > MAX_TILE_BLOCKS) continue;
+      if (['tile', 'campaign', 'app', 'goals', 'social', 'live'].includes(b.type) && ++tiles > MAX_TILE_BLOCKS) continue;
       if (b.type === 'ai' && ++ais > MAX_AI_BLOCKS) continue;
       out.push({
         id: String(b.id || `b${i}`).slice(0, 40),
@@ -115,6 +115,9 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         campaignId: String(b.campaignId || '').slice(0, 60),
         appView: ['summary', 'trend', 'events'].includes(b.appView) ? b.appView : 'summary',
         days: [7, 14, 28, 90].includes(Number(b.days)) ? Number(b.days) : 28,
+        socialView: ['accounts', 'trend', 'posts'].includes(b.socialView) ? b.socialView : 'accounts',
+        socialMetric: ['reach', 'followers', 'impressions', 'engagement'].includes(b.socialMetric) ? b.socialMetric : 'reach',
+        suiteId: String(b.suiteId || '').slice(0, 60),
       });
     }
     return out;
@@ -342,6 +345,92 @@ function mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles,
         factsByIdx.push(metricsFact(label, 'app', metrics));
         resolved.push({ type: 'heading', text: `📱 ${label}`, level: 2 });
         for (const [k, v] of metrics) resolved.push({ type: 'tile', kind: 'kpi', title: k, value: typeof v === 'number' ? fmtNum(v) : String(v) });
+        continue;
+      }
+      // Goals block: the entity's event goals with LIVE progress (same resolver
+      // the Goals page + digests use — values computed, never invented), frozen
+      // as a table. Feeds the AI scope with per-goal progress lines.
+      if (b.type === 'goals') {
+        let goals = [];
+        try { goals = goalsFor ? await goalsFor(entityId, user) : []; }
+        catch (e) { console.error('[reports] goals resolve failed', e.message); }
+        if (!goals.length) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'Goals unavailable' }); continue; }
+        const gf = (v) => (v == null ? '—' : (typeof v === 'number' ? fmtNum(v) : String(v)));
+        const rows = goals.map((g) => {
+          const pr = g.progress || {};
+          return [
+            `${g.isNorthStar ? '★ ' : ''}${g.name}${g.suiteName ? ` (${g.suiteName})` : ''}`,
+            gf(pr.value),
+            `${gf(g.targetValue)}${g.targetMax != null ? `–${gf(g.targetMax)}` : ''}${g.unit ? ` ${g.unit}` : ''}`,
+            pr.pct != null ? `${pr.pct}%` : '—',
+            String(pr.status || '—'),
+          ];
+        });
+        factsByIdx.push(metricsFact('Event goals (progress already computed)', 'goals',
+          goals.map((g) => { const pr = g.progress || {}; return [`${g.name}${g.suiteName ? ` [${g.suiteName}]` : ''}`, `${gf(pr.value)}/${gf(g.targetValue)}${pr.pct != null ? ` (${pr.pct}%)` : ''}${pr.status ? ` — pace ${pr.status}` : ''}`]; })));
+        resolved.push({ type: 'tile', kind: 'table', title: '🎯 Goals', columns: ['Goal', 'Current', 'Target', 'Progress', 'Pace'], rows, more: 0 });
+        continue;
+      }
+      // Social block: organic social performance (social-flag-gated). Three views:
+      // connected accounts table, a daily metric trend chart, or top posts.
+      if (b.type === 'social') {
+        try {
+          if (!social) throw new Error('social source not wired');
+          const days = b.days || 28;
+          if (b.socialView === 'trend') {
+            const metric = b.socialMetric || 'reach';
+            const series = social.series(entityId, { metric, days });
+            if (!series || !series.length) throw new Error('no social series yet');
+            const label = `Social ${metric} — last ${days} days`;
+            const fact = {
+              title: label, visType: 'looker_line', context: '',
+              fields: { dimensions: [{ name: 'date', label: 'Day' }], measures: [{ name: 'value', label: metric[0].toUpperCase() + metric.slice(1) }] },
+              rows: series.map((r) => ({ date: { value: r.date, rendered: r.date }, value: { value: r.value || 0, rendered: String(r.value || 0) } })),
+              pivots: [],
+            };
+            factsByIdx.push(fact);
+            const png = tileimg ? tileimg.renderTilePng({ title: label, vis: { type: 'looker_line' } }, fact, branding) : null;
+            if (!png) throw new Error('not enough data to chart');
+            resolved.push({ type: 'tile', kind: 'chart', title: label, assetToken: putAsset(snapshotId, 'image/png', png) });
+          } else if (b.socialView === 'posts') {
+            const posts = social.posts(entityId, { limit: 8 });
+            if (!posts || !posts.length) throw new Error('no post metrics yet');
+            factsByIdx.push(metricsFact('Top social posts', 'social', posts.map((pst) => [`${pst.platform}: ${String(pst.caption || pst.postId || '').slice(0, 60)}`, `${pst.reach || 0} reach / ${pst.likes || 0} likes / ${pst.engagement || 0} engagement`])));
+            resolved.push({
+              type: 'tile', kind: 'table', title: '🌐 Top social posts',
+              columns: ['Platform', 'Post', 'Reach', 'Likes', 'Engagement'],
+              rows: posts.map((pst) => [String(pst.platform || ''), String(pst.caption || pst.postId || '').slice(0, 60), fmtNum(pst.reach || 0), fmtNum(pst.likes || 0), fmtNum(pst.engagement || 0)]),
+              more: 0,
+            });
+          } else {
+            const accts = social.accounts(entityId);
+            if (!accts || !accts.length) throw new Error('no social accounts connected');
+            factsByIdx.push(metricsFact('Social accounts', 'social', accts.map((a) => [`${a.platform} @${a.username || a.name || ''}`, `${a.followers || 0} followers, ${a.postsCount || 0} posts`])));
+            resolved.push({
+              type: 'tile', kind: 'table', title: '🌐 Social accounts',
+              columns: ['Platform', 'Account', 'Followers', 'Posts'],
+              rows: accts.map((a) => [String(a.platform || ''), `@${a.username || a.name || ''}`, fmtNum(a.followers || 0), fmtNum(a.postsCount || 0)]),
+              more: 0,
+            });
+          }
+        } catch (e) {
+          factsByIdx.push(null);
+          resolved.push({ type: 'tile', kind: 'missing', title: `Social data unavailable (${e.message})` });
+        }
+        continue;
+      }
+      // Live block: the most recent Live Pulse update for one event — the same
+      // multi-metric message the team received on event day, frozen verbatim.
+      if (b.type === 'live') {
+        let run = null;
+        try { run = liveLatestFor ? liveLatestFor(entityId, b.suiteId) : null; }
+        catch (e) { console.error('[reports] live resolve failed', e.message); }
+        if (!run) { factsByIdx.push(null); resolved.push({ type: 'tile', kind: 'missing', title: 'No live updates for this event yet' }); continue; }
+        const text = String(run.message || '').replace(/\*/g, '');
+        factsByIdx.push(metricsFact(`Live update — ${run.pulseName || 'event day'} (${run.at})`, 'live', text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 20).map((l, li) => [`${li + 1}`, l])));
+        resolved.push({ type: 'heading', text: `⚡ ${run.pulseName || 'Live update'}`, level: 2 });
+        const when = (() => { try { return new Date(run.at).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Johannesburg' }); } catch { return run.at; } })();
+        resolved.push({ type: 'text', text: `*As sent on ${when}:*\n\n${text}` });
         continue;
       }
       factsByIdx.push(null);
