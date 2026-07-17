@@ -14,6 +14,11 @@
 
 **Contract version: 1** (sent as `"contractVersion": 1` in every payload).
 
+**Doc revision v1.1 (additive, 2026-07-17):** optional `layout` field on the
+survey object (§2) — presentation is chosen per survey in Pulse so
+organisers can A/B test. Additive and backward-compatible: payloads keep
+`contractVersion: 1`; surveys without `layout` render as `"form"`.
+
 ---
 
 ## 1. Principles
@@ -49,6 +54,7 @@
   "title": "How was Bushfire?",
   "description": "2 minutes — help us make next year better.",
   "status": "live",
+  "layout": "form",
   "opensAt": "2026-07-20T18:00:00Z",
   "closesAt": "2026-08-03T22:00:00Z",
   "questions": [
@@ -83,6 +89,10 @@
 ```
 
 Field rules:
+- `layout` — `form` (one scrolling page, all questions; default when
+  omitted) | `cards` (one question per screen with progress bar). Chosen
+  per survey in Pulse; the app renders whichever arrives. Both layouts
+  enforce the same answer shapes and required rules.
 - `id` — Pulse-generated, stable, prefix `srv_`.
 - `eventId` — string form of the Howler event ID.
 - `status` — `draft` | `live` | `closed`. The app only ever receives `live`
