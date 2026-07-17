@@ -12,11 +12,13 @@ const { errorMiddleware } = require('../server/http');
 const { createLoyalty, deriveProfile } = require('../server/loyalty');
 
 delete process.env.ANTHROPIC_API_KEY; // never call out from tests
+process.env.FANOWL_ADMIN_ALLOW = 'all'; // open the settings dogfood gate for the preview test
 
 // ── deriveProfile (pure) ─────────────────────────────────────────────────────────
-const row = (ev, date, type, sold, rev, cur = 'ZAR') => ({
+const row = (ev, date, type, sold, rev, cur = 'ZAR', count = sold) => ({
   'core_events.name': ev, 'core_events.start_date': date, 'core_events.currency': cur,
-  'core_ticket_types.name': type, 'core_tickets.sold_tickets': sold, 'core_tickets.sum_revenue_decimal': rev,
+  'core_ticket_types.name': type, 'core_tickets.sold_tickets': sold, 'core_tickets.count': count,
+  'core_tickets.sum_revenue_decimal': rev,
 });
 
 test('deriveProfile: no history → new tier, no signals', () => {
@@ -45,11 +47,23 @@ test('deriveProfile: 4+ tickets at one event → group_buyer; favourite type by 
   assert.equal(d.traits.favTicketType, 'GA');
   assert.equal(d.traits.maxTicketsOneEvent, 5);
   assert.equal(d.traits.currency, 'ZAR');
+  // Itemised history: event × ticket-type grain, biggest type first.
+  assert.deepEqual(d.traits.history[0].types, ['4× GA', '1× VIP']);
 });
 
-test('deriveProfile: zero-sold rows (refund noise) do not count as events', () => {
+test('deriveProfile: zero-ticket rows (refund noise) do not count as events', () => {
   const d = deriveProfile([row('Fest A', '2025-08-01', 'GA', 0, 0)]);
   assert.equal(d.tier, 'new');
+});
+
+test('deriveProfile: a comp ticket still counts as attendance (sold=0, count=1)', () => {
+  const d = deriveProfile([row('Fest A', '2025-08-01', 'GA', 0, 0, 'ZAR', 1)]);
+  assert.equal(d.tier, 'returning');
+  assert.equal(d.traits.totalTickets, 1);
+  assert.equal(d.traits.totalSpend, 0);
+  // …but the paid view stays separate, so reward pools can exclude comps.
+  assert.equal(d.traits.paidEventsCount, 0);
+  assert.equal(d.signals.comp_guest, true);
 });
 
 // ── The OTP flow + profile cache (against the real test DB) ─────────────────────
@@ -155,6 +169,50 @@ test('attempts lock after 5 wrong guesses; expired codes are dead; resend recove
     .run(new Date(Date.now() - 60_000).toISOString(), session.id);
   const expired = await loyalty.confirmVerification(site, session, { code: codeFrom(sent[1]) });
   assert.equal(expired.ok, false); assert.equal(expired.reason, 'expired');
+});
+
+test('staging test code: works ONLY with the outbound brake on; no email sent', async () => {
+  sent = []; lookerCalls = []; lookerRows = [];
+  const noMailer = { isConfigured: () => false, send: async () => { throw new Error('must not send'); } };
+  const l2 = createLoyalty({ db: h.db, auth: h.auth, mailer: noMailer, runQuery: stubRunQuery });
+  // Test code WITHOUT the outbound brake → ignored (fails closed, like prod).
+  process.env.FAN_OTP_TEST_CODE = '424242';
+  delete process.env.OUTBOUND_DISABLED;
+  const s1 = mkSession();
+  assert.equal((await l2.startVerification(site, s1, { email: 'qa@howler.co.za' })).reason, 'unavailable');
+  // Brake on + test code → verifies with the shared code, zero sends.
+  process.env.OUTBOUND_DISABLED = '1';
+  const s2 = mkSession();
+  const start = await l2.startVerification(site, s2, { email: 'qa@howler.co.za' });
+  assert.equal(start.ok, true); assert.equal(start.sent, false);
+  assert.equal((await l2.confirmVerification(site, s2, { code: '123456' })).reason, 'wrong_code');
+  assert.equal((await l2.confirmVerification(site, s2, { code: '424242' })).ok, true);
+  delete process.env.OUTBOUND_DISABLED; delete process.env.FAN_OTP_TEST_CODE;
+});
+
+test('context preview returns the EXACT chat instructions (admin, per site)', async () => {
+  const admin = h.makeAdmin('loyalty-admin@test.local');
+  const r = await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview?url=https://fest.example/`, { as: admin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.siteId, site.id);
+  assert.match(r.body.instructions, /EVENT CONTEXT: Loyalty Fest/);
+  assert.match(r.body.instructions, /CATALOGUE/);
+  assert.match(r.body.system, /booking guide|the Owl/i);
+  // Anonymous callers never see it.
+  assert.equal((await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview`)).status, 401);
+});
+
+test('unverified + flag on → the proactive-offer rules + turn counter reach the context', async () => {
+  const flags = require('../server/flags');
+  flags.init(h.db);
+  h.db.db.prepare('INSERT OR REPLACE INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,?,?)')
+    .run(entity.id, 'fanowl.loyalty', 'on', 'test', new Date().toISOString());
+  const admin = h.makeAdmin('loyalty-admin2@test.local');
+  const r = await app.req('GET', `/api/admin/entities/${entity.id}/fan-owl/context-preview`, { as: admin });
+  assert.match(r.body.instructions, /PROACTIVE OFFER/);
+  assert.match(r.body.instructions, /REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #1/);
+  // Leave the flag as we found it — the defaults-off test below depends on it.
+  h.db.db.prepare('DELETE FROM feature_flags WHERE entity_id = ? AND flag = ?').run(entity.id, 'fanowl.loyalty');
 });
 
 // ── Flag gating + the boot chip ──────────────────────────────────────────────────

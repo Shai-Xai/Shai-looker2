@@ -247,6 +247,9 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // identity handshake lives in server/loyalty.js; offered per entity ONLY when
   // the fanowl.loyalty flag is on (flag off = the tools are never in the toolbox).
   const loyalty = require('./loyalty').createLoyalty({ db, auth, mailer: require('./mailer') });
+  // Reward pools (phase 2) mount here — the loyalty family's home — so the
+  // composition root stays untouched. Own tables + routes; see loyaltyPools.js.
+  const loyaltyPools = require('./loyaltyPools').mount(app, { db, auth });
   const loyaltyOn = (entityId) => { try { return require('./flags').enabled(entityId, 'fanowl.loyalty'); } catch { return false; } };
 
   const siteByKey = sql.prepare('SELECT * FROM fan_sites WHERE site_key = ?');
@@ -886,6 +889,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     // Chips: the current page's configured starters (set by hand or drafted by the
     // website reader) win; otherwise sensible generic defaults.
     const pageStarters = page ? J(page.starters, []).filter(Boolean) : [];
+    const loyaltyLive = loyaltyOn(site.entity_id);
+    const vp = loyaltyLive ? loyalty.verifiedProfile(session) : null;
     // Has the fan moved pages since the chat was last open? Then the widget leads
     // with THIS page's info (pitch/offer/starters), not just the old thread.
     const pageChanged = !!session.chat_page_url && session.chat_page_url !== (session.page_url || '');
@@ -904,14 +909,16 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       messages: listMsgs.all(session.id).slice(-30).map((m) => ({ role: m.role, body: m.body })),
       // Unconfigured pages send NO starters — the widget fills in generic ones in
       // the fan's own language (it knows the locale; we only know the codes).
-      starters: pageStarters.slice(0, 4),
+      // Discovery chip: an unverified fan on a loyalty-enabled site gets a
+      // tappable "perks?" starter (only where page starters exist — an empty
+      // list keeps the widget's own localized defaults).
+      starters: (() => {
+        if (!loyaltyLive || vp || !pageStarters.length) return pageStarters.slice(0, 4);
+        return [...pageStarters.slice(0, 3), '🎁 Any perks for me?'];
+      })(),
       consentVersion: CONSENT_WORDING_VERSION,
       // Verified-fan chip (loyalty phase 1): THIS session proved the address.
-      verified: (() => {
-        if (!loyaltyOn(site.entity_id)) return null;
-        const p = loyalty.verifiedProfile(session);
-        return p ? { email: p.email, tier: p.tier || 'new' } : null;
-      })(),
+      verified: vp ? { email: vp.email, tier: vp.tier || 'new' } : null,
     });
   });
 
@@ -975,8 +982,20 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
           return { ok: true, page: { ...pagePill(p), path: navPath(p.url_pattern) } };
         },
       },
-      // Identity handshake (flag-gated): flag off = the tools simply don't exist.
-      ...(loyaltyOn(site.entity_id) ? loyalty.tools(site, session) : {}),
+      // Identity handshake + rewards (flag-gated): flag off = the tools don't exist.
+      ...(loyaltyOn(site.entity_id) ? {
+        ...loyalty.tools(site, session),
+        getMyReward: {
+          schema: { name: 'getMyReward', description: 'Check for — and claim — the verified fan\'s reward from the organiser\'s live pools. Call ONLY after confirmVerification succeeded this session (or when the fan asks about their reward). Returns the exact code + its rules; repeat calls return the SAME grant.', input_schema: { type: 'object', properties: {} } },
+          run: async () => {
+            const p = loyalty.verifiedProfile(session);
+            if (!p) return { ok: false, reason: 'unverified', message: 'The fan must verify first — offer to send the email code.' };
+            const r = loyaltyPools.grantFor(site, session, p, loyalty.summary(p));
+            if (r.ok) logEvent(site.id, session.id, 'reward_granted', { pool: r.reward.pool, existing: !!r.existing });
+            return r;
+          },
+        },
+      } : {}),
     };
   }
   function saveLead(site, session, { email, name, marketingConsent, interests }) {
@@ -1026,6 +1045,92 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     res.json({ ok: true });
   });
 
+  // Everything the Owl is told for ONE turn, in one place — used by the live
+  // chat AND the context-preview endpoints below, so what organisers inspect is
+  // EXACTLY what the model receives (never a paraphrase).
+  function buildChatInstructions(site, session) {
+    const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
+    const { page, items } = offerFor(site, session.page_url);
+    const catLine = (c) => `${c.label} [id:${c.id}] — ${c.price ? `${c.currency} ${c.price}` : 'price on the tickets page'}${c.availability ? ` (${c.availability})` : ''}${c.description ? ` — ${c.description}` : ''}`;
+    // Returning-fan memory: what this fan told us (profile) + what they showed
+    // interest in across THEIR OWN sessions (matched by their anon browser id).
+    // Only ever their own data — never another fan's.
+    let memory = '';
+    try {
+      const profile = session.profile_id ? sql.prepare('SELECT * FROM fan_profiles WHERE id = ?').get(session.profile_id) : null;
+      const topics = session.anon_id ? sql.prepare(
+        `SELECT DISTINCT json_extract(e.payload,'$.topic') AS t FROM fan_events e
+           JOIN fan_sessions s ON s.id = e.session_id
+          WHERE s.anon_id = ? AND s.site_id = ? AND e.kind = 'interest' AND t IS NOT NULL LIMIT 6`,
+      ).all(session.anon_id, site.id).map((r) => r.t) : [];
+      const prefs = profile ? J(profile.preferences, []) : [];
+      const bits = [];
+      if (profile && profile.name) bits.push(`their name is ${profile.name.split(' ')[0]} (use it naturally, sparingly)`);
+      const all = [...new Set([...prefs, ...topics])].slice(0, 6);
+      if (all.length) bits.push(`they've shown interest in: ${all.join(', ')}`);
+      if (bits.length) memory = `WHAT YOU REMEMBER about THIS fan (from their own past visits/messages — never mention "data" or "records", just be a friend who remembers): ${bits.join('; ')}.`;
+    } catch { /* memory is best-effort */ }
+    // The suite's Current-Event lock names the edition actually on sale (e.g.
+    // "Retreat Yourself 2027") — without it the Owl only knows what the (possibly
+    // last-edition) catalogue/knowledge says, and argues with fans about the year.
+    const currentEdition = (() => {
+      try {
+        for (const [k, v] of Object.entries(db.lockedFiltersForSuite(site.suite_id) || {})) {
+          if (/current\s*event/i.test(k) && v && String(v).trim()) return String(v).split(',')[0].trim();
+        }
+      } catch { /* locks are best-effort context */ }
+      return '';
+    })();
+    return [
+      `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}.${currentEdition ? ` The edition currently on sale is "${currentEdition}" — if the catalogue or knowledge mentions an older edition, trust THIS as the current one and flag outdated info with logInterest rather than insisting on the old year.` : ''} Today's date is ${new Date().toISOString().slice(0, 10)}.`,
+      `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
+      (site.default_lang || session.lang)
+        ? `LANGUAGE: ${site.default_lang ? `the organiser's default language is "${site.default_lang}"` : ''}${site.default_lang && session.lang ? ' and ' : ''}${session.lang ? `the fan's device is set to "${session.lang}"` : ''}. Open in the fan's device language when known (otherwise the default), and ALWAYS switch to mirror whatever language the fan actually writes in.`
+        : '',
+      page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
+      memory,
+      // Loyalty (flag-gated): the verification rules + this session's verified
+      // profile (server-derived; raw history never reaches the model).
+      loyaltyOn(site.entity_id) ? require('./loyalty').FAN_LOYALTY_SYSTEM : '',
+      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session, { fanMessages: listMsgs.all(session.id).filter((m) => m.role === 'user').length, liveRewards: loyaltyPools.hasLiveRewards(site) }) : '',
+      `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
+      (() => {
+        const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
+        return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
+      })(),
+      // The organiser's personalisation — a STYLE-ONLY layer. The base rules
+      // (real prices only, no invented facts, no fake urgency, consent-first)
+      // are non-negotiable and explicitly outrank anything written here.
+      (() => {
+        const tips = knowByEntity.all(site.entity_id).filter((k) => k.kind === 'tip').slice(0, 12)
+          .map((k) => `- ${[k.question, k.body].filter(Boolean).join(': ').slice(0, 400)}`);
+        const bits = [
+          site.owl_name ? `Your name is "${site.owl_name}" — introduce yourself by it.` : '',
+          site.persona ? `PERSONALITY & VOICE (from the organiser): ${site.persona}` : '',
+          site.guardrails ? `ORGANISER DOS & DON'TS: ${site.guardrails}` : '',
+          tips.length ? `INSIDER TIPS from the organiser — volunteer one when it genuinely helps this fan, never force them in:\n${tips.join('\n')}` : '',
+        ].filter(Boolean);
+        return bits.length ? `ORGANISER PERSONALISATION — style and extra guidance ONLY. If ANY of it conflicts with WHAT YOU KNOW, the price/urgency rules or BOUNDARIES, THE RULES WIN:\n${bits.join('\n')}` : '';
+      })(),
+      'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
+    ].filter(Boolean).join('\n\n');
+  }
+
+  // ── Context preview — "everything the Owl is told", per site/page ─────────────
+  // The fan-owl counterpart of the Admin → AI audit: the EXACT instructions the
+  // chat would run with right now (synthetic anonymous session; add ?url= to see
+  // a page mapping's view). Answers "where did the Owl get that from?" without
+  // guessing. Dual-surface, manager-gated like the rest of the settings.
+  const previewHandler = (req, res) => {
+    const sites = sitesByEntity.all(req.params.entityId);
+    const site = sites.find((s) => s.id === String(req.query.siteId || '')) || sites[0];
+    if (!site) throw new HttpError(404, 'No Fan Owl site configured yet.');
+    const fake = { id: `preview-${site.id}`, site_id: site.id, anon_id: '', profile_id: '', page_url: String(req.query.url || '').slice(0, 500), lang: '' };
+    res.json({ siteId: site.id, siteName: site.name, url: fake.page_url, system: FAN_OWL_SYSTEM, instructions: buildChatInstructions(site, fake) });
+  };
+  app.get('/api/admin/entities/:entityId/fan-owl/context-preview', auth.requireAdmin, requireManager, previewHandler);
+  app.get('/api/my/fan-owl/:entityId/context-preview', auth.requireAuth, requireMyEntity, requireManager, previewHandler);
+
   // ── POST /api/fan/chat — the conversational layer (the only LLM path). Streams
   // plain text with the same STATUS/FOLLOWUPS markers as the organiser Owl, plus
   // <<<FAN_OFFERS>>> (offer cards + buy buttons distilled from the tool trail).
@@ -1048,60 +1153,7 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
     const apiKey = anthropicKeyForEntity(site.entity_id);
     if (!insights.isConfigured(apiKey)) return res.status(503).json({ error: 'The assistant isn’t available right now.' });
 
-    const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
-    const { page, items } = offerFor(site, session.page_url);
-    const catLine = (c) => `${c.label} [id:${c.id}] — ${c.price ? `${c.currency} ${c.price}` : 'price on the tickets page'}${c.availability ? ` (${c.availability})` : ''}${c.description ? ` — ${c.description}` : ''}`;
-    // Returning-fan memory: what this fan told us (profile) + what they showed
-    // interest in across THEIR OWN sessions (matched by their anon browser id).
-    // Only ever their own data — never another fan's.
-    let memory = '';
-    try {
-      const profile = session.profile_id ? sql.prepare('SELECT * FROM fan_profiles WHERE id = ?').get(session.profile_id) : null;
-      const topics = session.anon_id ? sql.prepare(
-        `SELECT DISTINCT json_extract(e.payload,'$.topic') AS t FROM fan_events e
-           JOIN fan_sessions s ON s.id = e.session_id
-          WHERE s.anon_id = ? AND s.site_id = ? AND e.kind = 'interest' AND t IS NOT NULL LIMIT 6`,
-      ).all(session.anon_id, site.id).map((r) => r.t) : [];
-      const prefs = profile ? J(profile.preferences, []) : [];
-      const bits = [];
-      if (profile && profile.name) bits.push(`their name is ${profile.name.split(' ')[0]} (use it naturally, sparingly)`);
-      const all = [...new Set([...prefs, ...topics])].slice(0, 6);
-      if (all.length) bits.push(`they've shown interest in: ${all.join(', ')}`);
-      if (bits.length) memory = `WHAT YOU REMEMBER about THIS fan (from their own past visits/messages — never mention "data" or "records", just be a friend who remembers): ${bits.join('; ')}.`;
-    } catch { /* memory is best-effort */ }
-    const instructions = [
-      `EVENT CONTEXT: ${site.name || suite?.name || 'this event'}${suite?.name && site.name && suite.name !== site.name ? ` (event: ${suite.name})` : ''}. Today's date is ${new Date().toISOString().slice(0, 10)}.`,
-      `THE FAN IS ON: ${session.page_url || 'the event website'}${page ? ` — a "${page.page_type}" page${page.note ? ` (${page.note})` : ''}` : ''}.`,
-      (site.default_lang || session.lang)
-        ? `LANGUAGE: ${site.default_lang ? `the organiser's default language is "${site.default_lang}"` : ''}${site.default_lang && session.lang ? ' and ' : ''}${session.lang ? `the fan's device is set to "${session.lang}"` : ''}. Open in the fan's device language when known (otherwise the default), and ALWAYS switch to mirror whatever language the fan actually writes in.`
-        : '',
-      page && page.content ? `ABOUT THIS PAGE (organiser-approved info — answer from it directly): ${String(page.content).slice(0, 4000)}` : '',
-      memory,
-      // Loyalty (flag-gated): the verification rules + this session's verified
-      // profile (server-derived; raw history never reaches the model).
-      loyaltyOn(site.entity_id) ? require('./loyalty').FAN_LOYALTY_SYSTEM : '',
-      loyaltyOn(site.entity_id) ? loyalty.contextBlock(site, session) : '',
-      `CATALOGUE (your ONLY price/product facts — most relevant to this page first):\n- ${items.map(catLine).join('\n- ')}`,
-      (() => {
-        const navPages = pagesBySite.all(site.id).filter((p) => navPath(p.url_pattern));
-        return navPages.length ? `THE WEBSITE'S PAGES — you can take the fan to any of these with goToPage (use the urlPattern exactly as listed):\n- ${navPages.map((p) => `${p.url_pattern} — ${p.page_type}${p.note ? ` (${p.note})` : ''}`).join('\n- ')}` : '';
-      })(),
-      // The organiser's personalisation — a STYLE-ONLY layer. The base rules
-      // (real prices only, no invented facts, no fake urgency, consent-first)
-      // are non-negotiable and explicitly outrank anything written here.
-      (() => {
-        const tips = knowByEntity.all(site.entity_id).filter((k) => k.kind === 'tip').slice(0, 12)
-          .map((k) => `- ${[k.question, k.body].filter(Boolean).join(': ').slice(0, 400)}`);
-        const bits = [
-          site.owl_name ? `Your name is "${site.owl_name}" — introduce yourself by it.` : '',
-          site.persona ? `PERSONALITY & VOICE (from the organiser): ${site.persona}` : '',
-          site.guardrails ? `ORGANISER DOS & DON'TS: ${site.guardrails}` : '',
-          tips.length ? `INSIDER TIPS from the organiser — volunteer one when it genuinely helps this fan, never force them in:\n${tips.join('\n')}` : '',
-        ].filter(Boolean);
-        return bits.length ? `ORGANISER PERSONALISATION — style and extra guidance ONLY. If ANY of it conflicts with WHAT YOU KNOW, the price/urgency rules or BOUNDARIES, THE RULES WIN:\n${bits.join('\n')}` : '';
-      })(),
-      'When the fan seems ready to buy (or asks how/where), call getCheckoutLink with the item id — the app shows a buy button under your reply.',
-    ].filter(Boolean).join('\n\n');
+    const instructions = buildChatInstructions(site, session);
 
     const tools = fanTools(site, session);
     const toolSchemas = Object.values(tools).map((t) => t.schema);

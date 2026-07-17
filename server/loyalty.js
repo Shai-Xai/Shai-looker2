@@ -27,7 +27,9 @@ const FAN_LOYALTY_SYSTEM = `VERIFICATION & REWARDS (these tools are available be
 - startVerification → send the fan a 6-digit code, ONLY when they have given you their email in this chat and said yes to checking. One send per request; if it fails, relay the message honestly.
 - confirmVerification → check the code the fan typed. On success you get their profile summary (tier, past events, favourite ticket type) — greet them like a friend who remembers ("you were at the last two editions!"), and let it guide your recommendations naturally.
 - The profile summary is your ONLY personal fact source. NEVER invent history, spend, tiers or rewards beyond what the tools return. If history is unavailable, say you couldn't find past orders for that email and carry on helping normally.
-- A wrong code is no drama — invite them to re-check or resend. Never pressure a fan to verify; "no" ends the topic gracefully.`;
+- A wrong code is no drama — invite them to re-check or resend. Never pressure a fan to verify; "no" ends the topic gracefully.
+- PROACTIVE OFFER — bring it up yourself, but earn it first: NEVER in your first reply (answer their actual question properly), then around their 2nd-3rd message, IF they're unverified AND the moment is commercial (tickets, prices, buying intent — never during a policy/refund/safety answer), mention ONCE and lightly that the organiser may have perks for returning fans — and first-timers — and you can check: "by the way — if you've been to one of their events before (or even if it's your first), there might be a perk with your name on it. Want me to check? I just need your email." At most ONE offer per conversation (your earlier messages are in the history — if you already offered, don't again); any "no" or non-answer ends the topic for good; NEVER claim a specific special exists before getMyReward returns one. The REWARD-CHECK STATE line is authoritative: if it says no pools are live, do NOT proactively offer.
+- getMyReward → after a successful verification (or when a verified fan asks), call it ONCE to check and claim their reward. Present EXACTLY what it returns — the code verbatim, its expiry and any minimum-quantity/ticket-type rules ("valid on 4+ GA tickets, expires 31 Aug"). Repeat calls return the same grant — never promise a different or better one, and if it returns nothing, say so warmly and move on.`;
 
 const OTP_TTL_MS = 10 * 60_000; // a code lives 10 minutes
 const MAX_ATTEMPTS = 5; //          …and survives 5 wrong guesses
@@ -45,19 +47,27 @@ function deriveProfile(rows) {
   for (const r of R) {
     const ev = String(r['core_events.name'] || '').trim();
     if (!ev) continue;
-    const sold = num(r['core_tickets.sold_tickets']);
+    // Attendance counts ANY active ticket: sold_tickets excludes complimentary
+    // tickets (right for revenue, wrong for loyalty — a comp guest still
+    // attended), so take the larger of sold vs the incl-comps count.
+    const paid = num(r['core_tickets.sold_tickets']);
+    const sold = Math.max(paid, num(r['core_tickets.count']));
     const spend = num(r['core_tickets.sum_revenue_decimal']);
-    const e = byEvent.get(ev) || { tickets: 0, spend: 0, date: '' };
-    e.tickets += sold; e.spend += spend;
+    const e = byEvent.get(ev) || { tickets: 0, paid: 0, spend: 0, date: '', types: new Map() };
+    e.tickets += sold; e.paid += paid; e.spend += spend;
     const d = String(r['core_events.start_date'] || '');
     if (d > e.date) e.date = d;
-    byEvent.set(ev, e);
     const ty = String(r['core_ticket_types.name'] || '').trim();
+    if (ty && sold > 0) e.types.set(ty, (e.types.get(ty) || 0) + sold);
+    byEvent.set(ev, e);
     if (ty) byType.set(ty, (byType.get(ty) || 0) + sold);
     if (!currency && r['core_events.currency']) currency = String(r['core_events.currency']);
   }
   const events = [...byEvent.entries()].filter(([, e]) => e.tickets > 0);
   const eventsCount = events.length;
+  // Paid vs comp views kept SEPARATE so phase-2 reward pools can include or
+  // exclude comps from eligibility (spec §5) — the tier here counts attendance.
+  const paidEventsCount = events.filter(([, e]) => e.paid > 0).length;
   const totalTickets = events.reduce((n, [, e]) => n + e.tickets, 0);
   const totalSpend = events.reduce((n, [, e]) => n + e.spend, 0);
   const last = events.sort((a, b) => (a[1].date < b[1].date ? 1 : -1))[0] || null;
@@ -65,13 +75,20 @@ function deriveProfile(rows) {
   const maxBasket = events.reduce((n, [, e]) => Math.max(n, e.tickets), 0);
   return {
     tier: eventsCount >= 2 ? 'loyal' : eventsCount >= 1 ? 'returning' : 'new',
-    signals: { group_buyer: maxBasket >= 4 },
+    signals: { group_buyer: maxBasket >= 4, comp_guest: eventsCount > paidEventsCount },
     traits: {
-      eventsCount, totalTickets,
+      eventsCount, paidEventsCount, totalTickets,
       totalSpend: Math.round(totalSpend * 100) / 100, currency,
       favTicketType: favType ? favType[0] : '',
       lastEvent: last ? { name: last[0], date: last[1].date } : null,
       maxTicketsOneEvent: maxBasket,
+      // Itemised view — the fan's OWN orders at event × ticket-type grain, so a
+      // verified fan asking "what did I buy last year?" gets a real answer.
+      // Still derived (no per-ticket rows/holders/timestamps), capped for tokens.
+      history: events.slice(0, 10).map(([name, e]) => ({
+        name, date: e.date, spend: Math.round(e.spend * 100) / 100,
+        types: [...e.types.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, q]) => `${q}× ${t}`),
+      })),
     },
   };
 }
@@ -128,7 +145,7 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
         const rows = await looker()('/queries/run/json', {
           model: catalogue.model, view: catalogue.explore,
           fields: ['core_events.name', 'core_events.start_date', 'core_events.currency', 'core_ticket_types.name',
-            'core_tickets.sold_tickets', 'core_tickets.sum_revenue_decimal'],
+            'core_tickets.sold_tickets', 'core_tickets.count', 'core_tickets.sum_revenue_decimal'],
           filters: { 'core_purchasers.email': profile.email, ...locks },
           limit: 500,
         });
@@ -156,17 +173,24 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
   async function startVerification(site, session, { email }) {
     const em = String(email || '').trim().toLowerCase();
     if (!/.+@.+\..+/.test(em)) return { ok: false, reason: 'bad_email', message: 'That doesn’t look like a valid email address — ask the fan to re-check it.' };
-    if (!mailer.isConfigured()) return { ok: false, reason: 'unavailable', message: 'Verification emails aren’t available right now — carry on helping without it.' };
+    // Staging test mode (docs/STAGING.md): OUTBOUND_DISABLED=1 hard-kills all
+    // email, which would make this flow untestable there — so a staging server
+    // may set FAN_OTP_TEST_CODE (6 digits) and that shared code verifies WITHOUT
+    // any send. Double-gated: ignored unless the outbound brake is ALSO on, so
+    // it can never weaken production.
+    const testCode = process.env.OUTBOUND_DISABLED === '1' && /^\d{6}$/.test(process.env.FAN_OTP_TEST_CODE || '') ? process.env.FAN_OTP_TEST_CODE : '';
+    if (!mailer.isConfigured() && !testCode) return { ok: false, reason: 'unavailable', message: 'Verification emails aren’t available right now — carry on helping without it.' };
     const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
     const hourAgo = new Date(Date.now() - 3600_000).toISOString();
     if (sql.prepare('SELECT COUNT(*) c FROM fan_verifications WHERE session_id = ? AND created_at >= ?').get(session.id, tenMinAgo).c >= 3
       || sql.prepare('SELECT COUNT(*) c FROM fan_verifications WHERE entity_id = ? AND email = ? AND created_at >= ?').get(site.entity_id, em, hourAgo).c >= 5) {
       return { ok: false, reason: 'rate_limited', message: 'Too many codes sent just now — ask the fan to check their inbox (and spam), or try again in a few minutes.' };
     }
-    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const code = testCode || String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const id = uid();
     sql.prepare('INSERT INTO fan_verifications (id,entity_id,session_id,email,code_hash,expires_at,created_at) VALUES (?,?,?,?,?,?,?)')
       .run(id, site.entity_id, session.id, em, hash(id, code), new Date(Date.now() + OTP_TTL_MS).toISOString(), now());
+    if (testCode) return { ok: true, sent: false, message: 'TEST MODE (staging server, no email sent): ask the fan to type the 6-digit code — the test team knows the shared staging code. Never state the code yourself.' };
     const eventName = site.name || 'the event';
     try {
       await mailer.send({
@@ -203,7 +227,9 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     }
     sql.prepare('UPDATE fan_profiles SET verified_at = ?, verified_channel = ? WHERE id = ?').run(now(), 'email', profile.id);
     sql.prepare('UPDATE fan_sessions SET profile_id = ? WHERE id = ?').run(profile.id, session.id);
-    profile = await refreshProfile(site.entity_id, profile);
+    // A fresh explicit verification always re-derives (don't serve a stale cache
+    // to the one fan who just proved who they are; the query layer still caches).
+    profile = await refreshProfile(site.entity_id, profile, { force: true });
     return { ok: true, verified: true, profile: summary(profile) };
   }
 
@@ -216,10 +242,16 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     return p && p.verified_at ? p : null;
   }
 
-  // The VERIFIED FAN instructions block for the chat turn ('' when unverified).
-  function contextBlock(site, session) {
+  // The VERIFIED FAN instructions block for the chat turn. Unverified fans get
+  // the REWARD-CHECK STATE line instead — the deterministic turn count the
+  // PROACTIVE OFFER rule times itself against (models are bad at counting).
+  function contextBlock(site, session, { fanMessages = 0, liveRewards = false } = {}) {
     const p = verifiedProfile(session);
-    if (!p) return '';
+    if (!p) {
+      return `REWARD-CHECK STATE: this fan is UNVERIFIED; the message you are answering is fan message #${fanMessages + 1} of this conversation. ${liveRewards
+        ? 'Live reward pools EXIST for this event — a proactive offer to check is genuinely backed. Apply the PROACTIVE OFFER rule.'
+        : 'NO reward pools are live right now — do NOT proactively offer a reward check (verification remains available if the fan asks about their own history or rewards).'}`;
+    }
     const s = summary(p);
     const bits = [`tier: ${s.tier}`];
     if (s.eventsCount) bits.push(`been to ${s.eventsCount} of this organiser's event${s.eventsCount === 1 ? '' : 's'} (${s.totalTickets} tickets${s.totalSpend ? `, ${s.currency || ''} ${s.totalSpend} total`.trim() : ''})`);
@@ -227,7 +259,8 @@ function createLoyalty({ db, auth, mailer, runQuery, catalogue = require('./owlC
     if (s.favTicketType) bits.push(`usually buys: ${s.favTicketType}`);
     if (s.signals?.group_buyer) bits.push('tends to buy for a group (4+ tickets)');
     if (s.historyUnavailable) bits.push('purchase history unavailable — treat as a new fan');
-    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.`;
+    const orders = (s.history || []).map((ev) => `${ev.name}${ev.date ? ` (${String(ev.date).slice(0, 10)})` : ''}: ${ev.types.join(', ') || 'tickets'}`);
+    return `VERIFIED FAN (they proved control of ${p.email} this session — use this to guide, never to pressure; never recite it as "data"): ${bits.join('; ')}.${orders.length ? `\nTHEIR PAST ORDERS (their own, verified — you may share these with them when asked): ${orders.join(' · ')}` : ''}${liveRewards ? '\nREWARDS: live pools exist — call getMyReward (once) to check and claim theirs; if nothing applies, say so warmly.' : '\nREWARDS: no pools are live right now — if asked, say there\'s nothing running at the moment.'}`;
   }
 
   // The Owl's two new tools (offered by fanOwl.js only when fanowl.loyalty is on).
