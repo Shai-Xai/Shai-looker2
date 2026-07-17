@@ -99,6 +99,21 @@ funnel/FAQ-gap/leads reporting, persona in `promptRegistry()`. Next: pilot on
 Retreat Yourself, then crawl-suggest page mapping, live availability from the
 Howler API, in-widget checkout (phases 2–3).
 
+### 1.5 💡 Support Owl — the customer support agent
+*"The Fan Owl sells; the Support Owl cares."*
+An AI support agent for end-customers (ticket-buyers) across **email, the event
+website and WhatsApp** — the Owl's **fourth door**. Grounded in a two-tier
+knowledge base (Howler's help docs platform-wide + each client's own
+FAQs/policies, client tier winning), escalating to humans on a
+draft-first autonomy ladder. **Freshdesk stays** as the human queue: phase 0
+drafts replies as private notes inside Freshdesk (webhook in, API out) while
+Pulse manages the agent — knowledge, per-client config, escalation rules,
+monitoring and AI metering. Later phases: support mode in the Fan Owl widget,
+auto-send in bounds, WhatsApp path, verification-first order lookups. Spec
+(brainstorm): **`docs/specs/SUPPORT_OWL_SPEC.md`** (2026-07-17). Effort: L
+staged (phase 0 Freshdesk drafts: M).
+**Status:** 💡 — mapped, workshop pending (open questions in the spec §9).
+
 ---
 
 ## 2. Onboarding & client UX
