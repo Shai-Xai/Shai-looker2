@@ -72,6 +72,7 @@ async function defaultLookupEvent(eventId) {
 const QUESTION_TYPES = ['rating', 'single_choice', 'multiple_choice', 'text'];
 const CHOICE_TYPES = new Set(['single_choice', 'multiple_choice']);
 const LAYOUTS = ['form', 'cards'];
+const CHANNELS = ['app', 'email', 'web']; // where a survey is served: in-app · personal email links · public web link
 const STATUSES = ['draft', 'live', 'closed'];
 const MAX_QUESTIONS = 30;
 const MAX_OPTIONS = 10;
@@ -142,6 +143,13 @@ function normalizeSurveyFields(body, { partial = false } = {}) {
       if (v != null && v !== '' && !isIso(v)) throw new HttpError(400, `${k} must be an ISO-8601 timestamp or null`);
       out[k === 'opensAt' ? 'opens_at' : 'closes_at'] = v ? new Date(v).toISOString() : null;
     }
+  }
+  if (has('channels')) {
+    const raw = body.channels;
+    if (!Array.isArray(raw)) throw new HttpError(400, 'channels must be an array');
+    const list = CHANNELS.filter((c) => raw.includes(c));
+    if (!list.length) throw new HttpError(400, `channels must include at least one of ${CHANNELS.join(', ')}`);
+    out.channels = JSON.stringify(list);
   }
   if (has('audienceTicketTypes')) {
     const raw = body.audienceTicketTypes;
@@ -223,9 +231,12 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   addCol('survey_responses', 'ticket_type_id', "TEXT NOT NULL DEFAULT ''"); // optional stable id alongside the display name
   addCol('surveys', 'audience_ticket_types', "TEXT NOT NULL DEFAULT '[]'"); // contract v1.3: targeting — [] = everyone, else ticket-type names
   addCol('survey_responses', 'channel', "TEXT NOT NULL DEFAULT 'app'");     // where it was answered: app | email | web
+  addCol('surveys', 'channels', `TEXT NOT NULL DEFAULT '${JSON.stringify(CHANNELS)}'`); // where it is SERVED (subset of CHANNELS)
 
   const enabled = () => db.getSetting('surveys_enabled', '1') !== '0'; // global kill switch
   const audienceOf = (row) => { try { return JSON.parse(row.audience_ticket_types || '[]') || []; } catch { return []; } };
+  const channelsOf = (row) => { try { const c = JSON.parse(row.channels || 'null'); return Array.isArray(c) && c.length ? c : [...CHANNELS]; } catch { return [...CHANNELS]; } };
+  const onChannel = (row, channel) => channelsOf(row).includes(channel);
   // Targeting match: blanket surveys ([] audience) reach everyone; targeted ones
   // only fans whose ticket type is named. Case-insensitive. `fanTypes` = the
   // type(s) the app declared for this fan (comma-separated) — none declared
@@ -296,6 +307,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
       opensAt: row.opens_at || null,
       closesAt: row.closes_at || null,
       audienceTicketTypes: audienceOf(row),
+      channels: channelsOf(row),
       questions: questionsOf(row),
       responseCount: responseCount(row.id),
       publishedAt: row.published_at || null,
@@ -383,20 +395,20 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     if (!/^[0-9]{1,32}$/.test(eventId)) return res.status(400).json({ error: 'eventId (numeric) is required' });
     const rows = sql.prepare("SELECT * FROM surveys WHERE event_id=? AND status='live' ORDER BY created_at").all(eventId);
     const fanTypes = str(req.query.ticketType, 400); // v1.3: fan's ticket type(s), comma-separated
-    res.json({ surveys: rows.filter((r) => effectiveState(r) === 'live' && flagOn(r.entity_id) && audienceMatches(r, fanTypes)).map(publicSurvey) });
+    res.json({ surveys: rows.filter((r) => effectiveState(r) === 'live' && flagOn(r.entity_id) && onChannel(r, 'app') && audienceMatches(r, fanTypes)).map(publicSurvey) });
   });
 
   app.get('/api/app/surveys/:id', readLimit, (req, res) => {
     if (!enabled()) return res.status(404).json({ error: 'Surveys are disabled' });
     const row = getSurvey(req.params.id);
-    if (!row || effectiveState(row) !== 'live' || !flagOn(row.entity_id)) return res.status(404).json({ error: 'Survey not found' });
+    if (!row || effectiveState(row) !== 'live' || !flagOn(row.entity_id) || !onChannel(row, 'app')) return res.status(404).json({ error: 'Survey not found' });
     res.json(publicSurvey(row));
   });
 
   app.post('/api/app/surveys/:id/responses', submitLimitIp, submitLimitUser, (req, res) => {
     if (!enabled()) return res.status(404).json({ error: 'Surveys are disabled' });
     const row = getSurvey(req.params.id);
-    if (!row || row.status === 'draft' || !flagOn(row.entity_id)) return res.status(404).json({ error: 'Survey not found' });
+    if (!row || row.status === 'draft' || !flagOn(row.entity_id) || !onChannel(row, 'app')) return res.status(404).json({ error: 'Survey not found' });
     const state = effectiveState(row);
     if (state === 'closed') return res.status(409).json({ error: 'This survey has closed' });
     if (state === 'scheduled') return res.status(409).json({ error: 'This survey is not open yet' });
@@ -433,11 +445,11 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     const fields = normalizeSurveyFields(body || {});
     const t = nowIso();
     const id = rid('srv');
-    sql.prepare(`INSERT INTO surveys (id, entity_id, suite_id, event_id, event_name, title, description, status, layout, opens_at, closes_at, audience_ticket_types, questions, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    sql.prepare(`INSERT INTO surveys (id, entity_id, suite_id, event_id, event_name, title, description, status, layout, opens_at, closes_at, audience_ticket_types, channels, questions, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, fields.suite_id || '', fields.event_id, fields.event_name || '', fields.title,
         fields.description || '', 'draft', fields.layout || 'form', fields.opens_at || null, fields.closes_at || null,
-        fields.audience_ticket_types || '[]', fields.questions || '[]', t, t);
+        fields.audience_ticket_types || '[]', fields.channels || JSON.stringify(CHANNELS), fields.questions || '[]', t, t);
     return internalSurvey(getSurvey(id));
   }
 
@@ -499,8 +511,67 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
       opensAt: row.opens_at,
       closesAt: row.closes_at,
       audienceTicketTypes: audienceOf(row),
+      channels: channelsOf(row),
       questions: questionsOf(row),
     });
+  }
+
+  // ── Event-level results: one event, ALL its surveys, one rollup ─────────────
+  function eventResults(entityId, eventId, { ticketType = '', channel = '' } = {}) {
+    const rows = sql.prepare("SELECT * FROM surveys WHERE entity_id=? AND event_id=? AND status != 'draft' ORDER BY created_at").all(entityId, String(eventId));
+    const perSurvey = rows.map((r) => ({ survey: internalSurvey(r), results: surveyResults(r, { ticketType, channel }) }));
+    // Rollup across all surveys (same filters applied).
+    const days = new Map(); const types = new Map(); const chans = new Map();
+    let responses = 0, ratingSum = 0, ratingCount = 0;
+    for (const p of perSurvey) {
+      responses += p.results.responseCount;
+      for (const d of p.results.byDay) {
+        const cur = days.get(d.date) || { count: 0, rs: 0, rc: 0 };
+        cur.count += d.count;
+        if (d.avgRating != null) { cur.rs += d.avgRating * d.count; cur.rc += d.count; }
+        days.set(d.date, cur);
+      }
+      for (const t of p.results.byTicketType) types.set(t.ticketType, (types.get(t.ticketType) || 0) + t.count);
+      for (const c of p.results.byChannel) chans.set(c.channel, (chans.get(c.channel) || 0) + c.count);
+      const rq = p.results.questions.find((q) => q.type === 'rating');
+      if (rq && rq.average != null) { ratingSum += rq.average * rq.answered; ratingCount += rq.answered; }
+    }
+    return {
+      eventId: String(eventId),
+      eventName: rows.find((r) => r.event_name)?.event_name || '',
+      filter: { ticketType: ticketType || null, channel: channel || null },
+      responseCount: responses,
+      avgRating: ratingCount ? Math.round((ratingSum / ratingCount) * 100) / 100 : null,
+      byDay: [...days.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, v]) => ({ date, count: v.count, avgRating: v.rc ? Math.round((v.rs / v.rc) * 100) / 100 : null })),
+      byTicketType: [...types.entries()].map(([t, count]) => ({ ticketType: t, count })).sort((a, b) => b.count - a.count || ((a.ticketType === 'Unknown') - (b.ticketType === 'Unknown')) || a.ticketType.localeCompare(b.ticketType)),
+      byChannel: [...chans.entries()].map(([c, count]) => ({ channel: c, count })).sort((a, b) => b.count - a.count || a.channel.localeCompare(b.channel)),
+      surveys: perSurvey.map((p) => ({
+        id: p.survey.id, title: p.survey.title, status: p.survey.status, effectiveState: p.survey.effectiveState,
+        audienceTicketTypes: p.survey.audienceTicketTypes, channels: p.survey.channels,
+        responseCount: p.results.responseCount,
+        avgRating: (p.results.questions.find((q) => q.type === 'rating') || {}).average ?? null,
+        comments: p.results.questions.filter((q) => q.type === 'text').reduce((n, q) => n + (q.answered || 0), 0),
+      })),
+    };
+  }
+
+  // Long-format CSV across the event: one row per ANSWER (pivots cleanly).
+  function eventResultsCsv(entityId, eventId, opts = {}) {
+    const rows = sql.prepare("SELECT * FROM surveys WHERE entity_id=? AND event_id=? AND status != 'draft' ORDER BY created_at").all(entityId, String(eventId));
+    const lines = [['survey', 'response_id', 'howler_user_id', 'email', 'ticket_type', 'channel', 'submitted_at', 'question', 'answer'].map(csvCell).join(',')];
+    for (const row of rows) {
+      const qText = new Map(questionsOf(row).map((q) => [q.id, q.text]));
+      for (const r of responsesFor(row.id, opts).slice().reverse()) {
+        for (const a of parseAnswers(r)) {
+          const answer = a.type === 'rating' ? a.rating
+            : a.type === 'single_choice' ? a.selectedText
+            : a.type === 'multiple_choice' ? (a.selectedTexts || []).join('; ')
+            : a.text;
+          lines.push([row.title, r.id, r.howler_user_id, r.email, ticketLabel(r), r.channel || 'app', r.updated_at, qText.get(a.questionId) || a.questionId, answer].map(csvCell).join(','));
+        }
+      }
+    }
+    return lines.join('\n');
   }
 
   function deleteSurvey(row) {
@@ -515,18 +586,21 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   const ticketLabel = (r) => r.ticket_type || 'Unknown';
   // Responses for a survey, optionally narrowed to one ticket type ('Unknown'
   // matches responses that arrived without one — pre-contract-v1.2 app builds).
-  function responsesFor(surveyId, { ticketType = '' } = {}) {
-    const all = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC, id').all(surveyId);
-    return ticketType ? all.filter((r) => ticketLabel(r) === ticketType) : all;
+  function responsesFor(surveyId, { ticketType = '', channel = '' } = {}) {
+    let all = sql.prepare('SELECT * FROM survey_responses WHERE survey_id=? ORDER BY updated_at DESC, id').all(surveyId);
+    if (ticketType) all = all.filter((r) => ticketLabel(r) === ticketType);
+    if (channel) all = all.filter((r) => (r.channel || 'app') === channel);
+    return all;
   }
 
   // Results: per-question aggregates using the SNAPSHOTTED option text, plus
   // responses-by-day and a by-ticket-type breakdown. `ticketType` filters the
   // WHOLE report (aggregates, byDay, question breakdowns) — byTicketType and the
   // ticketTypes picker list always describe the unfiltered survey.
-  function surveyResults(row, { ticketType = '' } = {}) {
+  function surveyResults(row, { ticketType = '', channel = '' } = {}) {
     const allRows = responsesFor(row.id);
-    const rows = ticketType ? allRows.filter((r) => ticketLabel(r) === ticketType) : allRows;
+    let rows = ticketType ? allRows.filter((r) => ticketLabel(r) === ticketType) : allRows;
+    if (channel) rows = rows.filter((r) => (r.channel || 'app') === channel);
     const parsed = rows.map((r) => ({ row: r, answers: parseAnswers(r) }));
 
     // Overall rating per response = its first rating-type answer (the survey's
@@ -591,7 +665,8 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     return {
       surveyId: row.id, title: row.title, status: row.status, effectiveState: effectiveState(row),
       responseCount: parsed.length, totalResponseCount: allRows.length,
-      filter: { ticketType: ticketType || null },
+      filter: { ticketType: ticketType || null, channel: channel || null },
+      channels: channelsOf(row),
       ticketTypes: byTicketType.map((t) => t.ticketType),
       byDay, byTicketType, byChannel, questions,
     };
@@ -602,10 +677,11 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   // questionId+rating (rating) narrow to responses that gave that answer.
   function listResponses(row, q = {}) {
     const ticketType = str(q.ticketType, 80);
+    const channel = str(q.channel, 20);
     const questionId = str(q.questionId, 60);
     const optionIndex = q.optionIndex !== undefined && q.optionIndex !== '' ? Number(q.optionIndex) : null;
     const rating = q.rating !== undefined && q.rating !== '' ? Number(q.rating) : null;
-    let rows = responsesFor(row.id, { ticketType }).map((r) => ({ r, answers: parseAnswers(r) }));
+    let rows = responsesFor(row.id, { ticketType, channel }).map((r) => ({ r, answers: parseAnswers(r) }));
     if (questionId) {
       rows = rows.filter(({ answers }) => answers.some((a) => {
         if (a.questionId !== questionId) return false;
@@ -630,9 +706,9 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   }
 
   const csvCell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  function resultsCsv(row, { ticketType = '' } = {}) {
+  function resultsCsv(row, { ticketType = '', channel = '' } = {}) {
     const qs = questionsOf(row);
-    const rows = responsesFor(row.id, { ticketType }).slice().reverse(); // oldest first
+    const rows = responsesFor(row.id, { ticketType, channel }).slice().reverse(); // oldest first
     const head = ['response_id', 'howler_user_id', 'email', 'ticket_type', 'channel', 'platform', 'app_version', 'submitted_at', ...qs.map((q) => q.text)];
     const lines = [head.map(csvCell).join(',')];
     for (const r of rows) {
@@ -726,7 +802,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   });
   app.get('/api/admin/entities/:entityId/surveys/:surveyId/results', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
-    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80) }));
+    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
   });
   app.get('/api/admin/entities/:entityId/surveys/:surveyId/responses', (req, res) => {
     const row = adminSurvey(req, res); if (!row) return;
@@ -736,7 +812,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     const row = adminSurvey(req, res); if (!row) return;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="survey-${row.id}-results.csv"`);
-    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80) }));
+    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
   });
 
   // ── Client self-service surface (/api/my) ────────────────────────────────────
@@ -773,6 +849,25 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     events.sort((a, b) => a.name.localeCompare(b.name));
     res.json({ events });
   }));
+
+  // Event-level results: one event's whole survey set + rollup. Serves BOTH
+  // surfaces (admins pass the entity check), so it lives once, here.
+  app.get('/api/my/surveys/event-results', (req, res) => {
+    const entityId = str(req.query.entityId, 60);
+    if (!myEntityCheck(req, res, entityId, P.view)) return;
+    const eventId = str(req.query.eventId, 32);
+    if (!/^[0-9]{1,32}$/.test(eventId)) return res.status(400).json({ error: 'eventId (numeric) is required' });
+    res.json(eventResults(entityId, eventId, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
+  });
+  app.get('/api/my/surveys/event-results.csv', (req, res) => {
+    const entityId = str(req.query.entityId, 60);
+    if (!myEntityCheck(req, res, entityId, P.view)) return;
+    const eventId = str(req.query.eventId, 32);
+    if (!/^[0-9]{1,32}$/.test(eventId)) return res.status(400).json({ error: 'eventId (numeric) is required' });
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="event-${eventId}-survey-results.csv"`);
+    res.send(eventResultsCsv(entityId, eventId, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
+  });
 
   app.get('/api/my/surveys', (req, res) => {
     const user = requireUser(req, res); if (!user) return;
@@ -815,7 +910,7 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
   });
   app.get('/api/my/surveys/:id/results', (req, res) => {
     const row = mySurvey(req, res, P.view); if (!row) return;
-    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80) }));
+    res.json(surveyResults(row, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
   });
   app.get('/api/my/surveys/:id/responses', (req, res) => {
     const row = mySurvey(req, res, P.view); if (!row) return;
@@ -825,13 +920,13 @@ function mount(app, { db, auth, rateLimit, lookupEvent = defaultLookupEvent, lis
     const row = mySurvey(req, res, P.view); if (!row) return;
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="survey-${row.id}-results.csv"`);
-    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80) }));
+    res.send(resultsCsv(row, { ticketType: str(req.query.ticketType, 80), channel: str(req.query.channel, 20) }));
   });
 
   return {
     publicSurvey, effectiveState, validateAnswers, surveyResults, resultsCsv, listResponses, createSurvey,
     // for server/surveyWeb.js (email/web channel — same tables, same rules):
-    getSurvey, flagOn, audienceOf, audienceMatches, saveResponse, questionsOf, enabled,
+    getSurvey, flagOn, audienceOf, audienceMatches, saveResponse, questionsOf, enabled, channelsOf, onChannel,
   };
 }
 

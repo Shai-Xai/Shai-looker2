@@ -15,6 +15,8 @@ const QTYPES = {
   text: { label: '✎ Free text', hint: 'typed answer', bg: 'rgba(29,138,59,0.13)', fg: '#1d8a3b' },
 };
 const newQuestion = (type) => ({ id: `q_${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`, type, text: '', required: false, ...(type === 'single_choice' || type === 'multiple_choice' ? { options: ['', ''] } : {}) });
+const CHANNEL_META = { app: '📱 In-app', email: '✉️ Email', web: '🔗 Web link' };
+const CHANNEL_SHORT = { app: '📱 app', email: '✉️ email', web: '🔗 web' };
 const isChoice = (t) => t === 'single_choice' || t === 'multiple_choice';
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '');
 
@@ -31,6 +33,10 @@ export default function SurveyManager({ entityId, scope = 'my' }) {
   }
   if (view.mode === 'results') {
     return <SurveyResults entityId={entityId} scope={scope} survey={view.survey} onClose={() => { setView({ mode: 'list' }); load(); }} />;
+  }
+  if (view.mode === 'event-results') {
+    return <EventResults entityId={entityId} scope={scope} eventId={view.eventId} eventName={view.eventName} surveys={list || []}
+      onOpenSurvey={(s) => setView({ mode: 'results', survey: s })} onClose={() => { setView({ mode: 'list' }); load(); }} />;
   }
 
   return (
@@ -63,6 +69,7 @@ export default function SurveyManager({ entityId, scope = 'my' }) {
                     <span style={{ fontWeight: 800, fontSize: 14.5 }}>🎫 {eventName}</span>
                     <span style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 600 }}>#{eventId} · {surveys.length} survey{surveys.length === 1 ? '' : 's'}{live ? ` · ${live} live` : ''}{responses ? ` · ${responses.toLocaleString()} responses` : ''}</span>
                     <span style={{ flex: 1 }} />
+                    {responses > 0 && <button style={tiny} onClick={() => setView({ mode: 'event-results', eventId, eventName })}>📊 Event results</button>}
                     <button style={tiny} onClick={() => setView({ mode: 'edit', survey: null, prefill: { eventId, eventName: eventName.startsWith('Event #') ? '' : eventName } })}>+ Survey for this event</button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -101,8 +108,9 @@ function SurveyRow({ s, onEdit, onResults }) {
           <span style={{ fontSize: 10.5, fontWeight: 700, borderRadius: 980, padding: '2px 9px', background: 'rgba(128,128,128,0.12)', color: 'var(--muted)' }}>{s.layout === 'cards' ? '▦ Cards' : '▤ Form'}</span>
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          🎫 {s.eventName || `Event #${s.eventId}`} · {(s.questions || []).length} question{(s.questions || []).length === 1 ? '' : 's'}
+          {(s.questions || []).length} question{(s.questions || []).length === 1 ? '' : 's'}
           {audience.length ? ` · 🎯 ${audience.join(', ')}` : ' · everyone'}
+          {` · ${((s.channels && s.channels.length) ? s.channels : ['app', 'email', 'web']).map((c) => CHANNEL_SHORT[c] || c).join(' ')}`}
           {s.closesAt ? ` · closes ${fmtDate(s.closesAt)}` : ''}
         </div>
       </div>
@@ -128,6 +136,7 @@ function SurveyEditor({ entityId, scope, survey, prefill, onClose, onResults }) 
     layout: survey?.layout || 'form',
     closesAt: survey?.closesAt ? survey.closesAt.slice(0, 10) : '',
     audienceTicketTypes: survey?.audienceTicketTypes || [],
+    channels: survey?.channels || ['app', 'email', 'web'],
     questions: (survey?.questions || []).map((q) => ({ ...q, options: q.options ? [...q.options] : undefined })),
   });
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -172,6 +181,7 @@ function SurveyEditor({ entityId, scope, survey, prefill, onClose, onResults }) 
     title: f.title, description: f.description, eventId: String(f.eventId).trim(), eventName: f.eventName,
     layout: f.layout, closesAt: f.closesAt ? new Date(f.closesAt + 'T23:59:59Z').toISOString() : null,
     audienceTicketTypes: f.audienceTicketTypes,
+    channels: f.channels,
     questions: f.questions.map((q) => ({ id: q.id, type: q.type, text: q.text, required: !!q.required, ...(isChoice(q.type) ? { options: (q.options || []).filter((o) => o.trim()) } : {}) })),
   });
 
@@ -285,6 +295,24 @@ function SurveyEditor({ entityId, scope, survey, prefill, onClose, onResults }) 
                 </div>
               ) : <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Everyone with a ticket. Enter a listed event ID above to target specific ticket types.</p>}
               {f.audienceTicketTypes.length > 0 && <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0' }}>🎯 Only fans holding {f.audienceTicketTypes.join(' / ')} will see this survey in the app.</p>}
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <label style={label}>Where fans can answer</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {Object.entries(CHANNEL_META).map(([key, labelTxt]) => (
+                  <Chip key={key} on={f.channels.includes(key)} disabled={!draft}
+                    onClick={() => {
+                      const next = f.channels.includes(key) ? f.channels.filter((c) => c !== key) : [...f.channels, key];
+                      if (next.length) set('channels', next); // at least one channel stays on
+                    }}
+                    label={labelTxt} />
+                ))}
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0' }}>
+                {f.channels.length === 3 ? 'Served everywhere: the Howler app, personal email links, and the public web link.'
+                  : `Only via ${f.channels.map((c) => CHANNEL_SHORT[c]).join(' + ')} — the other channels won't serve this survey.`}
+              </p>
             </div>
 
             <div style={{ marginTop: 14 }}>
@@ -409,8 +437,10 @@ function DistributionPanel({ entityId, scope, survey }) {
         <span style={{ fontWeight: 700, fontSize: 13.5 }}>📧 Email & links</span>
         {stats && stats.total > 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{stats.total} link{stats.total === 1 ? '' : 's'}{stats.sent ? ` · ${stats.sent} sent` : ''}{stats.pending ? ` · ${stats.pending} sending…` : ''} · {stats.opened} opened · {stats.responded} responded</span>}
         <span style={{ flex: 1 }} />
-        <button style={tiny} onClick={makeShare}>🔗 {share ? 'Copied!' : 'Copy public link'}</button>
-        <button style={tiny} onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : '✉️ Email it out'}</button>
+        {(survey.channels || []).includes('web') && <button style={tiny} onClick={makeShare}>🔗 {share ? 'Copied!' : 'Copy public link'}</button>}
+        {(survey.channels || []).includes('email')
+          ? <button style={tiny} onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : '✉️ Email it out'}</button>
+          : <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Email channel off for this survey</span>}
       </div>
       {share && <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 0', wordBreak: 'break-all' }}>{share} — anyone with this link can answer (QR codes, socials, WhatsApp).</p>}
       {open && (
@@ -556,10 +586,11 @@ function PhonePreview({ f }) {
 function SurveyResults({ entityId, scope, survey, onClose }) {
   const [res, setRes] = useState(null);
   const [tt, setTt] = useState('');
+  const [ch, setCh] = useState('');
   const [drill, setDrill] = useState(null); // {questionId, optionIndex, label, data}
-  const load = (ticketType) => api.surveyResults(scope, entityId, survey.id, ticketType)
+  const load = () => api.surveyResults(scope, entityId, survey.id, { ticketType: tt, channel: ch })
     .then(setRes).catch(() => setRes({ error: true }));
-  useEffect(() => { setDrill(null); load(tt); }, [tt]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setDrill(null); load(); }, [tt, ch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!res) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading results…</p>;
   if (res.error) return <p style={{ color: 'var(--error, #d70015)', fontSize: 13 }}>Couldn’t load results — try again.</p>;
@@ -570,7 +601,7 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
 
   const openDrill = async (q, opt) => {
     if (drill && drill.questionId === q.id && drill.optionIndex === opt.index) { setDrill(null); return; }
-    const data = await api.surveyResponses(scope, entityId, survey.id, { questionId: q.id, optionIndex: opt.index, ...(tt ? { ticketType: tt } : {}), limit: 8 }).catch(() => null);
+    const data = await api.surveyResponses(scope, entityId, survey.id, { questionId: q.id, optionIndex: opt.index, ...(tt ? { ticketType: tt } : {}), ...(ch ? { channel: ch } : {}), limit: 8 }).catch(() => null);
     setDrill({ questionId: q.id, optionIndex: opt.index, label: opt.text, data });
   };
 
@@ -581,14 +612,21 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
         <span style={{ fontWeight: 750, fontSize: 15 }}>{survey.title}</span>
         <StatusPill s={survey} />
         <span style={{ flex: 1 }} />
-        <a style={{ ...mini, textDecoration: 'none', display: 'inline-block' }} href={api.surveyCsvUrl(scope, entityId, survey.id, tt)} download>⬇ Export CSV{tt ? ` (${tt})` : ''}</a>
+        <a style={{ ...mini, textDecoration: 'none', display: 'inline-block' }} href={api.surveyCsvUrl(scope, entityId, survey.id, { ticketType: tt, channel: ch })} download>⬇ Export CSV{tt || ch ? ' (filtered)' : ''}</a>
       </div>
 
       {res.ticketTypes.length > 1 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>🎫 Ticket type</span>
           <Chip on={!tt} onClick={() => setTt('')} label={`All · ${res.totalResponseCount.toLocaleString()}`} />
           {res.byTicketType.map((t) => <Chip key={t.ticketType} on={tt === t.ticketType} onClick={() => setTt(t.ticketType)} label={`${t.ticketType} · ${t.count.toLocaleString()}`} />)}
+        </div>
+      )}
+      {(res.byChannel || []).length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>📡 Channel</span>
+          <Chip on={!ch} onClick={() => setCh('')} label="All" />
+          {res.byChannel.map((c) => <Chip key={c.channel} on={ch === c.channel} onClick={() => setCh(c.channel)} label={`${CHANNEL_SHORT[c.channel] || c.channel} · ${c.count.toLocaleString()}`} />)}
         </div>
       )}
 
@@ -598,12 +636,7 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
         <Stat v={comments.toLocaleString()} k="Comments" />
         <Stat v={res.byDay.length ? `${fmtDate(res.byDay[0].date)} –` : '—'} k="Collecting since" />
       </div>
-      {(res.byChannel || []).length > 1 && (
-        <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px' }}>
-          Answered via {res.byChannel.map((c) => `${{ app: '📱 app', email: '✉️ email', web: '🔗 web' }[c.channel] || c.channel} ${c.count.toLocaleString()}`).join(' · ')}
-        </p>
-      )}
-      {(res.byChannel || []).length <= 1 && <div style={{ marginBottom: 6 }} />}
+      <div style={{ marginBottom: 6 }} />
 
       {res.byDay.length > 1 && (
         <div style={card}>
@@ -656,7 +689,7 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
                         const textAns = (r.answers || []).find((a) => a.type === 'text' && a.text);
                         return (
                           <div key={r.id} style={{ fontSize: 12, color: 'var(--muted-2, var(--text))', padding: '5px 0', borderTop: '1px solid var(--hairline)' }}>
-                            <span style={{ fontWeight: 650 }}>{r.ticketType}</span> · fan {r.howlerUserId} · {fmtDate(r.submittedAt)}
+                            <span style={{ fontWeight: 650 }}>{r.ticketType}</span> · {CHANNEL_SHORT[r.channel] || r.channel} · {r.email || `fan ${r.howlerUserId}`} · {fmtDate(r.submittedAt)}
                             {textAns && <div style={{ marginTop: 2, fontStyle: 'italic' }}>“{textAns.text}”</div>}
                           </div>
                         );
@@ -683,6 +716,89 @@ function SurveyResults({ entityId, scope, survey, onClose }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// One EVENT, all its surveys: rollup stats + per-survey summaries. Answers the
+// "we ran a VIP survey AND a General survey — how did the event do?" question.
+function EventResults({ entityId, scope, eventId, eventName, surveys, onOpenSurvey, onClose }) {
+  const [res, setRes] = useState(null);
+  const [tt, setTt] = useState('');
+  const [ch, setCh] = useState('');
+  useEffect(() => {
+    api.surveyEventResults(entityId, eventId, { ticketType: tt, channel: ch }).then(setRes).catch(() => setRes({ error: true }));
+  }, [entityId, eventId, tt, ch]);
+  if (!res) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading event results…</p>;
+  if (res.error) return <p style={{ color: 'var(--error, #d70015)', fontSize: 13 }}>Couldn’t load event results — try again.</p>;
+  const maxDay = Math.max(1, ...res.byDay.map((d) => d.count));
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <button style={mini} onClick={onClose}>← Back</button>
+        <span style={{ fontWeight: 750, fontSize: 15 }}>🎫 {res.eventName || eventName} — all surveys</span>
+        <span style={{ flex: 1 }} />
+        <a style={{ ...mini, textDecoration: 'none', display: 'inline-block' }} href={api.surveyEventCsvUrl(entityId, eventId, { ticketType: tt, channel: ch })} download>⬇ Combined CSV{tt || ch ? ' (filtered)' : ''}</a>
+      </div>
+
+      {res.byTicketType.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>🎫 Ticket type</span>
+          <Chip on={!tt} onClick={() => setTt('')} label="All" />
+          {res.byTicketType.map((t) => <Chip key={t.ticketType} on={tt === t.ticketType} onClick={() => setTt(t.ticketType)} label={`${t.ticketType} · ${t.count.toLocaleString()}`} />)}
+        </div>
+      )}
+      {res.byChannel.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>📡 Channel</span>
+          <Chip on={!ch} onClick={() => setCh('')} label="All" />
+          {res.byChannel.map((c) => <Chip key={c.channel} on={ch === c.channel} onClick={() => setCh(c.channel)} label={`${CHANNEL_SHORT[c.channel] || c.channel} · ${c.count.toLocaleString()}`} />)}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 14 }}>
+        <Stat v={res.responseCount.toLocaleString()} k="Responses (all surveys)" />
+        <Stat v={res.avgRating != null ? `${res.avgRating}/5` : '—'} k="Overall rating" />
+        <Stat v={String(res.surveys.length)} k="Surveys" />
+        <Stat v={res.byDay.length ? `${fmtDate(res.byDay[0].date)} –` : '—'} k="Collecting since" />
+      </div>
+
+      {res.byDay.length > 1 && (
+        <div style={card}>
+          <h4 style={h4}>Responses by day — whole event</h4>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 90 }}>
+            {res.byDay.map((d) => (
+              <div key={d.date} title={`${fmtDate(d.date)} · ${d.count} response${d.count === 1 ? '' : 's'}${d.avgRating != null ? ` · avg ${d.avgRating}★` : ''}`}
+                style={{ flex: 1, height: `${Math.max(4, Math.round((d.count / maxDay) * 100))}%`, background: 'linear-gradient(180deg, var(--brand-2, #ff6b35), var(--brand))', borderRadius: '3px 3px 0 0', minWidth: 4 }} />
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+            <span>{fmtDate(res.byDay[0].date)}</span><span>{fmtDate(res.byDay[res.byDay.length - 1].date)}</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {res.surveys.map((s) => (
+          <div key={s.id} style={{ ...card, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{s.title}</span>
+                <StatusPill s={s} />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 3 }}>
+                {s.audienceTicketTypes.length ? `🎯 ${s.audienceTicketTypes.join(', ')}` : 'everyone'} · {(s.channels || []).map((c) => CHANNEL_SHORT[c] || c).join(' ')}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{s.responseCount.toLocaleString()} <span style={{ fontWeight: 500, color: 'var(--muted)' }}>resp.</span></span>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>{s.avgRating != null ? `${s.avgRating}★` : '—'}</span>
+              <span style={{ fontSize: 13, color: 'var(--muted)' }}>{s.comments} 💬</span>
+              <button style={tiny} onClick={() => { const full = surveys.find((x) => x.id === s.id); if (full) onOpenSurvey(full); }}>Open results</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

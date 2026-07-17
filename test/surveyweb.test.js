@@ -210,6 +210,21 @@ test('management guards: outsiders 403, drafts cannot be emailed', async () => {
   assert.equal((await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: draft.body.id }, body: { recipients: [{ email: 'x@y.test' }] } })).code, 409);
 });
 
+test('channel switches gate the web surface: app-only surveys have no email/share', async () => {
+  seq += 1000;
+  const entity = makeEntity(`ChanOrg ${seq}`, `chanorg-${seq}`);
+  setFlag(entity.id, 'on');
+  const owner = makeClient(`chanowner-${seq}@test.local`, [entity.id], 'owner');
+  const created = await call('POST /api/my/surveys', {
+    user: owner, body: { title: 'App only', eventId: String(80000 + seq), questions: QUESTIONS, channels: ['app'] },
+  });
+  await call('POST /api/my/surveys/:id/publish', { user: owner, params: { id: created.body.id } });
+  const mail = await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: created.body.id }, body: { recipients: [{ email: 'a@b.test' }] } });
+  assert.equal(mail.code, 409);
+  assert.match(mail.body.error, /Email channel/);
+  assert.equal((await call('POST /api/my/surveys/:id/share-link', { user: owner, params: { id: created.body.id } })).code, 409);
+});
+
 test('flag off hides the hosted page too', async () => {
   const { entity, owner, survey } = await seedLive();
   const mint = await call('POST /api/my/surveys/:id/email', { user: owner, params: { id: survey.id }, body: { recipients: [{ email: 'f@f.test' }], send: false } });

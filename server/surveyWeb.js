@@ -57,6 +57,8 @@ function mount(app, { db, auth, rateLimit, mailer, surveys, getSegmentsApi = () 
     const link = getLink(token);
     const row = link && surveys.getSurvey(link.survey_id);
     if (!link || !row || row.status === 'draft' || !surveys.flagOn(row.entity_id)) return { status: 404, error: 'Survey not found' };
+    // The survey must be SERVED on this link's channel (share → web, personal → email).
+    if (!surveys.onChannel(row, link.email ? 'email' : 'web')) return { status: 404, error: 'Survey not found' };
     const state = surveys.effectiveState(row);
     if (state === 'closed') return { status: 409, error: 'This survey has closed', link, row };
     if (state === 'scheduled') return { status: 409, error: 'This survey is not open yet', link, row };
@@ -141,6 +143,7 @@ function mount(app, { db, auth, rateLimit, mailer, surveys, getSegmentsApi = () 
   async function emailHandler(req, res) {
     const row = guard(req, res, 'campaigns.approve'); if (!row) return;
     if (row.status !== 'live') return res.status(409).json({ error: 'Publish the survey before emailing it out' });
+    if (!surveys.onChannel(row, 'email')) return res.status(409).json({ error: 'This survey doesn’t have the Email channel enabled — switch it on in the editor first' });
     const body = req.body || {};
     let raw;
     if (body.segmentId) {
@@ -227,6 +230,7 @@ function mount(app, { db, auth, rateLimit, mailer, surveys, getSegmentsApi = () 
 
   function shareLinkHandler(req, res) {
     const row = guard(req, res, 'campaigns.approve'); if (!row) return;
+    if (!surveys.onChannel(row, 'web')) return res.status(409).json({ error: 'This survey doesn’t have the Web link channel enabled — switch it on in the editor first' });
     let link = sql.prepare("SELECT * FROM survey_links WHERE survey_id=? AND source='share'").get(row.id);
     if (!link) {
       link = { token: newToken() };
