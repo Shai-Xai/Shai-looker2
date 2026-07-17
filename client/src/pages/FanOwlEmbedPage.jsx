@@ -17,13 +17,16 @@ function splitAnswer(raw) {
   let offers = [];
   let followups = [];
   let nav = null;
+  let reward = null;
+  const ri = text.indexOf('<<<FAN_REWARD>>>');
+  if (ri !== -1) { try { reward = JSON.parse(text.slice(ri + 16)); } catch { /* partial */ } text = text.slice(0, ri); }
   const ni = text.indexOf('<<<FAN_NAV>>>');
   if (ni !== -1) { try { nav = JSON.parse(text.slice(ni + 13)); } catch { /* partial */ } text = text.slice(0, ni); }
   const oi = text.indexOf('<<<FAN_OFFERS>>>');
   if (oi !== -1) { try { offers = JSON.parse(text.slice(oi + 16)); } catch { /* partial */ } text = text.slice(0, oi); }
   const fi = text.indexOf('<<<FOLLOWUPS>>>');
   if (fi !== -1) { try { followups = JSON.parse(text.slice(fi + 15)); } catch { /* partial */ } text = text.slice(0, fi); }
-  return { text: text.replace(/\s+$/, ''), offers, followups, nav };
+  return { text: text.replace(/\s+$/, ''), offers, followups, nav, reward };
 }
 const lastStatus = (raw) => { let m; let s = ''; STATUS_RE.lastIndex = 0; while ((m = STATUS_RE.exec(raw))) s = m[1]; return s; };
 
@@ -42,6 +45,41 @@ const LOCALES = {
   nl: { guide: 'Jouw ticketgids', hello: 'Hoi! Ik ben {name} — ik ken dit evenement door en door.', helloSub: 'Vraag me alles — welk ticket je nodig hebt, wat inbegrepen is, hoe je extra’s toevoegt.', owl: 'de Uil', seeTickets: 'Bekijk tickets', tellMore: 'Vertel me meer', getTickets: 'Koop tickets ↗', takeMe: 'Breng me erheen →', nowOn: 'Je bent nu op {page} — vraag me er alles over', ask: 'Vraag over tickets…', starters: ['Welk ticket heb ik nodig?', 'Wat is inbegrepen?', 'Terugbetalingsbeleid?'], keepPosted: 'Houd me op de hoogte', namePh: 'Je naam (optioneel)', emailPh: 'Je e-mail', consent: 'Mail me updates en aanbiedingen over dit evenement. Je kunt je altijd uitschrijven.', save: 'Opslaan', saved: '✅ Je staat op de lijst — we houden je op de hoogte.', askOn: 'Vraag over {t}…', topics: { home: 'het evenement', tickets: 'tickets', lineup: 'de line-up', artist: 'de artiesten', venue: 'de locatie', accommodation: 'overnachten', attraction: 'wat te doen', sponsors: 'onze partners', faq: 'de details', other: 'deze pagina' } },
 };
 const localeFor = (bootLang) => LOCALES[(navigator.language || '').slice(0, 2).toLowerCase()] || LOCALES[String(bootLang || '').slice(0, 2).toLowerCase()] || LOCALES.en;
+
+// ── 🎁 Reward card — a granted code rendered as a proper card (loyalty phase 2):
+// gradient header, the value, a dashed tap-to-copy code box, and the rules the
+// code enforces at checkout. Strings fall back to English until localised.
+function RewardCard({ reward, brand, C, T }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(reward.code); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* unsupported */ }
+  };
+  const rules = [
+    reward.rules?.minQty > 0 ? `min ${reward.rules.minQty} tickets` : '',
+    (reward.rules?.ticketTypes || []).length ? `valid on ${reward.rules.ticketTypes.join(', ')}` : '',
+    reward.rules?.expiresAt ? `expires ${String(reward.rules.expiresAt).slice(0, 10)}` : '',
+  ].filter(Boolean).join(' · ');
+  return (
+    <div style={{ border: `1.5px solid ${brand}55`, borderRadius: 16, overflow: 'hidden', marginTop: 8, maxWidth: '88%', background: C.card }}>
+      <div style={{ background: `linear-gradient(120deg, ${brand}, ${brand}cc)`, color: '#fff', padding: '9px 13px', fontSize: 12, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+        🎁 {reward.existing ? (T.rewardYours || 'Your reward') : (T.rewardUnlocked || 'Reward unlocked!')}{reward.pool ? ` · ${reward.pool}` : ''}
+      </div>
+      <div style={{ padding: '11px 13px', fontSize: 13.5, lineHeight: 1.45, color: C.ink }}>
+        {reward.value && <div style={{ fontWeight: 700 }}>{reward.value}</div>}
+        {reward.description && <div style={{ opacity: 0.85 }}>{reward.description}</div>}
+        <button type="button" onClick={copy}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', boxSizing: 'border-box', marginTop: 9, border: `1.5px dashed ${brand}88`, borderRadius: 10, padding: '8px 12px', background: 'transparent', color: C.ink, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '.06em', cursor: 'pointer' }}>
+          <span>{reward.code}</span>
+          <span style={{ fontSize: 11, color: brand, fontFamily: 'inherit', letterSpacing: '.02em' }}>{copied ? (T.copied || 'Copied ✓') : (T.tapCopy || 'Tap to copy')}</span>
+        </button>
+        <div style={{ fontSize: 11, opacity: 0.65, marginTop: 7 }}>
+          {(rules ? `${rules} · ` : '') + (T.onePerFan || 'Applied at checkout · 1 per fan')}
+          {reward.termsUrl ? <> · <a href={reward.termsUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{T.terms || 'T&Cs'}</a></> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Quick-nav buttons (per-site nav styles: top strip / + menu / pills). One
 // icon + short label per page type; the button list itself comes from boot.nav.
@@ -328,6 +366,7 @@ export default function FanOwlEmbedPage() {
                 <button type="button" style={{ ...S.cta, background: brand }} onClick={() => goTo(m.nav)}>{T.takeMe}</button>
               </div>
             )}
+            {m.reward && !m.streaming && <RewardCard reward={m.reward} brand={brand} C={C} T={T} />}
           </div>
         ))}
         {navArrived && boot.page && (

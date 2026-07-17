@@ -82,6 +82,18 @@ test('grant engine: eligibility, one-per-fan idempotency, stock exhaustion', asy
   assert.equal(counts.available, 0); assert.equal(counts.issued, 3); assert.equal(counts.granted, 3);
 });
 
+test('issued-codes audit: grants listed per pool, tenant-guarded', async () => {
+  const list = (await app.req('GET', `/api/admin/entities/${entity.id}/loyalty/pools`, { as: admin })).body;
+  const poolId = list.pools[0].id;
+  const r = (await app.req('GET', `/api/admin/entities/${entity.id}/loyalty/pools/${poolId}/grants`, { as: admin })).body;
+  assert.equal(r.grants.length, 3); // the three grants from the previous test
+  assert.match(r.grants[0].code, /^VIP-/);
+  assert.equal(r.grants[0].redeemedAt, ''); // not tracked yet
+  // Wrong entity in the URL can't read another client's grants.
+  assert.equal((await app.req('GET', `/api/admin/entities/${other.id}/loyalty/pools/${poolId}/grants`, { as: admin })).status, 404);
+  assert.equal((await app.req('GET', `/api/my/loyalty/${entity.id}/pools/${poolId}/grants`, { as: outsider })).status, 403);
+});
+
 test('comps rule: ignore judges by PAID history only', async () => {
   await app.req('PUT', `/api/admin/entities/${entity.id}/loyalty/pools`, {
     as: admin,

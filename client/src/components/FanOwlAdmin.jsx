@@ -658,7 +658,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
       {tab === 'rewards' && (
         poolsDenied ? <p style={small}>🎁 Rewards ride the <strong>Loyalty & verification</strong> flag (Admin → Product → Flags → Fan Owl) — it's off for this client.</p>
           : !pools ? <p style={small}>Loading reward pools…</p> : (
-            <RewardPools pools={pools} setPools={setPools} suites={suites} isMobile={isMobile}
+            <RewardPools pools={pools} setPools={setPools} suites={suites} isMobile={isMobile} loyaltyBase={loyaltyBase}
               saving={poolsSaving} savedAt={poolsSavedAt} codesDraft={codesDraft} setCodesDraft={setCodesDraft} codesNote={codesNote}
               onSave={async () => {
                 setPoolsSaving(true);
@@ -719,8 +719,18 @@ const REWARD_KINDS_UI = [['discount', '💸 Discount'], ['upgrade', '⬆️ Upgr
 const TIER_OPTS = [['new', 'New (0 events)'], ['returning', 'Returning (1)'], ['loyal', 'Loyal (2–3)'], ['superfan', '👑 Superfan (4+)']];
 const SIGNAL_OPTS = [['group_buyer', 'Group buyer (4+)'], ['comp_guest', 'Comp guest'], ['lead_no_purchase', 'Registered, never bought'], ['preregistered', 'Preregistered']];
 
-function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
+function RewardPools({ pools, setPools, suites, isMobile, loyaltyBase, saving, savedAt, codesDraft, setCodesDraft, codesNote, onSave, onUpload }) {
   const setPool = (i, patch) => setPools(pools.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  // Issued-codes audit per pool: who got which code, their tier, and (once the
+  // ticketing redemption feed exists) whether it was redeemed.
+  const [grants, setGrants] = useState({}); // pool id → rows | 'loading'
+  const loadGrants = (poolId) => {
+    if (grants[poolId] && grants[poolId] !== 'error') { setGrants((g) => ({ ...g, [poolId]: undefined })); return; } // toggle closed
+    setGrants((g) => ({ ...g, [poolId]: 'loading' }));
+    fetch(`${loyaltyBase}/pools/${poolId}/grants`).then((r) => r.json())
+      .then((d) => setGrants((g) => ({ ...g, [poolId]: d.grants || [] })))
+      .catch(() => setGrants((g) => ({ ...g, [poolId]: 'error' })));
+  };
   const burn = (s = {}) => {
     const total = (s.available || 0) + (s.issued || 0);
     const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
@@ -834,9 +844,32 @@ function RewardPools({ pools, setPools, suites, isMobile, saving, savedAt, codes
             && <p style={{ ...small, color: 'var(--warn, #b3261e)', fontWeight: 700 }}>⚠️ No shared code set — the Owl can't offer this pool until you enter one and Save.</p>}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 180 }}>{burn(p.stock)}</div>
+            {p.id && String(p.id).length > 30 && (p.stock?.granted || 0) > 0
+              && <button type="button" style={btn} onClick={() => loadGrants(p.id)}>{grants[p.id] && grants[p.id] !== 'error' ? 'Hide issued codes' : `Issued codes (${p.stock.granted})`}</button>}
             <label style={{ fontSize: 12.5 }}><input type="checkbox" checked={p.active !== false} onChange={(e) => setPool(i, { active: e.target.checked })} /> Active</label>
             <button type="button" style={{ ...btn, color: 'var(--danger, #b3261e)' }} onClick={() => setPools(pools.filter((_, j) => j !== i))}>Delete pool</button>
           </div>
+          {grants[p.id] === 'loading' && <p style={small}>Loading issued codes…</p>}
+          {grants[p.id] === 'error' && <p style={small}>⚠️ Couldn’t load the issued codes — try again.</p>}
+          {Array.isArray(grants[p.id]) && (grants[p.id].length === 0 ? <p style={small}>No codes issued yet.</p> : (
+            <div style={{ overflowX: 'auto', marginTop: 8 }}>
+              <table style={{ borderCollapse: 'collapse', fontSize: 12.5, minWidth: 480 }}>
+                <thead><tr>{['Fan', 'Tier', 'Code', 'Via', 'When', 'Redeemed'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '5px 10px', borderBottom: '1px solid var(--hairline)', fontWeight: 700 }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {grants[p.id].map((g, gi) => (
+                    <tr key={gi}>
+                      <td style={{ padding: '5px 10px' }}>{g.name ? `${g.name} · ` : ''}{g.email}</td>
+                      <td style={{ padding: '5px 10px' }}>{{ new: '🆕', returning: '↻', loyal: '★', superfan: '👑' }[g.tier] || ''} {g.tier}</td>
+                      <td style={{ padding: '5px 10px', fontFamily: 'ui-monospace, monospace' }}>{g.code}</td>
+                      <td style={{ padding: '5px 10px' }}>{g.surface}</td>
+                      <td style={{ padding: '5px 10px', whiteSpace: 'nowrap' }}>{String(g.at || '').slice(0, 10)}</td>
+                      <td style={{ padding: '5px 10px' }} title="Redemption tracking arrives with the ticketing feed">{g.redeemedAt ? `✅ ${String(g.redeemedAt).slice(0, 10)}` : '— not yet tracked'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
         </div>
       ))}
       <button type="button" style={{ ...btn, marginTop: 10 }} onClick={() => setPools([...pools, { name: '', rewardKind: 'discount', valueLabel: '', target: { tiers: [], signals: [] }, rules: { comps: 'count' }, mode: 'unique', active: true, stock: {} }])}>+ New pool</button>
