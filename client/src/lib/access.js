@@ -28,6 +28,7 @@ export const PERMS = {
   CAMPAIGNS_VIEW: 'campaigns.view',
   CAMPAIGNS_APPROVE: 'campaigns.approve',
   DIGESTS_MANAGE: 'digests.manage',
+  REPORTS_MANAGE: 'reports.manage',
   SETTLEMENTS_VIEW: 'settlements.view',
   SETTLEMENTS_MANAGE: 'settlements.manage',
   BRANDING_MANAGE: 'branding.manage',

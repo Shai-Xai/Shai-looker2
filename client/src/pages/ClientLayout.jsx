@@ -108,6 +108,7 @@ export default function ClientLayout() {
   const onSettlements = location.pathname.startsWith('/settlements');
   const onInbox = location.pathname.startsWith('/inbox');
   const onDigests = location.pathname.startsWith('/digests');
+  const onReports = location.pathname.startsWith('/reports');
   const onProduct = location.pathname.startsWith('/product');
   const onJourney = location.pathname.startsWith('/journey');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
@@ -582,6 +583,17 @@ export default function ClientLayout() {
             <span style={ellip}>Digests</span>
           </button>
           )}
+          {!opsOnly && fl('reports') && can(PERMS.REPORTS_MANAGE) && (
+          <button
+            ref={onReports ? activeRef : null}
+            className={`nav-row${onReports ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onReports ? 600 : 500 }}
+            onClick={() => { if (!onReports) vtNavigate(navigate, '/reports'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📑</span>
+            <span style={ellip}>Reports</span>
+          </button>
+          )}
           {!opsOnly && fl('settlements') && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
           <button
             ref={onSettlements ? activeRef : null}
@@ -819,6 +831,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗓</span>
                     <span style={ellip}>Digests</span>
+                  </button>
+                  )}
+                  {!opsOnly && fl('reports') && can(PERMS.REPORTS_MANAGE) && (
+                  <button
+                    className={`nav-row${onReports ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onReports ? 700 : 500 }}
+                    onClick={() => { if (!onReports) vtNavigate(navigate, '/reports'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📑</span>
+                    <span style={ellip}>Reports</span>
                   </button>
                   )}
                   {!opsOnly && fl('settlements') && can(PERMS.SETTLEMENTS_VIEW) && (visibleSettlements.length > 0 || isAdmin) && (
