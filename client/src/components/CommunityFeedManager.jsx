@@ -145,6 +145,20 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [media, setMedia] = useState([]); // [{id, kind, url, mime}]
   const [busy, setBusy] = useState(false);
   const [publishNow, setPublishNow] = useState(true);
+  // Direct-to-cloud uploads (Cloudflare R2 via presigned PUT) when the server
+  // has SOCIAL_S3_* configured — media bytes skip Pulse entirely. Falls back
+  // to the base64→Pulse-disk path when unconfigured or blocked (e.g. CORS).
+  const [direct, setDirect] = useState(false);
+  useEffect(() => {
+    api.socialMediaConfig(scope, entityId).then((c) => setDirect(!!c.direct)).catch(() => setDirect(false));
+  }, [scope, entityId]);
+
+  const directUpload = async (blobOrFile, name, mime, dims) => {
+    const pre = await api.socialPresignMedia(scope, entityId, { name, mime });
+    const put = await fetch(pre.uploadUrl, { method: 'PUT', headers: pre.headers, body: blobOrFile });
+    if (!put.ok) throw new Error(`Cloud upload failed (${put.status})`);
+    return { kind: pre.kind, url: pre.publicUrl, mime, ...dims };
+  };
 
   // Images are normalised IN THE BROWSER before upload: decoded (Safari also
   // decodes iPhone HEIC here), downscaled to ≤1920px and re-encoded as JPEG.
@@ -181,19 +195,30 @@ function Composer({ communities, onCreate, scope, entityId }) {
     e.target.value = '';
     setBusy(true);
     try {
-      let payload;
-      let dims = {};
+      // Images: always normalised (HEIC→JPEG, ≤1920px) whichever path uploads.
+      let blob = f, name = f.name, mime = f.type, dims = {};
       if (f.type.startsWith('image/')) {
         const norm = await normaliseImage(f);
         if (!norm) throw new Error('That image couldn’t be read in this browser — try a JPG/PNG export of it.');
+        blob = norm.blob;
         dims = { width: norm.width, height: norm.height };
-        payload = { name: f.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg', mime: 'image/jpeg', data: await toBase64(norm.blob) };
-      } else {
-        if (f.size > 3_500_000) throw new Error('Videos over ~3.5MB need the direct-to-storage upload (not configured yet) — use a short clip for now.');
-        payload = { name: f.name, mime: f.type, data: await toBase64(f) };
+        name = f.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
+        mime = 'image/jpeg';
       }
-      const m = await api.socialUploadMedia(scope, entityId, payload);
-      setMedia((list) => [...list, { ...m, ...dims }]);
+      let item = null;
+      if (direct) {
+        try { item = await directUpload(blob, name, mime, dims); }
+        catch (err) { console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
+      }
+      if (!item) {
+        if (!mime.startsWith('image/') && blob.size > 3_500_000) {
+          throw new Error(direct
+            ? 'The cloud upload failed and this video is too big for the fallback — try again in a moment.'
+            : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
+        }
+        item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
+      }
+      setMedia((list) => [...list, item]);
     } catch (err) {
       alert(err.message || 'Upload failed');
     } finally {
@@ -224,8 +249,8 @@ function Composer({ communities, onCreate, scope, entityId }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ ...mini, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }}>
-          📷 Add media
+        <label style={{ ...mini, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }} title={direct ? 'Uploads go direct to cloud storage (R2)' : 'Uploads go via Pulse (images auto-optimised; videos capped until R2 is configured)'}>
+          {direct ? '📷☁️ Add media' : '📷 Add media'}
           <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={pickFile} />
         </label>
         <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
