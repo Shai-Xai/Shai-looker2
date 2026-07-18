@@ -23,9 +23,11 @@
 // bytes never transit Pulse — that is the production path; disk is the dev path.
 //
 // Three surfaces (surveys.js precedent):
-//   • PUBLIC app-facing /api/app/social/... — no auth (a fan's phone holds no
-//     secret yet; Howler-JWT verification is the planned hardening), protected
-//     by rate limits + strict validation. Only PUBLISHED posts ever leave.
+//   • App-facing /api/app/social/... — public reads (global feed, discovery,
+//     public communities, media) stay anonymous + rate-limited; anything
+//     identity-bearing (joins, members-only feeds) requires the app's Howler
+//     JWT, verified by introspection (see block below). Only PUBLISHED posts
+//     ever leave.
 //   • Admin /api/admin/entities/:id/social/... — Howler staff manage any client's.
 //   • Client self-service /api/my/social/... — entity-scoped via campaign perms
 //     (content sits with the campaign team): campaigns.view → read,
@@ -40,6 +42,54 @@ const fs = require('fs');
 const path = require('path');
 const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags'); // per-client gate: `community` (default OFF, beta)
+
+// ── Howler-JWT verification (contract v1) ────────────────────────────────────
+// The app proves who it is with its existing Howler login JWT
+// (Authorization: Bearer <token>). Pulse holds no signing secret, so it
+// INTROSPECTS instead: asks the Howler GraphQL backend "who is this token?"
+// ({ user { id } }) — production first, then staging (same backend list the
+// surveys module uses) — and caches the verdict. Anything identity-bearing
+// (joins, members-only feeds) runs on the VERIFIED id; a caller-supplied
+// howlerUserId is never trusted. Public reads (global feed, discovery,
+// public-community feeds, media) stay anonymous by design — they're public
+// content and must stay CDN-cacheable.
+const HOWLER_GQLS = (process.env.HOWLER_GRAPHQL_URLS
+  || 'production=https://api.howlerapp.com/api/v6/graphql,staging=https://www.howlerstaging.co.za/api/v6/graphql')
+  .split(',').map((s) => { const [source, ...u] = s.split('='); return { source: source.trim(), url: u.join('=').trim() }; });
+
+async function introspectOnBackend(url, token) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(url, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query: '{ user { id } }' }),
+    });
+    const gid = ((await r.json()) || {}).data?.user?.id || '';   // "gid://howler/User/661779"
+    const id = String(gid).split('/').pop();
+    return /^\d+$/.test(id) ? { id } : null;
+  } finally { clearTimeout(t); }
+}
+
+// token → { user, at } (positive, 10 min) or { neg: true, at } (negative, 60 s).
+const TOKEN_CACHE = new Map();
+const TOKEN_TTL_POS = 10 * 60_000, TOKEN_TTL_NEG = 60_000, TOKEN_CACHE_MAX = 2000;
+async function defaultVerifyAppToken(token) {
+  const hit = TOKEN_CACHE.get(token);
+  if (hit && Date.now() - hit.at < (hit.neg ? TOKEN_TTL_NEG : TOKEN_TTL_POS)) return hit.neg ? null : hit.user;
+  let user = null, failures = 0, lastErr = null;
+  for (const { url } of HOWLER_GQLS) {
+    try { user = await introspectOnBackend(url, token); if (user) break; }
+    catch (e) { failures += 1; lastErr = e; }
+  }
+  // Every backend unreachable → we cannot KNOW the token is bad; fail closed
+  // with a retryable error rather than caching a false negative.
+  if (!user && failures >= HOWLER_GQLS.length) throw lastErr || new Error('token introspection failed');
+  if (TOKEN_CACHE.size >= TOKEN_CACHE_MAX) TOKEN_CACHE.delete(TOKEN_CACHE.keys().next().value);
+  TOKEN_CACHE.set(token, user ? { user, at: Date.now() } : { neg: true, at: Date.now() });
+  return user;
+}
 
 const COMMUNITY_TYPES = ['organiser', 'event'];
 const VISIBILITIES = ['public', 'members'];
@@ -88,7 +138,7 @@ function presignPut({ key, expires = 900, nowDate = new Date() }) {
   return `https://${host}${pathName}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
-function mount(app, { db, auth, rateLimit }) {
+function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToken }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -371,6 +421,19 @@ function mount(app, { db, auth, rateLimit }) {
   const joinLimit = rateLimit({ windowMs: 10 * 60_000, max: 30, by: 'ip', scope: 'social_join' });
   const gone = (res) => res.status(404).json({ error: 'Not available' });
 
+  // Resolve the verified Howler user for a request, or throw. 401 = no/bad
+  // token (log in again); 503 = the Howler backend couldn't be reached to
+  // verify (retryable — never treated as "invalid token").
+  async function requireAppUser(req) {
+    const m = String(req.headers?.authorization || '').match(/^Bearer\s+(.+)$/i);
+    if (!m) throw new HttpError(401, 'Log in to the Howler app to do this');
+    let user;
+    try { user = await verifyAppToken(m[1]); }
+    catch { throw new HttpError(503, 'Couldn’t verify your session right now — try again in a moment'); }
+    if (!user) throw new HttpError(401, 'Your session has expired — log in to the Howler app again');
+    return user;
+  }
+
   // Published feed for one community (visible only when its entity's flag is on).
   function communityFeed(c, { limit, before }) {
     const rows = before
@@ -388,7 +451,7 @@ function mount(app, { db, auth, rateLimit }) {
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' ORDER BY published_at DESC LIMIT ?").all(limit);
     const posts = rows.filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id)));
-    res.json({ contractVersion: 0, posts, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
+    res.json({ contractVersion: 1, posts, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
   }));
 
   // Community discovery — by Howler eventId, or the active set for an entity.
@@ -401,39 +464,38 @@ function mount(app, { db, auth, rateLimit }) {
     else if (entityId) rows = sql.prepare("SELECT * FROM social_feed_communities WHERE entity_id=? AND status='active'").all(entityId);
     else throw new HttpError(400, 'eventId or entityId required');
     rows = rows.filter((r) => flagOn(r.entity_id));
-    res.json({ contractVersion: 0, communities: rows.map((r) => communityRow(r, { memberCount: memberCount(r.id) })) });
+    res.json({ contractVersion: 1, communities: rows.map((r) => communityRow(r, { memberCount: memberCount(r.id) })) });
   }));
 
-  // One community's feed. `members` visibility requires membership — asserted on
-  // the caller-supplied howlerUserId for now; Howler-JWT verification is the
-  // planned hardening before this carries anything sensitive (contract §5).
+  // One community's feed. `members` visibility requires a VERIFIED member —
+  // the caller's Howler JWT is introspected; a howlerUserId param is ignored.
   app.get('/api/app/social/communities/:id/feed', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const c = getCommunity(req.params.id);
     if (!c || c.status !== 'active' || !flagOn(c.entity_id)) return gone(res);
-    if (c.visibility === 'members' && !isMember(c.id, String(req.query.howlerUserId || ''))) {
-      throw new HttpError(403, 'Join this community to see its feed');
+    if (c.visibility === 'members') {
+      const user = await requireAppUser(req);
+      if (!isMember(c.id, user.id)) throw new HttpError(403, 'Join this community to see its feed');
     }
     const page = pageArgs(req.query);
     const posts = communityFeed(c, page);
-    res.json({ contractVersion: 0, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
+    res.json({ contractVersion: 1, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
   }));
 
-  // Explicit join / leave from the app.
+  // Explicit join / leave from the app — identity comes from the verified JWT.
   app.post('/api/app/social/communities/:id/join', joinLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const c = getCommunity(req.params.id);
     if (!c || c.status !== 'active' || !flagOn(c.entity_id)) return gone(res);
-    const howlerUserId = String((req.body || {}).howlerUserId || '').trim();
-    if (!/^\d+$/.test(howlerUserId)) throw new HttpError(400, 'A numeric howlerUserId is required');
+    const user = await requireAppUser(req);
     sql.prepare("INSERT OR IGNORE INTO social_feed_members (community_id, howler_user_id, source, created_at) VALUES (?,?,'join',?)")
-      .run(c.id, howlerUserId, now());
+      .run(c.id, user.id, now());
     res.json({ ok: true, memberCount: memberCount(c.id) });
   }));
   app.post('/api/app/social/communities/:id/leave', joinLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
-    const howlerUserId = String((req.body || {}).howlerUserId || '').trim();
-    sql.prepare('DELETE FROM social_feed_members WHERE community_id=? AND howler_user_id=?').run(req.params.id, howlerUserId);
+    const user = await requireAppUser(req);
+    sql.prepare('DELETE FROM social_feed_members WHERE community_id=? AND howler_user_id=?').run(req.params.id, user.id);
     res.json({ ok: true });
   }));
 
@@ -451,4 +513,4 @@ function mount(app, { db, auth, rateLimit }) {
   return { listCommunities, createCommunity, createPost, updatePost, saveMedia };
 }
 
-module.exports = { mount, _presignPut: presignPut };
+module.exports = { mount, _presignPut: presignPut, _verifyAppToken: defaultVerifyAppToken };
