@@ -50,7 +50,9 @@ const REGISTRY = [
     { key: 'engage.surveys', name: 'Surveys', def: false, beta: true, desc: 'Post-event fan surveys answered in the Howler app, results back in Pulse. OFF hides the tab AND stops the app being served this client\'s surveys.' },
   ] },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
-  { key: 'community', emoji: '📰', name: 'Community feed', def: false, beta: true, desc: 'Howler-native communities & feed posts served to the app from Pulse (Social+ replacement spike). OFF hides the composer AND drops this client\'s posts/communities from the app feed.' },
+  { key: 'community', emoji: '📰', name: 'Community feed', def: false, beta: true, desc: 'Howler-native communities & feed posts served to the app from Pulse (Social+ replacement spike). OFF hides the composer AND drops this client\'s posts/communities from the app feed.', kids: [
+    { key: 'community.chat', name: 'Event chat', def: true, beta: true, desc: 'Per-event chat channels + fan groups (mini WhatsApp). OFF hides the Channels manager AND drops this client\'s channels from the app.' },
+  ] },
   { key: 'appanalytics', emoji: '📱', name: 'App analytics', def: false, beta: true, desc: 'Howler-app engagement on the client\'s events, live from PostHog — views, CTAs, purchases, app users.', kids: [
     { key: 'appanalytics.socialplus', name: 'Community (Social+)', def: true, beta: true, desc: 'The client\'s in-app communities & chats from Social+ — members, messages, posts & reactions, as a tab on the App page. Needs communities linked to the client.' },
   ] },
@@ -136,6 +138,7 @@ const GATES = [
   ['/api/my/app-tickets', 'appanalytics'],
   ['/api/my/socialplus', 'appanalytics.socialplus'],
   ['/api/my/social', 'community'],
+  ['/api/my/social/chat', 'community.chat'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────

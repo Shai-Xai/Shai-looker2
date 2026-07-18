@@ -725,6 +725,20 @@ export const api = {
   socialAllComments: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/comments` : `/api/my/social/comments?entityId=${encodeURIComponent(entityId)}`).then(json),
   socialReplyComment: (scope, entityId, id, text) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/social/comments/${id}` : `/api/my/social/comments/${id}`) + '/reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? { text } : { text, entityId }) }).then(json),
   socialUpdateCommunity: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/communities/${id}` : `/api/my/social/communities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? patch : { ...patch, entityId }) }).then(json),
+
+  // Event chat channels (Social+ replacement phase 2) — docs/specs/SOCIAL_CONTRACT.md §chat
+  chatBase: (scope, entityId) => (scope === 'admin' ? `/api/admin/entities/${entityId}/social/chat` : '/api/my/social/chat'),
+  chatQ: (scope, entityId, extra = {}) => new URLSearchParams(scope === 'admin' ? extra : { entityId, ...extra }).toString(),
+  chatChannels: (scope, entityId, eventId) => fetch(`${api.chatBase(scope, entityId)}/channels?${api.chatQ(scope, entityId, eventId ? { eventId } : {})}`).then(json),
+  chatCreateChannel: (scope, entityId, body) => fetch(`${api.chatBase(scope, entityId)}/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  chatUpdateChannel: (scope, entityId, id, patch) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? patch : { ...patch, entityId }) }).then(json),
+  chatCloseChannel: (scope, entityId, id) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}/close`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? {} : { entityId }) }).then(json),
+  chatChannelMessages: (scope, entityId, id) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}/messages?${api.chatQ(scope, entityId)}`).then(json),
+  chatSendMessage: (scope, entityId, id, body) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  chatAddMember: (scope, entityId, id, body) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  chatSyncSegment: (scope, entityId, id) => fetch(`${api.chatBase(scope, entityId)}/channels/${id}/sync-segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? {} : { entityId }) }).then(json),
+  chatBroadcast: (scope, entityId, body) => fetch(`${api.chatBase(scope, entityId)}/broadcast`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  chatModerate: (scope, entityId, id, action) => fetch(`${api.chatBase(scope, entityId)}/messages/${id}/${action}?${api.chatQ(scope, entityId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? {} : { entityId }) }).then(json),
   socialPresignMedia: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media/presign` : '/api/my/social/media/presign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.

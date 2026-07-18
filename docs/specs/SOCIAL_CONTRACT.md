@@ -168,3 +168,37 @@ Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
   ring-fenced like `members` communities.
 - Media moves fully to R2 + image variants + HLS video per the investigation
   doc §5; the disk path remains dev-only.
+
+## 6. Event chat (phase 2 — mockup approved 2026-07-18)
+
+Owner: `server/chat.js` · flag `community.chat` (kid of `community`) · kill
+switch `social_chat_enabled` · every route requires the verified Howler JWT.
+
+**Channels** belong to an entity + Howler event. `kind` official|group;
+`access` public | segment (Pulse segment / ticket types — locked responses say
+`lockedReason: "tickets"` so the app shows a GET-TICKETS CTA) | manual
+(admin-added) | invite (fan groups); `mode` chat | broadcast (organiser posts,
+fans react/reply — `canPost:false` in the messages response).
+
+**Fan groups**: `POST /api/app/social/chat/channels {eventId,name}` → creator
+becomes owner, gets `inviteCode`. `POST /api/app/social/chat/join {code}` joins
+THAT GROUP ONLY (Shai's rule — other channels still check their own access).
+Owner: `remove-member`, `revoke-link` (regenerates the code, killing old
+copies). Organiser can `close` any group from the management surfaces.
+
+**Messages**: `GET /channels/:id/messages?after=<iso>` (poll; strictly
+monotonic timestamps), `POST` `{text, parentId?}` (one-level replies),
+`DELETE /messages/:id` (author, soft — `deleted:true` placeholder),
+`react`/`unreact` `{emoji}` (multi-emoji, aggregated `{emoji,count,mine}`),
+`report`, `POST /channels/:id/read` (clears `unread`, which rides the channel
+list). Organiser messages carry `authorType:"organiser"` and may carry a CTA
+(`ctaLabel` + `ctaDestination`, same vocabulary as posts) → clickable button
+in chat.
+
+**Management** (admin + /api/my, campaign perms): channel CRUD + `close`,
+per-channel messages (moderation: `pin/unpin/delete`), `members` add,
+`sync-segment` (resolver injectable; reports `pending` until segments×appMatch
+wiring lands), `broadcast {eventId,text,pin,push,ctaLabel?,ctaDestination?}` →
+one organiser message into every active OFFICIAL channel (fan groups
+excluded). `push` is a PER-MESSAGE flag — recorded now, delivery activates
+with the Firebase key.
