@@ -1141,6 +1141,12 @@ self-service), flag-gated per client (`community`, default off).
 - **In the app** — served to the Howler app over a public read API
   (docs/specs/SOCIAL_CONTRACT.md); fans join event communities explicitly today,
   ticket-holder auto-membership is next.
+- **Event chat channels** 🧪 — a mini WhatsApp per event, run from Pulse:
+  organiser channels (public / ticket-segment-gated / manual, open-chat or
+  broadcast mode), fan-made groups with shareable invite links, reactions,
+  replies, pins, reports, organiser CTA buttons in messages, and one-click
+  broadcast to every channel with per-message push flags (delivery activates
+  with the Firebase key).
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1188,6 +1194,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-18** — **💬 Event chat channels (Social+ replacement phase 2)** 🧪: per-event
+  chat run from Pulse (Engage → Community → Channels) — organiser channels with
+  public / segment(ticket)-gated / manual access and broadcast mode, fan-made groups
+  joined via invite links (ring-fenced: a link joins that group only), WhatsApp-style
+  reactions/replies/pins/reports, organiser CTA buttons in messages, broadcast-to-all
+  with per-message push flags. Fan side live in the app's Event Chat (Demo) screen.
 - **2026-07-18** — **📰 Community feed (Social+ replacement spike)** 🧪: Howler-native
   communities + feed posts, managed from Engage → Community in Pulse (dual-surface)
   and served to the Howler app over a new public API (docs/specs/SOCIAL_CONTRACT.md).
