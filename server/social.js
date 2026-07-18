@@ -242,12 +242,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     );
   `);
 
-  // CTA button columns (added after first deploy — ALTER for existing DBs).
+  // Columns added after first deploy — ALTER for existing DBs.
   try {
     const cols = sql.prepare('PRAGMA table_info(social_feed_posts)').all().map((c) => c.name);
     if (!cols.includes('cta_label')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_label TEXT NOT NULL DEFAULT ''");
     if (!cols.includes('cta_destination')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_destination TEXT NOT NULL DEFAULT ''");
-  } catch (e) { console.error('[social] cta migration skipped:', e.message); }
+    // Per-community comment settings: images + links in fan comments (both
+    // default OFF — the organiser opts in per community).
+    const ccols = sql.prepare('PRAGMA table_info(social_feed_communities)').all().map((c) => c.name);
+    if (!ccols.includes('allow_comment_images')) sql.exec('ALTER TABLE social_feed_communities ADD COLUMN allow_comment_images INTEGER NOT NULL DEFAULT 0');
+    if (!ccols.includes('allow_comment_links')) sql.exec('ALTER TABLE social_feed_communities ADD COLUMN allow_comment_links INTEGER NOT NULL DEFAULT 0');
+    // Comment threading (organiser replies) + media + author kind.
+    const mcols = sql.prepare('PRAGMA table_info(social_feed_comments)').all().map((c) => c.name);
+    if (!mcols.includes('parent_id')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
+    if (!mcols.includes('author_type')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN author_type TEXT NOT NULL DEFAULT 'fan'");
+    if (!mcols.includes('media')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN media TEXT NOT NULL DEFAULT '[]'");
+  } catch (e) { console.error('[social] column migrations skipped:', e.message); }
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'community'); } catch { return false; } };
@@ -258,7 +268,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     const out = {
       id: r.id, entityId: r.entity_id, type: r.type, name: r.name, description: r.description,
       visibility: r.visibility, status: r.status, parentId: r.parent_id || null,
-      eventId: r.event_id || null, suiteId: r.suite_id || null, createdAt: r.created_at,
+      eventId: r.event_id || null, suiteId: r.suite_id || null,
+      allowCommentImages: !!r.allow_comment_images, allowCommentLinks: !!r.allow_comment_links,
+      createdAt: r.created_at,
     };
     if (memberCount != null) out.memberCount = memberCount;
     return out;
@@ -267,13 +279,24 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   const commentCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_comments WHERE post_id=?').get(postId).n;
   function commentRow(r, { viewerId = null } = {}) {
     return {
-      id: r.id, postId: r.post_id,
+      id: r.id, postId: r.post_id, parentCommentId: r.parent_id || null,
+      authorType: r.author_type || 'fan',
       author: { id: r.howler_user_id, name: r.author_name || 'Howler fan' },
-      text: r.body, reported: !!r.reported,
-      ...(viewerId ? { isOwner: r.howler_user_id === String(viewerId) } : {}),
+      text: r.body, media: mediaList(r.media), reported: !!r.reported,
+      ...(viewerId ? { isOwner: r.author_type !== 'organiser' && r.howler_user_id === String(viewerId) } : {}),
       createdAt: r.created_at,
     };
   }
+  // Top-level comments with organiser/fan replies nested one level deep.
+  function nestComments(rows, { viewerId = null } = {}) {
+    const byParent = {};
+    for (const r of rows.filter((r) => r.parent_id)) (byParent[r.parent_id] = byParent[r.parent_id] || []).push(r);
+    return rows.filter((r) => !r.parent_id).map((r) => ({
+      ...commentRow(r, { viewerId }),
+      replies: (byParent[r.id] || []).map((x) => commentRow(x, { viewerId })),
+    }));
+  }
+  const URL_RE = /(https?:\/\/|www\.)\S+/i;
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
   function postRow(r, community, { viewerId = null } = {}) {
@@ -329,6 +352,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     }
     if (b.suiteId !== undefined) out.suite_id = String(b.suiteId || '');
     if (b.parentId !== undefined) out.parent_id = String(b.parentId || '');
+    if (b.allowCommentImages !== undefined) out.allow_comment_images = b.allowCommentImages ? 1 : 0;
+    if (b.allowCommentLinks !== undefined) out.allow_comment_links = b.allowCommentLinks ? 1 : 0;
     return out;
   }
   function validMediaItem(m) {
@@ -449,7 +474,28 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   function moderateDeleteComment(entityId, commentId) {
     const r = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(commentId);
     if (!r || r.entity_id !== entityId) throw new HttpError(404, 'Comment not found');
-    sql.prepare('DELETE FROM social_feed_comments WHERE id=?').run(commentId);
+    sql.prepare('DELETE FROM social_feed_comments WHERE id=? OR parent_id=?').run(commentId, commentId);
+  }
+  // The organiser's moderation inbox: EVERY comment across their posts,
+  // reported first, with post context for each.
+  function listAllComments(entityId) {
+    const rows = sql.prepare('SELECT * FROM social_feed_comments WHERE entity_id=? ORDER BY reported DESC, created_at DESC LIMIT 500').all(entityId);
+    const postCache = {};
+    return rows.map((r) => {
+      const p = postCache[r.post_id] ||= sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(r.post_id) || {};
+      return { ...commentRow(r), post: { id: p.id || r.post_id, body: String(p.body || '').slice(0, 80), communityName: getCommunity(p.community_id || '')?.name || '' } };
+    });
+  }
+  // Organiser reply — threads under the fan's comment, authored as the brand.
+  function organiserReply(entityId, commentId, text, authorName) {
+    const parent = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(commentId);
+    if (!parent || parent.entity_id !== entityId) throw new HttpError(404, 'Comment not found');
+    const clean = String(text || '').trim().slice(0, 1000);
+    if (!clean) throw new HttpError(400, 'Write a reply first');
+    const id = `cmt_${uuid().slice(0, 12)}`;
+    sql.prepare("INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, author_type, body, parent_id, created_at) VALUES (?,?,?,?,?,'organiser',?,?,?)")
+      .run(id, parent.post_id, entityId, '', authorName, clean, parent.parent_id || parent.id, now());
+    return commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id));
   }
   // Base64 media → persistent disk (dev path). Returns the served URL.
   function saveMedia(entityId, { name, mime, data }) {
@@ -492,6 +538,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${A}/posts/:id/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listComments(req.params.entityId, req.params.id) })));
+  app.get(`${A}/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listAllComments(req.params.entityId) })));
+  app.post(`${A}/comments/:id/reply`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(organiserReply(req.params.entityId, req.params.id, (req.body || {}).text, db.getEntity(req.params.entityId)?.name || 'Organiser'))));
   app.delete(`${A}/comments/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { moderateDeleteComment(req.params.entityId, req.params.id); res.json({ ok: true }); }));
 
   // ── CLIENT self-service surface (flag-gated at /api/my/social via flags GATES) ──
@@ -510,6 +558,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${M}/posts/:id/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listComments(eid(req), req.params.id) })));
+  app.get(`${M}/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listAllComments(eid(req)) })));
+  app.post(`${M}/comments/:id/reply`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(organiserReply(eid(req), req.params.id, (req.body || {}).text, db.getEntity(eid(req))?.name || 'Organiser'))));
   app.delete(`${M}/comments/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { moderateDeleteComment(eid(req), req.params.id); res.json({ ok: true }); }));
 
   // ── PUBLIC app-facing surface ──
@@ -634,25 +684,51 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
       viewer = await optionalAppUser(req);
     }
     const { limit, before } = pageArgs(req.query);
-    const rows = before
-      ? sql.prepare('SELECT * FROM social_feed_comments WHERE post_id=? AND created_at<? ORDER BY created_at DESC LIMIT ?').all(p.id, before, limit)
-      : sql.prepare('SELECT * FROM social_feed_comments WHERE post_id=? ORDER BY created_at DESC LIMIT ?').all(p.id, limit);
+    // Page over TOP-LEVEL comments; replies ride nested under their parent.
+    const top = before
+      ? sql.prepare("SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' AND created_at<? ORDER BY created_at DESC LIMIT ?").all(p.id, before, limit)
+      : sql.prepare("SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' ORDER BY created_at DESC LIMIT ?").all(p.id, limit);
+    const replies = top.length
+      ? sql.prepare(`SELECT * FROM social_feed_comments WHERE parent_id IN (${top.map(() => '?').join(',')})`).all(...top.map((r) => r.id))
+      : [];
     res.json({
       contractVersion: 1, commentCount: commentCount(p.id),
-      comments: rows.map((r) => commentRow(r, { viewerId: viewer?.id })),
-      nextCursor: rows.length === limit ? rows[rows.length - 1].created_at : null,
+      allowImages: !!c.allow_comment_images, allowLinks: !!c.allow_comment_links,
+      comments: nestComments([...top, ...replies], { viewerId: viewer?.id }),
+      nextCursor: top.length === limit ? top[top.length - 1].created_at : null,
     });
   }));
 
   app.post('/api/app/social/posts/:id/comments', commentLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const { user, post } = await reactablePost(req); // same visibility rules as liking
-    const text = String((req.body || {}).text || '').trim().slice(0, 1000);
-    if (!text) throw new HttpError(400, 'Write something first');
+    const community = getCommunity(post.community_id);
+    const body = req.body || {};
+    const text = String(body.text || '').trim().slice(0, 1000);
+    // Fan replies thread one level deep under a top-level comment on the same post.
+    let parentId = '';
+    if (body.parentCommentId) {
+      const parent = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(String(body.parentCommentId));
+      if (!parent || parent.post_id !== post.id) throw new HttpError(400, 'That comment isn’t on this post');
+      parentId = parent.parent_id || parent.id; // replying to a reply attaches to its top-level parent
+    }
+    // Links in comments are organiser-opt-in per community (anti-spam default).
+    if (text && URL_RE.test(text) && !community.allow_comment_links) {
+      throw new HttpError(400, 'Links aren’t allowed in comments here');
+    }
+    // Optional image — organiser-opt-in per community; stored via the normal
+    // media path (entity-scoped) and served like any other media.
+    let media = '[]';
+    if (body.imageData) {
+      if (!community.allow_comment_images) throw new HttpError(400, 'Photos aren’t allowed in comments here');
+      const saved = saveMedia(post.entity_id, { name: 'comment.jpg', mime: String(body.imageMime || 'image/jpeg'), data: body.imageData });
+      media = JSON.stringify([{ id: saved.id, kind: 'image', url: saved.url, mime: saved.mime }]);
+    }
+    if (!text && media === '[]') throw new HttpError(400, 'Write something first');
     const id = `cmt_${uuid().slice(0, 12)}`;
-    const name = (user.name || String((req.body || {}).displayName || '')).trim().slice(0, 80);
-    sql.prepare('INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, body, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id, post.id, post.entity_id, user.id, name, text, now());
+    const name = (user.name || String(body.displayName || '')).trim().slice(0, 80);
+    sql.prepare('INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, body, parent_id, media, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(id, post.id, post.entity_id, user.id, name, text, parentId, media, now());
     res.json(commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id), { viewerId: user.id }));
   }));
 
@@ -662,8 +738,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     const user = await requireAppUser(req);
     const r = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(String(req.params.id));
     if (!r) return gone(res);
-    if (r.howler_user_id !== String(user.id)) throw new HttpError(403, 'You can only delete your own comments');
-    sql.prepare('DELETE FROM social_feed_comments WHERE id=?').run(r.id);
+    if (r.author_type === 'organiser' || r.howler_user_id !== String(user.id)) throw new HttpError(403, 'You can only delete your own comments');
+    sql.prepare('DELETE FROM social_feed_comments WHERE id=? OR parent_id=?').run(r.id, r.id);
     res.json({ ok: true });
   }));
   app.post('/api/app/social/comments/:id/report', commentLimit, asyncHandler(async (req, res) => {

@@ -106,6 +106,19 @@ relative URLs against the Pulse base URL. `kind` is `image` or `video`; `width`/
 | `POST /api/app/social/posts/:id/react` (Bearer JWT) | Like a post (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": true }` |
 | `DELETE /api/app/social/posts/:id/react` (Bearer JWT) | Unlike (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": false }` |
 
+**Comment settings (per community, organiser-controlled, default OFF):**
+`allowCommentImages` / `allowCommentLinks` ride the community shape and the
+comments-list response (`allowImages`/`allowLinks`) so the app knows which
+buttons to show. Links off → comments containing URLs are refused; images off →
+`imageData` is refused. Comment create accepts optional `imageData` (base64) +
+`imageMime` (image/*, normal media caps) and optional `parentCommentId` — fan
+replies thread ONE level deep (replying to a reply attaches to its top-level
+parent). Organiser replies (`authorType: "organiser"`, authored as the brand
+name) are posted from the management surfaces: `POST .../comments/:id/reply`.
+The moderation inbox `GET .../comments` (admin + /api/my) lists EVERY comment
+across the client's posts — reported first, each with post context. Deleting a
+top-level comment removes its thread.
+
 **Comments** (first UGC): readable by whoever can see the post (anonymous for
 public/global posts, verified members otherwise); writing always needs a
 verified JWT. `POST /api/app/social/posts/:id/comments` `{ "text": "…", "displayName": "…" }`
