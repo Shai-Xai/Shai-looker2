@@ -112,6 +112,13 @@ Two upgrades the website can never have:
   docked above the app's bottom nav, with the deterministic `suggest`
   half-drawer payload the bar sites already get. Typing/tapping opens the sheet
   with the question pre-sent (`&ask=` fragment, already supported).
+- **Entry C (candidate, Shai 2026-07-18): the ⚡ morph.** The app's bottom-nav
+  lightning button becomes the assistant: tap → the bolt crossfades to the Owl
+  (the nav's `_AnimatedActionButton` already crossfades icon types) and the ask
+  input expands leftwards in the same glass bar, replacing Home + the tab pill;
+  the lightning contextual actions (Buy now / Outstanding actions with badge /
+  Checkout) ride above the input as chips while morphed. App-side only — no
+  further Pulse work; the `suggest` payload + `&ask=` boot cover it.
 
 ### Phase 3 — two optional deepenings (decide later, in either order)
 
