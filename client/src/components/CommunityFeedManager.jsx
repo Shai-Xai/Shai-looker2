@@ -56,10 +56,22 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                   {c.type === 'event' ? `Event ${c.eventId}` : 'Organiser community'} · {VIS[c.visibility]} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}
                 </p>
               </div>
+              {/* Per-community comment settings — organiser opt-ins, off by default. */}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!c.allowCommentImages} onChange={(e) => act(api.socialUpdateCommunity(scope, entityId, c.id, { allowCommentImages: e.target.checked }))} /> 📷 photos in comments
+                </label>
+                <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!c.allowCommentLinks} onChange={(e) => act(api.socialUpdateCommunity(scope, entityId, c.id, { allowCommentLinks: e.target.checked }))} /> 🔗 links in comments
+                </label>
+              </div>
             </div>
           ))}
         </div>
       </section>
+
+      {/* ── Moderation inbox: every fan comment across all posts ── */}
+      {posts.length > 0 && <CommentsInbox scope={scope} entityId={entityId} onError={(m) => setError(m)} />}
 
       {/* ── Composer + feed ── */}
       <section>
@@ -307,12 +319,50 @@ function Composer({ communities, onCreate, scope, entityId }) {
   );
 }
 
-// Fan comments on a post — count, expandable list, and moderation delete.
-// Reported comments are flagged loudly so organisers deal with them first.
+// One comment row — shared by the per-post list and the moderation inbox.
+// Organiser replies get a brand badge; reported comments are flagged loudly.
+function CommentItem({ scope, entityId, comment, onChanged, onError, postContext }) {
+  const [replying, setReplying] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const c = comment;
+  const sendReply = () => api.socialReplyComment(scope, entityId, c.id, replyText)
+    .then(() => { setReplying(false); setReplyText(''); onChanged(); })
+    .catch((e) => onError(e.message || 'Reply failed'));
+  return (
+    <div style={{ background: c.reported ? 'rgba(198,40,40,0.07)' : 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '7px 10px', marginLeft: c.parentCommentId ? 22 : 0 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 12.5 }}>
+            <strong>{c.author.name}</strong>
+            {c.authorType === 'organiser' && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>🏟 organiser</span>}
+            {c.reported && <span style={pill('rgba(198,40,40,0.14)', '#c62828')}>⚠ reported</span>}
+            {postContext && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>on “{postContext.body || postContext.communityName}…”</span>}
+          </p>
+          {c.text && <p style={{ margin: '2px 0 0', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</p>}
+          {(c.media || []).map((m) => <img key={m.id} src={m.url} alt="" style={{ maxHeight: 90, borderRadius: 8, marginTop: 6 }} />)}
+        </div>
+        {!c.parentCommentId && c.authorType !== 'organiser' && (
+          <button style={tiny} title="Reply as the organiser" onClick={() => setReplying((v) => !v)}>↩</button>
+        )}
+        <button style={{ ...tiny, color: '#c62828' }} title="Delete comment"
+          onClick={() => window.confirm('Delete this comment?') && api.socialDeleteComment(scope, entityId, c.id).then(onChanged).catch((e) => onError(e.message || 'Delete failed'))}>🗑</button>
+      </div>
+      {replying && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <input style={{ ...input, fontSize: 12.5, padding: '6px 10px' }} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Reply as your brand…" onKeyDown={(e) => e.key === 'Enter' && replyText.trim() && sendReply()} />
+          <button style={{ ...mini, opacity: replyText.trim() ? 1 : 0.5 }} disabled={!replyText.trim()} onClick={sendReply}>Send</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Fan comments on a post — count, expandable list, replies + moderation.
 function PostComments({ scope, entityId, post, onError }) {
   const [open, setOpen] = useState(false);
   const [comments, setComments] = useState(null);
-  const count = comments ? comments.length : post.commentCount || 0;
+  const flat = comments ? comments.flatMap((c) => [c, ...(c.replies || [])]) : null;
+  const count = flat ? flat.length : post.commentCount || 0;
   const load = () => api.socialComments(scope, entityId, post.id).then((r) => setComments(r.comments || [])).catch(() => setComments([]));
   const toggle = () => { setOpen((v) => !v); if (!open && comments === null) load(); };
   if (!count && !open) return null;
@@ -321,25 +371,36 @@ function PostComments({ scope, entityId, post, onError }) {
       <button style={{ border: 'none', background: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--muted)', cursor: 'pointer' }} onClick={toggle}>
         💬 {count} comment{count === 1 ? '' : 's'} {open ? '▴' : '▾'}
       </button>
-      {open && comments && (
+      {open && flat && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {comments.map((c) => (
-            <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', background: c.reported ? 'rgba(198,40,40,0.07)' : 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '7px 10px' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: 12.5 }}>
-                  <strong>{c.author.name}</strong>
-                  {c.reported && <span style={pill('rgba(198,40,40,0.14)', '#c62828')}>⚠ reported</span>}
-                </p>
-                <p style={{ margin: '2px 0 0', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</p>
-              </div>
-              <button style={{ ...tiny, color: '#c62828' }} title="Delete comment"
-                onClick={() => window.confirm('Delete this fan comment?') && api.socialDeleteComment(scope, entityId, c.id).then(load).catch((e) => onError(e.message || 'Delete failed'))}>🗑</button>
-            </div>
-          ))}
-          {comments.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>No comments.</p>}
+          {flat.map((c) => <CommentItem key={c.id} scope={scope} entityId={entityId} comment={c} onChanged={load} onError={onError} />)}
+          {flat.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>No comments.</p>}
         </div>
       )}
     </div>
+  );
+}
+
+// The organiser's moderation inbox — every comment across all posts, reported
+// first, each with post context, reply and delete.
+function CommentsInbox({ scope, entityId, onError }) {
+  const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState(null);
+  const load = () => api.socialAllComments(scope, entityId).then((r) => setComments(r.comments || [])).catch(() => setComments([]));
+  const toggle = () => { setOpen((v) => !v); if (!open && comments === null) load(); };
+  const reported = comments ? comments.filter((c) => c.reported).length : 0;
+  return (
+    <section>
+      <button style={{ border: 'none', background: 'none', padding: 0, fontSize: 15, fontWeight: 750, color: 'var(--text)', cursor: 'pointer' }} onClick={toggle}>
+        💬 Comments inbox {comments ? `(${comments.length}${reported ? ` · ⚠ ${reported} reported` : ''})` : ''} {open ? '▴' : '▾'}
+      </button>
+      {open && comments && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          {comments.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>No fan comments yet.</p>}
+          {comments.map((c) => <CommentItem key={c.id} scope={scope} entityId={entityId} comment={c} onChanged={load} onError={onError} postContext={c.post} />)}
+        </div>
+      )}
+    </section>
   );
 }
 

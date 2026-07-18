@@ -350,3 +350,57 @@ test('comments: JWT-gated writes, ring-fenced reads, author + moderator delete, 
   const outsiderRead = await call('GET /api/app/social/posts/:id/comments', { params: { id: secret.id }, token: 'tok-662076' });
   assert.equal(outsiderRead.code, 403);
 });
+
+test('comment settings, images, links, organiser replies + moderation inbox', async () => {
+  const feed = await call('GET /api/app/social/feed', {});
+  const post = feed.body.posts.find((p) => p.body === 'Coming soon 👀');
+  const orgComm = (await call(`GET /api/admin/entities/:entityId/social/communities`, { user: admin, params: { entityId: entity.id } }))
+    .body.communities.find((c) => c.type === 'organiser');
+
+  // Defaults: links + images OFF → both refused with clear messages.
+  assert.equal(orgComm.allowCommentImages, false);
+  const linkBlocked = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-661779', body: { text: 'see https://spam.example' } });
+  assert.equal(linkBlocked.code, 400);
+  const imgBlocked = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-661779', body: { imageData: PNG_B64, imageMime: 'image/png' } });
+  assert.equal(imgBlocked.code, 400);
+
+  // Organiser flips the settings on → both work.
+  await call(`PUT /api/admin/entities/:entityId/social/communities/:id`, { user: admin, params: { entityId: entity.id, id: orgComm.id }, body: { allowCommentImages: true, allowCommentLinks: true } });
+  const withLink = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-661779', body: { text: 'tickets at https://howler.co.za', displayName: 'Shai' } });
+  assert.equal(withLink.code, 200);
+  const withImg = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-662076', body: { imageData: PNG_B64, imageMime: 'image/png', displayName: 'Fan Two' } });
+  assert.equal(withImg.code, 200);
+  assert.equal(withImg.body.media.length, 1);
+  assert.ok(withImg.body.media[0].url.startsWith('/api/app/social/media/'));
+
+  // The comments list reports the flags so the app knows to show the buttons.
+  const list = await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id } });
+  assert.equal(list.body.allowImages, true);
+
+  // Organiser reply threads under the fan comment, authored as the brand.
+  const reply = await call(`POST /api/admin/entities/:entityId/social/comments/:id/reply`, { user: admin, params: { entityId: entity.id, id: withLink.body.id }, body: { text: 'See you there! 🎉' } });
+  assert.equal(reply.code, 200);
+  assert.equal(reply.body.authorType, 'organiser');
+  assert.equal(reply.body.author.name, 'Social Org');
+  const nested = (await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id } }))
+    .body.comments.find((c) => c.id === withLink.body.id);
+  assert.equal(nested.replies.length, 1);
+  assert.equal(nested.replies[0].text, 'See you there! 🎉');
+
+  // Fan replying to the organiser's reply attaches to the top-level thread.
+  const fanReply = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-662076', body: { text: 'Can not wait', parentCommentId: reply.body.id, displayName: 'Fan Two' } });
+  assert.equal(fanReply.body.parentCommentId, withLink.body.id);
+
+  // Moderation inbox: all comments across posts, with post context.
+  const inbox = await call(`GET /api/admin/entities/:entityId/social/comments`, { user: admin, params: { entityId: entity.id } });
+  assert.ok(inbox.body.comments.length >= 4);
+  assert.ok(inbox.body.comments.every((c) => c.post && c.post.id));
+
+  // A fan cannot delete the organiser's reply; deleting the top-level comment
+  // takes its thread with it (moderator path).
+  assert.equal((await call('DELETE /api/app/social/comments/:id', { params: { id: reply.body.id }, token: 'tok-662076' })).code, 403);
+  await call(`DELETE /api/admin/entities/:entityId/social/comments/:id`, { user: admin, params: { entityId: entity.id, id: withLink.body.id } });
+  const after = await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id } });
+  assert.ok(!after.body.comments.some((c) => c.id === withLink.body.id));
+  assert.ok(!after.body.comments.some((c) => c.replies.some((x) => x.id === reply.body.id)));
+});
