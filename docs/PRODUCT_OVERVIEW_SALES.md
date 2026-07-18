@@ -1103,7 +1103,8 @@ self-service), flag-gated per client (`community`, default off).
 - **Communities** — organiser-level and per-event (event communities nest under
   the organiser's), public or members-only.
 - **Posts** — text + image/video media, draft → publish, optional "also show on
-  the Howler global feed" syndication.
+  the Howler global feed" syndication. Fans can like posts in the app (verified
+  identity); like counts show on each post in the composer.
 - **In the app** — served to the Howler app over a public read API
   (docs/specs/SOCIAL_CONTRACT.md); fans join event communities explicitly today,
   ticket-holder auto-membership is next.

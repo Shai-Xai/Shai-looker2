@@ -77,10 +77,17 @@ Howler-JWT auth arrive in later versions — each bumps `contractVersion`.
   "status": "published",
   "global": true,                   // also syndicated to the app-wide feed
   "author": { "name": "Social Org" },
+  "reactionCount": 12,
+  "hasReacted": true,
   "createdAt": "2026-07-18T09:00:00.000Z",
   "publishedAt": "2026-07-18T09:05:00.000Z"
 }
 ```
+
+`reactionCount` is always present. `hasReacted` appears ONLY when the request
+carried a verified Howler JWT (feeds accept an optional Bearer token for this);
+anonymous reads simply omit it. Liking a members-only, non-global post requires
+membership — you can only like what you can see.
 
 Media `url` is absolute (bucket/CDN) or Pulse-relative
 (`/api/app/social/media/<id>` — the disk-backed dev path); the app must resolve
@@ -96,6 +103,8 @@ relative URLs against the Pulse base URL. `kind` is `image` or `video`; `width`/
 | `GET /api/app/social/communities/:id/feed?limit&before` | One community's feed (Bearer JWT required when `visibility=members`) | `{ "contractVersion": 1, "community": {...}, "posts": [...], "nextCursor": ... }` — `401` no/expired token · `403` verified but not a member |
 | `POST /api/app/social/communities/:id/join` (Bearer JWT) | Explicit join — identity from the verified token | `{ "ok": true, "memberCount": n }` |
 | `POST /api/app/social/communities/:id/leave` (Bearer JWT) | Leave | `{ "ok": true }` |
+| `POST /api/app/social/posts/:id/react` (Bearer JWT) | Like a post (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": true }` |
+| `DELETE /api/app/social/posts/:id/react` (Bearer JWT) | Unlike (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": false }` |
 | `GET /api/app/social/media/:id` | Disk-stored media bytes | bytes, `Cache-Control: public, max-age=31536000, immutable` |
 
 Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is

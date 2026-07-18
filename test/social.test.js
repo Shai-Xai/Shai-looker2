@@ -236,3 +236,36 @@ test('media: raw HEIC is refused with a clear message', async () => {
   assert.equal(heic.code, 400);
   assert.match(heic.body.error, /HEIC/);
 });
+
+test('likes: JWT-gated, idempotent, counted in feeds, ring-fenced', async () => {
+  const feed0 = await call('GET /api/app/social/feed', {});
+  const post = feed0.body.posts[0];
+  assert.equal(post.reactionCount, 0);
+  assert.equal(post.hasReacted, undefined); // anonymous read carries no per-user state
+
+  // No token → 401; verified like → count 1; repeat like stays 1 (idempotent).
+  assert.equal((await call('POST /api/app/social/posts/:id/react', { params: { id: post.id } })).code, 401);
+  const like = await call('POST /api/app/social/posts/:id/react', { params: { id: post.id }, token: 'tok-661779' });
+  assert.equal(like.code, 200);
+  assert.equal(like.body.reactionCount, 1);
+  assert.equal((await call('POST /api/app/social/posts/:id/react', { params: { id: post.id }, token: 'tok-661779' })).body.reactionCount, 1);
+
+  // Second user → 2; feed shows the count, and hasReacted per viewer.
+  await call('POST /api/app/social/posts/:id/react', { params: { id: post.id }, token: 'tok-662076' });
+  const feed1 = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.equal(feed1.body.posts[0].reactionCount, 2);
+  assert.equal(feed1.body.posts[0].hasReacted, true);
+
+  // Unlike → back to 1; anonymous feed still shows the count.
+  const unlike = await call('DELETE /api/app/social/posts/:id/react', { params: { id: post.id }, token: 'tok-661779' });
+  assert.equal(unlike.body.reactionCount, 1);
+  assert.equal((await call('GET /api/app/social/feed', {})).body.posts[0].reactionCount, 1);
+
+  // Ring-fencing: a members-only, non-global post can't be liked by a non-member.
+  const evComm = (await call(`GET /api/admin/entities/:entityId/social/communities`, { user: admin, params: { entityId: entity.id } }))
+    .body.communities.find((c) => c.type === 'event');
+  const secret = (await call(`GET /api/admin/entities/:entityId/social/posts`, { user: admin, params: { entityId: entity.id } }))
+    .body.posts.find((p) => p.communityId === evComm.id);
+  const outsiderLike = await call('POST /api/app/social/posts/:id/react', { params: { id: secret.id }, token: 'tok-662076' });
+  assert.equal(outsiderLike.code, 403);
+});
