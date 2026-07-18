@@ -2,7 +2,13 @@
 
 **Version:** 0 (`contractVersion: 0`) · **Status:** spike / beta · **Owner:** Pulse
 (`server/social.js`) · **Consumer:** Howler app prototype
-(`howler_app/lib/data/repositories/pulse_social_repository.dart` + debug feed screen)
+(`howler_app/lib/data/repositories/pulse_social_repository_impl.dart` + debug feed screen)
+
+> **Testing is STAGING-FIRST** (Shai, 2026-07-18): exercise this feature on the
+> staging service https://howler-pulse-staging.onrender.com (branch `staging`)
+> — the app's debug screen defaults there. Production carries the code too but
+> keep test content off it; the `community` flag stays off in production until
+> the feature graduates.
 
 This is the wire contract for the Howler-native social layer that replaces
 Social+ (see `docs/SOCIAL_PLATFORM_INVESTIGATION.md` for the full plan). Pulse
