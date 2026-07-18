@@ -1,6 +1,10 @@
 # Fan Owl × Howler Super App — integration investigation
 
-> Status: **investigation / proposal** (2026-07-18) · Companion to
+> Status: **Phase 1 Pulse side BUILT (2026-07-18)** — per-site "Allow in Howler
+> app" toggle (`allow_app` + `platform:'howler-app'` boots on
+> `/api/fan/context`) and the `host=app` embed mode (FanOwlChannel bridge for
+> close/checkout/navigate, safe-area, no footer). App (Flutter) side awaits
+> mockup sign-off. · Companion to
 > `docs/specs/FAN_OWL_SPEC.md` (the Fan Owl itself) and `docs/OWL_EMBED.md`
 > (the organizer-portal embed handshake, the precedent for identity-linked
 > embedding) · App repo: https://github.com/howler/HowlerApp_Standalone_Shai

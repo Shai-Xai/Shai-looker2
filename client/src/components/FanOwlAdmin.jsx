@@ -280,9 +280,13 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <input style={input} type="number" value={s.dailyBudget} onChange={(e) => setSite(i, { dailyBudget: e.target.value })} />
                 </div>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0 4px' }}>
                 <input type="checkbox" checked={!!s.enabled} onChange={(e) => setSite(i, { enabled: e.target.checked })} style={{ width: 16, height: 16 }} />
                 Enabled (fans can see the widget)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '0 0 10px' }}>
+                <input type="checkbox" checked={!!s.allowApp} onChange={(e) => setSite(i, { allowApp: e.target.checked })} style={{ width: 16, height: 16 }} />
+                Allow in Howler app (the super app can open this Owl — app boots skip the domain allowlist)
               </label>
               {s.siteKey && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -297,7 +301,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', heroHome: false, navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, allowApp: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', heroHome: false, navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}

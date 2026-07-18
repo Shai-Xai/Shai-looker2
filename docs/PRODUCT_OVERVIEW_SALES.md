@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-17 (📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-18 (🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -267,6 +267,11 @@ ticket like a well-informed friend who's already going.
 - **Self-service** — clients manage everything themselves under **Settings → Fan
   Owl** (sites, catalogue, knowledge, page mappings); Howler can do it for them in
   Admin → client → Fan Owl.
+- **Howler super-app ready** 🔜 — the plumbing for the same Owl inside the Howler
+  app is live (a per-site **"Allow in Howler app"** switch + an app mode of the
+  chat that hands buy links to the app for native checkout); the in-app screen
+  itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
 - **Status 🧪:** beta. Deep-link checkout (in-widget checkout is on the roadmap);
   catalogue and links are entered manually for now. Pilots: Retreat Yourself,
   then Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
@@ -1117,6 +1122,14 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-18** — **🦉📱 Fan Owl: Howler super-app groundwork** 🔜: the plumbing
+  for the same booking guide inside the Howler app — a per-site **"Allow in
+  Howler app"** switch (Fan Owl settings, both surfaces) that lets the app open
+  that site's Owl, and an app mode of the chat that hides the web chrome and
+  hands buy links to the app so checkout can complete natively in-app. The
+  in-app screen itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
 
 - **2026-07-17** — **📋 Fan surveys: channels, channel results & event rollup** 🧪:
   every survey now has **channel switches** (📱 in-app · ✉️ email · 🔗 web link —
