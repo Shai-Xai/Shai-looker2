@@ -123,6 +123,59 @@ function mount(app, { db, auth, fetchImpl }) {
     res.json({ ok: true, ...view(entityId) });
   }
 
+  // ── Meta Ads MCP probe (spike, 2026-07 — see docs/SPIKE_META_ADS_MCP.md) ────
+  // Answers ONE question, using the client's stored token: does Meta's hosted
+  // Ads MCP server (https://mcp.facebook.com/ads) accept ordinary Graph tokens
+  // (system-user / OAuth) as Bearer auth? Its dynamic client registration is
+  // closed to non-allowlisted clients (tested 2026-07-18: "Dynamic registration
+  // is not available for this client"), so riding existing tokens is the only
+  // unattended path for a third-party backend like Pulse. Admin-only, read-only,
+  // never returns the token.
+  const MCP_URL = 'https://mcp.facebook.com/ads';
+  const shortStr = (s, n = 300) => String(s || '').slice(0, n);
+  async function mcpRpc(payload, { token, session }) {
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${token}`,
+      'MCP-Protocol-Version': '2025-06-18',
+    };
+    if (session) headers['Mcp-Session-Id'] = session;
+    const res = await doFetch(MCP_URL, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) });
+    const text = await res.text().catch(() => '');
+    // Streamable HTTP may answer as SSE — take the first `data:` line as the body.
+    let body = null;
+    try { body = JSON.parse(text); }
+    catch { const m = text.match(/^data:\s*(\{.*\})\s*$/m); if (m) { try { body = JSON.parse(m[1]); } catch { body = null; } } }
+    return { status: res.status, session: res.headers.get('mcp-session-id') || session || '', body, raw: shortStr(text) };
+  }
+  async function mcpProbe(entityId) {
+    const token = (db.getEntityIntegrations(entityId).metaAccessToken || '').trim();
+    if (!token) return { ok: false, verdict: 'No Meta token stored for this client — connect Meta first (either path).' };
+    const steps = [];
+    try {
+      const init = await mcpRpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'howler-pulse', version: '1.0' } } }, { token });
+      steps.push({ step: 'initialize', httpStatus: init.status, detail: shortStr(JSON.stringify(init.body?.result?.serverInfo || init.body?.error || init.raw), 200) });
+      if (init.status === 401 || init.status === 403) {
+        return { ok: false, steps, verdict: 'Meta’s MCP rejected this token — the hosted server only accepts its own allowlisted OAuth clients, so Pulse can’t ride existing Graph tokens. Owl integration would need Meta to open registration (or a partner arrangement); clients can still use the MCP via Claude/ChatGPT directly.' };
+      }
+      if (!init.body?.result) return { ok: false, steps, verdict: `Unexpected response (HTTP ${init.status}) — see steps.` };
+      const session = init.session;
+      await mcpRpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, { token, session }).catch(() => {});
+      const list = await mcpRpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { token, session });
+      const tools = (list.body?.result?.tools || []).map((t) => t.name);
+      steps.push({ step: 'tools/list', httpStatus: list.status, detail: `${tools.length} tools` });
+      return {
+        ok: tools.length > 0, steps, server: init.body.result.serverInfo || null, toolCount: tools.length, tools,
+        verdict: tools.length ? 'IT WORKS — Meta’s MCP accepts this stored token. The Owl can be given these tools server-side (via the Anthropic API’s MCP connector) with no Marketing API wrappers.' : 'Handshake accepted but no tools listed — partial support; see steps.',
+      };
+    } catch (e) {
+      steps.push({ step: 'error', detail: shortStr(e.message, 200) });
+      return { ok: false, steps, verdict: 'Probe failed before reaching a verdict (network/timeout) — try again.' };
+    }
+  }
+  app.post('/api/admin/entities/:entityId/meta-mcp-probe', auth.requireAdmin, wrap(async (req, res) => res.json(await mcpProbe(req.params.entityId))));
+
   app.get('/api/my/meta-connect/:entityId', auth.requireAuth, myEntity, (req, res) => res.json(view(req.params.entityId)));
   app.get('/api/my/meta-connect/:entityId/start', auth.requireAuth, myEntity, manage, (req, res) => start(req.params.entityId, req, res));
   app.post('/api/my/meta-connect/:entityId/select', auth.requireAuth, myEntity, manage, (req, res) => select(req.params.entityId, req.body || {}, res));
