@@ -76,7 +76,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                   {p.global && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>🌍 global feed</span>}
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
-                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{fmt(p.publishedAt || p.createdAt)}</p>
+                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}</p>
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
               {p.media.length > 0 && (

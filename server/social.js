@@ -192,6 +192,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     CREATE INDEX IF NOT EXISTS idx_sfp_comm ON social_feed_posts(community_id, status, published_at);
     CREATE INDEX IF NOT EXISTS idx_sfp_global ON social_feed_posts(global, status, published_at);
 
+    -- Likes: one row per (post, verified Howler user). Counts ride every post
+    -- shape; per-user state (hasReacted) only when a verified JWT is presented.
+    CREATE TABLE IF NOT EXISTS social_feed_reactions (
+      post_id        TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      created_at     TEXT NOT NULL,
+      PRIMARY KEY (post_id, howler_user_id)
+    );
+
     -- Metadata for disk-stored media (dev path). Presigned-R2 media has no row;
     -- its public URL lives directly on the post's media JSON.
     CREATE TABLE IF NOT EXISTS social_feed_media (
@@ -218,13 +227,18 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (memberCount != null) out.memberCount = memberCount;
     return out;
   }
-  function postRow(r, community) {
+  const reactionCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_reactions WHERE post_id=?').get(postId).n;
+  const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
+  // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
+  function postRow(r, community, { viewerId = null } = {}) {
     return {
       id: r.id, communityId: r.community_id,
       community: community ? { id: community.id, name: community.name, type: community.type } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
       status: r.status, global: !!r.global,
       author: { name: r.author_name || community?.name || '' },
+      reactionCount: reactionCount(r.id),
+      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId) } : {}),
       createdAt: r.created_at, publishedAt: r.published_at || null,
     };
   }
@@ -360,6 +374,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
     if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
     sql.prepare('DELETE FROM social_feed_posts WHERE id=?').run(id);
+    sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=?').run(id);
   }
   // Base64 media → persistent disk (dev path). Returns the served URL.
   function saveMedia(entityId, { name, mime, data }) {
@@ -435,24 +450,31 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (!user) throw new HttpError(401, 'Your session has expired — log in to the Howler app again');
     return user;
   }
+  // Anonymous-friendly variant for public reads: a valid token enriches the
+  // response (hasReacted); no/invalid token just reads anonymously.
+  async function optionalAppUser(req) {
+    if (!/^Bearer\s+/i.test(String(req.headers?.authorization || ''))) return null;
+    try { return await requireAppUser(req); } catch { return null; }
+  }
 
   // Published feed for one community (visible only when its entity's flag is on).
-  function communityFeed(c, { limit, before }) {
+  function communityFeed(c, { limit, before }, viewerId = null) {
     const rows = before
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(c.id, before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' ORDER BY published_at DESC LIMIT ?").all(c.id, limit);
-    return rows.map((r) => postRow(r, c));
+    return rows.map((r) => postRow(r, c, { viewerId }));
   }
 
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
+    const viewer = await optionalAppUser(req);
     const { limit, before } = pageArgs(req.query);
     const rows = before
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' ORDER BY published_at DESC LIMIT ?").all(limit);
-    const posts = rows.filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id)));
+    const posts = rows.filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId: viewer?.id }));
     res.json({ contractVersion: 1, posts, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
   }));
 
@@ -475,12 +497,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (!enabled()) return gone(res);
     const c = getCommunity(req.params.id);
     if (!c || c.status !== 'active' || !flagOn(c.entity_id)) return gone(res);
+    let viewer = null;
     if (c.visibility === 'members') {
-      const user = await requireAppUser(req);
-      if (!isMember(c.id, user.id)) throw new HttpError(403, 'Join this community to see its feed');
+      viewer = await requireAppUser(req);
+      if (!isMember(c.id, viewer.id)) throw new HttpError(403, 'Join this community to see its feed');
+    } else {
+      viewer = await optionalAppUser(req);
     }
     const page = pageArgs(req.query);
-    const posts = communityFeed(c, page);
+    const posts = communityFeed(c, page, viewer?.id);
     res.json({ contractVersion: 1, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
   }));
 
@@ -499,6 +524,29 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     const user = await requireAppUser(req);
     sql.prepare('DELETE FROM social_feed_members WHERE community_id=? AND howler_user_id=?').run(req.params.id, user.id);
     res.json({ ok: true });
+  }));
+
+  // Like / unlike a post — verified identity only; idempotent both ways.
+  // Members-only ring-fencing applies: you can only like what you can see.
+  async function reactablePost(req) {
+    const user = await requireAppUser(req);
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
+    const c = p && getCommunity(p.community_id);
+    if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) throw new HttpError(404, 'Not available');
+    if (c.visibility === 'members' && !p.global && !isMember(c.id, user.id)) throw new HttpError(403, 'Join this community first');
+    return { user, post: p };
+  }
+  app.post('/api/app/social/posts/:id/react', joinLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { user, post } = await reactablePost(req);
+    sql.prepare('INSERT OR IGNORE INTO social_feed_reactions (post_id, howler_user_id, created_at) VALUES (?,?,?)').run(post.id, user.id, now());
+    res.json({ ok: true, reactionCount: reactionCount(post.id), hasReacted: true });
+  }));
+  app.delete('/api/app/social/posts/:id/react', joinLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { user, post } = await reactablePost(req);
+    sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').run(post.id, user.id);
+    res.json({ ok: true, reactionCount: reactionCount(post.id), hasReacted: false });
   }));
 
   // Serve disk-stored media — public, immutable (ids are unguessable UUIDs).
