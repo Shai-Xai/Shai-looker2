@@ -201,6 +201,15 @@ test('super-app boot: platform howler-app is gated by the allow_app toggle, not 
   assert.equal(r.body.offer.label, 'Weekend Pass'); // app:// URL matches no mapping → default offer
   // The toggle widens ONLY the app path: a web boot from a foreign origin still 403s.
   assert.equal((await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://x.example/' }, headers: { Origin: 'https://evil.example' } })).status, 403);
+  // App-screen mappings (app://…) are context-only: an app-only screen like the
+  // wallet gets its own info + starters, but never becomes a web nav button.
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...saved.body.sites[0], pages: [{ urlPattern: 'app://*/wallet', pageType: 'other', itemIds: [], note: 'My Tickets screen', content: 'Your ticket QR lives under My Tickets; transfers open 30 days out.', starters: ['Where is my QR code?'] }] }] } });
+  const rw = await app.req('POST', '/api/fan/context', { body: { ...APP_BODY, url: 'app://event/123/wallet', sessionId: r.body.sessionId } });
+  assert.equal(rw.status, 200);
+  assert.equal(rw.body.pageType, 'other'); // the wallet mapping matched
+  const boot = await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`);
+  assert.deepEqual(boot.body.starters, ['Where is my QR code?']); // the screen's own chips
+  assert.equal(boot.body.nav.length, 0); // app:// mappings never leak into website nav buttons
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {

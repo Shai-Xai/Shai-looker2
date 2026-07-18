@@ -754,6 +754,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
   // the loader, so the Owl can only ever send fans within the promoter's own site.
   const navPath = (pattern) => {
+    // App-screen mappings (app://…) are context-only: they describe a screen of
+    // the Howler super app, not a website destination — never a web nav button.
+    if (/^app:/i.test(String(pattern || '').trim())) return '';
     const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
     // Root-relative, always: "lineup" must land on /lineup, not resolve against
     // whatever sub-path the fan happens to be on.

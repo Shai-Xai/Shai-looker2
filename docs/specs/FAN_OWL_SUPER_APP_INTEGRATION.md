@@ -98,12 +98,20 @@ Two upgrades the website can never have:
   jump. Add a `deeplink_click` beacon variant (e.g. payload `surface: 'app'`)
   so web vs app funnels separate cleanly in Fan Owl insights.
 - **Per-screen context via the existing page-mapping machinery.** The Owl
-  already switches offer/pitch/starters by URL pattern. Send synthetic URLs per
-  app screen — `app://event/<id>/lineup`, `app://event/<id>/tickets`,
-  `app://event/<id>/map` — and promoters (or "Read the website"'s cousin) add
-  mappings with `app://*lineup` patterns. The lineup screen's Owl then leads
-  with lineup starters, exactly as the website's artist pages do today. No new
-  Pulse machinery: it's the same `fan_pages` table.
+  already switches offer/pitch/starters by URL pattern. Each app screen boots
+  with a synthetic URL — `app://event/<id>/store|lineup|info|map|explore|wallet|feed|chat`
+  — and promoters map them like website pages (the Pages editor has a one-click
+  **"📱 + Howler app screens"** seeder). This explicitly covers **app-only
+  screens with no website equivalent** (My Tickets/wallet, feed, chat): each
+  gets its own organiser-approved info, starter chips and pitch. `app://`
+  mappings are context-only — `navPath` returns `''` for them, so they never
+  become website nav buttons. No new Pulse machinery: same `fan_pages` table.
+- **Both widget styles, natively.** The site's `widgetStyle` (already in the
+  `/api/fan/context` payload) drives the app entry point exactly like the web:
+  `launcher` → floating Owl FAB + teaser chip; `bar` → a persistent ask bar
+  docked above the app's bottom nav, with the deterministic `suggest`
+  half-drawer payload the bar sites already get. Typing/tapping opens the sheet
+  with the question pre-sent (`&ask=` fragment, already supported).
 
 ### Phase 3 — two optional deepenings (decide later, in either order)
 
