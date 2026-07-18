@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
+import ChatChannelsManager from './ChatChannelsManager.jsx';
 
 // Engage → Community: Howler-native communities + feed posts, managed in Pulse
 // and served straight to the Howler app (the Social+ replacement spike).
@@ -112,6 +113,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
           ))}
         </div>
       </section>
+
+      {/* ── Event chat channels (phase 2) — event ids suggested from event communities ── */}
+      <ChatChannelsManager entityId={entityId} scope={scope} eventIds={[...new Set(communities.filter((c) => c.eventId).map((c) => c.eventId))]} />
     </div>
   );
 }

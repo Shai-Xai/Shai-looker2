@@ -42,67 +42,7 @@ const fs = require('fs');
 const path = require('path');
 const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags'); // per-client gate: `community` (default OFF, beta)
-
-// ── Howler-JWT verification (contract v1) ────────────────────────────────────
-// The app proves who it is with its existing Howler login JWT
-// (Authorization: Bearer <token>). Pulse holds no signing secret, so it
-// INTROSPECTS instead: asks the Howler GraphQL backend "who is this token?"
-// ({ user { id } }) — production first, then staging (same backend list the
-// surveys module uses) — and caches the verdict. Anything identity-bearing
-// (joins, members-only feeds) runs on the VERIFIED id; a caller-supplied
-// howlerUserId is never trusted. Public reads (global feed, discovery,
-// public-community feeds, media) stay anonymous by design — they're public
-// content and must stay CDN-cacheable.
-const HOWLER_GQLS = (process.env.HOWLER_GRAPHQL_URLS
-  || 'production=https://api.howlerapp.com/api/v6/graphql,staging=https://www.howlerstaging.co.za/api/v6/graphql')
-  .split(',').map((s) => { const [source, ...u] = s.split('='); return { source: source.trim(), url: u.join('=').trim() }; });
-
-async function gqlWithToken(url, token, query, signal) {
-  const r = await fetch(url, {
-    method: 'POST', signal,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query }),
-  });
-  return ((await r.json()) || {}).data?.user || null;
-}
-
-async function introspectOnBackend(url, token) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    // `{ user { id } }` is THE verification; the display name is a separate
-    // best-effort read (schema fields may differ per backend version) so a
-    // name-query error can never fail a valid token.
-    const user = await gqlWithToken(url, token, '{ user { id } }', ctrl.signal);
-    const id = String(user?.id || '').split('/').pop(); // "gid://howler/User/661779"
-    if (!/^\d+$/.test(id)) return null;
-    let name = '';
-    try {
-      const named = await gqlWithToken(url, token, '{ user { firstName lastName } }', ctrl.signal);
-      name = [named?.firstName, named?.lastName].filter(Boolean).join(' ').trim();
-    } catch { /* cosmetic only */ }
-    return { id, name };
-  } finally { clearTimeout(t); }
-}
-
-// token → { user, at } (positive, 10 min) or { neg: true, at } (negative, 60 s).
-const TOKEN_CACHE = new Map();
-const TOKEN_TTL_POS = 10 * 60_000, TOKEN_TTL_NEG = 60_000, TOKEN_CACHE_MAX = 2000;
-async function defaultVerifyAppToken(token) {
-  const hit = TOKEN_CACHE.get(token);
-  if (hit && Date.now() - hit.at < (hit.neg ? TOKEN_TTL_NEG : TOKEN_TTL_POS)) return hit.neg ? null : hit.user;
-  let user = null, failures = 0, lastErr = null;
-  for (const { url } of HOWLER_GQLS) {
-    try { user = await introspectOnBackend(url, token); if (user) break; }
-    catch (e) { failures += 1; lastErr = e; }
-  }
-  // Every backend unreachable → we cannot KNOW the token is bad; fail closed
-  // with a retryable error rather than caching a false negative.
-  if (!user && failures >= HOWLER_GQLS.length) throw lastErr || new Error('token introspection failed');
-  if (TOKEN_CACHE.size >= TOKEN_CACHE_MAX) TOKEN_CACHE.delete(TOKEN_CACHE.keys().next().value);
-  TOKEN_CACHE.set(token, user ? { user, at: Date.now() } : { neg: true, at: Date.now() });
-  return user;
-}
+const appAuth = require('./appAuth'); // shared Howler-JWT introspection (see server/appAuth.js)
 
 const COMMUNITY_TYPES = ['organiser', 'event'];
 const VISIBILITIES = ['public', 'members'];
@@ -151,7 +91,7 @@ function presignPut({ key, expires = 900, nowDate = new Date() }) {
   return `https://${host}${pathName}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
-function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToken }) {
+function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerifyAppToken }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -567,24 +507,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   const joinLimit = rateLimit({ windowMs: 10 * 60_000, max: 30, by: 'ip', scope: 'social_join' });
   const gone = (res) => res.status(404).json({ error: 'Not available' });
 
-  // Resolve the verified Howler user for a request, or throw. 401 = no/bad
-  // token (log in again); 503 = the Howler backend couldn't be reached to
-  // verify (retryable — never treated as "invalid token").
-  async function requireAppUser(req) {
-    const m = String(req.headers?.authorization || '').match(/^Bearer\s+(.+)$/i);
-    if (!m) throw new HttpError(401, 'Log in to the Howler app to do this');
-    let user;
-    try { user = await verifyAppToken(m[1]); }
-    catch { throw new HttpError(503, 'Couldn’t verify your session right now — try again in a moment'); }
-    if (!user) throw new HttpError(401, 'Your session has expired — log in to the Howler app again');
-    return user;
-  }
-  // Anonymous-friendly variant for public reads: a valid token enriches the
-  // response (hasReacted); no/invalid token just reads anonymously.
-  async function optionalAppUser(req) {
-    if (!/^Bearer\s+/i.test(String(req.headers?.authorization || ''))) return null;
-    try { return await requireAppUser(req); } catch { return null; }
-  }
+  const { requireAppUser, optionalAppUser } = appAuth.helpers(verifyAppToken);
 
   // Published feed for one community (visible only when its entity's flag is on).
   function communityFeed(c, { limit, before }, viewerId = null) {
@@ -775,4 +698,4 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   return { listCommunities, createCommunity, createPost, updatePost, saveMedia };
 }
 
-module.exports = { mount, _presignPut: presignPut, _verifyAppToken: defaultVerifyAppToken };
+module.exports = { mount, _presignPut: presignPut, _verifyAppToken: appAuth.defaultVerifyAppToken };
