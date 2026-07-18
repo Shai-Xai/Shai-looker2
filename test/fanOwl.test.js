@@ -207,6 +207,9 @@ test('super-app boot: platform howler-app is gated by the allow_app toggle, not 
   const rw = await app.req('POST', '/api/fan/context', { body: { ...APP_BODY, url: 'app://event/123/wallet', sessionId: r.body.sessionId } });
   assert.equal(rw.status, 200);
   assert.equal(rw.body.pageType, 'other'); // the wallet mapping matched
+  // App boots get the suggest payload regardless of widget style — the app's
+  // morphed ask bar renders this screen's starters as chips.
+  assert.deepEqual(rw.body.suggest.topics, ['Where is my QR code?']);
   const boot = await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`);
   assert.deepEqual(boot.body.starters, ['Where is my QR code?']); // the screen's own chips
   assert.equal(boot.body.nav.length, 0); // app:// mappings never leak into website nav buttons

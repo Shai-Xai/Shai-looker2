@@ -886,7 +886,10 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
         sessionId: session.id,
         site: { name: site.name || suite?.name || '', brandColor: effBrandColor(site), theme: site.widget_theme || '', widgetStyle: site.widget_style || '', heroHome: !!site.hero_home, navStyle: site.nav_style || 'top', defaultLang: site.default_lang || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },
         nav: navButtons(site, page), // the persistent bar's + menu (and any loader-side nav)
-        suggest: (site.widget_style || '') === 'bar' ? buildSuggest(site, page) : undefined, // the bar's half-drawer
+        // The bar's half-drawer suggestions — also served to super-app boots
+        // regardless of widget style (the app's morphed ask bar renders them
+        // as chips; deterministic, no AI cost).
+        suggest: (fromApp || (site.widget_style || '') === 'bar') ? buildSuggest(site, page) : undefined,
         event: suite ? { name: suite.name } : null,
         pageType: page?.page_type || 'default',
         pitch: page?.pitch || '', // the approved salesy line for THIS page (ribbon leads with it)
