@@ -1,6 +1,8 @@
 # Community Feed Contract — Pulse ⇄ Howler app
 
-**Version:** 0 (`contractVersion: 0`) · **Status:** spike / beta · **Owner:** Pulse
+**Version:** 0 (`contractVersion: 0`) · **Status:** spike / beta — **validated
+end-to-end 2026-07-18** (image post composed in staging Pulse rendered in the
+Dev Fork - Shai app build, verified by Shai) · **Owner:** Pulse
 (`server/social.js`) · **Consumer:** Howler app prototype
 (`howler_app/lib/data/repositories/pulse_social_repository_impl.dart` + debug feed screen)
 
