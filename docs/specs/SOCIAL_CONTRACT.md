@@ -106,6 +106,19 @@ relative URLs against the Pulse base URL. `kind` is `image` or `video`; `width`/
 | `POST /api/app/social/posts/:id/react` (Bearer JWT) | Like a post (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": true }` |
 | `DELETE /api/app/social/posts/:id/react` (Bearer JWT) | Unlike (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": false }` |
 
+**Comments** (first UGC): readable by whoever can see the post (anonymous for
+public/global posts, verified members otherwise); writing always needs a
+verified JWT. `POST /api/app/social/posts/:id/comments` `{ "text": "…", "displayName": "…" }`
+(display name is a fallback — the verified Howler name wins when resolvable);
+`GET .../posts/:id/comments?limit&before` → `{ commentCount, comments: [{ id,
+postId, author: {id,name}, text, reported, isOwner?, createdAt }], nextCursor }`;
+`DELETE /api/app/social/comments/:id` (author only);
+`POST /api/app/social/comments/:id/report` (any verified user — flags it for
+the organiser). `commentCount` rides every post shape. Moderation: organisers
+list + delete any comment from the composer (reported ones flagged);
+management endpoints `GET .../posts/:id/comments` + `DELETE .../comments/:id`
+on both admin and /api/my surfaces.
+
 Posts may carry a **CTA button**: `ctaLabel` + `ctaDestination` (the app's
 existing screen-keyword vocabulary, e.g. `explore_tickets:19203`,
 `explore_lineup:19203`, `open_url:https://…`) plus `eventId` (from the post's

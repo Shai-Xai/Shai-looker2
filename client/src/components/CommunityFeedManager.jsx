@@ -87,6 +87,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                     : <img key={m.id} src={m.url} alt="" style={{ maxHeight: 160, borderRadius: 10 }} />)}
                 </div>
               )}
+              <PostComments scope={scope} entityId={entityId} post={p} onError={(m) => setError(m)} />
               <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 {p.status === 'draft' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'published' }))}>🚀 Publish</button>}
                 {p.status === 'published' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'archived' }))}>⏸ Unpublish</button>}
@@ -302,6 +303,42 @@ function Composer({ communities, onCreate, scope, entityId }) {
           {publishNow ? 'Post' : 'Save draft'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// Fan comments on a post — count, expandable list, and moderation delete.
+// Reported comments are flagged loudly so organisers deal with them first.
+function PostComments({ scope, entityId, post, onError }) {
+  const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState(null);
+  const count = comments ? comments.length : post.commentCount || 0;
+  const load = () => api.socialComments(scope, entityId, post.id).then((r) => setComments(r.comments || [])).catch(() => setComments([]));
+  const toggle = () => { setOpen((v) => !v); if (!open && comments === null) load(); };
+  if (!count && !open) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button style={{ border: 'none', background: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--muted)', cursor: 'pointer' }} onClick={toggle}>
+        💬 {count} comment{count === 1 ? '' : 's'} {open ? '▴' : '▾'}
+      </button>
+      {open && comments && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+          {comments.map((c) => (
+            <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', background: c.reported ? 'rgba(198,40,40,0.07)' : 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '7px 10px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 12.5 }}>
+                  <strong>{c.author.name}</strong>
+                  {c.reported && <span style={pill('rgba(198,40,40,0.14)', '#c62828')}>⚠ reported</span>}
+                </p>
+                <p style={{ margin: '2px 0 0', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</p>
+              </div>
+              <button style={{ ...tiny, color: '#c62828' }} title="Delete comment"
+                onClick={() => window.confirm('Delete this fan comment?') && api.socialDeleteComment(scope, entityId, c.id).then(load).catch((e) => onError(e.message || 'Delete failed'))}>🗑</button>
+            </div>
+          ))}
+          {comments.length === 0 && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>No comments.</p>}
+        </div>
+      )}
     </div>
   );
 }
