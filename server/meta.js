@@ -69,16 +69,25 @@ function logSync({ entityId, segmentId, audienceId, received, added, removed, st
   } catch { /* logging must never break a sync */ }
 }
 
+// Howler's house system-user token (agency model): clients partner-share their
+// ad account to Howler's Business portfolio, and ONE platform-level token works
+// across all of them. A blank per-client token inherits it — a client's own
+// token, when set, always wins. Ads-scoped only: socialMetrics (Page/IG) keeps
+// its own per-client token on purpose (the house token carries no page perms).
+function houseToken() { return ((db && db.getSetting ? db.getSetting('meta_house_token', '') : '') || '').trim(); }
 function connection(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
+  const own = (i.metaAccessToken || '').trim();
+  const house = own ? '' : houseToken();
   return {
-    accessToken: (i.metaAccessToken || '').trim(),
+    accessToken: own || house,
+    viaHouse: !own && !!house,
     adAccountId: normaliseAdAccount(i.metaAdAccountId || ''),
     businessId: (i.metaBusinessId || '').trim(),
   };
 }
 function isConfigured(entityId) { const c = connection(entityId); return !!(c.accessToken && c.adAccountId); }
-function status(entityId) { const c = connection(entityId); return { configured: !!(c.accessToken && c.adAccountId), adAccountId: c.adAccountId, businessId: c.businessId }; }
+function status(entityId) { const c = connection(entityId); return { configured: !!(c.accessToken && c.adAccountId), adAccountId: c.adAccountId, businessId: c.businessId, viaHouse: c.viaHouse }; }
 
 // Meta wants the ad account as "act_<digits>". Accept a bare id too.
 function normaliseAdAccount(raw) {

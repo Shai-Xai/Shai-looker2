@@ -44,6 +44,9 @@ function mount(app, { db, auth, fetchImpl }) {
   }
 
   // ── status view (never returns the token) ──
+  // Agency model: a blank per-client token inherits Howler's house system-user
+  // token (setting meta_house_token — see server/meta.js `connection`).
+  const houseToken = () => ((db.getSetting ? db.getSetting('meta_house_token', '') : '') || '').trim();
   function view(entityId) {
     const i = db.getEntityIntegrations(entityId);
     const cfg = appConfig();
@@ -51,9 +54,12 @@ function mount(app, { db, auth, fetchImpl }) {
     const daysLeft = expiresAt ? Math.floor((new Date(expiresAt).getTime() - Date.now()) / 86400_000) : null;
     let pending = [];
     try { pending = JSON.parse(i.metaOauthAccounts || '[]'); } catch { pending = []; }
+    const ownToken = !!(i.metaAccessToken || '').trim();
+    const viaHouse = !ownToken && !!houseToken();
     return {
       appConfigured: !!(cfg.appId && cfg.appSecret),
-      connected: !!(i.metaAccessToken || '').trim() && !!(i.metaAdAccountId || '').trim(),
+      connected: (ownToken || viaHouse) && !!(i.metaAdAccountId || '').trim(),
+      viaHouse,
       adAccountId: i.metaAdAccountId || '',
       connectedAs: i.metaConnectedAs || '',
       viaOauth: !!(i.metaConnectedAs || '').trim(), // pasted tokens have no connected-as
@@ -150,8 +156,8 @@ function mount(app, { db, auth, fetchImpl }) {
     return { status: res.status, session: res.headers.get('mcp-session-id') || session || '', body, raw: shortStr(text) };
   }
   async function mcpProbe(entityId) {
-    const token = (db.getEntityIntegrations(entityId).metaAccessToken || '').trim();
-    if (!token) return { ok: false, verdict: 'No Meta token stored for this client — connect Meta first (either path).' };
+    const token = (db.getEntityIntegrations(entityId).metaAccessToken || '').trim() || houseToken();
+    if (!token) return { ok: false, verdict: 'No Meta token stored for this client (and no house token set) — connect Meta first.' };
     const steps = [];
     try {
       const init = await mcpRpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'howler-pulse', version: '1.0' } } }, { token });

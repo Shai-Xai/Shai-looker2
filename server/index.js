@@ -1035,7 +1035,7 @@ app.get('/api/admin/ai-resolved-prompt', auth.requireAdmin, (req, res) => {
 // Patch / masked views / freeze-locks for both tiers live in
 // server/integrationsConfig.js (factory library — secrets stay write-only).
 const {
-  applyIntegrationsPatch, adminIntegrationsView, entityIntegrationsView,
+  applyIntegrationsPatch, applyMetaHousePatch, adminIntegrationsView, entityIntegrationsView,
   dropFrozenSections, getPlatformIntegrationLocks, setPlatformIntegrationLock,
   ENTITY_INTEGRATION_KEYS, PLATFORM_INTEGRATION_KEYS,
 } = require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret });
@@ -1048,8 +1048,8 @@ app.put('/api/admin/integrations', auth.requireSuperAdmin, (req, res) => {
   // Locked by default: a section is editable only when explicitly unlocked (false).
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
-  if (locks.chottu !== false) delete body.chottu;
-  if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  if (locks.chottu !== false) delete body.chottu; if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  applyMetaHousePatch(req.body, locks); // Meta house token (agency model) — integrationsConfig.js
   const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
   applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.

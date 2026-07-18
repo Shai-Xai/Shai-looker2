@@ -83,6 +83,14 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
         envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
         configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
       },
+      // Meta house connection (agency model) — Howler's own system-user token;
+      // blank per-client Meta tokens inherit it. Clients partner-share their ad
+      // account to Howler's Business portfolio (docs/DRIVE_META_SETUP.md §0c).
+      meta: {
+        tokenSet: !!db.getSetting('meta_house_token'),
+        tokenHint: maskSecret(db.getSetting('meta_house_token')),
+        businessId: db.getSetting('meta_house_business_id') || '',
+      },
       // Queue-it — platform account (per-client overrides live on the entity).
       queueit: {
         customerId: db.getSetting('queueit_customer_id') || '',
@@ -107,7 +115,12 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
     return {
       looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
       anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
-      meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
+      meta: {
+        tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '',
+        // Agency model: blank client token inherits the platform house token.
+        houseFallback: !i.metaAccessToken && !!db.getSetting('meta_house_token'),
+        houseBusinessId: db.getSetting('meta_house_business_id') || '', // shown to clients for the partner-share step (non-secret)
+      },
       tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' },
       slack: slack.view(i),
       pixel: pixel.view(i),
@@ -129,9 +142,19 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
     return b;
   }
 
+  // Meta house connection (agency model) — platform tier only. Writes Howler's
+  // system-user token that blank per-client tokens inherit (server/meta.js).
+  // Respects the platform 'meta' freeze-lock; write-only like every secret.
+  function applyMetaHousePatch(body, locks) {
+    const mh = (locks.meta !== false ? {} : (body || {}).metaHouse) || {};
+    if (mh.token) db.setSetting('meta_house_token', String(mh.token).trim());
+    if (mh.clearToken) db.setSetting('meta_house_token', '');
+    if (mh.businessId !== undefined) db.setSetting('meta_house_business_id', String(mh.businessId || '').trim());
+  }
+
   // Platform-level integration freeze locks — same idea as per-client, but for
   // Howler's own accounts, kept in a single setting.
-  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'chottu', 'queueit', 'socialplus'];
+  const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive', 'meta', 'chottu', 'queueit', 'socialplus'];
   function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
   function setPlatformIntegrationLock(key, locked) {
     const cur = getPlatformIntegrationLocks();
@@ -141,7 +164,7 @@ function build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret }) {
   }
 
   return {
-    applyIntegrationsPatch, adminIntegrationsView, entityIntegrationsView,
+    applyIntegrationsPatch, applyMetaHousePatch, adminIntegrationsView, entityIntegrationsView,
     dropFrozenSections, getPlatformIntegrationLocks, setPlatformIntegrationLock,
     ENTITY_INTEGRATION_KEYS, PLATFORM_INTEGRATION_KEYS,
   };

@@ -67,7 +67,7 @@ export default function MetaConnectCard({ entityId, scope = 'my' }) {
       {v.connected && !v.pendingAccounts?.length ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 220px', minWidth: 0, fontSize: 13 }}>
-            <b>Connected{v.connectedAs ? ` as ${v.connectedAs}` : ''}</b>
+            <b>Connected{v.connectedAs ? ` as ${v.connectedAs}` : (v.viaHouse ? ' via Howler house connection' : '')}</b>
             <span style={{ color: 'var(--muted)' }}> · {v.adAccountId}</span>
             {v.daysLeft != null && (
               <div style={{ fontSize: 12, marginTop: 2, color: v.needsReconnect ? 'var(--danger, #dc2626)' : 'var(--muted)' }}>

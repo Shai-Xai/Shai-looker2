@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 // write-only: the form only knows whether a value is set (value.*.keySet /
 // clientSecretSet); typing a new value changes it, blank leaves it unchanged.
 // `onSave(payload)` receives only the fields that changed.
-export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, showSocialPlus = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
+export default function IntegrationsForm({ value, onSave, showLooker = true, lookerActive = true, showResend = false, showInventive = false, inventiveWorkspace = null, showMeta = false, showMetaHouse = false, showTikTok = false, showSlack = false, showChottu = false, showQueueit = false, showPixel = false, pixelEntityId = '', onPixelStatus, onCreatePixelAudiences, showSocialPlus = false, clients = [], onTestEmail, onTestSlack, collapsible = false, canManageLock = false, locks = {}, onToggleLock, lockableKeys = [] }) {
   // Each integration is FROZEN by default — fields are read-only until an
   // admin/Owner (canManageLock) explicitly unlocks it, then re-locks. A guard
   // against accidental changes to a working connection. A section reads as locked
@@ -33,6 +33,10 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
   const [invwRef, setInvwRef] = useState(inventiveWorkspace?.refId || '');
   const [metaToken, setMetaToken] = useState('');
   const [clearMetaToken, setClearMetaToken] = useState(false);
+  // Platform tier: Howler's house system-user token (agency model).
+  const [mhToken, setMhToken] = useState('');
+  const [clearMhToken, setClearMhToken] = useState(false);
+  const [mhBusiness, setMhBusiness] = useState(value?.meta?.businessId || '');
   const [metaAdAccount, setMetaAdAccount] = useState(value?.meta?.adAccountId || '');
   const [metaBusiness, setMetaBusiness] = useState(value?.meta?.businessId || '');
   // Organic-insights assets (inbound social metrics): the Page / IG account we read.
@@ -109,6 +113,11 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (metaToken) p.meta.accessToken = metaToken;
       if (clearMetaToken) p.meta.clearAccessToken = true;
     }
+    if (showMetaHouse && want('metaHouse')) {
+      p.metaHouse = { businessId: mhBusiness };
+      if (mhToken) p.metaHouse.token = mhToken;
+      if (clearMhToken) p.metaHouse.clearToken = true;
+    }
     if (showTikTok && want('tiktok')) {
       p.tiktok = { advertiserId: ttAdvertiser };
       if (ttToken) p.tiktok.accessToken = ttToken;
@@ -152,6 +161,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'resend') { setResendKey(''); setClearResendKey(false); setResendWebhookSecret(''); setClearResendWebhookSecret(false); }
       if (!only || only === 'inventive') { setInvKey(''); setInvToken(''); setClearInvKey(false); setClearInvToken(false); }
       if (!only || only === 'meta') { setMetaToken(''); setClearMetaToken(false); }
+      if (!only || only === 'metaHouse') { setMhToken(''); setClearMhToken(false); }
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
@@ -197,14 +207,50 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
         <SaveRow k="anthropic" />
       </Section>
 
+      {/* Meta house connection (platform tier) — agency model: one Howler
+          system-user token that blank per-client Meta tokens inherit. */}
+      {showMetaHouse && (
+        <Section title="◇ Meta — house connection (agency)" collapsible={collapsible} {...lockProps('meta')} guide={<>
+          <div style={note}>
+            Howler's own <b>system-user token</b>, used automatically for every client whose own Meta token is blank. Clients just <b>partner-share</b> their ad account to Howler's Business portfolio — no tokens or developer steps on their side. A client's own token, when set, always wins.
+          </div>
+          <HowTo title="One-time setup (Howler side)" steps={[
+            <>In <ExtLink href="https://business.facebook.com/settings">Howler's Business settings</ExtLink>, make sure the business has an app (<b>Accounts → Apps</b>; if empty, create a <b>Business</b>-type app at <ExtLink href="https://developers.facebook.com/apps">developers.facebook.com/apps</ExtLink>), then create a system user: <b>Users → System users</b> → Add → name <code>pulse</code>, role <b>Admin</b>.</>,
+            <>On the system user click <b>Generate new token</b> → pick the app → expiration <b>Never</b> → tick <code>ads_read</code>, <code>ads_management</code> and <code>business_management</code> → Generate → paste it below. It never expires.</>,
+            <>When a client approves a partner share, assign their ad account to the system user (<b>Add assets → Ad accounts</b> → enable <b>Manage campaigns</b>) and put their <b>Ad account ID</b> on their entity — their token field stays blank.</>,
+          ]} />
+        </>}>
+          <Lbl>House system-user token</Lbl>
+          <input
+            type="password" autoComplete="off"
+            value={mhToken} onChange={(e) => setMhToken(e.target.value)}
+            placeholder={value?.meta?.tokenSet ? `Set (${value.meta.tokenHint || '••••'}) — leave blank to keep` : 'Meta system-user token (never expires)'}
+            style={input} disabled={clearMhToken}
+          />
+          {value?.meta?.tokenSet && (
+            <label style={clearRow}><input type="checkbox" checked={clearMhToken} onChange={(e) => setClearMhToken(e.target.checked)} /> Remove this token</label>
+          )}
+          <Lbl>Howler Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· shown to clients for the partner-share step</span></Lbl>
+          <input value={mhBusiness} onChange={(e) => setMhBusiness(e.target.value)} placeholder="Business settings → Business info" style={input} autoComplete="off" />
+          <SaveRow k="metaHouse" />
+        </Section>
+      )}
+
       {/* Meta (FB/IG) — per-client audience sync */}
       {showMeta && (
         <Section title="◇ Meta (Facebook / Instagram)" collapsible={collapsible} {...lockProps('meta')} guide={<>
           <div style={note}>
             Connect Meta once and Pulse can push <b>segments</b> to Meta <b>Custom Audiences</b> (ad targeting/exclusion) and pull in your <b>paid-ads performance</b>. Emails/phones are hashed before they leave Pulse.
-            {' '}<b>Easiest way:</b> if a <b>📘 Continue with Facebook</b> button appears below this card, use that — one login, nothing to copy. The fields here are the manual (fallback) path.
+            {' '}<b>Easiest way:</b> let Howler connect for you — you approve one partner request, no tokens or technical steps (first guide below). A <b>📘 Continue with Facebook</b> button below this card (when shown) is the other easy path; the fields here are the do-it-yourself route.
           </div>
-          <HowTo title="Manual setup, step by step — no tech skills needed (±10 min)" steps={[
+          <HowTo title="Let Howler connect for you — approve a partner share (±2 min)" steps={[
+            <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the account that manages your ads (you need Admin access to the business).</>,
+            <>In the left menu open <b>Users → Partners</b> → <b>Add</b> → choose <b>Give a partner access to your assets</b>.</>,
+            <>Enter Howler's Business ID{value?.meta?.houseBusinessId ? <>: <code>{value.meta.houseBusinessId}</code></> : ' (ask your Howler contact for it)'} → Next.</>,
+            <>Pick your <b>ad account</b> → switch on <b>Manage campaigns</b> → Save. That's it — no tokens, nothing technical.</>,
+            <>Tell your Howler contact which ad account (or paste its <code>act_…</code> number into <b>Ad account ID</b> below and Save) — we handle the rest on our side.</>,
+          ]} />
+          <HowTo title="Prefer to do it yourself? Manual setup, step by step (±10 min)" steps={[
             <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the Facebook login that manages your ads. You need <b>Admin</b> access to the business portfolio (if you don't have it, ask whoever set up your Facebook ads).</>,
             <><b>One-time check — your business needs an “app”.</b> In the left menu open <b>Accounts → Apps</b>. If the list is empty, create one (it's just a container Meta requires — you're not building anything): open <ExtLink href="https://developers.facebook.com/apps">developers.facebook.com/apps</ExtLink> → <b>Create app</b> → pick the <b>Business</b> type → name it e.g. “Pulse” → link it to your business portfolio when asked → Create. <i>This is the fix when Meta blocks the token button with “an app must be part of this business portfolio. Please add an app.”</i></>,
             <>Back in <b>Business settings</b>, go to <b>Users → System users</b> → <b>Add</b> → name it <code>pulse</code>, role <b>Admin</b>. (A system user is a “robot” login the token belongs to — it keeps working even if a staff member leaves.)</>,
@@ -219,7 +265,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <input
             type="password" autoComplete="off"
             value={metaToken} onChange={(e) => setMetaToken(e.target.value)}
-            placeholder={value?.meta?.tokenSet ? `Set (${value.meta.tokenHint || '••••'}) — leave blank to keep` : 'Meta access token'}
+            placeholder={value?.meta?.tokenSet ? `Set (${value.meta.tokenHint || '••••'}) — leave blank to keep` : (value?.meta?.houseFallback ? 'Using Howler house connection — paste a token to override' : 'Meta access token')}
             style={input} disabled={clearMetaToken}
           />
           {value?.meta?.tokenSet && (
@@ -229,7 +275,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           <input value={metaAdAccount} onChange={(e) => setMetaAdAccount(e.target.value)} placeholder="act_1234567890" style={input} autoComplete="off" />
           <Lbl>Business ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaBusiness} onChange={(e) => setMetaBusiness(e.target.value)} placeholder="Meta Business Manager ID" style={input} autoComplete="off" />
-          {value?.meta?.tokenSet && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — sync segments from Engage → Segments.</div>}
+          {(value?.meta?.tokenSet || value?.meta?.houseFallback) && value?.meta?.adAccountId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected{!value?.meta?.tokenSet && value?.meta?.houseFallback ? ' via Howler house connection' : ''} — sync segments from Engage → Segments.</div>}
 
           {/* Organic social metrics (INBOUND) — read Page/IG stats into Pulse. */}
           <div style={{ ...note, marginTop: 14 }}>
