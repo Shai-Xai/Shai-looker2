@@ -138,6 +138,12 @@ export default function FanOwlEmbedPage() {
   const askedRef = useRef(false);
   const [expanded, setExpanded] = useState(false); // desktop wide view (parent resizes)
   const isMobileFrame = /[#&]m=1/.test(window.location.hash || '');
+  // Hosted inside the Howler super app's WebView (…#sid=…&host=app): outbound
+  // intents (close / checkout / navigate) go to the native side over the
+  // FanOwlChannel JS channel instead of postMessage/window.open, and the
+  // "Powered by Howler" footer hides (it's Howler's own app). Spec:
+  // docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md.
+  const hostApp = /[#&]host=app(&|$)/.test(window.location.hash || '');
   // Bar-mode desktop chats carry &lay= — a main-view ↔ side-panel toggle replaces
   // the ⤢ expand (main view is already wide).
   const [layout, setLayout] = useState(() => (/[#&]lay=(main|side|dock)/.exec(window.location.hash || '') || [])[1] || '');
@@ -180,7 +186,17 @@ export default function FanOwlEmbedPage() {
       </div>
     );
   };
-  const close = () => { try { window.parent.postMessage('howler-fan-owl:close', '*'); } catch { /* not framed */ } };
+  // The native-app bridge: webview_flutter registers window.FanOwlChannel; each
+  // message is one JSON intent {type, …}. Returns false when not app-hosted (or
+  // the channel is missing) so callers fall through to their web behaviour.
+  const appBridge = (type, payload) => {
+    if (!hostApp) return false;
+    try { window.FanOwlChannel.postMessage(JSON.stringify({ type, ...payload })); return true; } catch { return false; }
+  };
+  const close = () => {
+    if (appBridge('close')) return;
+    try { window.parent.postMessage('howler-fan-owl:close', '*'); } catch { /* not framed */ }
+  };
   const toggleExpand = () => {
     const on = !expanded;
     setExpanded(on);
@@ -195,11 +211,18 @@ export default function FanOwlEmbedPage() {
   // on the new page with its context.
   const goTo = (nav) => {
     fetch('/api/fan/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, kind: 'nav_click', payload: { path: nav.path, pageType: nav.pageType } }) }).catch(() => {});
+    // In the app the native side decides where a destination lives (an in-app
+    // screen, or the promoter's site in an in-app browser).
+    if (appBridge('navigate', { path: nav.path, pageType: nav.pageType })) return;
     try { window.parent.postMessage({ t: 'howler-fan-owl:nav', path: nav.path }, '*'); } catch { /* not framed */ }
   };
   const pageLabel = (p) => (p.note || `the ${p.pageType} page`).slice(0, 60);
   const clickOffer = (o) => {
-    fetch('/api/fan/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, kind: 'deeplink_click', payload: { itemId: o.id, label: o.label } }) }).catch(() => {});
+    fetch('/api/fan/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, kind: 'deeplink_click', payload: { itemId: o.id, label: o.label, ...(hostApp ? { surface: 'app' } : {}) } }) }).catch(() => {});
+    // In the app the buy link is handed to the native side, which routes Howler
+    // store links into the in-app checkout (window.open is unreliable in
+    // WebViews anyway); on the web it opens the ticket store in a new tab.
+    if (appBridge('checkout', { url: o.url, itemId: o.id, label: o.label })) return;
     window.open(o.url, '_blank', 'noopener');
   };
 
@@ -295,7 +318,7 @@ export default function FanOwlEmbedPage() {
       : (latest?.role === 'owl' && (latest.followups || []).length ? latest.followups : pageChips));
 
   return (
-    <div style={{ ...S.shell, background: C.bg, color: C.ink }}>
+    <div style={{ ...S.shell, background: C.bg, color: C.ink, ...(hostApp ? { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' } : {}) }}>
       <header style={{ ...S.header, background: brand }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {boot.site?.owlAvatar
@@ -456,7 +479,7 @@ export default function FanOwlEmbedPage() {
         </div>
       </form>
       {navStyle === 'below' && navPillRow('10px 12px 8px')}
-      <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 13, width: 13, borderRadius: '50%', verticalAlign: -2.5 }} /></div>
+      {!hostApp && <div style={{ ...S.foot, color: C.muted }}>Powered by Howler <img src="/email-howler.png" alt="" style={{ height: 13, width: 13, borderRadius: '50%', verticalAlign: -2.5 }} /></div>}
     </div>
   );
 }

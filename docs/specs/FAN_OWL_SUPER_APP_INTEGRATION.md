@@ -1,6 +1,10 @@
 # Fan Owl × Howler Super App — integration investigation
 
-> Status: **investigation / proposal** (2026-07-18) · Companion to
+> Status: **Phase 1 Pulse side BUILT (2026-07-18)** — per-site "Allow in Howler
+> app" toggle (`allow_app` + `platform:'howler-app'` boots on
+> `/api/fan/context`) and the `host=app` embed mode (FanOwlChannel bridge for
+> close/checkout/navigate, safe-area, no footer). App (Flutter) side awaits
+> mockup sign-off. · Companion to
 > `docs/specs/FAN_OWL_SPEC.md` (the Fan Owl itself) and `docs/OWL_EMBED.md`
 > (the organizer-portal embed handshake, the precedent for identity-linked
 > embedding) · App repo: https://github.com/howler/HowlerApp_Standalone_Shai
@@ -94,12 +98,27 @@ Two upgrades the website can never have:
   jump. Add a `deeplink_click` beacon variant (e.g. payload `surface: 'app'`)
   so web vs app funnels separate cleanly in Fan Owl insights.
 - **Per-screen context via the existing page-mapping machinery.** The Owl
-  already switches offer/pitch/starters by URL pattern. Send synthetic URLs per
-  app screen — `app://event/<id>/lineup`, `app://event/<id>/tickets`,
-  `app://event/<id>/map` — and promoters (or "Read the website"'s cousin) add
-  mappings with `app://*lineup` patterns. The lineup screen's Owl then leads
-  with lineup starters, exactly as the website's artist pages do today. No new
-  Pulse machinery: it's the same `fan_pages` table.
+  already switches offer/pitch/starters by URL pattern. Each app screen boots
+  with a synthetic URL — `app://event/<id>/store|lineup|info|map|explore|wallet|feed|chat`
+  — and promoters map them like website pages (the Pages editor has a one-click
+  **"📱 + Howler app screens"** seeder). This explicitly covers **app-only
+  screens with no website equivalent** (My Tickets/wallet, feed, chat): each
+  gets its own organiser-approved info, starter chips and pitch. `app://`
+  mappings are context-only — `navPath` returns `''` for them, so they never
+  become website nav buttons. No new Pulse machinery: same `fan_pages` table.
+- **Both widget styles, natively.** The site's `widgetStyle` (already in the
+  `/api/fan/context` payload) drives the app entry point exactly like the web:
+  `launcher` → floating Owl FAB + teaser chip; `bar` → a persistent ask bar
+  docked above the app's bottom nav, with the deterministic `suggest`
+  half-drawer payload the bar sites already get. Typing/tapping opens the sheet
+  with the question pre-sent (`&ask=` fragment, already supported).
+- **Entry C (candidate, Shai 2026-07-18): the ⚡ morph.** The app's bottom-nav
+  lightning button becomes the assistant: tap → the bolt crossfades to the Owl
+  (the nav's `_AnimatedActionButton` already crossfades icon types) and the ask
+  input expands leftwards in the same glass bar, replacing Home + the tab pill;
+  the lightning contextual actions (Buy now / Outstanding actions with badge /
+  Checkout) ride above the input as chips while morphed. App-side only — no
+  further Pulse work; the `suggest` payload + `&ask=` boot cover it.
 
 ### Phase 3 — two optional deepenings (decide later, in either order)
 

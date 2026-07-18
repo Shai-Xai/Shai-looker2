@@ -185,6 +185,33 @@ test('public context: bad key 404s, wrong origin 403s, allowed origin mints a se
   assert.equal((await app.req('GET', `/api/fan/boot?sid=${back.body.sessionId}`)).body.pageChanged, false);
 });
 
+test('super-app boot: platform howler-app is gated by the allow_app toggle, not the allowlist', async () => {
+  const { e, admin, site } = await provision('app');
+  // App boots carry NO Origin header, so the domain allowlist can't vouch for
+  // them — without the per-site toggle they must stay locked out.
+  const APP_BODY = { siteKey: site.siteKey, url: 'app://event/123/tickets', platform: 'howler-app', anonId: 'app-a1' };
+  assert.equal((await app.req('POST', '/api/fan/context', { body: APP_BODY })).status, 403);
+  // Tick "Allow in Howler app" → the same boot succeeds despite the locked
+  // allowlist, and the flag round-trips through the config view.
+  const saved = await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, allowApp: true }] } });
+  assert.equal(saved.body.sites[0].allowApp, true);
+  const r = await app.req('POST', '/api/fan/context', { body: APP_BODY });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.sessionId);
+  assert.equal(r.body.offer.label, 'Weekend Pass'); // app:// URL matches no mapping → default offer
+  // The toggle widens ONLY the app path: a web boot from a foreign origin still 403s.
+  assert.equal((await app.req('POST', '/api/fan/context', { body: { siteKey: site.siteKey, url: 'https://x.example/' }, headers: { Origin: 'https://evil.example' } })).status, 403);
+  // App-screen mappings (app://…) are context-only: an app-only screen like the
+  // wallet gets its own info + starters, but never becomes a web nav button.
+  await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...saved.body.sites[0], pages: [{ urlPattern: 'app://*/wallet', pageType: 'other', itemIds: [], note: 'My Tickets screen', content: 'Your ticket QR lives under My Tickets; transfers open 30 days out.', starters: ['Where is my QR code?'] }] }] } });
+  const rw = await app.req('POST', '/api/fan/context', { body: { ...APP_BODY, url: 'app://event/123/wallet', sessionId: r.body.sessionId } });
+  assert.equal(rw.status, 200);
+  assert.equal(rw.body.pageType, 'other'); // the wallet mapping matched
+  const boot = await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`);
+  assert.deepEqual(boot.body.starters, ['Where is my QR code?']); // the screen's own chips
+  assert.equal(boot.body.nav.length, 0); // app:// mappings never leak into website nav buttons
+});
+
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {
   const { e, admin, site } = await provision('ptype');
   await app.req('PUT', `/api/admin/entities/${e.id}/fan-owl`, { as: admin, body: { sites: [{ ...site, pages: [{ urlPattern: '/venue', pageType: 'venue', itemIds: [], note: '' }, { urlPattern: '/sleep', pageType: 'accommodation', itemIds: [], note: '' }] }] } });

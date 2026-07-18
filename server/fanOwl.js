@@ -221,6 +221,11 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   // urlPattern) and custom links, each with optional label/emoji overrides,
   // enabled flags and their own order.
   try { sql.exec("ALTER TABLE fan_sites ADD COLUMN nav_json TEXT NOT NULL DEFAULT ''"); } catch { /* already present */ }
+  // Migration: super-app embed opt-in. Native Howler-app boots send
+  // platform:'howler-app' and NO Origin header, so the domain allowlist can't
+  // gate them — this per-site toggle does instead (the promoter's choice, same
+  // spirit as the allowlist). Spec: docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md.
+  try { sql.exec("ALTER TABLE fan_sites ADD COLUMN allow_app INTEGER NOT NULL DEFAULT 0"); } catch { /* already present */ }
   const cleanNavButtons = (v) => {
     if (!Array.isArray(v)) return '';
     const rows = v.slice(0, 12).map((b) => ({
@@ -275,7 +280,7 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
   const configView = (entityId) => ({
     sites: sitesByEntity.all(entityId).map((s) => ({
       id: s.id, siteKey: s.site_key, name: s.name, suiteId: s.suite_id, enabled: !!s.enabled,
-      domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget,
+      domains: J(s.domains, []), teaser: s.teaser, brandColor: s.brand_color, dailyBudget: s.daily_budget, allowApp: !!s.allow_app,
       owlName: s.owl_name || '', owlAvatar: s.owl_avatar || '', owlIntro: s.owl_intro || '', persona: s.persona || '', guardrails: s.guardrails || '', defaultLang: s.default_lang || '', widgetTheme: s.widget_theme || '', widgetStyle: s.widget_style || '', heroHome: !!s.hero_home, navStyle: s.nav_style || '', navButtons: J(s.nav_json, null),
       pages: pagesBySite.all(s.id).map((p) => ({ id: p.id, urlPattern: p.url_pattern, pageType: p.page_type, itemIds: J(p.item_ids, []), note: p.note, content: p.content || '', starters: J(p.starters, []), pitch: p.pitch || '' })),
     })),
@@ -305,13 +310,13 @@ function mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }) {
           const personaFields = [String(s.owlName || '').slice(0, 40), owlAvatar, String(s.owlIntro || '').slice(0, 200), String(s.persona || '').slice(0, 2000), String(s.guardrails || '').slice(0, 2000), cleanLang(s.defaultLang), WTHEMES.has(s.widgetTheme) ? s.widgetTheme : '', WSTYLES.has(s.widgetStyle) ? s.widgetStyle : '', s.heroHome === true ? 1 : 0, NAV_STYLES.has(s.navStyle) ? s.navStyle : '', cleanNavButtons(s.navButtons)];
           const row = siteById.get(id);
           if (row) {
-            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, widget_style=?, hero_home=?, nav_style=?, nav_json=? WHERE id=?')
-              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, id);
+            sql.prepare('UPDATE fan_sites SET name=?, suite_id=?, domains=?, enabled=?, teaser=?, brand_color=?, daily_budget=?, allow_app=?, owl_name=?, owl_avatar=?, owl_intro=?, persona=?, guardrails=?, default_lang=?, widget_theme=?, widget_style=?, hero_home=?, nav_style=?, nav_json=? WHERE id=?')
+              .run(String(s.name || '').slice(0, 80), String(s.suiteId || ''), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), s.allowApp === true ? 1 : 0, ...personaFields, id);
           } else {
             // The key is minted server-side, once, and is not secret (it's in the page
             // source) — the domain allowlist + enable switch are the gates.
-            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,widget_style,hero_home,nav_style,nav_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), ...personaFields, now());
+            sql.prepare('INSERT INTO fan_sites (id,entity_id,suite_id,site_key,name,domains,enabled,teaser,brand_color,daily_budget,allow_app,owl_name,owl_avatar,owl_intro,persona,guardrails,default_lang,widget_theme,widget_style,hero_home,nav_style,nav_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+              .run(id, entityId, String(s.suiteId || ''), `fw_${crypto.randomBytes(12).toString('hex')}`, String(s.name || '').slice(0, 80), domains, s.enabled ? 1 : 0, String(s.teaser || '').slice(0, 200), String(s.brandColor || '').slice(0, 20), Math.max(20, Math.min(5000, Number(s.dailyBudget) || 400)), s.allowApp === true ? 1 : 0, ...personaFields, now());
           }
           // Page mappings ride their site (replace-all under it).
           sql.prepare('DELETE FROM fan_pages WHERE site_id = ?').run(id);
@@ -758,6 +763,9 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
   // as the /fan-owl-test nav links) — resolved against the HOST site's origin by
   // the loader, so the Owl can only ever send fans within the promoter's own site.
   const navPath = (pattern) => {
+    // App-screen mappings (app://…) are context-only: they describe a screen of
+    // the Howler super app, not a website destination — never a web nav button.
+    if (/^app:/i.test(String(pattern || '').trim())) return '';
     const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
     // Root-relative, always: "lineup" must land on /lineup, not resolve against
     // whatever sub-path the fan happens to be on.
@@ -843,10 +851,17 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       // 🚩 fanowl feature flag: OFF for this client = the public widget refuses to
       // boot (same wording as a disabled site — nothing to probe from outside).
       if (!require('./flags').enabled(site.entity_id, 'fanowl')) throw new HttpError(404, 'This assistant isn’t available.');
+      // Native super-app boots (platform:'howler-app') carry no Origin header, so
+      // the domain allowlist can't vouch for them — the per-site "Allow in Howler
+      // app" toggle is that surface's gate instead. Web boots are checked exactly
+      // as before. (Origin was always a soft gate — rate limits + the daily
+      // budget stay the hard ones either way.)
+      const fromApp = String(b.platform || '') === 'howler-app';
+      if (fromApp && !site.allow_app) throw new HttpError(403, 'This assistant isn’t enabled in the app.');
       // Pulse's own /fan-owl-test preview page is always allowed (same host), even
       // once the promoter has locked the domain list down to their site.
       const sameHost = originHost(req.headers.origin || req.headers.referer || '') === String(req.hostname || '').toLowerCase();
-      if (!sameHost && !originAllowed(site, req.headers.origin || req.headers.referer)) throw new HttpError(403, 'This site isn’t allowed to use this assistant.');
+      if (!fromApp && !sameHost && !originAllowed(site, req.headers.origin || req.headers.referer)) throw new HttpError(403, 'This site isn’t allowed to use this assistant.');
       const pageUrl = String(b.url || '').slice(0, 500);
       // One session per loader boot; the anon id (loader-side localStorage) threads a
       // returning fan's visits together without any identity.
@@ -865,7 +880,8 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
       }
       const suite = site.suite_id ? db.getSuite(site.suite_id) : null;
       const { page, primary } = offerFor(site, pageUrl);
-      logEvent(site.id, session.id, 'ribbon_view', { url: pageUrl, pageType: page?.page_type || 'default' });
+      // surface:'app' splits web vs super-app funnels in the insights view.
+      logEvent(site.id, session.id, 'ribbon_view', { url: pageUrl, pageType: page?.page_type || 'default', ...(fromApp ? { surface: 'app' } : {}) });
       res.json({
         sessionId: session.id,
         site: { name: site.name || suite?.name || '', brandColor: effBrandColor(site), theme: site.widget_theme || '', widgetStyle: site.widget_style || '', heroHome: !!site.hero_home, navStyle: site.nav_style || 'top', defaultLang: site.default_lang || '', teaser: site.teaser || '', owlName: site.owl_name || '', owlAvatar: site.owl_avatar || '', owlIntro: site.owl_intro || '' },

@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-17 (📑 Report Studio: block-based shareable client reports with a live WYSIWYG canvas — tiles + campaigns + app/goals/social/live blocks + AI analysis, share link + PDF, one-off or scheduled · 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-18 (📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · 📑 Report Studio: block-based shareable client reports with a live WYSIWYG canvas — tiles + campaigns + app/goals/social/live blocks + AI analysis, share link + PDF, one-off or scheduled · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -279,6 +279,11 @@ ticket like a well-informed friend who's already going.
 - **Self-service** — clients manage everything themselves under **Settings → Fan
   Owl** (sites, catalogue, knowledge, page mappings); Howler can do it for them in
   Admin → client → Fan Owl.
+- **Howler super-app ready** 🔜 — the plumbing for the same Owl inside the Howler
+  app is live (a per-site **"Allow in Howler app"** switch + an app mode of the
+  chat that hands buy links to the app for native checkout); the in-app screen
+  itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
 - **Status 🧪:** beta. Deep-link checkout (in-widget checkout is on the roadmap);
   catalogue and links are entered manually for now. Pilots: Retreat Yourself,
   then Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
@@ -486,8 +491,12 @@ where people open, click and convert."
   size / availability** read back from the platform, last-sync detail, and a link
   straight into Meta/TikTok. (The same roll-up exists for Howler staff in Admin →
   connector health.)
-- Requires connecting the client's ad account (access token + ad account) in
-  Integrations. *TikTok push verified end-to-end against a live ad account; Meta
+- Requires connecting the client's ad account in Integrations. **Easiest for
+  Meta: the agency path** — the client approves one **partner-share** of their ad
+  account to Howler's Business portfolio (2 minutes, no tokens), and Howler's
+  house connection does the rest; the in-card guide has shareable steps. Token
+  paste and Continue-with-Facebook remain for clients who prefer their own
+  connection. *TikTok push verified end-to-end against a live ad account; Meta
   push pending the same live check.*
 
 **Pitch:** "Turn a Pulse audience into a Meta/TikTok ad audience in a click — keep
@@ -1116,6 +1125,33 @@ next year's planning.
 
 ---
 
+## 16. Community feed — your own social layer in the Howler app  🧪
+
+Organisers post updates, photos and videos from Pulse straight into the Howler
+app — an organiser community for the brand, event communities ring-fenced to
+ticket holders and joiners, and a Howler-wide global feed for reach. Managed in
+Engage → Community (both surfaces: Howler admin per client, and client
+self-service), flag-gated per client (`community`, default off).
+
+- **Communities** — organiser-level and per-event (event communities nest under
+  the organiser's), public or members-only.
+- **Posts** — text + image/video media, draft → publish, optional "also show on
+  the Howler global feed" syndication.
+- **In the app** — served to the Howler app over a public read API
+  (docs/specs/SOCIAL_CONTRACT.md); fans join event communities explicitly today,
+  ticket-holder auto-membership is next.
+
+**Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
+docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
+behind the flag; reactions/comments, push-on-post, Instagram/TikTok import and
+event chat channels are the next phases. Don't sell it yet; show it.
+
+**The pitch (when live):** "Your event's own feed and community, inside the
+app your ticket holders already have — no per-user SaaS bill, managed from the
+same place as your campaigns."
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates. *(The conversational/agentic
 Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
@@ -1150,6 +1186,33 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-18** — **📰 Community feed (Social+ replacement spike)** 🧪: Howler-native
+  communities + feed posts, managed from Engage → Community in Pulse (dual-surface)
+  and served to the Howler app over a new public API (docs/specs/SOCIAL_CONTRACT.md).
+  Organiser + event communities (event nests under organiser, public or members-only),
+  text/image/video posts with draft→publish, global-feed syndication, explicit joins,
+  media on disk now with presigned direct-to-R2 ready. Per-client flag `community`
+  (default off, beta); kill switch `social_feed_enabled`. Phase 1 of
+  docs/SOCIAL_PLATFORM_INVESTIGATION.md — reactions, push-on-post, IG/TikTok import
+  and event chat channels follow.
+- **2026-07-18** — **🦉📱 Fan Owl: Howler super-app groundwork** 🔜: the plumbing
+  for the same booking guide inside the Howler app — a per-site **"Allow in
+  Howler app"** switch (Fan Owl settings, both surfaces) that lets the app open
+  that site's Owl, and an app mode of the chat that hides the web chrome and
+  hands buy links to the app so checkout can complete natively in-app. The
+  in-app screen itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
+
+- **2026-07-18** — **◇ Meta agency path (house connection)** 🟡: clients can now
+  connect Meta by approving one **partner-share** of their ad account to Howler's
+  Business portfolio — no tokens, apps or developer steps on their side. Howler
+  sets a platform-level **house system-user token** once (Admin → Integrations →
+  Meta — house connection); any client whose own token is blank inherits it
+  automatically (their own token always wins). The client Meta card leads with a
+  shareable 2-minute partner-share guide, and every integration guide now has
+  **Copy steps / Share** buttons for forwarding requirements to whoever manages
+  the account. 🟡 needs the one-time Howler-side setup + per-client share.
 
 - **2026-07-17** — **📋 Fan surveys: channels, channel results & event rollup** 🧪:
   every survey now has **channel switches** (📱 in-app · ✉️ email · 🔗 web link —

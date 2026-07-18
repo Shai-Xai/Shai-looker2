@@ -16,7 +16,21 @@ const AVAILABILITY = ['', 'selling fast', 'last few', 'sold out'];
 const LANGS = [['', "Auto — fan's device language, else English"], ['en', 'English'], ['af', 'Afrikaans'], ['it', 'Italiano'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['nl', 'Nederlands']];
 const NAV_TYPE_LABELS = { home: 'Home', tickets: 'Tickets', lineup: 'Line-up', artist: 'Artists', venue: 'Venue', accommodation: 'Stay', attraction: 'Explore', sponsors: 'Partners', faq: 'FAQs', other: 'More' };
 // Same derivation as the server: a mapping is navigable when its pattern leaves a path.
+// The Howler super app boots the Owl with synthetic URLs (app://event/<id>/<screen>),
+// so each app screen can carry its own mapping — same machinery as website pages.
+// Includes app-only screens that have no website equivalent (wallet, feed, chat).
+const APP_SCREENS = [
+  { urlPattern: 'app://*/store', pageType: 'tickets', note: 'Howler app — event store (tickets)' },
+  { urlPattern: 'app://*/lineup', pageType: 'lineup', note: 'Howler app — line-up screen' },
+  { urlPattern: 'app://*/info', pageType: 'faq', note: 'Howler app — event info screen' },
+  { urlPattern: 'app://*/map', pageType: 'venue', note: 'Howler app — venue map screen' },
+  { urlPattern: 'app://*/explore', pageType: 'home', note: 'Howler app — explore / event landing' },
+  { urlPattern: 'app://*/wallet', pageType: 'other', note: 'Howler app — My Tickets / wallet (app-only)' },
+  { urlPattern: 'app://*/feed', pageType: 'other', note: 'Howler app — event feed (app-only)' },
+  { urlPattern: 'app://*/chat', pageType: 'other', note: 'Howler app — event chat (app-only)' },
+];
 const navigablePath = (pattern) => {
+  if (/^app:/i.test(String(pattern || '').trim())) return ''; // app screens are context-only, never website nav
   const frag = String(pattern || '').replace(/\*/g, '').replace(/[^\w/\-.:]/g, '').trim();
   return !frag || frag.startsWith('/') ? frag : `/${frag}`;
 };
@@ -292,9 +306,13 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   <input style={input} type="number" value={s.dailyBudget} onChange={(e) => setSite(i, { dailyBudget: e.target.value })} />
                 </div>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '10px 0 4px' }}>
                 <input type="checkbox" checked={!!s.enabled} onChange={(e) => setSite(i, { enabled: e.target.checked })} style={{ width: 16, height: 16 }} />
                 Enabled (fans can see the widget)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: '0 0 10px' }}>
+                <input type="checkbox" checked={!!s.allowApp} onChange={(e) => setSite(i, { allowApp: e.target.checked })} style={{ width: 16, height: 16 }} />
+                Allow in Howler app (the super app can open this Owl — app boots skip the domain allowlist)
               </label>
               {s.siteKey && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -309,7 +327,7 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
               </div>
             </div>
           ))}
-          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', heroHome: false, navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
+          <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => set({ sites: [...cfg.sites, { name: '', suiteId: '', domains: [], enabled: false, allowApp: false, teaser: '', brandColor: '', dailyBudget: 400, owlName: '', owlAvatar: '', owlIntro: '', persona: '', guardrails: '', defaultLang: '', widgetTheme: '', widgetStyle: '', heroHome: false, navStyle: '', navButtons: null, pages: [] }] })}>+ Add site</button>
           {saveBar}
         </>
       )}
@@ -548,7 +566,16 @@ export default function FanOwlAdmin({ scope = 'admin-client', entityId }) {
                   </div>
                 </details>
               ))}
-              <button type="button" style={{ ...btn, marginTop: 8 }} onClick={() => setSite(i, { pages: [...(s.pages || []), { urlPattern: '', pageType: 'other', itemIds: [], note: '', content: '', starters: [] }] })}>+ Page</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                <button type="button" style={btn} onClick={() => setSite(i, { pages: [...(s.pages || []), { urlPattern: '', pageType: 'other', itemIds: [], note: '', content: '', starters: [] }] })}>+ Page</button>
+                <button type="button" style={btn} title="Seed one mapping per Howler-app screen (app:// patterns) — give each its own info, chips and pitch, exactly like website pages"
+                  onClick={() => {
+                    const have = new Set((s.pages || []).map((p) => String(p.urlPattern).trim().toLowerCase()));
+                    const add = APP_SCREENS.filter((p) => !have.has(p.urlPattern)).map((p) => ({ ...p, itemIds: [], content: '', starters: [] }));
+                    if (add.length) setSite(i, { pages: [...(s.pages || []), ...add] });
+                  }}>📱 + Howler app screens</button>
+                <span style={small}>App screens are context-only mappings (<code>app://…</code>) — they tune the Owl per app screen (incl. app-only ones like My&nbsp;Tickets, feed, chat) and never become website nav buttons.</span>
+              </div>
             </div>
           ))}
           {cfg.sites.length > 0 && saveBar}

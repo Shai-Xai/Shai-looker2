@@ -621,7 +621,7 @@ const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, reso
 
 // ── Status notices: human-authored platform incidents → server/notices.js ────────
 // Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
-require('./notices').mount(app, { db, auth, os, mailer, messaging });
+require('./notices').mount(app, { db, auth, os, mailer, messaging }); require('./social').mount(app, { db, auth, rateLimit }); // 📰 Community feed — organiser/event communities + posts served to the Howler app (Social+ replacement spike, docs/specs/SOCIAL_CONTRACT.md; flag: community, kill switch: social_feed_enabled) → server/social.js
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
 const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging, mailer }); const staffAlertsApi = require('./staffAlerts').mount(app, { db, auth, mailer, push, messaging }) || {}; staffInboundFn = staffAlertsApi.staffInbound; const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi, push, signalFlow: staffAlertsApi.signalFlow }); const surveysApi = require('./surveys').mount(app, { db, auth, rateLimit, listEntityEventIds: (eid) => posthogApi.eventIdsForEntity(eid) }); require('./surveyWeb').mount(app, { db, auth, rateLimit, mailer, surveys: surveysApi, getSegmentsApi: () => segmentsApi }); // device/station logistics + 🚨 staff alerts + Live Pulse recurring event-day updates (the Alerts page's "Live updates" tab) + post-event fan surveys (Pulse ⇄ Howler app, docs/specs/SURVEY_CONTRACT.md) → server/eventops.js, server/staffAlerts.js, server/livepulse.js, server/surveys.js
 
@@ -1035,7 +1035,7 @@ app.get('/api/admin/ai-resolved-prompt', auth.requireAdmin, (req, res) => {
 // Patch / masked views / freeze-locks for both tiers live in
 // server/integrationsConfig.js (factory library — secrets stay write-only).
 const {
-  applyIntegrationsPatch, adminIntegrationsView, entityIntegrationsView,
+  applyIntegrationsPatch, applyMetaHousePatch, adminIntegrationsView, entityIntegrationsView,
   dropFrozenSections, getPlatformIntegrationLocks, setPlatformIntegrationLock,
   ENTITY_INTEGRATION_KEYS, PLATFORM_INTEGRATION_KEYS,
 } = require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret });
@@ -1048,8 +1048,8 @@ app.put('/api/admin/integrations', auth.requireSuperAdmin, (req, res) => {
   // Locked by default: a section is editable only when explicitly unlocked (false).
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
-  if (locks.chottu !== false) delete body.chottu;
-  if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  if (locks.chottu !== false) delete body.chottu; if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  applyMetaHousePatch(req.body, locks); // Meta house token (agency model) — integrationsConfig.js
   const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
   applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
