@@ -86,10 +86,13 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                     : <img key={m.id} src={m.url} alt="" style={{ maxHeight: 160, borderRadius: 10 }} />)}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                {p.status === 'draft' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'published' }))}>Publish</button>}
-                {p.status === 'published' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'archived' }))}>Unpublish</button>}
-                <button style={{ ...mini, color: '#c62828' }} onClick={() => window.confirm('Delete this post?') && act(api.socialDeletePost(scope, entityId, p.id))}>Delete</button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                {p.status === 'draft' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'published' }))}>🚀 Publish</button>}
+                {p.status === 'published' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'archived' }))}>⏸ Unpublish</button>}
+                <button
+                  style={{ ...mini, color: '#c62828', borderColor: 'rgba(198,40,40,0.4)', marginLeft: 'auto' }}
+                  onClick={() => window.confirm('Delete this post for good? It disappears from the app feed immediately.') && act(api.socialDeletePost(scope, entityId, p.id))}
+                >🗑 Delete</button>
               </div>
             </div>
           ))}
