@@ -269,3 +269,40 @@ test('likes: JWT-gated, idempotent, counted in feeds, ring-fenced', async () => 
   const outsiderLike = await call('POST /api/app/social/posts/:id/react', { params: { id: secret.id }, token: 'tok-662076' });
   assert.equal(outsiderLike.code, 403);
 });
+
+test('CTA buttons: stored, validated, served with eventId', async () => {
+  const evComm = (await call(`GET /api/admin/entities/:entityId/social/communities`, { user: admin, params: { entityId: entity.id } }))
+    .body.communities.find((c) => c.type === 'event');
+
+  const withCta = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, body: 'Last release 🎟', publish: true, global: true, ctaLabel: 'Get tickets', ctaDestination: 'explore_tickets:19203' },
+  });
+  assert.equal(withCta.code, 200);
+  assert.equal(withCta.body.ctaLabel, 'Get tickets');
+  assert.equal(withCta.body.ctaDestination, 'explore_tickets:19203');
+  assert.equal(withCta.body.eventId, '19203'); // from the community
+
+  const feed = await call('GET /api/app/social/feed', {});
+  const served = feed.body.posts.find((p) => p.id === withCta.body.id);
+  assert.equal(served.ctaLabel, 'Get tickets');
+  assert.equal(served.eventId, '19203');
+
+  const badDest = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, ctaLabel: 'Nope', ctaDestination: 'javascript:alert(1)' },
+  });
+  assert.equal(badDest.code, 400);
+
+  const labelNoDest = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, ctaLabel: 'Lonely' },
+  });
+  assert.equal(labelNoDest.code, 400);
+
+  const openUrl = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, ctaLabel: 'Site', ctaDestination: 'open_url:https://howler.co.za' },
+  });
+  assert.equal(openUrl.code, 200);
+});

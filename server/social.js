@@ -213,6 +213,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     );
   `);
 
+  // CTA button columns (added after first deploy — ALTER for existing DBs).
+  try {
+    const cols = sql.prepare('PRAGMA table_info(social_feed_posts)').all().map((c) => c.name);
+    if (!cols.includes('cta_label')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_label TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('cta_destination')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_destination TEXT NOT NULL DEFAULT ''");
+  } catch (e) { console.error('[social] cta migration skipped:', e.message); }
+
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'community'); } catch { return false; } };
 
@@ -239,6 +246,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
       ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId) } : {}),
+      // CTA button (app renders it via its existing PostCtaResolver vocabulary,
+      // e.g. "explore_tickets:19203" or "open_url:https://…").
+      ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
+      eventId: community?.event_id || null,
       createdAt: r.created_at, publishedAt: r.published_at || null,
     };
   }
@@ -308,6 +319,16 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     }
     if (b.global !== undefined) out.global = b.global ? 1 : 0;
     if (b.source !== undefined && ['pulse', 'instagram', 'tiktok'].includes(b.source)) out.source = b.source;
+    if (b.ctaLabel !== undefined || b.ctaDestination !== undefined) {
+      const ctaLabel = String(b.ctaLabel || '').trim().slice(0, 40);
+      const dest = String(b.ctaDestination || '').trim().slice(0, 500);
+      if (ctaLabel && !dest) throw new HttpError(400, 'A button needs a destination');
+      if (dest && !/^(open_url:https?:\/\/.+|[a-z][a-z0-9_]*(:\d+)?)$/.test(dest)) {
+        throw new HttpError(400, 'Button destination must be a known screen keyword (e.g. explore_tickets:19203) or open_url:https://…');
+      }
+      out.cta_label = ctaLabel;
+      out.cta_destination = ctaLabel ? dest : '';
+    }
     return out;
   }
 
@@ -349,10 +370,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (!v.community_id) throw new HttpError(400, 'communityId required');
     const id = `post_${uuid().slice(0, 12)}`;
     const publish = !!body.publish; // create-and-publish in one step (composer's "Publish now")
-    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, status, published_at, author_name, author_email, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, status, published_at, cta_label, cta_destination, author_name, author_email, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0,
-        publish ? 'published' : 'draft', publish ? now() : '', String(body.authorName || '').slice(0, 120), user?.email || '', now(), now());
+        publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '',
+        String(body.authorName || '').slice(0, 120), user?.email || '', now(), now());
     return postRow(sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id), getCommunity(v.community_id));
   }
   function updatePost(entityId, id, body) {

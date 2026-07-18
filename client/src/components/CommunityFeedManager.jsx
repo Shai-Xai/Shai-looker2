@@ -79,6 +79,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                 <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}</p>
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
+              {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}</span></p>}
               {p.media.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
                   {p.media.map((m) => m.kind === 'video'
@@ -145,6 +146,19 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [media, setMedia] = useState([]); // [{id, kind, url, mime}]
   const [busy, setBusy] = useState(false);
   const [publishNow, setPublishNow] = useState(true);
+  // Optional CTA button on the post — rendered by the app with its existing
+  // CTA system (destinations are the app's screen keywords; event id rides
+  // along automatically for event communities).
+  const [showCta, setShowCta] = useState(false);
+  const [ctaLabel, setCtaLabel] = useState('');
+  const [ctaScreen, setCtaScreen] = useState('explore_tickets');
+  const [ctaUrl, setCtaUrl] = useState('');
+  const [ctaEventId, setCtaEventId] = useState('');
+  const CTA_SCREENS = [
+    ['explore_tickets', '🎟 Tickets'], ['explore', '📄 Event page'], ['explore_lineup', '🎤 Line-up'],
+    ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
+    ['open_url', '🔗 Custom link'],
+  ];
   // Direct-to-cloud uploads (Cloudflare R2 via presigned PUT) when the server
   // has SOCIAL_S3_* configured — media bytes skip Pulse entirely. Falls back
   // to the base64→Pulse-disk path when unconfigured or blocked (e.g. CORS).
@@ -226,10 +240,20 @@ function Composer({ communities, onCreate, scope, entityId }) {
     }
   };
 
+  const selectedCommunity = communities.find((c) => c.id === communityId);
+  const ctaNeedsEventId = ctaScreen !== 'open_url' && !selectedCommunity?.eventId;
+  const buildCta = () => {
+    if (!showCta || !ctaLabel.trim()) return {};
+    const destination = ctaScreen === 'open_url'
+      ? `open_url:${ctaUrl.trim()}`
+      : `${ctaScreen}${(selectedCommunity?.eventId || ctaEventId) ? `:${selectedCommunity?.eventId || ctaEventId}` : ''}`;
+    return { ctaLabel: ctaLabel.trim(), ctaDestination: destination };
+  };
+
   const post = () => {
     setBusy(true);
-    onCreate({ communityId, body, global, media, ...(publishNow ? { publish: true } : {}) })
-      .finally(() => { setBody(''); setMedia([]); setBusy(false); });
+    onCreate({ communityId, body, global, media, ...buildCta(), ...(publishNow ? { publish: true } : {}) })
+      .finally(() => { setBody(''); setMedia([]); setCtaLabel(''); setCtaUrl(''); setShowCta(false); setBusy(false); });
   };
 
   return (
@@ -248,11 +272,26 @@ function Composer({ communities, onCreate, scope, entityId }) {
           ))}
         </div>
       )}
+      {showCta && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center', border: '1px dashed var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
+          <input style={{ ...input, width: 'auto', flex: 1, minWidth: 140 }} value={ctaLabel} onChange={(e) => setCtaLabel(e.target.value)} placeholder="Button label, e.g. Get tickets" maxLength={40} />
+          <select style={{ ...input, width: 'auto', minWidth: 140 }} value={ctaScreen} onChange={(e) => setCtaScreen(e.target.value)}>
+            {CTA_SCREENS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          {ctaScreen === 'open_url' && (
+            <input style={{ ...input, width: 'auto', flex: 2, minWidth: 180 }} value={ctaUrl} onChange={(e) => setCtaUrl(e.target.value)} placeholder="https://…" />
+          )}
+          {ctaNeedsEventId && (
+            <input style={{ ...input, width: 'auto', minWidth: 130 }} value={ctaEventId} onChange={(e) => setCtaEventId(e.target.value.replace(/\D/g, ''))} placeholder="Event ID" inputMode="numeric" title="Organiser-community posts need the target event's ID; event-community posts fill this automatically" />
+          )}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <label style={{ ...mini, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }} title={direct ? 'Uploads go direct to cloud storage (R2)' : 'Uploads go via Pulse (images auto-optimised; videos capped until R2 is configured)'}>
           {direct ? '📷☁️ Add media' : '📷 Add media'}
           <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={pickFile} />
         </label>
+        <button style={{ ...mini, background: showCta ? 'rgba(11,107,203,0.10)' : 'var(--card)' }} onClick={() => setShowCta((v) => !v)}>🔘 Button</button>
         <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} /> Also show on the Howler global feed
         </label>

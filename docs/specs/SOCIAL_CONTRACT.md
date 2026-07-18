@@ -105,6 +105,12 @@ relative URLs against the Pulse base URL. `kind` is `image` or `video`; `width`/
 | `POST /api/app/social/communities/:id/leave` (Bearer JWT) | Leave | `{ "ok": true }` |
 | `POST /api/app/social/posts/:id/react` (Bearer JWT) | Like a post (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": true }` |
 | `DELETE /api/app/social/posts/:id/react` (Bearer JWT) | Unlike (idempotent) | `{ "ok": true, "reactionCount": n, "hasReacted": false }` |
+
+Posts may carry a **CTA button**: `ctaLabel` + `ctaDestination` (the app's
+existing screen-keyword vocabulary, e.g. `explore_tickets:19203`,
+`explore_lineup:19203`, `open_url:https://…`) plus `eventId` (from the post's
+event community) — rendered and routed by the app's existing PostCtaResolver
+unchanged.
 | `GET /api/app/social/media/:id` | Disk-stored media bytes | bytes, `Cache-Control: public, max-age=31536000, immutable` |
 
 Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
