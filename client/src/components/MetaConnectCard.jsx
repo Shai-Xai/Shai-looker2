@@ -15,8 +15,20 @@ export default function MetaConnectCard({ entityId, scope = 'my' }) {
   const [v, setV] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [probe, setProbe] = useState(null);
+  const [probing, setProbing] = useState(false);
   useEffect(() => { get().then(setV).catch(() => setV(null)); }, [entityId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!v || !v.appConfigured) return null;
+  // Without the platform app the OAuth path is unavailable, but the admin MCP
+  // probe still works off a pasted token — keep the card for that case.
+  const canOauth = !!v?.appConfigured;
+  if (!v || (!canOauth && !(scope === 'admin-client' && v.connected))) return null;
+
+  const runProbe = async () => {
+    setProbing(true); setProbe(null);
+    try { setProbe(await api.adminMetaMcpProbe(entityId)); }
+    catch (e) { setProbe({ ok: false, verdict: e.message }); }
+    setProbing(false);
+  };
 
   const connect = async () => {
     setBusy(true); setErr('');
@@ -64,14 +76,32 @@ export default function MetaConnectCard({ entityId, scope = 'my' }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button style={v.needsReconnect ? btn : ghostBtn} disabled={busy} onClick={connect}>{v.needsReconnect ? 'Reconnect' : 'Reconnect / switch'}</button>
+            {canOauth && <button style={v.needsReconnect ? btn : ghostBtn} disabled={busy} onClick={connect}>{v.needsReconnect ? 'Reconnect' : 'Reconnect / switch'}</button>}
             <button style={dangerBtn} disabled={busy} onClick={() => window.confirm('Disconnect Meta? Audience sync and paid-ads reporting stop until reconnected.') && act(discFn)}>Disconnect</button>
           </div>
         </div>
-      ) : !v.pendingAccounts?.length && (
+      ) : !v.pendingAccounts?.length && canOauth && (
         <button style={{ ...btn, background: '#1877f2', borderColor: '#1877f2' }} disabled={busy} onClick={connect}>
           {busy ? 'Opening…' : 'Continue with Facebook'}
         </button>
+      )}
+
+      {/* Spike: does Meta's hosted Ads MCP accept this stored token? Admin-only. */}
+      {scope === 'admin-client' && v.connected && (
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--hairline)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button style={ghostBtn} disabled={probing} onClick={runProbe}>{probing ? 'Testing…' : '🧪 Test Meta Ads MCP'}</button>
+            <span style={{ fontSize: 12, color: 'var(--muted)', flex: '1 1 200px' }}>Spike: checks whether the Owl could use Meta's hosted ads tools with this connection.</span>
+          </div>
+          {probe && (
+            <div style={{ fontSize: 12.5, marginTop: 8, color: probe.ok ? 'var(--success, #10b981)' : 'var(--danger, #dc2626)' }}>
+              {probe.ok ? '✓' : '✗'} {probe.verdict}
+              {probe.ok && probe.tools?.length > 0 && (
+                <div style={{ color: 'var(--muted)', marginTop: 4 }}>{probe.toolCount} tools: {probe.tools.slice(0, 12).join(', ')}{probe.tools.length > 12 ? ', …' : ''}</div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

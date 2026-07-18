@@ -278,6 +278,7 @@ export const api = {
   adminMetaConnectSelect: (entityId, accountId) => fetch(`/api/admin/entities/${entityId}/meta-connect/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId }) }).then(json),
   myMetaConnectDisconnect: (entityId) => fetch(`/api/my/meta-connect/${entityId}/disconnect`, { method: 'POST' }).then(json),
   adminMetaConnectDisconnect: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-connect/disconnect`, { method: 'POST' }).then(json),
+  adminMetaMcpProbe: (entityId) => fetch(`/api/admin/entities/${entityId}/meta-mcp-probe`, { method: 'POST' }).then(json),
   // Queue-it waiting-room stats — dual-surface (scope 'my' | 'admin-client')
   queueitStatus: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit` : `/api/my/queueit/${entityId}`).then(json),
   queueitRooms: (entityId, scope) => fetch(scope === 'admin-client' ? `/api/admin/entities/${entityId}/queueit/waiting-rooms` : `/api/my/queueit/${entityId}/waiting-rooms`).then(json),
