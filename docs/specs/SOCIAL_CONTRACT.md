@@ -106,7 +106,11 @@ Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
 - Admin: `GET/POST/PUT/DELETE /api/admin/entities/:id/social/{communities,posts}` +
   `POST .../media` (base64 `{name,mime,data}`, ≤10 MB, `image/*`|`video/*`) +
   `POST .../media/presign` (`{name,mime}` → `{uploadUrl,method,headers,publicUrl,kind}`
-  presigned PUT; needs `SOCIAL_S3_*` + `SOCIAL_MEDIA_BASE_URL` env).
+  presigned PUT; needs `SOCIAL_S3_*` + `SOCIAL_MEDIA_BASE_URL` env) +
+  `GET .../media/config` (`{direct}` — whether presigned direct-to-bucket uploads
+  are configured; the composer probes this and prefers the direct path, falling
+  back to base64→Pulse on failure). The bucket needs a CORS rule allowing `PUT`
+  from the Pulse origins for browser presigned uploads to work.
 - Client self-service: same shapes under `/api/my/social/...` with `entityId` in
   query/body; permissions `campaigns.view` (read) / `campaigns.approve` (write);
   route-gated by the `community` flag.

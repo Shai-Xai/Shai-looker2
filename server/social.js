@@ -400,6 +400,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.delete(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { deletePost(req.params.entityId, req.params.id); res.json({ ok: true }); }));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
+  app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
 
   // ── CLIENT self-service surface (flag-gated at /api/my/social via flags GATES) ──
   const eid = (req) => String(req.query.entityId || (req.body || {}).entityId || '');
@@ -415,6 +416,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.delete(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { deletePost(eid(req), req.params.id); res.json({ ok: true }); }));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
+  app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
 
   // ── PUBLIC app-facing surface ──
   const readLimit = rateLimit({ windowMs: 60_000, max: 120, by: 'ip', scope: 'social_read' });
