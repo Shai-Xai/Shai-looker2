@@ -213,6 +213,12 @@ test('super-app boot: platform howler-app is gated by the allow_app toggle, not 
   const boot = await app.req('GET', `/api/fan/boot?sid=${r.body.sessionId}`);
   assert.deepEqual(boot.body.starters, ['Where is my QR code?']); // the screen's own chips
   assert.equal(boot.body.nav.length, 0); // app:// mappings never leak into website nav buttons
+  // The phone-friendly diagnostic mirrors the boot gates (booleans only).
+  const chk = await app.req('GET', `/api/fan/app-check?k=${site.siteKey}`);
+  assert.equal(chk.body.ok, true);
+  assert.equal(chk.body.allowApp, true);
+  assert.equal(chk.body.appScreenMappings, 1); // the wallet mapping
+  assert.equal((await app.req('GET', '/api/fan/app-check?k=fw_nope')).body.ok, false);
 });
 
 test('a matched page with NO ticked items still leads with what fits the page type', async () => {

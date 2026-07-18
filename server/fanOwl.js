@@ -725,6 +725,28 @@ something NOT in your knowledge base (it should honestly say it doesn't know) ·
 </body></html>`);
   });
 
+  // GET /api/fan/app-check?k=fw_… — phone-friendly diagnostic: would a Howler
+  // super-app boot succeed for this site key? Open it in any browser. Reveals
+  // nothing a boot attempt wouldn't (site keys are public; booleans only).
+  app.get('/api/fan/app-check', rateLimit({ windowMs: 60_000, max: 30, by: 'ip', scope: 'fan-app-check' }), (req, res) => {
+    const site = siteByKey.get(String(req.query.k || '').trim());
+    if (!site) return res.json({ ok: false, reason: 'unknown_key', hint: 'Check the fw_ key in Pulse → Fan Owl → Sites.' });
+    const flagOn = require('./flags').enabled(site.entity_id, 'fanowl');
+    const ok = !!(site.enabled && site.allow_app && flagOn);
+    res.json({
+      ok,
+      site: site.name || '',
+      enabled: !!site.enabled,
+      allowApp: !!site.allow_app,
+      fanOwlFlag: flagOn,
+      appScreenMappings: pagesBySite.all(site.id).filter((p) => /^app:/i.test(p.url_pattern)).length,
+      hint: ok ? 'The app can boot this Owl — open any mapped event and tap ⚡.'
+        : (!site.enabled ? 'Tick “Enabled” on the site in Pulse → Fan Owl and Save.'
+          : (!site.allow_app ? 'Tick “Allow in Howler app” on the site in Pulse → Fan Owl and Save.'
+            : 'The Fan Owl feature flag is off for this client (Admin → Product → Flags).')),
+    });
+  });
+
   const originHost = (o) => String(o || '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/^www\./, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
   const originAllowed = (site, origin) => {
     const domains = J(site.domains, []);
