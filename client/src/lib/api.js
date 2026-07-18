@@ -729,6 +729,8 @@ export const api = {
   socialDeletePost: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts/${id}` : `/api/my/social/posts/${id}?entityId=${encodeURIComponent(entityId)}`, { method: 'DELETE' }).then(json),
   socialUploadMedia: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media` : '/api/my/social/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
   socialMediaConfig: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media/config` : `/api/my/social/media/config?entityId=${encodeURIComponent(entityId)}`).then(json),
+  socialComments: (scope, entityId, postId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts/${postId}/comments` : `/api/my/social/posts/${postId}/comments?entityId=${encodeURIComponent(entityId)}`).then(json),
+  socialDeleteComment: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/comments/${id}` : `/api/my/social/comments/${id}?entityId=${encodeURIComponent(entityId)}`, { method: 'DELETE' }).then(json),
   socialPresignMedia: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media/presign` : '/api/my/social/media/presign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
 
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.

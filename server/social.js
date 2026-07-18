@@ -57,18 +57,31 @@ const HOWLER_GQLS = (process.env.HOWLER_GRAPHQL_URLS
   || 'production=https://api.howlerapp.com/api/v6/graphql,staging=https://www.howlerstaging.co.za/api/v6/graphql')
   .split(',').map((s) => { const [source, ...u] = s.split('='); return { source: source.trim(), url: u.join('=').trim() }; });
 
+async function gqlWithToken(url, token, query, signal) {
+  const r = await fetch(url, {
+    method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+  });
+  return ((await r.json()) || {}).data?.user || null;
+}
+
 async function introspectOnBackend(url, token) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const r = await fetch(url, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ query: '{ user { id } }' }),
-    });
-    const gid = ((await r.json()) || {}).data?.user?.id || '';   // "gid://howler/User/661779"
-    const id = String(gid).split('/').pop();
-    return /^\d+$/.test(id) ? { id } : null;
+    // `{ user { id } }` is THE verification; the display name is a separate
+    // best-effort read (schema fields may differ per backend version) so a
+    // name-query error can never fail a valid token.
+    const user = await gqlWithToken(url, token, '{ user { id } }', ctrl.signal);
+    const id = String(user?.id || '').split('/').pop(); // "gid://howler/User/661779"
+    if (!/^\d+$/.test(id)) return null;
+    let name = '';
+    try {
+      const named = await gqlWithToken(url, token, '{ user { firstName lastName } }', ctrl.signal);
+      name = [named?.firstName, named?.lastName].filter(Boolean).join(' ').trim();
+    } catch { /* cosmetic only */ }
+    return { id, name };
   } finally { clearTimeout(t); }
 }
 
@@ -201,6 +214,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
       PRIMARY KEY (post_id, howler_user_id)
     );
 
+    -- Comments: the first UGC. Author identity is the VERIFIED Howler user;
+    -- author_name is captured at write time (verified name, else app-supplied,
+    -- else "Howler fan"). Moderation: author can delete own; organiser/admin
+    -- delete any from the composer; any verified user can report.
+    CREATE TABLE IF NOT EXISTS social_feed_comments (
+      id             TEXT PRIMARY KEY,
+      post_id        TEXT NOT NULL,
+      entity_id      TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      author_name    TEXT NOT NULL DEFAULT '',
+      body           TEXT NOT NULL,
+      reported       INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sfcm_post ON social_feed_comments(post_id, created_at);
+
     -- Metadata for disk-stored media (dev path). Presigned-R2 media has no row;
     -- its public URL lives directly on the post's media JSON.
     CREATE TABLE IF NOT EXISTS social_feed_media (
@@ -235,6 +264,16 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     return out;
   }
   const reactionCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_reactions WHERE post_id=?').get(postId).n;
+  const commentCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_comments WHERE post_id=?').get(postId).n;
+  function commentRow(r, { viewerId = null } = {}) {
+    return {
+      id: r.id, postId: r.post_id,
+      author: { id: r.howler_user_id, name: r.author_name || 'Howler fan' },
+      text: r.body, reported: !!r.reported,
+      ...(viewerId ? { isOwner: r.howler_user_id === String(viewerId) } : {}),
+      createdAt: r.created_at,
+    };
+  }
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
   function postRow(r, community, { viewerId = null } = {}) {
@@ -245,6 +284,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
       status: r.status, global: !!r.global,
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
+      commentCount: commentCount(r.id),
       ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId) } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
       // e.g. "explore_tickets:19203" or "open_url:https://…").
@@ -397,6 +437,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
     sql.prepare('DELETE FROM social_feed_posts WHERE id=?').run(id);
     sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=?').run(id);
+    sql.prepare('DELETE FROM social_feed_comments WHERE post_id=?').run(id);
+  }
+  // Moderation (organiser/admin): list a post's comments incl. reported flags;
+  // delete any comment. Exposed on both management surfaces.
+  function listComments(entityId, postId) {
+    const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(postId);
+    if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
+    return sql.prepare('SELECT * FROM social_feed_comments WHERE post_id=? ORDER BY created_at DESC').all(postId).map((r) => commentRow(r));
+  }
+  function moderateDeleteComment(entityId, commentId) {
+    const r = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(commentId);
+    if (!r || r.entity_id !== entityId) throw new HttpError(404, 'Comment not found');
+    sql.prepare('DELETE FROM social_feed_comments WHERE id=?').run(commentId);
   }
   // Base64 media → persistent disk (dev path). Returns the served URL.
   function saveMedia(entityId, { name, mime, data }) {
@@ -438,6 +491,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
+  app.get(`${A}/posts/:id/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listComments(req.params.entityId, req.params.id) })));
+  app.delete(`${A}/comments/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { moderateDeleteComment(req.params.entityId, req.params.id); res.json({ ok: true }); }));
 
   // ── CLIENT self-service surface (flag-gated at /api/my/social via flags GATES) ──
   const eid = (req) => String(req.query.entityId || (req.body || {}).entityId || '');
@@ -454,6 +509,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
+  app.get(`${M}/posts/:id/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listComments(eid(req), req.params.id) })));
+  app.delete(`${M}/comments/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { moderateDeleteComment(eid(req), req.params.id); res.json({ ok: true }); }));
 
   // ── PUBLIC app-facing surface ──
   const readLimit = rateLimit({ windowMs: 60_000, max: 120, by: 'ip', scope: 'social_read' });
@@ -558,6 +615,63 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = defaultVerifyAppToke
     if (c.visibility === 'members' && !p.global && !isMember(c.id, user.id)) throw new HttpError(403, 'Join this community first');
     return { user, post: p };
   }
+
+  // ── Comments (the first UGC) ──
+  const commentLimit = rateLimit({ windowMs: 10 * 60_000, max: 60, by: 'ip', scope: 'social_comment' });
+
+  // Comments are readable by whoever can see the post: public/global posts
+  // anonymously; members-only posts by verified members.
+  app.get('/api/app/social/posts/:id/comments', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
+    const c = p && getCommunity(p.community_id);
+    if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) return gone(res);
+    let viewer = null;
+    if (c.visibility === 'members' && !p.global) {
+      viewer = await requireAppUser(req);
+      if (!isMember(c.id, viewer.id)) throw new HttpError(403, 'Join this community first');
+    } else {
+      viewer = await optionalAppUser(req);
+    }
+    const { limit, before } = pageArgs(req.query);
+    const rows = before
+      ? sql.prepare('SELECT * FROM social_feed_comments WHERE post_id=? AND created_at<? ORDER BY created_at DESC LIMIT ?').all(p.id, before, limit)
+      : sql.prepare('SELECT * FROM social_feed_comments WHERE post_id=? ORDER BY created_at DESC LIMIT ?').all(p.id, limit);
+    res.json({
+      contractVersion: 1, commentCount: commentCount(p.id),
+      comments: rows.map((r) => commentRow(r, { viewerId: viewer?.id })),
+      nextCursor: rows.length === limit ? rows[rows.length - 1].created_at : null,
+    });
+  }));
+
+  app.post('/api/app/social/posts/:id/comments', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { user, post } = await reactablePost(req); // same visibility rules as liking
+    const text = String((req.body || {}).text || '').trim().slice(0, 1000);
+    if (!text) throw new HttpError(400, 'Write something first');
+    const id = `cmt_${uuid().slice(0, 12)}`;
+    const name = (user.name || String((req.body || {}).displayName || '')).trim().slice(0, 80);
+    sql.prepare('INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, body, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, post.id, post.entity_id, user.id, name, text, now());
+    res.json(commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id), { viewerId: user.id }));
+  }));
+
+  // Author deletes their own comment; anyone verified can report one.
+  app.delete('/api/app/social/comments/:id', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const r = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(String(req.params.id));
+    if (!r) return gone(res);
+    if (r.howler_user_id !== String(user.id)) throw new HttpError(403, 'You can only delete your own comments');
+    sql.prepare('DELETE FROM social_feed_comments WHERE id=?').run(r.id);
+    res.json({ ok: true });
+  }));
+  app.post('/api/app/social/comments/:id/report', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    await requireAppUser(req);
+    sql.prepare('UPDATE social_feed_comments SET reported=1 WHERE id=?').run(String(req.params.id));
+    res.json({ ok: true });
+  }));
   app.post('/api/app/social/posts/:id/react', joinLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const { user, post } = await reactablePost(req);

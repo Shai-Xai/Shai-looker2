@@ -306,3 +306,47 @@ test('CTA buttons: stored, validated, served with eventId', async () => {
   });
   assert.equal(openUrl.code, 200);
 });
+
+test('comments: JWT-gated writes, ring-fenced reads, author + moderator delete, report', async () => {
+  const feed = await call('GET /api/app/social/feed', {});
+  const post = feed.body.posts.find((p) => p.body === 'Coming soon 👀');
+
+  // Anonymous can read comments on a public/global post, but not write.
+  assert.equal((await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id } })).code, 200);
+  assert.equal((await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, body: { text: 'hi' } })).code, 401);
+
+  // Verified write; name falls back to the app-supplied displayName.
+  const c1 = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-661779', body: { text: 'Can’t wait 🔥', displayName: 'Shai' } });
+  assert.equal(c1.code, 200);
+  assert.equal(c1.body.author.name, 'Shai');
+  assert.equal(c1.body.isOwner, true);
+  assert.equal((await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-661779', body: { text: '' } })).code, 400);
+
+  // Count rides the post shape; list returns the comment.
+  const feed2 = await call('GET /api/app/social/feed', {});
+  assert.equal(feed2.body.posts.find((p) => p.id === post.id).commentCount, 1);
+  const list = await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-662076' });
+  assert.equal(list.body.comments.length, 1);
+  assert.equal(list.body.comments[0].isOwner, false);
+
+  // Another user can't delete it, but can report it; the author can delete it.
+  assert.equal((await call('DELETE /api/app/social/comments/:id', { params: { id: c1.body.id }, token: 'tok-662076' })).code, 403);
+  assert.equal((await call('POST /api/app/social/comments/:id/report', { params: { id: c1.body.id }, token: 'tok-662076' })).code, 200);
+  const adminList = await call(`GET /api/admin/entities/:entityId/social/posts/:id/comments`, { user: admin, params: { entityId: entity.id, id: post.id } });
+  assert.equal(adminList.body.comments[0].reported, true);
+  assert.equal((await call('DELETE /api/app/social/comments/:id', { params: { id: c1.body.id }, token: 'tok-661779' })).code, 200);
+
+  // Moderator (admin surface) can delete any comment.
+  const c2 = await call('POST /api/app/social/posts/:id/comments', { params: { id: post.id }, token: 'tok-662076', body: { text: 'spam spam', displayName: 'Spammer' } });
+  const modDel = await call(`DELETE /api/admin/entities/:entityId/social/comments/:id`, { user: admin, params: { entityId: entity.id, id: c2.body.id } });
+  assert.equal(modDel.code, 200);
+  assert.equal((await call('GET /api/app/social/posts/:id/comments', { params: { id: post.id } })).body.comments.length, 0);
+
+  // Ring-fencing: comments on a members-only non-global post need membership.
+  const evComm = (await call(`GET /api/admin/entities/:entityId/social/communities`, { user: admin, params: { entityId: entity.id } }))
+    .body.communities.find((c) => c.type === 'event');
+  const secret = (await call(`GET /api/admin/entities/:entityId/social/posts`, { user: admin, params: { entityId: entity.id } }))
+    .body.posts.find((p) => p.communityId === evComm.id && !p.global && p.status === 'published');
+  const outsiderRead = await call('GET /api/app/social/posts/:id/comments', { params: { id: secret.id }, token: 'tok-662076' });
+  assert.equal(outsiderRead.code, 403);
+});
