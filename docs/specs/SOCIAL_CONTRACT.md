@@ -1,8 +1,8 @@
 # Community Feed Contract — Pulse ⇄ Howler app
 
-**Version:** 0 (`contractVersion: 0`) · **Status:** spike / beta — **validated
+**Version:** 1 (`contractVersion: 1`) · **Status:** spike / beta — v0 **validated
 end-to-end 2026-07-18** (image post composed in staging Pulse rendered in the
-Dev Fork - Shai app build, verified by Shai) · **Owner:** Pulse
+Dev Fork - Shai app build, verified by Shai); v1 adds Howler-JWT auth · **Owner:** Pulse
 (`server/social.js`) · **Consumer:** Howler app prototype
 (`howler_app/lib/data/repositories/pulse_social_repository_impl.dart` + debug feed screen)
 
@@ -31,9 +31,16 @@ Howler-JWT auth arrive in later versions — each bumps `contractVersion`.
   next fetch).
 - **Kill switch:** settings key `social_feed_enabled = '0'` 404s the entire
   public surface.
-- **Auth (v0):** none on reads; joins carry the numeric `howlerUserId`. This is
-  spike-grade — the planned hardening is Howler-JWT verification before any
-  sensitive content rides these routes. Rate limits apply per IP.
+- **Auth (v1):** identity-bearing requests carry the app's Howler login JWT as
+  `Authorization: Bearer <token>`. Pulse verifies it by **introspection** — it
+  asks the Howler GraphQL backend (`{ user { id } }`, production then staging;
+  override list via `HOWLER_GRAPHQL_URLS`) and caches verdicts (10 min positive
+  / 60 s negative). The verified user id is the ONLY identity used — any
+  `howlerUserId` param is ignored. Required on: join, leave, members-only
+  community feeds. Anonymous by design: global feed, discovery,
+  public-community feeds, media (public content, CDN-cacheable). Errors: `401`
+  = missing/expired token (re-login); `503` = Howler backend unreachable
+  (retry — never treated as invalid). Rate limits apply per IP.
 
 ## 2. Objects
 
@@ -86,9 +93,9 @@ relative URLs against the Pulse base URL. `kind` is `image` or `video`; `width`/
 |---|---|---|
 | `GET /api/app/social/feed?limit=20&before=<iso>` | The Howler-wide global feed (posts with `global: true`, newest first) | `{ "contractVersion": 0, "posts": [...], "nextCursor": "<iso>\|null" }` |
 | `GET /api/app/social/communities?eventId=19203` (or `entityId=`) | Community discovery | `{ "contractVersion": 0, "communities": [...] }` |
-| `GET /api/app/social/communities/:id/feed?limit&before&howlerUserId=` | One community's feed | `{ "contractVersion": 0, "community": {...}, "posts": [...], "nextCursor": ... }` — `403` when `visibility=members` and the user isn't a member |
-| `POST /api/app/social/communities/:id/join` `{ "howlerUserId": "661779" }` | Explicit join | `{ "ok": true, "memberCount": n }` |
-| `POST /api/app/social/communities/:id/leave` | Leave | `{ "ok": true }` |
+| `GET /api/app/social/communities/:id/feed?limit&before` | One community's feed (Bearer JWT required when `visibility=members`) | `{ "contractVersion": 1, "community": {...}, "posts": [...], "nextCursor": ... }` — `401` no/expired token · `403` verified but not a member |
+| `POST /api/app/social/communities/:id/join` (Bearer JWT) | Explicit join — identity from the verified token | `{ "ok": true, "memberCount": n }` |
+| `POST /api/app/social/communities/:id/leave` (Bearer JWT) | Leave | `{ "ok": true }` |
 | `GET /api/app/social/media/:id` | Disk-stored media bytes | bytes, `Cache-Control: public, max-age=31536000, immutable` |
 
 Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
@@ -108,11 +115,11 @@ Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
 
 ## 5. Planned (bumping contractVersion)
 
-- **v1:** Howler-JWT on app requests (membership asserted server-side, not by a
-  caller-supplied id); ticket-holder membership sync (`source: "ticket"`)
-  repointing the Rails community-linking; reactions + comment counts; post push
-  fan-out via FCM topics (`global` / `org_<entityId>` / `event_<eventId>`).
-- **v2:** event chat channels (public/closed, broadcast/interactive) —
+- ~~v1: Howler-JWT on app requests~~ — **shipped** (this version).
+- **v2:** ticket-holder membership sync (`source: "ticket"`) repointing the
+  Rails community-linking; reactions + comment counts; post push fan-out via
+  FCM topics (`global` / `org_<entityId>` / `event_<eventId>`).
+- **v3:** event chat channels (public/closed, broadcast/interactive) —
   ring-fenced like `members` communities.
 - Media moves fully to R2 + image variants + HLS video per the investigation
   doc §5; the disk path remains dev-only.

@@ -19,18 +19,27 @@ const setFlag = (entityId, value) => db.db
   .prepare("INSERT INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?, 'community', ?, 'test', ?) ON CONFLICT(entity_id, flag) DO UPDATE SET value=excluded.value")
   .run(entityId, value, new Date().toISOString());
 
+// Howler-JWT introspection stub (contract v1): token "tok-<id>" verifies as
+// user <id>; "tok-down" simulates an unreachable Howler backend; all else is
+// an invalid/expired token.
+const verifyAppToken = async (token) => {
+  if (token === 'tok-down') throw new Error('backend unreachable');
+  const m = token.match(/^tok-(\d+)$/);
+  return m ? { id: m[1] } : null;
+};
+
 function mount() {
   const routes = {};
   const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h; };
   const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE'), use: () => {} };
-  social.mount(app, { db, auth, rateLimit });
+  social.mount(app, { db, auth, rateLimit, verifyAppToken });
   return routes;
 }
 const routes = mount();
 
 // Run the FULL captured chain (middlewares + handler) like Express would; a
 // sync throw or async rejection lands as errorMiddleware output.
-async function call(key, { user, params = {}, body = {}, query = {} } = {}) {
+async function call(key, { user, params = {}, body = {}, query = {}, token } = {}) {
   let code = 200, payload, sent;
   const res = {
     status(c) { code = c; return res; },
@@ -38,7 +47,7 @@ async function call(key, { user, params = {}, body = {}, query = {} } = {}) {
     send(d) { sent = d; return res; },
     set() { return res; },
   };
-  const req = { user, params, body, query, ip: '9.9.9.9', headers: {} };
+  const req = { user, params, body, query, ip: '9.9.9.9', headers: token ? { authorization: `Bearer ${token}` } : {} };
   try {
     for (const h of routes[key]) {
       let nextCalled = false, nextErr = null;
@@ -119,7 +128,7 @@ test('posts: draft → published lifecycle; only published reaches the app', asy
   assert.equal(feed.body.posts.length, 1);
   assert.equal(feed.body.posts[0].body, 'Coming soon 👀');
   assert.equal(feed.body.posts[0].community.name, 'Social Org HQ');
-  assert.equal(feed.body.contractVersion, 0);
+  assert.equal(feed.body.contractVersion, 1);
 
   // Flag off → the entity's posts drop out of the app feed entirely.
   setFlag(entity.id, 'off');
@@ -138,17 +147,34 @@ test('ring-fencing: members-only community requires membership; join opens it', 
     user: admin, params: { entityId: entity.id, id: p.id }, body: { status: 'published' },
   }));
 
-  const locked = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, query: { howlerUserId: '661779' } });
+  // No token → asked to log in; a spoofed howlerUserId param changes nothing.
+  const anon = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, query: { howlerUserId: '661779' } });
+  assert.equal(anon.code, 401);
+
+  // Valid token but not yet a member → still locked out.
+  const locked = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, token: 'tok-661779' });
   assert.equal(locked.code, 403);
 
-  const join = await call('POST /api/app/social/communities/:id/join', { params: { id: evComm.id }, body: { howlerUserId: '661779' } });
+  // Join without a token → 401; expired token → 401; Howler backend down → 503.
+  assert.equal((await call('POST /api/app/social/communities/:id/join', { params: { id: evComm.id } })).code, 401);
+  assert.equal((await call('POST /api/app/social/communities/:id/join', { params: { id: evComm.id }, token: 'garbage' })).code, 401);
+  assert.equal((await call('POST /api/app/social/communities/:id/join', { params: { id: evComm.id }, token: 'tok-down' })).code, 503);
+
+  // Join with a verified token — identity comes from the token, not the body.
+  const join = await call('POST /api/app/social/communities/:id/join', { params: { id: evComm.id }, token: 'tok-661779', body: { howlerUserId: '999999' } });
   assert.equal(join.code, 200);
   assert.equal(join.body.memberCount, 1);
+  assert.ok(db.db.prepare("SELECT 1 FROM social_feed_members WHERE community_id=? AND howler_user_id='661779'").get(evComm.id), 'membership stored under the VERIFIED id');
+  assert.ok(!db.db.prepare("SELECT 1 FROM social_feed_members WHERE community_id=? AND howler_user_id='999999'").get(evComm.id), 'spoofed body id ignored');
 
-  const open = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, query: { howlerUserId: '661779' } });
+  const open = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, token: 'tok-661779' });
   assert.equal(open.code, 200);
   assert.equal(open.body.posts.length, 1);
   assert.equal(open.body.posts[0].body, 'Ticket-holder secret');
+
+  // A DIFFERENT verified user is still not a member.
+  const stranger = await call('GET /api/app/social/communities/:id/feed', { params: { id: evComm.id }, token: 'tok-662076' });
+  assert.equal(stranger.code, 403);
 
   // Discovery by Howler eventId finds the community.
   const disco = await call('GET /api/app/social/communities', { query: { eventId: '19203' } });
