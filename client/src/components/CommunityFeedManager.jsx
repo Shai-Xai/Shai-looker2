@@ -143,20 +143,59 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [busy, setBusy] = useState(false);
   const [publishNow, setPublishNow] = useState(true);
 
-  const pickFile = (e) => {
+  // Images are normalised IN THE BROWSER before upload: decoded (Safari also
+  // decodes iPhone HEIC here), downscaled to ≤1920px and re-encoded as JPEG.
+  // This is what makes phone photos render in the app — Flutter can't decode
+  // HEIC — and keeps payloads far under the server's body limit. Videos go up
+  // as-is (the dev disk path caps them; big video belongs to the R2 path).
+  const MAX_EDGE = 1920;
+  const normaliseImage = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => { URL.revokeObjectURL(url); resolve(blob ? { blob, width: w, height: h } : null); }, 'image/jpeg', 0.85);
+      } catch { URL.revokeObjectURL(url); resolve(null); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+  const toBase64 = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+
+  const pickFile = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    setBusy(true);
-    const r = new FileReader();
-    r.onload = () => {
-      const data = String(r.result).split(',')[1] || '';
-      api.socialUploadMedia(scope, entityId, { name: f.name, mime: f.type, data })
-        .then((m) => setMedia((list) => [...list, m]))
-        .catch((err) => alert(err.message || 'Upload failed'))
-        .finally(() => setBusy(false));
-    };
-    r.readAsDataURL(f);
     e.target.value = '';
+    setBusy(true);
+    try {
+      let payload;
+      let dims = {};
+      if (f.type.startsWith('image/')) {
+        const norm = await normaliseImage(f);
+        if (!norm) throw new Error('That image couldn’t be read in this browser — try a JPG/PNG export of it.');
+        dims = { width: norm.width, height: norm.height };
+        payload = { name: f.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg', mime: 'image/jpeg', data: await toBase64(norm.blob) };
+      } else {
+        if (f.size > 3_500_000) throw new Error('Videos over ~3.5MB need the direct-to-storage upload (not configured yet) — use a short clip for now.');
+        payload = { name: f.name, mime: f.type, data: await toBase64(f) };
+      }
+      const m = await api.socialUploadMedia(scope, entityId, payload);
+      setMedia((list) => [...list, { ...m, ...dims }]);
+    } catch (err) {
+      alert(err.message || 'Upload failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const post = () => {

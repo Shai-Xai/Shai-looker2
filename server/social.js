@@ -318,6 +318,9 @@ function mount(app, { db, auth, rateLimit }) {
     if (buf.length > MAX_MEDIA_BYTES) throw new HttpError(400, `Media over the ${Math.round(MAX_MEDIA_BYTES / 1024 / 1024)}MB direct-upload cap — use the presigned upload`);
     const m = String(mime || '');
     if (!/^(image|video)\//.test(m)) throw new HttpError(400, 'Only image/* or video/* media is accepted');
+    // The Howler app's renderer can't decode HEIC/HEIF; the composer converts
+    // photos to JPEG in the browser — a raw HEIC reaching us means that failed.
+    if (/^image\/hei[cf]/.test(m)) throw new HttpError(400, 'iPhone HEIC photos must be converted first — refresh Pulse and re-pick the photo (it converts to JPEG automatically)');
     const id = uuid();
     fs.writeFileSync(path.join(MEDIA_DIR, id), buf);
     sql.prepare('INSERT INTO social_feed_media (id, entity_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?)')

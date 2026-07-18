@@ -202,3 +202,11 @@ test('kill switch: social_feed_enabled=0 hides the public surface', async () => 
   assert.equal(feed.code, 404);
   db.setSetting('social_feed_enabled', '1');
 });
+
+test('media: raw HEIC is refused with a clear message', async () => {
+  const heic = await call(`POST /api/admin/entities/:entityId/social/media`, {
+    user: admin, params: { entityId: entity.id }, body: { name: 'photo.heic', mime: 'image/heic', data: PNG_B64 },
+  });
+  assert.equal(heic.code, 400);
+  assert.match(heic.body.error, /HEIC/);
+});
