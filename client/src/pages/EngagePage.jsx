@@ -11,6 +11,7 @@ import TemplateManager from '../components/TemplateManager.jsx';
 import JourneyWizard from '../components/JourneyWizard.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
 import SurveyManager from '../components/SurveyManager.jsx';
+import CommunityFeedManager from '../components/CommunityFeedManager.jsx';
 
 // Engage — the Action layer of the Experience OS as one first-class area.
 // Sub-areas live as tabs: Campaigns + Segments today; Automations, Templates and
@@ -24,6 +25,7 @@ const TABS = [
   { key: 'automations', label: 'Automations', icon: '⏱', ready: false },
   { key: 'links', label: 'Links', icon: '🔗', ready: true },
   { key: 'surveys', label: 'Surveys', icon: '📋', ready: true },
+  { key: 'community', label: 'Community', icon: '📰', ready: true },
   { key: 'templates', label: 'Templates', icon: '📝', ready: true },
   { key: 'connections', label: 'Connections', icon: '🔌', ready: false },
 ];
@@ -41,7 +43,7 @@ export default function EngagePage() {
 
   // Feature-flagged tabs (Admin → Product → Flags): hidden when the client's
   // effective flag is off. Server routes enforce the same flags for real.
-  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links', surveys: 'engage.surveys' };
+  const TAB_FLAGS = { campaigns: 'engage.campaigns', journeys: 'engage.journeys', segments: 'engage.segments', audiences: 'engage.audiences', templates: 'engage.templates', links: 'engage.links', surveys: 'engage.surveys', community: 'community' };
   const myFlags = useMyFlags(entityId);
   const tabs = TABS.filter((t) => !TAB_FLAGS[t.key] || flagOn(myFlags, TAB_FLAGS[t.key]));
 
@@ -118,6 +120,11 @@ export default function EngagePage() {
         <>
           <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Post-event fan surveys — design them here, fans answer in the Howler app, results land back in Pulse. Target everyone or specific ticket types.</p>
           <SurveyManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+        </>
+      ) : active === 'community' ? (
+        <>
+          <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>Your in-app communities and feed — post updates, photos and videos straight to fans in the Howler app. Event communities are ring-fenced to ticket holders and joiners.</p>
+          <CommunityFeedManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
         </>
       ) : active === 'templates' ? (
         <>

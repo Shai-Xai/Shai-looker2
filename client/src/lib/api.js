@@ -711,6 +711,15 @@ export const api = {
   surveyShareLink: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/share-link', { method: 'POST' }).then(json),
   surveyLinks: (scope, entityId, id) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/surveys/${id}` : `/api/my/surveys/${id}`) + '/links').then(json),
 
+  // Community feed (Social+ replacement spike) — docs/specs/SOCIAL_CONTRACT.md
+  socialCommunities: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/communities` : `/api/my/social/communities?entityId=${encodeURIComponent(entityId)}`).then(json),
+  socialCreateCommunity: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/communities` : '/api/my/social/communities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  socialPosts: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts` : `/api/my/social/posts?entityId=${encodeURIComponent(entityId)}`).then(json),
+  socialCreatePost: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts` : '/api/my/social/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+  socialUpdatePost: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts/${id}` : `/api/my/social/posts/${id}?entityId=${encodeURIComponent(entityId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? patch : { ...patch, entityId }) }).then(json),
+  socialDeletePost: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posts/${id}` : `/api/my/social/posts/${id}?entityId=${encodeURIComponent(entityId)}`, { method: 'DELETE' }).then(json),
+  socialUploadMedia: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media` : '/api/my/social/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
+
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),

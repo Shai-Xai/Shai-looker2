@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-18 (🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-18 (📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1092,6 +1092,33 @@ next year's planning.
 
 ---
 
+## 16. Community feed — your own social layer in the Howler app  🧪
+
+Organisers post updates, photos and videos from Pulse straight into the Howler
+app — an organiser community for the brand, event communities ring-fenced to
+ticket holders and joiners, and a Howler-wide global feed for reach. Managed in
+Engage → Community (both surfaces: Howler admin per client, and client
+self-service), flag-gated per client (`community`, default off).
+
+- **Communities** — organiser-level and per-event (event communities nest under
+  the organiser's), public or members-only.
+- **Posts** — text + image/video media, draft → publish, optional "also show on
+  the Howler global feed" syndication.
+- **In the app** — served to the Howler app over a public read API
+  (docs/specs/SOCIAL_CONTRACT.md); fans join event communities explicitly today,
+  ticket-holder auto-membership is next.
+
+**Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
+docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
+behind the flag; reactions/comments, push-on-post, Instagram/TikTok import and
+event chat channels are the next phases. Don't sell it yet; show it.
+
+**The pitch (when live):** "Your event's own feed and community, inside the
+app your ticket holders already have — no per-user SaaS bill, managed from the
+same place as your campaigns."
+
+---
+
 ## On the horizon (🔜 — not yet usable; for roadmap conversations only)
 Use these to set direction, **not** to promise dates. *(The conversational/agentic
 Owl graduated off this list — the Owl chat is 🧪 and the one-tap auto-pilot is ✅,
@@ -1127,6 +1154,15 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-18** — **📰 Community feed (Social+ replacement spike)** 🧪: Howler-native
+  communities + feed posts, managed from Engage → Community in Pulse (dual-surface)
+  and served to the Howler app over a new public API (docs/specs/SOCIAL_CONTRACT.md).
+  Organiser + event communities (event nests under organiser, public or members-only),
+  text/image/video posts with draft→publish, global-feed syndication, explicit joins,
+  media on disk now with presigned direct-to-R2 ready. Per-client flag `community`
+  (default off, beta); kill switch `social_feed_enabled`. Phase 1 of
+  docs/SOCIAL_PLATFORM_INVESTIGATION.md — reactions, push-on-post, IG/TikTok import
+  and event chat channels follow.
 - **2026-07-18** — **🦉📱 Fan Owl: Howler super-app groundwork** 🔜: the plumbing
   for the same booking guide inside the Howler app — a per-site **"Allow in
   Howler app"** switch (Fan Owl settings, both surfaces) that lets the app open
