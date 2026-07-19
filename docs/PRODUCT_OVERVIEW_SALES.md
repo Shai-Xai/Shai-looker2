@@ -1122,6 +1122,11 @@ self-service), flag-gated per client (`community`, default off).
   text + photos, optional Howler-wide feed, live instantly, no Pulse login.
   Instagram-style composer UI in design; fan/UGC posting rides the same rails
   later.
+- **Instagram import** 🟡 — content already on the client's Instagram reposts
+  to the community feed in one click (Community → 📸 Instagram): recent-posts
+  grid, caption prefilled, carousels come across whole, media re-hosted on
+  Howler's infrastructure. Needs the Meta connection + IG account id set under
+  Integrations.
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1169,6 +1174,10 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **📸 Instagram import** 🟡: one-click repost of existing
+  Instagram content into the community feed (recent-posts grid in Community,
+  media re-hosted, captions prefilled, carousels intact). Uses the existing
+  Meta connection + IG account id from Integrations.
 - **2026-07-19** — **📲 Post from the app (backend)** 🧪: per-client "App
   posters" registry (Community tab, both surfaces) + a JWT-verified app
   endpoint that lets authorised Howler accounts publish brand posts with
