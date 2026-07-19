@@ -292,6 +292,34 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!viewer || !rows.some((r) => r.audience)) return null;
     try { return await fetchAppTickets(tokenOf(req)); } catch { return null; }
   }
+
+  // ── the Howler house + follow/ticket gating on the global feed ──
+  // The GLOBAL feed is personalised: posts from the designated HOUSE entity
+  // (Howler's own voice) reach EVERYONE; any other organiser's global post
+  // only reaches viewers CONNECTED to that organiser — they joined any of its
+  // communities ("follow") or hold a ticket to any of its events. Anonymous
+  // readers see house posts only.
+  const houseEntity = () => String(db.getSetting ? db.getSetting('social_house_entity', '') : '').trim();
+  function entityConnected(entityId, viewerId, tickets) {
+    if (sql.prepare('SELECT 1 FROM social_feed_members m JOIN social_feed_communities c ON c.id=m.community_id WHERE c.entity_id=? AND m.howler_user_id=? LIMIT 1').get(entityId, String(viewerId))) return true;
+    const held = new Set((tickets || []).map((t) => String(t.eventId)));
+    if (!held.size) return false;
+    return sql.prepare("SELECT DISTINCT event_id FROM social_feed_communities WHERE entity_id=? AND event_id!=''").all(entityId)
+      .some((r) => held.has(String(r.event_id)));
+  }
+  // entity ids from `rows` the viewer may see on the GLOBAL feed.
+  async function allowedGlobalEntities(rows, req, viewer) {
+    const house = houseEntity();
+    const allowed = new Set(house ? [house] : []);
+    if (!house) return null; // no house configured → legacy behaviour (everyone sees all)
+    if (!viewer) return allowed;
+    const others = [...new Set(rows.map((r) => r.entity_id))].filter((id) => id !== house);
+    if (!others.length) return allowed;
+    let tickets = null;
+    try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* membership can still connect */ }
+    for (const id of others) if (entityConnected(id, viewer.id, tickets)) allowed.add(id);
+    return allowed;
+  }
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   const hasPinned = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_user_pins WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
@@ -650,13 +678,6 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       : [];
     return { pinned, myPins };
   }
-  // Shaped strips for the GLOBAL feed (targeted posts are never global, so no
-  // ticket filtering applies there).
-  function pinnedStrips(where, args, viewerId) {
-    const rows = pinnedStripRows(where, args, viewerId);
-    const shape = (r) => postRow(r, getCommunity(r.community_id), { viewerId });
-    return { pinned: rows.pinned.map(shape), myPins: rows.myPins.map(shape) };
-  }
 
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
@@ -667,9 +688,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const rows = before
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' ORDER BY published_at DESC LIMIT ?").all(limit);
-    const posts = rows.filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId: viewer?.id }));
-    const strips = before ? {} : pinnedStrips('global=1', [], viewer?.id);
+    const stripRows = before ? { pinned: [], myPins: [] } : pinnedStripRows('global=1', [], viewer?.id);
+    const allowed = await allowedGlobalEntities([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
+    const visible = (r) => flagOn(r.entity_id) && (allowed === null || allowed.has(r.entity_id));
+    const shape = (r) => postRow(r, getCommunity(r.community_id), { viewerId: viewer?.id });
+    const posts = rows.filter(visible).map(shape);
+    const strips = before ? {} : {
+      pinned: stripRows.pinned.filter(visible).map(shape),
+      myPins: stripRows.myPins.filter(visible).map(shape),
+    };
     res.json({ contractVersion: 1, posts, ...strips, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
+  }));
+
+  // Which entity is "Howler's own voice" on the global feed (platform admin).
+  app.get('/api/admin/social/house', auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ entityId: houseEntity() })));
+  app.put('/api/admin/social/house', auth.requireAdmin, asyncHandler(async (req, res) => {
+    db.setSetting('social_house_entity', String((req.body || {}).entityId || '').trim());
+    res.json({ entityId: houseEntity() });
   }));
 
   // Community discovery — by Howler eventId, or the active set for an entity.

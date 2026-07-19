@@ -283,3 +283,18 @@ the organiser feed (like global syndication), EXCEPT ticket-targeted ones,
 which stay ticket-checked against the home event wherever they appear.
 So the hierarchy reads: event feed → (toParent) organiser feed → (global)
 Howler-wide feed, with targeting always enforced at every level.
+
+## 12. Personalised global feed + the Howler house (added 2026-07-19)
+
+The Howler-wide feed is NOT a public firehose:
+- **House posts** — a designated house entity (Howler's own voice; platform
+  admin sets it via `GET/PUT /api/admin/social/house {entityId}`) reaches
+  EVERYONE, including anonymous/pre-login readers.
+- **Organiser posts** shared to global only reach viewers CONNECTED to that
+  organiser: they joined any of its communities ("follow"), or hold a ticket
+  to any of its events (JWT ticket introspection; entity matched via its
+  event communities' event ids).
+- Anonymous viewers see house posts only. No house configured → legacy
+  behaviour (all global posts public) so nothing breaks before setup.
+Enforced server-side on the feed pages and both pinned strips; cursor stays
+exact (computed from raw rows).
