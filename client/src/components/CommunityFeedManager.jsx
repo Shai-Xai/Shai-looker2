@@ -74,6 +74,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
       {/* ── App posters: Howler accounts allowed to post from the app ── */}
       <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
 
+      {/* ── Instagram import: one-click repost of existing IG content ── */}
+      <InstagramImport scope={scope} entityId={entityId} communities={communities} onImported={load} onError={(m) => setError(m)} />
+
       {/* ── Moderation inbox: every fan comment across all posts ── */}
       {posts.length > 0 && <CommentsInbox scope={scope} entityId={entityId} onError={(m) => setError(m)} />}
 
@@ -366,6 +369,75 @@ function AppPosters({ scope, entityId, onError }) {
               </div>
             ))}
           </div>
+        )}
+    </section>
+  );
+}
+
+// One-click repost of content already on the client's Instagram: grid of
+// recent IG media → Import re-hosts the media through Pulse (IG CDN links
+// expire) and publishes with the caption prefilled. Needs the Meta token +
+// IG account id from Integrations (same connection social metrics uses).
+function InstagramImport({ scope, entityId, communities, onImported, onError }) {
+  const [state, setState] = useState(null); // null=loading, {connected, media}
+  const [communityId, setCommunityId] = useState('');
+  const [global, setGlobal] = useState(true);
+  const [busy, setBusy] = useState('');
+  useEffect(() => {
+    setState(null);
+    api.socialInstagramMedia(scope, entityId).then(setState).catch(() => setState({ connected: false, media: [] }));
+  }, [scope, entityId]);
+  const target = communityId || communities[0]?.id || '';
+  const doImport = (m) => {
+    if (!target) { onError('Create a community first'); return; }
+    setBusy(m.id);
+    api.socialInstagramImport(scope, entityId, { mediaId: m.id, communityId: target, global })
+      .then(() => { setBusy(''); onImported(); })
+      .catch((e) => { setBusy(''); onError(e.message || 'Import failed'); });
+  };
+  return (
+    <section style={{ marginTop: 18 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 750 }}>📸 Instagram</h3>
+      {state === null ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading your Instagram…</p>
+        : !state.connected ? (
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>
+            Not connected — add your Meta access token and Instagram account id under Integrations
+            (the same connection social metrics uses), then your recent posts appear here for one-click reposting.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+              <select value={target} onChange={(e) => setCommunityId(e.target.value)}>
+                {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} /> 🌍 also on the Howler feed
+              </label>
+            </div>
+            {state.media.length === 0
+              ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>No recent posts found on the connected Instagram account.</p>
+              : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                  {state.media.map((m) => (
+                    <div key={m.id} style={{ border: '1px solid var(--line, #e3e0d8)', borderRadius: 10, overflow: 'hidden' }}>
+                      {m.thumbnailUrl
+                        ? <img src={m.thumbnailUrl} alt="" style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }} />
+                        : <div style={{ width: '100%', aspectRatio: '1/1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>{m.type === 'VIDEO' ? '🎬' : '🖼'}</div>}
+                      <div style={{ padding: '6px 8px' }}>
+                        <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {m.type === 'CAROUSEL_ALBUM' ? `🖼×${m.childCount} ` : m.type === 'VIDEO' ? '🎬 ' : ''}{m.caption || '(no caption)'}
+                        </p>
+                        <button
+                          style={{ marginTop: 6, width: '100%', fontSize: 12 }}
+                          disabled={busy === m.id}
+                          onClick={() => doImport(m)}
+                        >{busy === m.id ? 'Importing…' : '⤵ Post on Howler'}</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </>
         )}
     </section>
   );

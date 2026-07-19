@@ -237,3 +237,19 @@ Authorised **app posters** publish for a client without a Pulse login.
   photos; HEIC refused). The post goes live immediately with `source:"app"`.
 Fan/UGC posting later rides the same endpoint with a different authorisation
 policy (e.g. per-community "fans may post" setting) — the wire shape is ready.
+
+## 9. Instagram import (added 2026-07-19)
+
+One-click repost of content already on the client's Instagram.
+- Connection: reuses the social-metrics fields (entity integrations
+  `metaAccessToken` + `metaIgUserId`, an IG Business/Creator account) — no new
+  OAuth. Not connected → `{connected:false}`, a hint not an error.
+- `GET .../social/instagram/media` (both management surfaces) → picker grid
+  shape `{id, type IMAGE|VIDEO|CAROUSEL_ALBUM, caption, thumbnailUrl,
+  permalink, timestamp, childCount}` (30 most recent).
+- `POST .../social/instagram/import {mediaId, communityId, global?, caption?,
+  publish?=true}` → Pulse downloads the media server-side and RE-HOSTS it
+  through the normal media store (IG CDN urls expire — never hotlink),
+  carousels land as one multi-image post, caption prefills (custom caption
+  wins), post publishes with `source:"instagram"`.
+- App one-click surface (poster-gated, same helpers) is the next phase.
