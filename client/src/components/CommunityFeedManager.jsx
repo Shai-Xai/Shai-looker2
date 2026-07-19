@@ -233,47 +233,72 @@ function Composer({ communities, onCreate, scope, entityId }) {
     r.readAsDataURL(blob);
   });
 
+  const MAX_MEDIA = 10; // matches the server's MAX_MEDIA_PER_POST
+
+  // Upload one file → a served media item (Instagram-style multi-photo posts
+  // share this per-file path; the composer loops over the whole selection).
+  const uploadOne = async (f) => {
+    // Images: always normalised (HEIC→JPEG, ≤1920px) whichever path uploads.
+    let blob = f, name = f.name, mime = f.type, dims = {};
+    if (f.type.startsWith('image/')) {
+      const norm = await normaliseImage(f);
+      if (!norm) throw new Error(`“${f.name}” couldn’t be read in this browser — try a JPG/PNG export of it.`);
+      blob = norm.blob;
+      dims = { width: norm.width, height: norm.height };
+      name = f.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
+      mime = 'image/jpeg';
+    }
+    let item = null;
+    let directErr = null;
+    if (direct) {
+      try { item = await directUpload(blob, name, mime, dims); }
+      catch (err) { directErr = err; console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
+    }
+    if (!item) {
+      if (!mime.startsWith('image/') && blob.size > 3_500_000) {
+        // Surface the REAL reason — a "Load failed"/"Failed to fetch" here
+        // is the browser blocking the cross-origin PUT (bucket CORS policy
+        // missing/wrong); a status code is the bucket rejecting it.
+        const why = directErr ? ` Cloud upload said: ${directErr.message} — a network/fetch error here usually means the bucket's CORS policy is missing.` : '';
+        throw new Error(direct
+          ? `The cloud upload failed and this video is too big for the fallback.${why}`
+          : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
+      }
+      item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
+    }
+    return item;
+  };
+
+  // Pick one OR MANY at once — the order you select is the carousel order in
+  // the app (drag not needed; reorder with the ◀ ▶ buttons on each thumb).
   const pickFile = async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
+    if (!files.length) return;
+    const room = MAX_MEDIA - media.length;
+    if (room <= 0) { alert(`A post can hold up to ${MAX_MEDIA} photos/videos.`); return; }
+    const toAdd = files.slice(0, room);
+    if (files.length > room) alert(`Only the first ${room} added — a post holds up to ${MAX_MEDIA}.`);
     setBusy(true);
     try {
-      // Images: always normalised (HEIC→JPEG, ≤1920px) whichever path uploads.
-      let blob = f, name = f.name, mime = f.type, dims = {};
-      if (f.type.startsWith('image/')) {
-        const norm = await normaliseImage(f);
-        if (!norm) throw new Error('That image couldn’t be read in this browser — try a JPG/PNG export of it.');
-        blob = norm.blob;
-        dims = { width: norm.width, height: norm.height };
-        name = f.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
-        mime = 'image/jpeg';
+      for (const f of toAdd) {
+        const item = await uploadOne(f); // sequential keeps upload order = pick order
+        setMedia((list) => [...list, item]);
       }
-      let item = null;
-      let directErr = null;
-      if (direct) {
-        try { item = await directUpload(blob, name, mime, dims); }
-        catch (err) { directErr = err; console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
-      }
-      if (!item) {
-        if (!mime.startsWith('image/') && blob.size > 3_500_000) {
-          // Surface the REAL reason — a "Load failed"/"Failed to fetch" here
-          // is the browser blocking the cross-origin PUT (bucket CORS policy
-          // missing/wrong); a status code is the bucket rejecting it.
-          const why = directErr ? ` Cloud upload said: ${directErr.message} — a network/fetch error here usually means the bucket's CORS policy is missing.` : '';
-          throw new Error(direct
-            ? `The cloud upload failed and this video is too big for the fallback.${why}`
-            : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
-        }
-        item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
-      }
-      setMedia((list) => [...list, item]);
     } catch (err) {
       alert(err.message || 'Upload failed');
     } finally {
       setBusy(false);
     }
   };
+
+  const moveMedia = (i, dir) => setMedia((list) => {
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return list;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
 
   const selectedCommunity = communities.find((c) => c.id === communityId);
   const ctaNeedsEventId = ctaScreen !== 'open_url' && !selectedCommunity?.eventId;
@@ -314,14 +339,25 @@ function Composer({ communities, onCreate, scope, entityId }) {
       </select>
       <textarea style={{ ...input, marginTop: 10, minHeight: 90, resize: 'vertical' }} value={body} onChange={(e) => setBody(e.target.value)} placeholder="What’s happening? Fans see this in the Howler app…" />
       {media.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
-          {media.map((m, i) => (
-            <div key={m.id} style={{ position: 'relative' }}>
-              {m.kind === 'video' ? <video src={m.url} style={{ height: 90, borderRadius: 10 }} /> : <img src={m.url} alt="" style={{ height: 90, borderRadius: 10 }} />}
-              <button style={{ ...tiny, position: 'absolute', top: 4, right: 4 }} onClick={() => setMedia((list) => list.filter((_, j) => j !== i))}>✕</button>
-            </div>
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
+            {media.map((m, i) => (
+              <div key={m.id} style={{ position: 'relative', flex: '0 0 auto' }}>
+                {m.kind === 'video' ? <video src={m.url} style={{ height: 90, borderRadius: 10, display: 'block' }} /> : <img src={m.url} alt="" style={{ height: 90, borderRadius: 10, display: 'block' }} />}
+                {/* Order badge — the app shows these as a swipeable carousel in this order. */}
+                {media.length > 1 && <span style={{ position: 'absolute', top: 4, left: 4, fontSize: 10, fontWeight: 700, color: '#fff', background: 'rgba(0,0,0,0.6)', borderRadius: 980, padding: '1px 6px' }}>{i + 1}/{media.length}</span>}
+                <button style={{ ...tiny, position: 'absolute', top: 4, right: 4 }} title="Remove" onClick={() => setMedia((list) => list.filter((_, j) => j !== i))}>✕</button>
+                {media.length > 1 && (
+                  <div style={{ position: 'absolute', bottom: 4, left: 4, right: 4, display: 'flex', justifyContent: 'space-between' }}>
+                    <button style={{ ...tiny, opacity: i === 0 ? 0.3 : 1 }} disabled={i === 0} title="Move earlier" onClick={() => moveMedia(i, -1)}>◀</button>
+                    <button style={{ ...tiny, opacity: i === media.length - 1 ? 0.3 : 1 }} disabled={i === media.length - 1} title="Move later" onClick={() => moveMedia(i, 1)}>▶</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {media.length > 1 && <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--muted)' }}>Fans swipe through these in order — reorder with ◀ ▶.</p>}
+        </>
       )}
       {showCta && (
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center', border: '1px dashed var(--hairline)', borderRadius: 10, padding: '10px 12px' }}>
@@ -360,7 +396,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
       <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <label style={{ ...mini, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }} title={direct ? 'Uploads go direct to cloud storage (R2)' : 'Uploads go via Pulse (images auto-optimised; videos capped until R2 is configured)'}>
           {direct ? '📷☁️ Add media' : '📷 Add media'}
-          <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={pickFile} />
+          <input type="file" accept="image/*,video/*" multiple style={{ display: 'none' }} onChange={pickFile} />
         </label>
         <button style={{ ...mini, background: showCta ? 'rgba(11,107,203,0.10)' : 'var(--card)' }} onClick={() => setShowCta((v) => !v)}>🔘 Button</button>
         <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: targeted ? 'not-allowed' : 'pointer', opacity: targeted ? 0.45 : 1 }} title={targeted ? 'Targeted posts stay off the Howler-wide feed' : ''}>
