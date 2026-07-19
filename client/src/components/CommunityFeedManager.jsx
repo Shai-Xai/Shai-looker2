@@ -250,14 +250,19 @@ function Composer({ communities, onCreate, scope, entityId }) {
         mime = 'image/jpeg';
       }
       let item = null;
+      let directErr = null;
       if (direct) {
         try { item = await directUpload(blob, name, mime, dims); }
-        catch (err) { console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
+        catch (err) { directErr = err; console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
       }
       if (!item) {
         if (!mime.startsWith('image/') && blob.size > 3_500_000) {
+          // Surface the REAL reason — a "Load failed"/"Failed to fetch" here
+          // is the browser blocking the cross-origin PUT (bucket CORS policy
+          // missing/wrong); a status code is the bucket rejecting it.
+          const why = directErr ? ` Cloud upload said: ${directErr.message} — a network/fetch error here usually means the bucket's CORS policy is missing.` : '';
           throw new Error(direct
-            ? 'The cloud upload failed and this video is too big for the fallback — try again in a moment.'
+            ? `The cloud upload failed and this video is too big for the fallback.${why}`
             : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
         }
         item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
