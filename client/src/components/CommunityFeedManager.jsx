@@ -48,7 +48,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
           {communities.map((c) => (
             <div key={c.id} style={{ ...card, marginBottom: 0, display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ minWidth: 180 }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 180 }}>
+                <CommunityAvatar scope={scope} entityId={entityId} community={c} onChanged={load} onError={(m) => setError(m)} />
+                <div>
                 <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
                   {c.type === 'event' ? '🎪' : '🏟'} {c.name}
                   {c.status === 'archived' && <span style={pill('rgba(128,128,128,0.16)', 'var(--muted)')}>archived</span>}
@@ -56,6 +58,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                 <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>
                   {c.type === 'event' ? `Event ${c.eventId}` : 'Organiser community'} · {VIS[c.visibility]} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}
                 </p>
+                </div>
               </div>
               {/* Per-community comment settings — organiser opt-ins, off by default. */}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -130,6 +133,61 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
       {/* ── Event chat channels (phase 2) — event ids suggested from event communities ── */}
       <ChatChannelsManager entityId={entityId} scope={scope} eventIds={[...new Set(communities.filter((c) => c.eventId).map((c) => c.eventId))]} />
     </div>
+  );
+}
+
+// Round community profile image — tap to upload (resized to 400px JPEG).
+// Shown on the app feed cards, the share page, and community discovery.
+function CommunityAvatar({ scope, entityId, community, onChanged, onError }) {
+  const [busy, setBusy] = useState(false);
+  const c = community;
+  const resize = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, 400 / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * scale);
+        const h = Math.round(img.naturalHeight * scale);
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        cv.toBlob((b) => { URL.revokeObjectURL(url); resolve(b); }, 'image/jpeg', 0.85);
+      } catch { URL.revokeObjectURL(url); resolve(null); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+  const toB64 = (blob) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1] || '');
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+  const pick = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    e.target.value = '';
+    setBusy(true);
+    try {
+      const blob = await resize(f);
+      if (!blob) throw new Error('That image couldn’t be read — try a JPG/PNG.');
+      const media = await api.socialUploadMedia(scope, entityId, { name: 'avatar.jpg', mime: 'image/jpeg', data: await toB64(blob) });
+      await api.socialUpdateCommunity(scope, entityId, c.id, { avatarUrl: media.url });
+      onChanged();
+    } catch (err) {
+      onError(err.message || 'Upload failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <label title="Set community image" style={{ cursor: 'pointer', flex: '0 0 auto' }}>
+      {c.avatarUrl
+        ? <img src={c.avatarUrl} alt="" style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', opacity: busy ? 0.5 : 1, display: 'block' }} />
+        : <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--card)', border: '1px dashed var(--hairline, #ccc)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>{busy ? '…' : '📷'}</div>}
+      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={pick} />
+    </label>
   );
 }
 

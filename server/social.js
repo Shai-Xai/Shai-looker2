@@ -192,6 +192,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const ccols = sql.prepare('PRAGMA table_info(social_feed_communities)').all().map((c) => c.name);
     if (!ccols.includes('allow_comment_images')) sql.exec('ALTER TABLE social_feed_communities ADD COLUMN allow_comment_images INTEGER NOT NULL DEFAULT 0');
     if (!ccols.includes('allow_comment_links')) sql.exec('ALTER TABLE social_feed_communities ADD COLUMN allow_comment_links INTEGER NOT NULL DEFAULT 0');
+    if (!ccols.includes('avatar_url')) sql.exec("ALTER TABLE social_feed_communities ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''");
     // Comment threading (organiser replies) + media + author kind.
     const mcols = sql.prepare('PRAGMA table_info(social_feed_comments)').all().map((c) => c.name);
     if (!mcols.includes('parent_id')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
@@ -244,12 +245,24 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   // ── shapers (public wire shapes — SOCIAL_CONTRACT.md) ──
   const mediaList = (raw) => { try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; } };
+  // Default community image = the organiser's (entity's) logo when the
+  // community has no image of its own. Only URL logos are used (a data-URI
+  // logo would bloat feeds + can't be an OG preview image).
+  const entityLogo = (entityId) => {
+    try {
+      const l = (db.getEntity && db.getEntity(entityId)?.logo) || '';
+      return /^(https?:\/\/|\/)/.test(l) ? l : '';
+    } catch { return ''; }
+  };
+  const communityAvatar = (r) => (r && (r.avatar_url || entityLogo(r.entity_id))) || '';
+
   function communityRow(r, { memberCount = null, canPost = null } = {}) {
     const out = {
       id: r.id, entityId: r.entity_id, type: r.type, name: r.name, description: r.description,
       visibility: r.visibility, status: r.status, parentId: r.parent_id || null,
       eventId: r.event_id || null, suiteId: r.suite_id || null,
       allowCommentImages: !!r.allow_comment_images, allowCommentLinks: !!r.allow_comment_links,
+      avatarUrl: communityAvatar(r) || null,
       createdAt: r.created_at,
     };
     if (memberCount != null) out.memberCount = memberCount;
@@ -335,7 +348,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   function postRow(r, community, { viewerId = null } = {}) {
     return {
       id: r.id, communityId: r.community_id,
-      community: community ? { id: community.id, name: community.name, type: community.type } : undefined,
+      community: community ? { id: community.id, name: community.name, type: community.type, avatarUrl: communityAvatar(community) || null } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
       status: r.status, global: !!r.global, pinned: !!r.pinned,
       toParent: !!r.to_parent,
@@ -390,6 +403,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (b.parentId !== undefined) out.parent_id = String(b.parentId || '');
     if (b.allowCommentImages !== undefined) out.allow_comment_images = b.allowCommentImages ? 1 : 0;
     if (b.allowCommentLinks !== undefined) out.allow_comment_links = b.allowCommentLinks ? 1 : 0;
+    if (b.avatarUrl !== undefined) out.avatar_url = String(b.avatarUrl || '').slice(0, 500);
     return out;
   }
   function validMediaItem(m) {
@@ -1055,10 +1069,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const brand = open ? (c.name || 'Howler') : 'Howler';
     const caption = open ? String(p.body || '').slice(0, 200) : 'Open this post in the Howler app.';
     const ogImg = firstImg ? abs(firstImg.url) : '';
+    const avatar = open && communityAvatar(c) ? abs(communityAvatar(c)) : '';
+    // Howler watermark on every shared image/video (on the share page). NOTE:
+    // this is an overlay on THIS page — burning it into the media pixels
+    // (survives screenshots / re-shares) is a separate media-processing step.
+    const wm = '<div class="wm">🐺 <b>Howler</b></div>';
     const mediaHtml = !open ? ''
       : media.map((m) => (m.kind === 'video'
-        ? `<video src="${esc(abs(m.url))}" controls playsinline style="width:100%;border-radius:14px;margin-top:12px"></video>`
-        : `<img src="${esc(abs(m.url))}" alt="" style="width:100%;border-radius:14px;margin-top:12px"/>`)).join('');
+        ? `<div class="mw"><video src="${esc(abs(m.url))}" controls playsinline></video>${wm}</div>`
+        : `<div class="mw"><img src="${esc(abs(m.url))}" alt=""/>${wm}</div>`)).join('');
+    // Device-aware store button — show only the store for the visitor's OS.
+    const ua = String(req.headers['user-agent'] || '');
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+    const iosBtn = `<a class="btn amber" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
+    const androidBtn = `<a class="btn amber" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
+    const bothBtns = `<a class="btn amber" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
+    const btns = isIOS ? iosBtn : isAndroid ? androidBtn : bothBtns;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -1072,23 +1099,26 @@ ${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
   body{margin:0;background:#0e0f12;color:#ECEBE7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center}
   .wrap{max-width:520px;width:100%;padding:22px 18px 44px}
   .head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .ava{width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #F5B301}
+  .ava{width:38px;height:38px;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #F5B301}
   .name{font-weight:800}
   .cap{font-size:15px;line-height:1.45;margin:14px 2px 0}
+  .mw{position:relative;margin-top:12px}
+  .mw img,.mw video{width:100%;border-radius:14px;display:block}
+  .wm{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.5);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:800;color:#fff;backdrop-filter:blur(2px)}
+  .wm b{color:#F5B301}
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:22px}
   .btn{display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:12px;padding:13px}
   .amber{background:#F5B301;color:#241d05}
   .ghost{background:#1b1d22;color:#ECEBE7;border:1px solid #2a2d34}
   .muted{color:#9A9DA5;font-size:12.5px;text-align:center;margin-top:16px}
 </style></head><body><div class="wrap">
-  <div class="head"><div class="ava">${esc(brand.charAt(0).toUpperCase() || 'H')}</div><div class="name">${esc(brand)}</div></div>
+  <div class="head">${avatar ? `<img class="ava" src="${esc(avatar)}" alt=""/>` : `<div class="ava">${esc(brand.charAt(0).toUpperCase() || 'H')}</div>`}<div class="name">${esc(brand)}</div></div>
   ${open ? `<div class="cap">${esc(p.body || '')}</div>` : `<div class="cap">This post lives in the Howler app.</div>`}
   ${mediaHtml}
   <div class="btns">
-    <a class="btn amber" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>
-    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>
+    ${btns}
   </div>
-  <div class="muted">Shared from Howler</div>
+  <div class="muted">🐺 Shared from Howler</div>
 </div></body></html>`);
   }));
 
