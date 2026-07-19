@@ -298,3 +298,19 @@ The Howler-wide feed is NOT a public firehose:
   behaviour (all global posts public) so nothing breaks before setup.
 Enforced server-side on the feed pages and both pinned strips; cursor stays
 exact (computed from raw rows).
+
+## 13. Story rail (added 2026-07-19)
+
+The quick-door row of community circles (mockup frame 7).
+- `GET /api/app/social/rail` (optional JWT): active, flag-on communities that
+  have published at least once. `?parentId=` scopes to one organiser's event
+  circles (the rail on an organiser feed). Items: `{communityId, name, type,
+  entityId, eventId, parentId, lastPostAt, joined, hasTicket, unseen}` —
+  joined counts membership of the circle or (organiser circles) any child;
+  hasTicket via JWT ticket introspection; organiser circles glow on child
+  activity. Sorted joined → ticket-held → recency, capped at 20.
+- `POST /api/app/social/communities/:id/seen` (JWT) marks the feed opened —
+  clears that circle's `unseen` ring (the app fires it on every community
+  feed load).
+- In the app the rail rides the feed tab's existing story row (StoryTarget
+  mapping); tapping an event circle opens `/event/:id/feed`.

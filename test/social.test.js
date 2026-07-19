@@ -645,3 +645,34 @@ test('global feed is personalised: house posts for everyone; organiser posts onl
   const follower = await call('GET /api/app/social/feed', { token: 'tok-555' });
   assert.ok(ids(follower).includes(orgPost.id));
 });
+
+test('story rail: active circles, joined/ticket ordering, unseen rings clear on seen', async () => {
+  // Anonymous: rail renders (recency-ordered), no viewer state.
+  const anon = await call('GET /api/app/social/rail', {});
+  assert.equal(anon.code, 200);
+  assert.ok(anon.body.rail.length > 0);
+  assert.ok(anon.body.rail.every((i) => i.joined === false && i.unseen === false));
+  assert.ok(anon.body.rail.every((i) => i.lastPostAt), 'quiet communities stay off the rail');
+
+  // Ticket holder: their event's circle (and its organiser parent) rank above
+  // unrelated circles, and organiser circles glow via child activity.
+  const vip = await call('GET /api/app/social/rail', { token: 'tok-661779' });
+  const withTicket = vip.body.rail.filter((i) => i.hasTicket);
+  assert.ok(withTicket.length > 0, 'ticket holder sees ticket-held circles');
+  const firstNoTicket = vip.body.rail.findIndex((i) => !i.hasTicket && !i.joined);
+  const lastTicket = vip.body.rail.map((i) => i.hasTicket || i.joined).lastIndexOf(true);
+  assert.ok(firstNoTicket === -1 || lastTicket < firstNoTicket || vip.body.rail[0].joined || vip.body.rail[0].hasTicket);
+
+  // Unseen ring: fresh viewer sees unseen; opening the feed (seen mark) clears it.
+  const target = vip.body.rail.find((i) => i.hasTicket) || vip.body.rail[0];
+  assert.equal(target.unseen, true);
+  await call('POST /api/app/social/communities/:id/seen', { token: 'tok-661779', params: { id: target.communityId } });
+  const after = await call('GET /api/app/social/rail', { token: 'tok-661779' });
+  assert.equal(after.body.rail.find((i) => i.communityId === target.communityId).unseen, false);
+
+  // parentId scopes the rail to one organiser's events.
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  const scoped = await call('GET /api/app/social/rail', { query: { parentId: orgComm.id } });
+  assert.ok(scoped.body.rail.every((i) => i.parentId === orgComm.id));
+});

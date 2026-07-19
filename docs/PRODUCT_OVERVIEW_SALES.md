@@ -1122,6 +1122,10 @@ self-service), flag-gated per client (`community`, default off).
   text + photos, optional Howler-wide feed, live instantly, no Pulse login.
   Instagram-style composer UI in design; fan/UGC posting rides the same rails
   later.
+- **Story rail** 🧪 — Instagram-style circles across the top of the app's
+  feed: the fan's joined communities and ticketed events first (amber ring =
+  new posts), one tap into any organiser or event feed. Discovery built into
+  the landing page.
 - **Personalised Howler feed** 🧪 — the app's landing feed shows Howler's
   own announcements to everyone, plus posts from organisers the fan follows
   or holds tickets for — relevant by construction, not a firehose.
@@ -1184,6 +1188,9 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **⭕ Story rail**: community circles on the app's feed
+  (joined + ticketed first, unseen rings, one-tap into organiser/event
+  feeds) served by a new rail endpoint with per-viewer state.
 - **2026-07-19** — **🏠 Personalised global feed**: Howler house posts reach
   everyone; organiser posts on the global feed now only reach followers and
   ticket holders of that organiser (server-side, via joins + verified ticket
