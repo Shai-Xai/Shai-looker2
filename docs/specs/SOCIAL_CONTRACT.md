@@ -325,6 +325,20 @@ The quick-door row of community circles (mockup frame 7).
   the post for anyone (no app needed); buttons to open/get the app. PRIVATE
   posts (members-only / ticket-targeted) never leak their content — the page
   falls back to a generic get-the-app gate.
+- The share page detects the visitor's device from the User-Agent: iOS shows a
+  single App Store button, Android a single Play Store button, desktop/unknown
+  shows both. Each media tile carries a Howler watermark overlay, and the header
+  shows the community avatar.
 - Phase 2 (device-tested): true auto-open-to-the-post via a `howler.chottu.link`
   deep link (Pulse already integrates ChottuLink) → the app's universal-link
   handler → a single-post screen using `GET .../posts/:id`.
+
+## 15. Community avatar (added 2026-07-19)
+
+- A community carries an optional `avatarUrl` (profile image). Set it on any
+  management surface (`PUT .../social/communities/:id` with `{ avatarUrl }`) or
+  clear it with `''`. Blank falls back to the organiser's entity logo, so a
+  community shows a brand image by default without any extra setup.
+- `avatarUrl` rides on the community object everywhere it appears — community
+  lists, the story rail, each post's `community`, and the share page header —
+  so feed cards and circles render the brand mark.

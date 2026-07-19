@@ -50,7 +50,7 @@ const routes = mount();
 
 // Run the FULL captured chain (middlewares + handler) like Express would; a
 // sync throw or async rejection lands as errorMiddleware output.
-async function call(key, { user, params = {}, body = {}, query = {}, token } = {}) {
+async function call(key, { user, params = {}, body = {}, query = {}, token, headers = {} } = {}) {
   let code = 200, payload, sent;
   const res = {
     status(c) { code = c; return res; },
@@ -58,7 +58,7 @@ async function call(key, { user, params = {}, body = {}, query = {}, token } = {
     send(d) { sent = d; return res; },
     set() { return res; },
   };
-  const req = { user, params, body, query, ip: '9.9.9.9', headers: token ? { authorization: `Bearer ${token}` } : {} };
+  const req = { user, params, body, query, ip: '9.9.9.9', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } };
   try {
     for (const h of routes[key]) {
       let nextCalled = false, nextErr = null;
@@ -698,7 +698,7 @@ test('single-post endpoint + shareable /p/:id page (deep-link phase 1)', async (
   const html = page.sent || page.body;
   assert.match(html, /og:title/);
   assert.match(html, /Deep link me/);
-  assert.match(html, /Open in the Howler app/);
+  assert.match(html, /apps\.apple\.com/); // get-the-app gate (desktop UA shows both store buttons)
   assert.match(html, /og:image/); // has an image → rich preview
 
   // A ticket-targeted post must NOT leak its content on the public page.
@@ -709,5 +709,42 @@ test('single-post endpoint + shareable /p/:id page (deep-link phase 1)', async (
   const vipPage = await call('GET /p/:id', { params: { id: vip.id } });
   const vipHtml = vipPage.sent || vipPage.body;
   assert.doesNotMatch(vipHtml, /VIP secret bar location/);
-  assert.match(vipHtml, /Open in the Howler app/); // still a get-the-app gate
+  assert.match(vipHtml, /apps\.apple\.com/); // still a get-the-app gate
+});
+
+test('community avatar + device-aware share buttons + watermark', async () => {
+  const comm = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: entity.id }, body: { name: 'Avatar Org', type: 'organiser' },
+  })).body;
+  assert.equal(comm.avatarUrl, null);
+  // Set an avatar URL.
+  const up = await call('PUT /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: entity.id, id: comm.id }, body: { avatarUrl: '/api/app/social/media/av123' },
+  });
+  assert.equal(up.body.avatarUrl, '/api/app/social/media/av123');
+
+  // A post's community object carries the avatar (feed cards show the brand).
+  const post = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id }, body: { communityId: comm.id, body: 'Brand post', global: true, publish: true, media: [{ kind: 'image', url: '/api/app/social/media/x' }] },
+  })).body;
+  // A prior test designated a house entity, so the personalised global feed
+  // only shows this organiser's post to a CONNECTED viewer — join, then read.
+  await call('POST /api/app/social/communities/:id/join', { token: 'tok-555', params: { id: comm.id } });
+  const feed = await call('GET /api/app/social/feed', { token: 'tok-555' });
+  const mine = feed.body.posts.find((p) => p.id === post.id);
+  assert.equal(mine.community.avatarUrl, '/api/app/social/media/av123');
+
+  // Share page: iOS UA → single "Open in the Howler app" (App Store), no Android button.
+  const ios = await call('GET /p/:id', { params: { id: post.id }, headers: { 'user-agent': 'iPhone Safari' } });
+  const iosHtml = ios.sent || ios.body;
+  assert.match(iosHtml, /apps\.apple\.com/);
+  assert.doesNotMatch(iosHtml, /play\.google\.com/);
+  // Android UA → Play Store only.
+  const and = await call('GET /p/:id', { params: { id: post.id }, headers: { 'user-agent': 'Android Chrome' } });
+  const andHtml = and.sent || and.body;
+  assert.match(andHtml, /play\.google\.com/);
+  assert.doesNotMatch(andHtml, /apps\.apple\.com/);
+  // Watermark on the media + avatar image in the header.
+  assert.match(iosHtml, /class="wm"/);
+  assert.match(iosHtml, /av123/); // community avatar rendered in the header
 });
