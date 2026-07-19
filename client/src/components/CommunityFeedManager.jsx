@@ -94,6 +94,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                   {p.community?.name || '—'}
                   {p.global && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>🌍 global feed</span>}
                   {p.pinned && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>📌 pinned</span>}
+                  {p.audience && <span style={pill('rgba(122,62,201,0.13)', '#7a3ec9')} title="Only matching ticket holders see this post in the app">{p.audience.type === 'holders' ? '🎟 ticket holders' : `🎯 ${(p.audience.ticketTypes || []).join(', ')}`}</span>}
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
                 <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}</p>
@@ -267,6 +268,16 @@ function Composer({ communities, onCreate, scope, entityId }) {
 
   const selectedCommunity = communities.find((c) => c.id === communityId);
   const ctaNeedsEventId = ctaScreen !== 'open_url' && !selectedCommunity?.eventId;
+  // Targeting (event communities only): everyone / any ticket holder /
+  // specific ticket type names. Targeted posts never ride the global feed.
+  const [audienceType, setAudienceType] = useState('everyone');
+  const [ticketTypes, setTicketTypes] = useState('');
+  const targeted = selectedCommunity?.eventId && audienceType !== 'everyone';
+  const buildAudience = () => {
+    if (!selectedCommunity?.eventId || audienceType === 'everyone') return {};
+    if (audienceType === 'holders') return { audience: { type: 'holders' } };
+    return { audience: { type: 'ticketTypes', ticketTypes: ticketTypes.split(',').map((s) => s.trim()).filter(Boolean) } };
+  };
   const buildCta = () => {
     if (!showCta || !ctaLabel.trim()) return {};
     const destination = ctaScreen === 'open_url'
@@ -277,8 +288,13 @@ function Composer({ communities, onCreate, scope, entityId }) {
 
   const post = () => {
     setBusy(true);
-    onCreate({ communityId, body, global, media, ...buildCta(), ...(publishNow ? { publish: true } : {}) })
-      .finally(() => { setBody(''); setMedia([]); setCtaLabel(''); setCtaUrl(''); setShowCta(false); setBusy(false); });
+    if (audienceType === 'ticketTypes' && !ticketTypes.split(',').some((s) => s.trim())) {
+      alert('List at least one ticket type name to target (comma separated, exactly as they appear on tickets)');
+      setBusy(false);
+      return;
+    }
+    onCreate({ communityId, body, global: targeted ? false : global, media, ...buildCta(), ...buildAudience(), ...(publishNow ? { publish: true } : {}) })
+      .finally(() => { setBody(''); setMedia([]); setCtaLabel(''); setCtaUrl(''); setShowCta(false); setAudienceType('everyone'); setTicketTypes(''); setBusy(false); });
   };
 
   return (
@@ -309,6 +325,26 @@ function Composer({ communities, onCreate, scope, entityId }) {
           {ctaNeedsEventId && (
             <input style={{ ...input, width: 'auto', minWidth: 130 }} value={ctaEventId} onChange={(e) => setCtaEventId(e.target.value.replace(/\D/g, ''))} placeholder="Event ID" inputMode="numeric" title="Organiser-community posts need the target event's ID; event-community posts fill this automatically" />
           )}
+        </div>
+      )}
+      {selectedCommunity?.eventId && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>🎯 Who sees it:</span>
+          <select style={{ ...input, width: 'auto', minWidth: 170 }} value={audienceType} onChange={(e) => setAudienceType(e.target.value)}>
+            <option value="everyone">🌍 Everyone</option>
+            <option value="holders">🎟 Any ticket holder</option>
+            <option value="ticketTypes">🎯 Specific ticket types</option>
+          </select>
+          {audienceType === 'ticketTypes' && (
+            <input
+              style={{ ...input, width: 'auto', flex: 1, minWidth: 220 }}
+              value={ticketTypes}
+              onChange={(e) => setTicketTypes(e.target.value)}
+              placeholder="Ticket type names, comma separated — e.g. VIP, Weekend Pass"
+              title="Exact ticket type names as fans hold them (case doesn’t matter)"
+            />
+          )}
+          {targeted && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>targeted posts stay off the Howler-wide feed</span>}
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>

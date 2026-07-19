@@ -253,3 +253,22 @@ One-click repost of content already on the client's Instagram.
   carousels land as one multi-image post, caption prefills (custom caption
   wins), post publishes with `source:"instagram"`.
 - App one-click surface (poster-gated, same helpers) is the next phase.
+
+## 10. Targeted posts — ticket types (added 2026-07-19)
+
+Event-community posts can target holders, enforced SERVER-SIDE (a fan who
+shouldn't see a post never receives it; no app changes needed).
+- `audience` on a post: absent/null = everyone · `{type:"holders"}` = anyone
+  with a (non-expired) ticket for the community's event ·
+  `{type:"ticketTypes", ticketTypes:[names]}` = holders of those ticket types
+  (name match, case-insensitive). Event communities only; a targeted post is
+  forced OFF the Howler-wide feed.
+- Holdings come from JWT introspection (appAuth `fetchAppTickets`: the same
+  GraphQL backends answer `{ user { tickets { nodes { name event { id } } } } }`;
+  cached ~5 min; unknown → fail CLOSED). Fetched lazily — only when a
+  response's candidate rows actually carry an audience.
+- Enforced on: community feed pages + pinned strips, comment reads, and all
+  interactions (like/comment/personal-pin via the shared guard). Cursor
+  pagination stays exact (cursor computed from raw rows before filtering).
+- Full segment-based audiences (Pulse segments) are the later phase — same
+  `audience` field, new type.

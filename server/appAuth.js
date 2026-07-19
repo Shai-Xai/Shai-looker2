@@ -60,6 +60,42 @@ async function defaultVerifyAppToken(token) {
   return user;
 }
 
+// ── Viewer's tickets (for ticket-type-targeted content) ──
+// Same introspection idea as identity: ask the Howler backend what tickets
+// this token's user holds. Used to ring-fence targeted posts/channels
+// server-side. Returns [{ eventId, name }] (non-expired tickets only — the
+// GraphQL API's behaviour), or null when it can't be determined (callers
+// treat null as "no targeted content visible" — fail closed, never open).
+const TICKET_CACHE = new Map();
+const TICKET_TTL = 5 * 60_000, TICKET_CACHE_MAX = 2000;
+async function defaultFetchAppTickets(token) {
+  if (!token) return null;
+  const hit = TICKET_CACHE.get(token);
+  if (hit && Date.now() - hit.at < TICKET_TTL) return hit.tickets;
+  let tickets = null;
+  for (const { url } of HOWLER_GQLS) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const user = await gqlWithToken(url, token,
+        '{ user { tickets(last: 100) { nodes { name event { id } } } } }', ctrl.signal);
+      const nodes = user?.tickets?.nodes;
+      if (Array.isArray(nodes)) {
+        tickets = nodes.map((n) => ({
+          eventId: String(n?.event?.id || '').split('/').pop(),
+          name: String(n?.name || ''),
+        })).filter((t2) => /^\d+$/.test(t2.eventId));
+        break;
+      }
+    } catch { /* try the next backend */ } finally { clearTimeout(t); }
+  }
+  if (tickets) {
+    if (TICKET_CACHE.size >= TICKET_CACHE_MAX) TICKET_CACHE.delete(TICKET_CACHE.keys().next().value);
+    TICKET_CACHE.set(token, { tickets, at: Date.now() });
+  }
+  return tickets;
+}
+
 // Request helpers bound to a verifier (tests inject a stub verifier).
 function helpers(verifyAppToken = defaultVerifyAppToken) {
   // Resolve the verified Howler user for a request, or throw. 401 = no/bad
@@ -83,4 +119,4 @@ function helpers(verifyAppToken = defaultVerifyAppToken) {
   return { requireAppUser, optionalAppUser };
 }
 
-module.exports = { defaultVerifyAppToken, helpers };
+module.exports = { defaultVerifyAppToken, defaultFetchAppTickets, helpers };
