@@ -560,3 +560,43 @@ test('targeting: ticket-type posts only reach matching holders (server-side)', a
   assert.equal((await call('POST /api/admin/entities/:entityId/social/posts', { user: admin, params: { entityId: entity.id }, body: { communityId: orgComm.id, body: 'x', audience: { type: 'holders' } } })).code, 400);
   assert.equal((await mk({ body: 'x', audience: { type: 'ticketTypes', ticketTypes: [] } })).code, 400);
 });
+
+test('roll-up: event posts opt into the organiser feed (same mechanic as global)', async () => {
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  // A nested PUBLIC event community under the organiser.
+  const ev = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: entity.id },
+    body: { name: 'Rollup Fest', type: 'event', eventId: '19203', parentId: orgComm.id, visibility: 'public' },
+  })).body;
+  const mk = (body) => call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id }, body: { communityId: ev.id, publish: true, ...body },
+  });
+  const rolled = (await mk({ body: 'Rolls up to the brand', toParent: true })).body;
+  const stays = (await mk({ body: 'Stays in the event' })).body;
+  assert.equal(rolled.toParent, true);
+
+  const orgFeed = await call('GET /api/app/social/communities/:id/feed', { params: { id: orgComm.id } });
+  const ids = orgFeed.body.posts.map((p) => p.id);
+  assert.ok(ids.includes(rolled.id), 'opted-in event post appears in the organiser feed');
+  assert.ok(!ids.includes(stays.id), 'non-opted post stays event-only');
+  // Rolled post is labelled with its HOME (event) community.
+  assert.equal(orgFeed.body.posts.find((p) => p.id === rolled.id).community.name, 'Rollup Fest');
+  // The event's own feed still shows both.
+  const evFeed = await call('GET /api/app/social/communities/:id/feed', { params: { id: ev.id } });
+  assert.ok(evFeed.body.posts.map((p) => p.id).includes(rolled.id));
+
+  // Targeted + rolled: still ticket-checked against the EVENT in the
+  // organiser feed (VIP holder sees it there; GA holder doesn't).
+  const vipRolled = (await mk({ body: 'VIP rolled', toParent: true, audience: { type: 'ticketTypes', ticketTypes: ['VIP'] } })).body;
+  const vipView = await call('GET /api/app/social/communities/:id/feed', { params: { id: orgComm.id }, token: 'tok-661779' });
+  assert.ok(vipView.body.posts.some((p) => p.id === vipRolled.id));
+  const gaView = await call('GET /api/app/social/communities/:id/feed', { params: { id: orgComm.id }, token: 'tok-662076' });
+  assert.ok(!gaView.body.posts.some((p) => p.id === vipRolled.id));
+
+  // toParent on a community with no parent is ignored.
+  const orgPost = await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id }, body: { communityId: orgComm.id, body: 'x', publish: true, toParent: true },
+  });
+  assert.equal(orgPost.body.toParent, false);
+});

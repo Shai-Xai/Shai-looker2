@@ -272,3 +272,14 @@ shouldn't see a post never receives it; no app changes needed).
   pagination stays exact (cursor computed from raw rows before filtering).
 - Full segment-based audiences (Pulse segments) are the later phase — same
   `audience` field, new type.
+
+## 11. Event → organiser roll-up (added 2026-07-19)
+
+Per-post opt-in, the same mechanic as `global`: `toParent:true` on an event
+post ALSO surfaces it in the parent organiser community's feed (labelled with
+its home event community). Only meaningful on nested event communities —
+ignored elsewhere. Rolled posts are readable/interactable by whoever can see
+the organiser feed (like global syndication), EXCEPT ticket-targeted ones,
+which stay ticket-checked against the home event wherever they appear.
+So the hierarchy reads: event feed → (toParent) organiser feed → (global)
+Howler-wide feed, with targeting always enforced at every level.

@@ -1122,6 +1122,9 @@ self-service), flag-gated per client (`community`, default off).
   text + photos, optional Howler-wide feed, live instantly, no Pulse login.
   Instagram-style composer UI in design; fan/UGC posting rides the same rails
   later.
+- **Feed roll-up** 🧪 — event posts can also surface on the organiser's
+  community feed (per-post toggle, like the Howler-wide one) — the brand feed
+  becomes the best-of across its events.
 - **Targeted posts** 🧪 — event posts aimed at 🎟 any ticket holder or 🎯
   specific ticket types ("VIP, Weekend Pass"); fans who don't match simply
   never see the post (enforced on Howler's servers, not hidden in the app).
@@ -1178,6 +1181,10 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **⬆ Event → organiser feed roll-up** 🧪: event posts can
+  opt onto the parent organiser community's feed (per-post toggle, same
+  mechanic as the Howler-wide one); ticket-targeted posts stay ticket-checked
+  wherever they surface.
 - **2026-07-19** — **🎯 Targeted posts (ticket types)** 🧪: event-community
   posts can target any-ticket-holders or specific ticket types; enforcement is
   server-side against the fan's verified ticket holdings (via the same Howler
