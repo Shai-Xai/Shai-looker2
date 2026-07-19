@@ -1155,6 +1155,9 @@ self-service), flag-gated per client (`community`, default off).
   text + photos, optional Howler-wide feed, live instantly, no Pulse login.
   Instagram-style composer UI in design; fan/UGC posting rides the same rails
   later.
+- **Personalised Howler feed** 🧪 — the app's landing feed shows Howler's
+  own announcements to everyone, plus posts from organisers the fan follows
+  or holds tickets for — relevant by construction, not a firehose.
 - **Feed roll-up** 🧪 — event posts can also surface on the organiser's
   community feed (per-post toggle, like the Howler-wide one) — the brand feed
   becomes the best-of across its events.
@@ -1214,6 +1217,10 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **🏠 Personalised global feed**: Howler house posts reach
+  everyone; organiser posts on the global feed now only reach followers and
+  ticket holders of that organiser (server-side, via joins + verified ticket
+  holdings). Platform admin designates the house entity.
 - **2026-07-19** — **⬆ Event → organiser feed roll-up** 🧪: event posts can
   opt onto the parent organiser community's feed (per-post toggle, same
   mechanic as the Howler-wide one); ticket-targeted posts stay ticket-checked

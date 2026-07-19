@@ -31,6 +31,8 @@ const TICKETS = {
 };
 const fetchAppTickets = async (token) => TICKETS[token] ?? null;
 
+const setFlagFor = (entityId) => setFlag(entityId, 'on');
+
 const verifyAppToken = async (token) => {
   if (token === 'tok-down') throw new Error('backend unreachable');
   const m = token.match(/^tok-(\d+)$/);
@@ -599,4 +601,47 @@ test('roll-up: event posts opt into the organiser feed (same mechanic as global)
     user: admin, params: { entityId: entity.id }, body: { communityId: orgComm.id, body: 'x', publish: true, toParent: true },
   });
   assert.equal(orgPost.body.toParent, false);
+});
+
+test('global feed is personalised: house posts for everyone; organiser posts only for followers/ticket holders', async () => {
+  // Designate a Howler house entity; its global posts reach EVERYONE.
+  const house = makeEntity('Howler HQ', 'Howler HQ');
+  setFlagFor(house.id);
+  await call('PUT /api/admin/social/house', { user: admin, body: { entityId: house.id } });
+  const hq = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: house.id }, body: { name: 'Howler HQ', type: 'organiser' },
+  })).body;
+  const housePost = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: house.id }, body: { communityId: hq.id, body: 'Welcome to Howler', global: true, publish: true },
+  })).body;
+
+  // A second organiser with a global post + an event community (event 19203).
+  const org2 = makeEntity('Indie Fest Co', 'Indie Fest Co');
+  setFlagFor(org2.id);
+  const org2Comm = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: org2.id }, body: { name: 'Indie Fest', type: 'organiser' },
+  })).body;
+  await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: org2.id }, body: { name: 'Indie Fest Live', type: 'event', eventId: '19203', parentId: org2Comm.id },
+  });
+  const orgPost = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: org2.id }, body: { communityId: org2Comm.id, body: 'Indie lineup drop', global: true, publish: true },
+  })).body;
+
+  const ids = (out) => out.body.posts.map((p) => p.id);
+  // Anonymous: house only.
+  const anon = await call('GET /api/app/social/feed', {});
+  assert.ok(ids(anon).includes(housePost.id));
+  assert.ok(!ids(anon).includes(orgPost.id));
+  // Ticket holder for event 19203 → connected to Indie Fest Co → sees both.
+  const holder = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.ok(ids(holder).includes(housePost.id) && ids(holder).includes(orgPost.id));
+  // No tickets, not joined → house only…
+  const stranger = await call('GET /api/app/social/feed', { token: 'tok-555' });
+  assert.ok(ids(stranger).includes(housePost.id));
+  assert.ok(!ids(stranger).includes(orgPost.id));
+  // …until they FOLLOW (join any of the organiser's communities).
+  await call('POST /api/app/social/communities/:id/join', { token: 'tok-555', params: { id: org2Comm.id } });
+  const follower = await call('GET /api/app/social/feed', { token: 'tok-555' });
+  assert.ok(ids(follower).includes(orgPost.id));
 });
