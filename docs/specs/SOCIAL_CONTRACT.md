@@ -202,3 +202,22 @@ wiring lands), `broadcast {eventId,text,pin,push,ctaLabel?,ctaDestination?}` →
 one organiser message into every active OFFICIAL channel (fan groups
 excluded). `push` is a PER-MESSAGE flag — recorded now, delivery activates
 with the Firebase key.
+
+## 7. Pins (feed + chat, added 2026-07-19)
+
+Two pin layers everywhere, never mixed:
+- **Organiser pin** — global, everyone sees it. On posts: `pinned` on the
+  post + a `pinned: [...]` strip (≤10, organiser-pinned posts) on the FIRST
+  page of both feeds (`before=` pages never carry strips, so cursor paging
+  stays exact). Toggled from the management surfaces:
+  `POST .../posts/:id/pin {pinned}`. On chat messages: the existing
+  `pin/unpin` moderation actions → `channel.pinnedMessage`.
+- **Personal pin** — private bookmark, only the pinner sees it.
+  Posts: `POST /api/app/social/posts/:id/pin {pinned}` (JWT; same
+  ring-fencing as likes) → `pinnedByMe` on posts + a `myPins: [...]` strip
+  (≤10) on first feed pages. Chat: `POST /api/app/social/chat/messages/:id/pin
+  {pinned}` → `pinnedByMe` on messages + `channel.myPinnedMessage`.
+- **Fan groups are the exception (WhatsApp parity)**: in a `kind:"group"`
+  channel the same fan endpoint toggles the SHARED pin (any member, everyone
+  sees it; response says `shared:true`). Official channels always fall back
+  to the personal pin (`shared:false`).

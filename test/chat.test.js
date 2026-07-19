@@ -229,3 +229,36 @@ test('history paging: before= returns older messages chronologically, hasOlder f
   const times = older.body.messages.map((m) => m.createdAt);
   assert.deepEqual(times, [...times].sort());
 });
+
+test('fan pins: shared in groups, personal in official channels', async () => {
+  // Personal pin in an official channel: only the pinner sees it.
+  const send = await call('POST /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id }, body: { text: 'pin me' } });
+  const pin = await call('POST /api/app/social/chat/messages/:id/pin', { token: 'tok-661779', params: { id: send.body.id }, body: { pinned: true } });
+  assert.equal(pin.code, 200);
+  assert.equal(pin.body.shared, false);
+  const mine = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id } });
+  assert.equal(mine.body.channel.myPinnedMessage.id, send.body.id);
+  assert.equal(mine.body.messages.find((m) => m.id === send.body.id).pinnedByMe, true);
+  const other = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: state.main.id } });
+  assert.equal(other.body.channel.myPinnedMessage, undefined);
+  assert.equal(other.body.messages.find((m) => m.id === send.body.id).pinnedByMe, false);
+  // Unpin clears it.
+  await call('POST /api/app/social/chat/messages/:id/pin', { token: 'tok-661779', params: { id: send.body.id }, body: { pinned: false } });
+  const after = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id } });
+  assert.equal(after.body.channel.myPinnedMessage, undefined);
+
+  // Shared pin in a fan group: any member toggles, everyone sees it.
+  const group = (await call('POST /api/app/social/chat/channels', { token: 'tok-661779', body: { eventId: EVENT, name: 'Pin crew' } })).body;
+  await call('POST /api/app/social/chat/join', { token: 'tok-662076', body: { code: group.inviteCode } });
+  const gm = await call('POST /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: group.id }, body: { text: 'meet at gate B' } });
+  const gpin = await call('POST /api/app/social/chat/messages/:id/pin', { token: 'tok-662076', params: { id: gm.body.id }, body: { pinned: true } });
+  assert.equal(gpin.body.shared, true);
+  const owner = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: group.id } });
+  assert.equal(owner.body.channel.pinnedMessage.id, gm.body.id); // shared → visible to ALL members
+  // Non-member of the group cannot pin in it.
+  assert.equal((await call('POST /api/app/social/chat/messages/:id/pin', { token: 'tok-555', params: { id: gm.body.id }, body: { pinned: true } })).code, 403);
+  // Member unpins for everyone (WhatsApp-style).
+  await call('POST /api/app/social/chat/messages/:id/pin', { token: 'tok-661779', params: { id: gm.body.id }, body: { pinned: false } });
+  const cleared = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: group.id } });
+  assert.equal(cleared.body.channel.pinnedMessage, undefined);
+});

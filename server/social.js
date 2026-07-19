@@ -197,7 +197,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!mcols.includes('parent_id')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
     if (!mcols.includes('author_type')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN author_type TEXT NOT NULL DEFAULT 'fan'");
     if (!mcols.includes('media')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN media TEXT NOT NULL DEFAULT '[]'");
+    // Organiser pin: pinned posts surface at the top of the feed for everyone.
+    if (!cols.includes('pinned')) sql.exec('ALTER TABLE social_feed_posts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
   } catch (e) { console.error('[social] column migrations skipped:', e.message); }
+
+  // Personal pins: a fan bookmarks a post for THEMSELVES (visible only to them,
+  // returned as pinnedByMe + in the feed's myPins strip). Distinct from the
+  // organiser's global `pinned` flag on the post row.
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS social_feed_user_pins (
+      post_id        TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      created_at     TEXT NOT NULL,
+      PRIMARY KEY (post_id, howler_user_id)
+    );
+  `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'community'); } catch { return false; } };
@@ -238,17 +252,18 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   }
   const URL_RE = /(https?:\/\/|www\.)\S+/i;
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
+  const hasPinned = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_user_pins WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
   function postRow(r, community, { viewerId = null } = {}) {
     return {
       id: r.id, communityId: r.community_id,
       community: community ? { id: community.id, name: community.name, type: community.type } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
-      status: r.status, global: !!r.global,
+      status: r.status, global: !!r.global, pinned: !!r.pinned,
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
       commentCount: commentCount(r.id),
-      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId) } : {}),
+      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId), pinnedByMe: hasPinned(r.id, viewerId) } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
       // e.g. "explore_tickets:19203" or "open_url:https://…").
       ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
@@ -397,12 +412,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const r = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
     return postRow(r, getCommunity(r.community_id));
   }
+  // Organiser pin/unpin: floats the post to the top of its feeds for everyone.
+  function pinPost(entityId, id, pinned) {
+    const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
+    if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
+    sql.prepare('UPDATE social_feed_posts SET pinned=?, updated_at=? WHERE id=?').run(pinned ? 1 : 0, now(), id);
+    const r = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
+    return postRow(r, getCommunity(r.community_id));
+  }
   function deletePost(entityId, id) {
     const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
     if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
     sql.prepare('DELETE FROM social_feed_posts WHERE id=?').run(id);
     sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=?').run(id);
     sql.prepare('DELETE FROM social_feed_comments WHERE post_id=?').run(id);
+    sql.prepare('DELETE FROM social_feed_user_pins WHERE post_id=?').run(id);
   }
   // Moderation (organiser/admin): list a post's comments incl. reported flags;
   // delete any comment. Exposed on both management surfaces.
@@ -474,6 +498,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.post(`${A}/posts`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(createPost(req.params.entityId, req.body || {}, req.user))));
   app.put(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(updatePost(req.params.entityId, req.params.id, req.body || {}))));
   app.delete(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { deletePost(req.params.entityId, req.params.id); res.json({ ok: true }); }));
+  app.post(`${A}/posts/:id/pin`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(pinPost(req.params.entityId, req.params.id, !!(req.body || {}).pinned))));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -494,6 +519,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.post(`${M}/posts`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(createPost(eid(req), req.body || {}, req.user))));
   app.put(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(updatePost(eid(req), req.params.id, req.body || {}))));
   app.delete(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { deletePost(eid(req), req.params.id); res.json({ ok: true }); }));
+  app.post(`${M}/posts/:id/pin`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(pinPost(eid(req), req.params.id, !!(req.body || {}).pinned))));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -517,6 +543,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     return rows.map((r) => postRow(r, c, { viewerId }));
   }
 
+  // Pinned strips for a feed's FIRST page (pages stay purely chronological so
+  // the before-cursor never skips or repeats): the organiser's globally pinned
+  // posts, plus the viewer's own personal pins, each capped at 10.
+  function pinnedStrips(where, args, viewerId) {
+    const pinned = sql.prepare(`SELECT * FROM social_feed_posts WHERE ${where} AND status='published' AND pinned=1 ORDER BY published_at DESC LIMIT 10`).all(...args)
+      .filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId }));
+    const myPins = viewerId
+      ? sql.prepare(`SELECT p.* FROM social_feed_posts p JOIN social_feed_user_pins u ON u.post_id=p.id AND u.howler_user_id=? WHERE ${where} AND p.status='published' ORDER BY u.created_at DESC LIMIT 10`).all(String(viewerId), ...args)
+        .filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId }))
+      : [];
+    return { pinned, myPins };
+  }
+
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
@@ -527,7 +566,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' ORDER BY published_at DESC LIMIT ?").all(limit);
     const posts = rows.filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId: viewer?.id }));
-    res.json({ contractVersion: 1, posts, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
+    const strips = before ? {} : pinnedStrips('global=1', [], viewer?.id);
+    res.json({ contractVersion: 1, posts, ...strips, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
   }));
 
   // Community discovery — by Howler eventId, or the active set for an entity.
@@ -558,7 +598,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     const page = pageArgs(req.query);
     const posts = communityFeed(c, page, viewer?.id);
-    res.json({ contractVersion: 1, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
+    const strips = page.before ? {} : pinnedStrips('community_id=?', [c.id], viewer?.id);
+    res.json({ contractVersion: 1, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, ...strips, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
   }));
 
   // Explicit join / leave from the app — identity comes from the verified JWT.
@@ -682,6 +723,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const { user, post } = await reactablePost(req);
     sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').run(post.id, user.id);
     res.json({ ok: true, reactionCount: reactionCount(post.id), hasReacted: false });
+  }));
+
+  // Personal pin / unpin — a private bookmark, only ever visible to the pinner
+  // (pinnedByMe on posts + the feed's myPins strip). Same ring-fencing as likes.
+  app.post('/api/app/social/posts/:id/pin', joinLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { user, post } = await reactablePost(req);
+    if ((req.body || {}).pinned === false) {
+      sql.prepare('DELETE FROM social_feed_user_pins WHERE post_id=? AND howler_user_id=?').run(post.id, user.id);
+      return res.json({ ok: true, pinnedByMe: false });
+    }
+    sql.prepare('INSERT OR IGNORE INTO social_feed_user_pins (post_id, howler_user_id, created_at) VALUES (?,?,?)').run(post.id, user.id, now());
+    res.json({ ok: true, pinnedByMe: true });
   }));
 
   // Serve disk-stored media — public, immutable (ids are unguessable UUIDs).
