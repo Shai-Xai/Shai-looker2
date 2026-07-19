@@ -221,3 +221,19 @@ Two pin layers everywhere, never mixed:
   channel the same fan endpoint toggles the SHARED pin (any member, everyone
   sees it; response says `shared:true`). Official channels always fall back
   to the personal pin (`shared:false`).
+
+## 8. Posting from the app (added 2026-07-19)
+
+Authorised **app posters** publish for a client without a Pulse login.
+- Registry: per-entity list of verified Howler user ids, managed from BOTH
+  Pulse surfaces (`GET/POST .../posters`, `DELETE .../posters/:userId`;
+  `{howlerUserId, name}` — blank `name` = post in the brand's voice, the
+  community name shows as author).
+- Discovery: `canPost` rides the app's community payloads (communities list +
+  community feed `community`) for the verified viewer.
+- Publish: `POST /api/app/social/posts {communityId, text, global?, images?}`
+  (JWT required; 403 unless the id is in that entity's poster list). `images`
+  = inline base64 `[{data, mime}]` (app pre-scales to JPEG, same as comment
+  photos; HEIC refused). The post goes live immediately with `source:"app"`.
+Fan/UGC posting later rides the same endpoint with a different authorisation
+policy (e.g. per-community "fans may post" setting) — the wire shape is ready.
