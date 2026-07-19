@@ -1082,9 +1082,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const ua = String(req.headers['user-agent'] || '');
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const isAndroid = /Android/i.test(ua);
-    const iosBtn = `<a class="btn amber" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
-    const androidBtn = `<a class="btn amber" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
-    const bothBtns = `<a class="btn amber" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
+    const iosBtn = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
+    const androidBtn = `<a class="btn brand" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
+    const bothBtns = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
     const btns = isIOS ? iosBtn : isAndroid ? androidBtn : bothBtns;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"/>
@@ -1099,16 +1099,16 @@ ${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
   body{margin:0;background:#0e0f12;color:#ECEBE7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center}
   .wrap{max-width:520px;width:100%;padding:22px 18px 44px}
   .head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .ava{width:38px;height:38px;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #F5B301}
+  .ava{width:38px;height:38px;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #EC0B62}
   .name{font-weight:800}
   .cap{font-size:15px;line-height:1.45;margin:14px 2px 0}
   .mw{position:relative;margin-top:12px}
   .mw img,.mw video{width:100%;border-radius:14px;display:block}
   .wm{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.5);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:800;color:#fff;backdrop-filter:blur(2px)}
-  .wm b{color:#F5B301}
+  .wm b{color:#EC0B62}
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:22px}
   .btn{display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:12px;padding:13px}
-  .amber{background:#F5B301;color:#241d05}
+  .brand{background:#EC0B62;color:#fff}
   .ghost{background:#1b1d22;color:#ECEBE7;border:1px solid #2a2d34}
   .muted{color:#9A9DA5;font-size:12.5px;text-align:center;margin-top:16px}
 </style></head><body><div class="wrap">
