@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-18 (📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-19 (📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1114,6 +1114,9 @@ self-service), flag-gated per client (`community`, default off).
   replies, pins, reports, organiser CTA buttons in messages, and one-click
   broadcast to every channel with per-message push flags (delivery activates
   with the Firebase key).
+- **Pins everywhere** 🧪 — organisers pin/unpin posts (float to the top of the
+  feed for everyone) and chat messages; fans pin privately for themselves
+  (posts + messages), and in their own groups pins are shared WhatsApp-style.
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1161,6 +1164,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **📌 Pins across feed + chat** 🧪: organisers pin/unpin posts
+  (feed shows a pinned strip for everyone) and chat messages from Pulse; fans
+  get personal pins on posts and messages (visible only to them), and pins in
+  fan-made groups are shared WhatsApp-style. Also: chat history paging in the
+  app ("Load earlier messages").
 - **2026-07-18** — **💬 Event chat channels (Social+ replacement phase 2)** 🧪: per-event
   chat run from Pulse (Engage → Community → Channels) — organiser channels with
   public / segment(ticket)-gated / manual access and broadcast mode, fan-made groups

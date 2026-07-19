@@ -87,6 +87,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', fontWeight: 600 }}>
                   {p.community?.name || '—'}
                   {p.global && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>🌍 global feed</span>}
+                  {p.pinned && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>📌 pinned</span>}
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
                 <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}</p>
@@ -104,6 +105,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
               <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 {p.status === 'draft' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'published' }))}>🚀 Publish</button>}
                 {p.status === 'published' && <button style={mini} onClick={() => act(api.socialUpdatePost(scope, entityId, p.id, { status: 'archived' }))}>⏸ Unpublish</button>}
+                {p.status === 'published' && <button style={mini} title={p.pinned ? 'Unpin from the top of the feed' : 'Pin to the top of the feed'} onClick={() => act(api.socialPinPost(scope, entityId, p.id, !p.pinned))}>{p.pinned ? '📌 Unpin' : '📌 Pin'}</button>}
                 <button
                   style={{ ...mini, color: '#c62828', borderColor: 'rgba(198,40,40,0.4)', marginLeft: 'auto' }}
                   onClick={() => window.confirm('Delete this post for good? It disappears from the app feed immediately.') && act(api.socialDeletePost(scope, entityId, p.id))}

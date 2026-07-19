@@ -119,6 +119,16 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       last_read_at   TEXT NOT NULL,
       PRIMARY KEY (channel_id, howler_user_id)
     );
+
+    -- Personal pins in OFFICIAL channels: visible only to the pinner (their
+    -- own "pinned by you" banner). In fan groups the shared message.pinned
+    -- flag is used instead (any member can pin, WhatsApp-style).
+    CREATE TABLE IF NOT EXISTS social_chat_user_pins (
+      message_id     TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      created_at     TEXT NOT NULL,
+      PRIMARY KEY (message_id, howler_user_id)
+    );
   `);
 
   const enabled = () => db.getSetting('social_chat_enabled', '1') !== '0';
@@ -187,6 +197,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       out.unread = sql.prepare('SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND created_at>? AND howler_user_id!=?').get(c.id, lastRead, String(userId)).n;
       const pin = sql.prepare('SELECT * FROM social_chat_messages WHERE channel_id=? AND pinned=1 AND deleted=0 ORDER BY created_at DESC LIMIT 1').get(c.id);
       if (pin) out.pinnedMessage = messageRow(pin);
+      const myPin = sql.prepare('SELECT m.* FROM social_chat_messages m JOIN social_chat_user_pins u ON u.message_id=m.id AND u.howler_user_id=? WHERE m.channel_id=? AND m.deleted=0 ORDER BY u.created_at DESC LIMIT 1').get(String(userId), c.id);
+      if (myPin) out.myPinnedMessage = messageRow(myPin);
     }
     if (c.kind === 'group' && userId && (memberRow(c.id, userId)?.role === 'owner')) {
       out.inviteCode = c.invite_code;
@@ -267,12 +279,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
         : sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, limit);
     const reacts = reactionsFor(rows.map((r) => r.id), user.id);
     const hasOlder = rows.length > 0 && !!sql.prepare('SELECT 1 FROM social_chat_messages WHERE channel_id=? AND created_at<? LIMIT 1').get(c.id, rows[0].created_at);
+    const myPins = new Set(sql.prepare('SELECT u.message_id FROM social_chat_user_pins u JOIN social_chat_messages m ON m.id=u.message_id WHERE m.channel_id=? AND u.howler_user_id=?').all(c.id, String(user.id)).map((r) => r.message_id));
     res.json({
       contractVersion: 1,
       channel: channelRow(c, { userId: user.id }),
       canPost: canPost(c, user, false),
       hasOlder,
-      messages: rows.map((r) => messageRow(r, { reactions: reacts[r.id] || [], viewerId: user.id })),
+      messages: rows.map((r) => ({ ...messageRow(r, { reactions: reacts[r.id] || [], viewerId: user.id }), pinnedByMe: myPins.has(r.id) })),
     });
   }));
 
@@ -309,6 +322,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!r) return gone(res);
     if (r.author_type === 'organiser' || r.howler_user_id !== String(user.id)) throw new HttpError(403, 'You can only delete your own messages');
     sql.prepare('UPDATE social_chat_messages SET deleted=1, body=\'\', pinned=0 WHERE id=?').run(r.id);
+    sql.prepare('DELETE FROM social_chat_user_pins WHERE message_id=?').run(r.id);
     res.json({ ok: true });
   }));
 
@@ -330,6 +344,28 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const emoji = String((req.body || {}).emoji || req.query.emoji || '').trim();
     sql.prepare('DELETE FROM social_chat_reactions WHERE message_id=? AND howler_user_id=? AND emoji=?').run(String(req.params.id), user.id, emoji);
     res.json({ ok: true, reactions: reactionsFor([String(req.params.id)], user.id)[String(req.params.id)] || [] });
+  }));
+
+  // Fan pin/unpin. In a fan GROUP the shared pinned flag toggles (any member,
+  // WhatsApp-style — everyone sees it). In an OFFICIAL channel it's a personal
+  // pin: only the pinner sees it (their own banner); the organiser's global
+  // pin (Pulse) is untouched.
+  app.post('/api/app/social/chat/messages/:id/pin', writeLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND deleted=0').get(String(req.params.id));
+    const c = r && getChannel(r.channel_id);
+    if (!r || !c || !flagOn(c.entity_id)) return gone(res);
+    if (!accessFor(c, user.id).ok) throw new HttpError(403, 'Join this channel first');
+    const pinned = (req.body || {}).pinned !== false;
+    if (c.kind === 'group') {
+      if (!memberRow(c.id, user.id)) throw new HttpError(403, 'Join this group first');
+      sql.prepare('UPDATE social_chat_messages SET pinned=? WHERE id=?').run(pinned ? 1 : 0, r.id);
+      return res.json({ ok: true, pinned, shared: true });
+    }
+    if (pinned) sql.prepare('INSERT OR IGNORE INTO social_chat_user_pins (message_id, howler_user_id, created_at) VALUES (?,?,?)').run(r.id, user.id, now());
+    else sql.prepare('DELETE FROM social_chat_user_pins WHERE message_id=? AND howler_user_id=?').run(r.id, user.id);
+    res.json({ ok: true, pinnedByMe: pinned, shared: false });
   }));
 
   app.post('/api/app/social/chat/messages/:id/report', writeLimit, asyncHandler(async (req, res) => {
@@ -459,7 +495,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   function moderateMessage(entityId, messageId, action) {
     const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(messageId);
     if (!r || r.entity_id !== entityId) throw new HttpError(404, 'Message not found');
-    if (action === 'delete') sql.prepare('UPDATE social_chat_messages SET deleted=1, body=\'\', pinned=0 WHERE id=?').run(messageId);
+    if (action === 'delete') { sql.prepare('UPDATE social_chat_messages SET deleted=1, body=\'\', pinned=0 WHERE id=?').run(messageId); sql.prepare('DELETE FROM social_chat_user_pins WHERE message_id=?').run(messageId); }
     if (action === 'pin') sql.prepare('UPDATE social_chat_messages SET pinned=1 WHERE id=?').run(messageId);
     if (action === 'unpin') sql.prepare('UPDATE social_chat_messages SET pinned=0 WHERE id=?').run(messageId);
     return { ok: true };

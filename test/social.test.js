@@ -404,3 +404,52 @@ test('comment settings, images, links, organiser replies + moderation inbox', as
   assert.ok(!after.body.comments.some((c) => c.id === withLink.body.id));
   assert.ok(!after.body.comments.some((c) => c.replies.some((x) => x.id === reply.body.id)));
 });
+
+test('pins: organiser pin floats a strip; fan personal pins are private', async () => {
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  const mk = (text) => call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id }, body: { communityId: orgComm.id, body: text, global: true, publish: true },
+  });
+  const a = (await mk('Pinnable A')).body;
+  const b = (await mk('Pinnable B')).body;
+
+  // Organiser pins A → global feed first page carries a pinned strip for everyone.
+  const pin = await call('POST /api/admin/entities/:entityId/social/posts/:id/pin', { user: admin, params: { entityId: entity.id, id: a.id }, body: { pinned: true } });
+  assert.equal(pin.code, 200);
+  assert.equal(pin.body.pinned, true);
+  const feed = await call('GET /api/app/social/feed', {});
+  assert.equal(feed.body.pinned.length, 1);
+  assert.equal(feed.body.pinned[0].id, a.id);
+  // …and pages (before=) do NOT repeat the strip.
+  const page2 = await call('GET /api/app/social/feed', { query: { before: feed.body.posts[feed.body.posts.length - 1].publishedAt || new Date().toISOString() } });
+  assert.equal(page2.body.pinned, undefined);
+
+  // Fan personally pins B: visible to them only (pinnedByMe + myPins strip).
+  const fpin = await call('POST /api/app/social/posts/:id/pin', { token: 'tok-661779', params: { id: b.id }, body: { pinned: true } });
+  assert.equal(fpin.code, 200);
+  assert.equal(fpin.body.pinnedByMe, true);
+  const mine = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.equal(mine.body.myPins.length, 1);
+  assert.equal(mine.body.myPins[0].id, b.id);
+  assert.equal(mine.body.posts.find((p) => p.id === b.id).pinnedByMe, true);
+  const others = await call('GET /api/app/social/feed', { token: 'tok-662076' });
+  assert.equal(others.body.myPins.length, 0);
+  assert.equal(others.body.posts.find((p) => p.id === b.id).pinnedByMe, false);
+  // Anonymous feed has no myPins but still sees the organiser strip.
+  const anon = await call('GET /api/app/social/feed', {});
+  assert.equal(anon.body.myPins.length, 0);
+  assert.equal(anon.body.pinned[0].id, a.id);
+
+  // Unpin both ways.
+  await call('POST /api/admin/entities/:entityId/social/posts/:id/pin', { user: admin, params: { entityId: entity.id, id: a.id }, body: { pinned: false } });
+  await call('POST /api/app/social/posts/:id/pin', { token: 'tok-661779', params: { id: b.id }, body: { pinned: false } });
+  const cleared = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.equal(cleared.body.pinned.length, 0);
+  assert.equal(cleared.body.myPins.length, 0);
+  // Client self-service scope can pin too (dual-surface rule).
+  const myPin = await call('POST /api/my/social/posts/:id/pin', { user: owner, query: { entityId: entity.id }, params: { id: a.id }, body: { pinned: true } });
+  assert.equal(myPin.code, 200);
+  assert.equal(myPin.body.pinned, true);
+  await call('POST /api/my/social/posts/:id/pin', { user: owner, query: { entityId: entity.id }, params: { id: a.id }, body: { pinned: false } });
+});
