@@ -215,3 +215,17 @@ test('organiser CTA message: clickable button data, validated destination', asyn
   });
   assert.equal(bad.code, 400);
 });
+
+test('history paging: before= returns older messages chronologically, hasOlder flags more', async () => {
+  // Small pages over Main's messages (several exist from earlier tests).
+  const latest = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id }, query: { limit: '2' } });
+  assert.equal(latest.body.messages.length, 2);
+  assert.equal(latest.body.hasOlder, true);
+  const older = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id }, query: { limit: '50', before: latest.body.messages[0].createdAt } });
+  assert.ok(older.body.messages.length >= 1);
+  assert.ok(older.body.messages.every((m) => m.createdAt < latest.body.messages[0].createdAt));
+  assert.equal(older.body.hasOlder, false);
+  // Chronological within the page.
+  const times = older.body.messages.map((m) => m.createdAt);
+  assert.deepEqual(times, [...times].sort());
+});

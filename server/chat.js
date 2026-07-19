@@ -257,14 +257,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!acc.ok) throw new HttpError(403, acc.lockedReason === 'tickets' ? 'This channel is for specific ticket holders' : 'This channel is private');
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), PAGE_MAX);
     const after = typeof req.query.after === 'string' ? req.query.after : '';
+    const before = typeof req.query.before === 'string' ? req.query.before : '';
+    // after= → newer than (polling); before= → older than (history paging);
+    // neither → the latest page. Always returned chronologically.
     const rows = after
       ? sql.prepare('SELECT * FROM social_chat_messages WHERE channel_id=? AND created_at>? ORDER BY created_at LIMIT ?').all(c.id, after, limit)
-      : sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, limit);
+      : before
+        ? sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? AND created_at<? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, before, limit)
+        : sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, limit);
     const reacts = reactionsFor(rows.map((r) => r.id), user.id);
+    const hasOlder = rows.length > 0 && !!sql.prepare('SELECT 1 FROM social_chat_messages WHERE channel_id=? AND created_at<? LIMIT 1').get(c.id, rows[0].created_at);
     res.json({
       contractVersion: 1,
       channel: channelRow(c, { userId: user.id }),
       canPost: canPost(c, user, false),
+      hasOlder,
       messages: rows.map((r) => messageRow(r, { reactions: reacts[r.id] || [], viewerId: user.id })),
     });
   }));
