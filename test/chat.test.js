@@ -76,6 +76,9 @@ test('channel list: locked reasons drive the app UI (tickets vs private)', async
   assert.equal(byName['VIP Lounge'].locked, true);
   assert.equal(byName['VIP Lounge'].lockedReason, 'tickets'); // → "get tickets" CTA
   assert.equal(byName['Crew'].lockedReason, 'private');
+  // Each channel carries the organiser's Pulse brand colour so the app can
+  // tint chat accents to the client's brand (platform default when unset).
+  assert.match(byName['Main'].brandColor, /^#[0-9a-fA-F]{3,8}$/);
   assert.equal((await call('GET /api/app/social/chat/channels', { query: { eventId: EVENT } })).code, 401);
 });
 

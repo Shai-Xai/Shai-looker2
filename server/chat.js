@@ -185,11 +185,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     return { cta_label: ctaLabel, cta_destination: dest };
   }
+  // The client's Pulse brand colour(s) so the app can tint chat accents to the
+  // organiser's brand (falls back to the app brand when unset / unresolvable).
+  const channelBrand = (c) => {
+    try {
+      const b = require('./mailer').resolveBranding(c.entity_id);
+      return { brandColor: b.brandColor || null, secondaryColor: b.secondaryColor || null };
+    } catch { return { brandColor: null, secondaryColor: null }; }
+  };
   function channelRow(c, { userId = null } = {}) {
     const acc = userId ? accessFor(c, userId) : { ok: c.access === 'public' };
+    const brand = channelBrand(c);
     const out = {
       id: c.id, eventId: c.event_id, name: c.name, emoji: c.emoji, kind: c.kind,
       access: c.access, mode: c.mode, status: c.status, memberCount: memberCount(c.id),
+      brandColor: brand.brandColor, secondaryColor: brand.secondaryColor,
       locked: !acc.ok, ...(acc.ok ? {} : { lockedReason: acc.lockedReason }),
     };
     if (acc.ok && userId) {

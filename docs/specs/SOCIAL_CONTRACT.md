@@ -342,3 +342,17 @@ The quick-door row of community circles (mockup frame 7).
 - `avatarUrl` rides on the community object everywhere it appears — community
   lists, the story rail, each post's `community`, and the share page header —
   so feed cards and circles render the brand mark.
+
+## 16. Brand colours (added 2026-07-19)
+
+- Communities, each post's `community`, story-rail items and chat channels all
+  carry `brandColor` + `secondaryColor` — the organiser's Pulse branding,
+  resolved server-side (platform ← client ← event(suite)) via the mailer's
+  `resolveBranding`. Unset tiers inherit the one below; the platform default is
+  returned when a client hasn't set its own.
+- Clients tint their accents to `brandColor` (feed-card avatar rings / CTAs,
+  chat chips + bubbles, story rings) and fall back to the app brand when it's
+  null/unusable. The `/p/:id` share page tints its buttons, avatar ring and
+  watermark to the community's `brandColor` (sanitised to a hex literal before
+  it reaches the inline `<style>`), falling back to Howler red `#EC0B62`.
+- Presentation only (non-secret), so it rides to the browser/app freely.
