@@ -314,3 +314,17 @@ The quick-door row of community circles (mockup frame 7).
   feed load).
 - In the app the rail rides the feed tab's existing story row (StoryTarget
   mapping); tapping an event circle opens `/event/:id/feed`.
+
+## 14. Shareable post links (added 2026-07-19)
+
+- `GET /api/app/social/posts/:id` — a single published post as JSON (same
+  visibility as the feed: flag-on; members-only needs membership; targeted
+  posts need the matching ticket). Groundwork for a single-post screen.
+- `GET /p/:id` — a public HTML share page (the link fans send). Open Graph
+  tags so it unfurls with a thumbnail + caption in WhatsApp/iMessage; renders
+  the post for anyone (no app needed); buttons to open/get the app. PRIVATE
+  posts (members-only / ticket-targeted) never leak their content — the page
+  falls back to a generic get-the-app gate.
+- Phase 2 (device-tested): true auto-open-to-the-post via a `howler.chottu.link`
+  deep link (Pulse already integrates ChottuLink) → the app's universal-link
+  handler → a single-post screen using `GET .../posts/:id`.

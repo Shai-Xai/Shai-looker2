@@ -676,3 +676,38 @@ test('story rail: active circles, joined/ticket ordering, unseen rings clear on 
   const scoped = await call('GET /api/app/social/rail', { query: { parentId: orgComm.id } });
   assert.ok(scoped.body.rail.every((i) => i.parentId === orgComm.id));
 });
+
+test('single-post endpoint + shareable /p/:id page (deep-link phase 1)', async () => {
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  const post = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: orgComm.id, body: 'Deep link me', global: true, publish: true, media: [{ kind: 'image', url: '/api/app/social/media/xyz' }] },
+  })).body;
+
+  // Single post JSON, visibility respected.
+  const one = await call('GET /api/app/social/posts/:id', { params: { id: post.id } });
+  assert.equal(one.code, 200);
+  assert.equal(one.body.post.id, post.id);
+  assert.equal(one.body.post.body, 'Deep link me');
+  assert.equal((await call('GET /api/app/social/posts/:id', { params: { id: 'nope' } })).code, 404);
+
+  // Public share page: OG tags + the caption + media, no auth.
+  const page = await call('GET /p/:id', { params: { id: post.id } });
+  assert.equal(page.code, 200);
+  const html = page.sent || page.body;
+  assert.match(html, /og:title/);
+  assert.match(html, /Deep link me/);
+  assert.match(html, /Open in the Howler app/);
+  assert.match(html, /og:image/); // has an image → rich preview
+
+  // A ticket-targeted post must NOT leak its content on the public page.
+  const vip = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: orgComm.id, body: 'VIP secret bar location', publish: true, audience: { type: 'ticketTypes', ticketTypes: ['VIP'] } },
+  })).body;
+  const vipPage = await call('GET /p/:id', { params: { id: vip.id } });
+  const vipHtml = vipPage.sent || vipPage.body;
+  assert.doesNotMatch(vipHtml, /VIP secret bar location/);
+  assert.match(vipHtml, /Open in the Howler app/); // still a get-the-app gate
+});
