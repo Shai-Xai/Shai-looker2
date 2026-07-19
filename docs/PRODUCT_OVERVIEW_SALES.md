@@ -1122,6 +1122,10 @@ self-service), flag-gated per client (`community`, default off).
   text + photos, optional Howler-wide feed, live instantly, no Pulse login.
   Instagram-style composer UI in design; fan/UGC posting rides the same rails
   later.
+- **Targeted posts** 🧪 — event posts aimed at 🎟 any ticket holder or 🎯
+  specific ticket types ("VIP, Weekend Pass"); fans who don't match simply
+  never see the post (enforced on Howler's servers, not hidden in the app).
+  Full segment-based audiences are the next step on the same rails.
 - **Instagram import** 🟡 — content already on the client's Instagram reposts
   to the community feed in one click (Community → 📸 Instagram): recent-posts
   grid, caption prefilled, carousels come across whole, media re-hosted on
@@ -1174,6 +1178,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **🎯 Targeted posts (ticket types)** 🧪: event-community
+  posts can target any-ticket-holders or specific ticket types; enforcement is
+  server-side against the fan's verified ticket holdings (via the same Howler
+  JWT introspection that powers identity), so non-matching fans never receive
+  the post. Composer gains a "Who sees it" selector.
 - **2026-07-19** — **📸 Instagram import** 🟡: one-click repost of existing
   Instagram content into the community feed (recent-posts grid in Community,
   media re-hosted, captions prefilled, carousels intact). Uses the existing

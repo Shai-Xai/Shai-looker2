@@ -91,7 +91,7 @@ function presignPut({ key, expires = 900, nowDate = new Date() }) {
   return `https://${host}${pathName}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
-function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerifyAppToken }) {
+function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerifyAppToken, fetchAppTickets = appAuth.defaultFetchAppTickets }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -199,6 +199,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!mcols.includes('media')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN media TEXT NOT NULL DEFAULT '[]'");
     // Organiser pin: pinned posts surface at the top of the feed for everyone.
     if (!cols.includes('pinned')) sql.exec('ALTER TABLE social_feed_posts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    // Targeting: '' = everyone; else JSON {type:'holders'} (any ticket for the
+    // community's event) or {type:'ticketTypes', ticketTypes:[names]}.
+    if (!cols.includes('audience')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN audience TEXT NOT NULL DEFAULT ''");
   } catch (e) { console.error('[social] column migrations skipped:', e.message); }
 
   // Personal pins: a fan bookmarks a post for THEMSELVES (visible only to them,
@@ -264,6 +267,29 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }));
   }
   const URL_RE = /(https?:\/\/|www\.)\S+/i;
+  // ── targeting (ticket types) ──
+  const audienceOf = (r) => { try { return r.audience ? JSON.parse(r.audience) : null; } catch { return null; } };
+  const tokenOf = (req) => (String(req.headers?.authorization || '').match(/^Bearer\s+(.+)$/i) || [])[1] || '';
+  // Is this post visible to a viewer holding `tickets`? Untargeted → always.
+  // Targeted → needs the community's event + a matching (non-expired) ticket;
+  // tickets===null (anonymous, or holdings unknown) fails CLOSED.
+  function postVisible(r, community, tickets) {
+    const a = audienceOf(r);
+    if (!a) return true;
+    if (!community?.event_id || !Array.isArray(tickets)) return false;
+    const mine = tickets.filter((t) => t.eventId === String(community.event_id));
+    if (a.type === 'holders') return mine.length > 0;
+    if (a.type === 'ticketTypes') {
+      const wanted = new Set((a.ticketTypes || []).map((s) => String(s).trim().toLowerCase()));
+      return mine.some((t) => wanted.has(String(t.name || '').trim().toLowerCase()));
+    }
+    return false;
+  }
+  // Fetch the viewer's tickets only when the row set actually needs them.
+  async function ticketsIfNeeded(rows, req, viewer) {
+    if (!viewer || !rows.some((r) => r.audience)) return null;
+    try { return await fetchAppTickets(tokenOf(req)); } catch { return null; }
+  }
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   const hasPinned = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_user_pins WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
@@ -273,6 +299,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       community: community ? { id: community.id, name: community.name, type: community.type } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
       status: r.status, global: !!r.global, pinned: !!r.pinned,
+      audience: audienceOf(r),
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
       commentCount: commentCount(r.id),
@@ -336,10 +363,12 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   }
   function validPostInput(b, entityId, { forUpdate = false } = {}) {
     const out = {};
+    let community = null;
     if (!forUpdate || b.communityId !== undefined) {
       const c = getCommunity(String(b.communityId || ''));
       if (!c || c.entity_id !== entityId) throw new HttpError(400, 'communityId must be one of this client’s communities');
       out.community_id = c.id;
+      community = c;
     }
     if (b.body !== undefined || !forUpdate) out.body = String(b.body || '').slice(0, MAX_BODY);
     if (b.media !== undefined) {
@@ -352,6 +381,24 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       out.link_url = u;
     }
     if (b.global !== undefined) out.global = b.global ? 1 : 0;
+    // Targeting: holders / specific ticket types (event communities only).
+    // A targeted post can never ride the Howler-wide feed.
+    if (b.audience !== undefined) {
+      const a = b.audience || {};
+      const type = String(a.type || 'everyone');
+      if (type === 'everyone' || !type) out.audience = '';
+      else if (type === 'holders') out.audience = JSON.stringify({ type: 'holders' });
+      else if (type === 'ticketTypes') {
+        const names = (Array.isArray(a.ticketTypes) ? a.ticketTypes : [])
+          .map((s) => String(s).trim().slice(0, 120)).filter(Boolean).slice(0, 30);
+        if (!names.length) throw new HttpError(400, 'Pick at least one ticket type to target');
+        out.audience = JSON.stringify({ type: 'ticketTypes', ticketTypes: names });
+      } else throw new HttpError(400, 'audience.type must be everyone, holders or ticketTypes');
+      if (out.audience) {
+        if (community && !community.event_id) throw new HttpError(400, 'Ticket targeting only works on an event community');
+        out.global = 0;
+      }
+    }
     if (b.source !== undefined && ['pulse', 'instagram', 'tiktok', 'app'].includes(b.source)) out.source = b.source;
     if (b.ctaLabel !== undefined || b.ctaDestination !== undefined) {
       const ctaLabel = String(b.ctaLabel || '').trim().slice(0, 40);
@@ -404,10 +451,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!v.community_id) throw new HttpError(400, 'communityId required');
     const id = `post_${uuid().slice(0, 12)}`;
     const publish = !!body.publish; // create-and-publish in one step (composer's "Publish now")
-    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, status, published_at, cta_label, cta_destination, author_name, author_email, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, status, published_at, cta_label, cta_destination, audience, author_name, author_email, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0,
-        publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '',
+        publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '', v.audience || '',
         String(body.authorName || '').slice(0, 120), user?.email || '', now(), now());
     return postRow(sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id), getCommunity(v.community_id));
   }
@@ -572,25 +619,35 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   const { requireAppUser, optionalAppUser } = appAuth.helpers(verifyAppToken);
 
-  // Published feed for one community (visible only when its entity's flag is on).
-  function communityFeed(c, { limit, before }, viewerId = null) {
-    const rows = before
+  // Published feed rows for one community (visible only when its entity's
+  // flag is on). Raw rows out — the endpoint filters targeted posts against
+  // the viewer's tickets and keeps the cursor exact (from RAW rows, so a
+  // filtered-out post never breaks paging).
+  function communityFeedRows(c, { limit, before }) {
+    return before
       ? sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(c.id, before, limit)
       : sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' ORDER BY published_at DESC LIMIT ?").all(c.id, limit);
-    return rows.map((r) => postRow(r, c, { viewerId }));
   }
 
   // Pinned strips for a feed's FIRST page (pages stay purely chronological so
   // the before-cursor never skips or repeats): the organiser's globally pinned
-  // posts, plus the viewer's own personal pins, each capped at 10.
-  function pinnedStrips(where, args, viewerId) {
+  // posts, plus the viewer's own personal pins, each capped at 10. Raw rows —
+  // callers apply ticket-targeting filters where relevant.
+  function pinnedStripRows(where, args, viewerId) {
     const pinned = sql.prepare(`SELECT * FROM social_feed_posts WHERE ${where} AND status='published' AND pinned=1 ORDER BY published_at DESC LIMIT 10`).all(...args)
-      .filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId }));
+      .filter((r) => flagOn(r.entity_id));
     const myPins = viewerId
       ? sql.prepare(`SELECT p.* FROM social_feed_posts p JOIN social_feed_user_pins u ON u.post_id=p.id AND u.howler_user_id=? WHERE ${where} AND p.status='published' ORDER BY u.created_at DESC LIMIT 10`).all(String(viewerId), ...args)
-        .filter((r) => flagOn(r.entity_id)).map((r) => postRow(r, getCommunity(r.community_id), { viewerId }))
+        .filter((r) => flagOn(r.entity_id))
       : [];
     return { pinned, myPins };
+  }
+  // Shaped strips for the GLOBAL feed (targeted posts are never global, so no
+  // ticket filtering applies there).
+  function pinnedStrips(where, args, viewerId) {
+    const rows = pinnedStripRows(where, args, viewerId);
+    const shape = (r) => postRow(r, getCommunity(r.community_id), { viewerId });
+    return { pinned: rows.pinned.map(shape), myPins: rows.myPins.map(shape) };
   }
 
   // The Howler-wide feed: every published post marked global, newest first,
@@ -641,13 +698,20 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       viewer = await optionalAppUser(req);
     }
     const page = pageArgs(req.query);
-    const posts = communityFeed(c, page, viewer?.id);
-    const strips = page.before ? {} : pinnedStrips('community_id=?', [c.id], viewer?.id);
+    const rows = communityFeedRows(c, page);
+    const stripRows = page.before ? { pinned: [], myPins: [] } : pinnedStripRows('community_id=?', [c.id], viewer?.id);
+    const tickets = await ticketsIfNeeded([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
+    const shape = (r) => postRow(r, c, { viewerId: viewer?.id });
+    const posts = rows.filter((r) => postVisible(r, c, tickets)).map(shape);
+    const strips = page.before ? {} : {
+      pinned: stripRows.pinned.filter((r) => postVisible(r, c, tickets)).map(shape),
+      myPins: stripRows.myPins.filter((r) => postVisible(r, c, tickets)).map(shape),
+    };
     const community = communityRow(c, {
       memberCount: memberCount(c.id),
       canPost: viewer ? !!posterRow(c.entity_id, viewer.id) : null,
     });
-    res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
+    res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: rows.length === page.limit ? rows[rows.length - 1].published_at : null });
   }));
 
   // Explicit join / leave from the app — identity comes from the verified JWT.
@@ -675,6 +739,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const c = p && getCommunity(p.community_id);
     if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) throw new HttpError(404, 'Not available');
     if (c.visibility === 'members' && !p.global && !isMember(c.id, user.id)) throw new HttpError(403, 'Join this community first');
+    if (p.audience) {
+      let tickets = null;
+      try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* fail closed below */ }
+      if (!postVisible(p, c, tickets)) throw new HttpError(403, 'This post is for specific ticket holders');
+    }
     return { user, post: p };
   }
 
@@ -694,6 +763,12 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       if (!isMember(c.id, viewer.id)) throw new HttpError(403, 'Join this community first');
     } else {
       viewer = await optionalAppUser(req);
+    }
+    if (p.audience) {
+      if (!viewer) throw new HttpError(403, 'This post is for specific ticket holders');
+      let tickets = null;
+      try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* fail closed below */ }
+      if (!postVisible(p, c, tickets)) throw new HttpError(403, 'This post is for specific ticket holders');
     }
     const { limit, before } = pageArgs(req.query);
     // Page over TOP-LEVEL comments; replies ride nested under their parent.

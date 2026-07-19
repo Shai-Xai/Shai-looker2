@@ -22,6 +22,15 @@ const setFlag = (entityId, value) => db.db
 // Howler-JWT introspection stub (contract v1): token "tok-<id>" verifies as
 // user <id>; "tok-down" simulates an unreachable Howler backend; all else is
 // an invalid/expired token.
+// Ticket holdings per token (for targeted-post tests): VIP holder, GA holder,
+// no tickets. Unknown tokens -> null ("couldn't determine" — fail closed).
+const TICKETS = {
+  'tok-661779': [{ eventId: '19203', name: 'VIP' }],
+  'tok-662076': [{ eventId: '19203', name: 'General Admission' }],
+  'tok-555': [],
+};
+const fetchAppTickets = async (token) => TICKETS[token] ?? null;
+
 const verifyAppToken = async (token) => {
   if (token === 'tok-down') throw new Error('backend unreachable');
   const m = token.match(/^tok-(\d+)$/);
@@ -32,7 +41,7 @@ function mount() {
   const routes = {};
   const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h; };
   const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE'), use: () => {} };
-  social.mount(app, { db, auth, rateLimit, verifyAppToken });
+  social.mount(app, { db, auth, rateLimit, verifyAppToken, fetchAppTickets });
   return routes;
 }
 const routes = mount();
@@ -500,4 +509,54 @@ test('app posters: organiser authorises a Howler account to post from the app', 
   const removed = await call('DELETE /api/admin/entities/:entityId/social/posters/:userId', { user: admin, params: { entityId: entity.id, userId: '661779' } });
   assert.equal(removed.body.posters.length, 0);
   assert.equal((await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id, text: 'still me?' } })).code, 403);
+});
+
+test('targeting: ticket-type posts only reach matching holders (server-side)', async () => {
+  // A PUBLIC event community so anonymous reads are possible.
+  const pub = await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: entity.id },
+    body: { name: 'Big Fest Public', type: 'event', eventId: '19203', visibility: 'public' },
+  });
+  const commId = pub.body.id;
+  const mk = (body) => call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id }, body: { communityId: commId, publish: true, ...body },
+  });
+  const open = (await mk({ body: 'Everyone sees this' })).body;
+  const holders = (await mk({ body: 'Holders only', audience: { type: 'holders' } })).body;
+  const vip = (await mk({ body: 'VIP secret bar', audience: { type: 'ticketTypes', ticketTypes: ['vip'] }, global: true })).body;
+  assert.deepEqual(holders.audience, { type: 'holders' });
+  assert.equal(vip.global, false, 'targeted posts are forced OFF the global feed');
+
+  const feedFor = async (token) => {
+    const out = await call('GET /api/app/social/communities/:id/feed', { params: { id: commId }, ...(token ? { token } : {}) });
+    assert.equal(out.code, 200);
+    return out.body.posts.map((p) => p.id);
+  };
+  // Anonymous: only the untargeted post.
+  assert.deepEqual(await feedFor(null), [vip, holders, open].filter((p) => p.id === open.id).map((p) => p.id));
+  // VIP holder sees all three; GA holder misses the VIP post; ticketless
+  // verified user sees only the open post.
+  const vipSees = await feedFor('tok-661779');
+  assert.ok(vipSees.includes(vip.id) && vipSees.includes(holders.id) && vipSees.includes(open.id));
+  const gaSees = await feedFor('tok-662076');
+  assert.ok(!gaSees.includes(vip.id) && gaSees.includes(holders.id) && gaSees.includes(open.id));
+  const noneSees = await feedFor('tok-555');
+  assert.deepEqual(noneSees, [open.id]);
+
+  // Interactions on a targeted post are ring-fenced the same way.
+  assert.equal((await call('POST /api/app/social/posts/:id/react', { token: 'tok-661779', params: { id: vip.id } })).code, 200);
+  assert.equal((await call('POST /api/app/social/posts/:id/react', { token: 'tok-662076', params: { id: vip.id } })).code, 403);
+  assert.equal((await call('GET /api/app/social/posts/:id/comments', { token: 'tok-662076', params: { id: vip.id } })).code, 403);
+  assert.equal((await call('GET /api/app/social/posts/:id/comments', { token: 'tok-661779', params: { id: vip.id } })).code, 200);
+
+  // Global feed never carries targeted posts.
+  const global = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.ok(!global.body.posts.some((p) => p.id === vip.id));
+
+  // Organiser-community targeting is refused (no event to match against);
+  // empty type list refused.
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  assert.equal((await call('POST /api/admin/entities/:entityId/social/posts', { user: admin, params: { entityId: entity.id }, body: { communityId: orgComm.id, body: 'x', audience: { type: 'holders' } } })).code, 400);
+  assert.equal((await mk({ body: 'x', audience: { type: 'ticketTypes', ticketTypes: [] } })).code, 400);
 });
