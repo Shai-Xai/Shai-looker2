@@ -733,6 +733,10 @@ test('community avatar + device-aware share buttons + watermark', async () => {
   const feed = await call('GET /api/app/social/feed', { token: 'tok-555' });
   const mine = feed.body.posts.find((p) => p.id === post.id);
   assert.equal(mine.community.avatarUrl, '/api/app/social/media/av123');
+  // The client's Pulse brand colour rides on the community so feed cards/share
+  // links tint to the organiser's brand (platform default when unset).
+  assert.match(mine.community.brandColor, /^#[0-9a-fA-F]{3,8}$/);
+  assert.equal(comm.brandColor, mine.community.brandColor);
 
   // Share page: iOS UA → single "Open in the Howler app" (App Store), no Android button.
   const ios = await call('GET /p/:id', { params: { id: post.id }, headers: { 'user-agent': 'iPhone Safari' } });
@@ -747,4 +751,6 @@ test('community avatar + device-aware share buttons + watermark', async () => {
   // Watermark on the media + avatar image in the header.
   assert.match(iosHtml, /class="wm"/);
   assert.match(iosHtml, /av123/); // community avatar rendered in the header
+  // Share page tints its accent to the organiser's brand colour.
+  assert.ok(iosHtml.includes(comm.brandColor), 'share page uses the brand accent');
 });

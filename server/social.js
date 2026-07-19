@@ -255,14 +255,25 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     } catch { return ''; }
   };
   const communityAvatar = (r) => (r && (r.avatar_url || entityLogo(r.entity_id))) || '';
+  // The client's (and event's) Pulse branding colours, layered platform ←
+  // client ← event(suite) via the mailer resolver. Feeds/chat/share links tint
+  // their accents with these so a post looks like the organiser's own brand.
+  const communityBrand = (r) => {
+    try {
+      const b = require('./mailer').resolveBranding(r.entity_id, r.suite_id || undefined);
+      return { brandColor: b.brandColor || '', secondaryColor: b.secondaryColor || '' };
+    } catch { return { brandColor: '', secondaryColor: '' }; }
+  };
 
   function communityRow(r, { memberCount = null, canPost = null } = {}) {
+    const brand = communityBrand(r);
     const out = {
       id: r.id, entityId: r.entity_id, type: r.type, name: r.name, description: r.description,
       visibility: r.visibility, status: r.status, parentId: r.parent_id || null,
       eventId: r.event_id || null, suiteId: r.suite_id || null,
       allowCommentImages: !!r.allow_comment_images, allowCommentLinks: !!r.allow_comment_links,
       avatarUrl: communityAvatar(r) || null,
+      brandColor: brand.brandColor || null, secondaryColor: brand.secondaryColor || null,
       createdAt: r.created_at,
     };
     if (memberCount != null) out.memberCount = memberCount;
@@ -348,7 +359,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   function postRow(r, community, { viewerId = null } = {}) {
     return {
       id: r.id, communityId: r.community_id,
-      community: community ? { id: community.id, name: community.name, type: community.type, avatarUrl: communityAvatar(community) || null } : undefined,
+      community: community ? { id: community.id, name: community.name, type: community.type, avatarUrl: communityAvatar(community) || null, ...(() => { const br = communityBrand(community); return { brandColor: br.brandColor || null, secondaryColor: br.secondaryColor || null }; })() } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
       status: r.status, global: !!r.global, pinned: !!r.pinned,
       toParent: !!r.to_parent,
@@ -818,9 +829,12 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
         : false;
       const hasTicket = r.event_id ? held.has(String(r.event_id)) : childEventIds.some((e) => held.has(e));
       const seen = viewer ? sql.prepare('SELECT last_seen_at FROM social_feed_seen WHERE community_id=? AND howler_user_id=?').get(r.id, String(viewer.id))?.last_seen_at || '' : '';
+      const brand = communityBrand(r);
       return {
         communityId: r.id, name: r.name, type: r.type,
         entityId: r.entity_id, eventId: r.event_id || null, parentId: r.parent_id || null,
+        avatarUrl: communityAvatar(r) || null,
+        brandColor: brand.brandColor || null, secondaryColor: brand.secondaryColor || null,
         lastPostAt: last, joined, hasTicket,
         unseen: !!viewer && last > seen,
       };
@@ -1082,6 +1096,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const ua = String(req.headers['user-agent'] || '');
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const isAndroid = /Android/i.test(ua);
+    // Accent = the organiser's Pulse brand colour (sanitised to a hex literal
+    // before it goes into the <style> tag), falling back to Howler's brand red.
+    const HOWLER_RED = '#EC0B62';
+    const brandHex = communityBrand(c).brandColor || '';
+    const accent = /^#[0-9a-fA-F]{3,8}$/.test(brandHex) ? brandHex : HOWLER_RED;
     const iosBtn = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
     const androidBtn = `<a class="btn brand" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
     const bothBtns = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
@@ -1099,16 +1118,16 @@ ${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
   body{margin:0;background:#0e0f12;color:#ECEBE7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center}
   .wrap{max-width:520px;width:100%;padding:22px 18px 44px}
   .head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .ava{width:38px;height:38px;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #EC0B62}
+  .ava{width:38px;height:38px;border-radius:50%;object-fit:cover;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px ${accent}}
   .name{font-weight:800}
   .cap{font-size:15px;line-height:1.45;margin:14px 2px 0}
   .mw{position:relative;margin-top:12px}
   .mw img,.mw video{width:100%;border-radius:14px;display:block}
   .wm{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.5);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:800;color:#fff;backdrop-filter:blur(2px)}
-  .wm b{color:#EC0B62}
+  .wm b{color:${accent}}
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:22px}
   .btn{display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:12px;padding:13px}
-  .brand{background:#EC0B62;color:#fff}
+  .brand{background:${accent};color:#fff}
   .ghost{background:#1b1d22;color:#ECEBE7;border:1px solid #2a2d34}
   .muted{color:#9A9DA5;font-size:12.5px;text-align:center;margin-top:16px}
 </style></head><body><div class="wrap">
