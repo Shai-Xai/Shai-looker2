@@ -94,6 +94,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                   {p.community?.name || '—'}
                   {p.global && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>🌍 global feed</span>}
                   {p.pinned && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>📌 pinned</span>}
+                  {p.toParent && <span style={pill('rgba(29,138,59,0.13)', '#1d8a3b')} title="Also shows in the organiser community’s feed">⬆ organiser feed</span>}
                   {p.audience && <span style={pill('rgba(122,62,201,0.13)', '#7a3ec9')} title="Only matching ticket holders see this post in the app">{p.audience.type === 'holders' ? '🎟 ticket holders' : `🎯 ${(p.audience.ticketTypes || []).join(', ')}`}</span>}
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
@@ -273,6 +274,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [audienceType, setAudienceType] = useState('everyone');
   const [ticketTypes, setTicketTypes] = useState('');
   const targeted = selectedCommunity?.eventId && audienceType !== 'everyone';
+  const [toParent, setToParent] = useState(false); // event → organiser roll-up
   const buildAudience = () => {
     if (!selectedCommunity?.eventId || audienceType === 'everyone') return {};
     if (audienceType === 'holders') return { audience: { type: 'holders' } };
@@ -293,8 +295,8 @@ function Composer({ communities, onCreate, scope, entityId }) {
       setBusy(false);
       return;
     }
-    onCreate({ communityId, body, global: targeted ? false : global, media, ...buildCta(), ...buildAudience(), ...(publishNow ? { publish: true } : {}) })
-      .finally(() => { setBody(''); setMedia([]); setCtaLabel(''); setCtaUrl(''); setShowCta(false); setAudienceType('everyone'); setTicketTypes(''); setBusy(false); });
+    onCreate({ communityId, body, global: targeted ? false : global, toParent: selectedCommunity?.parentId ? toParent : false, media, ...buildCta(), ...buildAudience(), ...(publishNow ? { publish: true } : {}) })
+      .finally(() => { setBody(''); setMedia([]); setCtaLabel(''); setCtaUrl(''); setShowCta(false); setAudienceType('everyone'); setTicketTypes(''); setToParent(false); setBusy(false); });
   };
 
   return (
@@ -353,9 +355,14 @@ function Composer({ communities, onCreate, scope, entityId }) {
           <input type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={pickFile} />
         </label>
         <button style={{ ...mini, background: showCta ? 'rgba(11,107,203,0.10)' : 'var(--card)' }} onClick={() => setShowCta((v) => !v)}>🔘 Button</button>
-        <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-          <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} /> Also show on the Howler global feed
+        <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: targeted ? 'not-allowed' : 'pointer', opacity: targeted ? 0.45 : 1 }} title={targeted ? 'Targeted posts stay off the Howler-wide feed' : ''}>
+          <input type="checkbox" disabled={!!targeted} checked={targeted ? false : global} onChange={(e) => setGlobal(e.target.checked)} /> Also show on the Howler global feed
         </label>
+        {selectedCommunity?.parentId && (
+          <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }} title="Rolls this event post up into the organiser community’s feed too">
+            <input type="checkbox" checked={toParent} onChange={(e) => setToParent(e.target.checked)} /> ⬆ Also on the organiser feed
+          </label>
+        )}
         <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={publishNow} onChange={(e) => setPublishNow(e.target.checked)} /> Publish now
         </label>

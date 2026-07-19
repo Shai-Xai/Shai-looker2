@@ -202,6 +202,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // Targeting: '' = everyone; else JSON {type:'holders'} (any ticket for the
     // community's event) or {type:'ticketTypes', ticketTypes:[names]}.
     if (!cols.includes('audience')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN audience TEXT NOT NULL DEFAULT ''");
+    // Event → organiser roll-up: per-post opt-in, same mechanic as `global`.
+    if (!cols.includes('to_parent')) sql.exec('ALTER TABLE social_feed_posts ADD COLUMN to_parent INTEGER NOT NULL DEFAULT 0');
   } catch (e) { console.error('[social] column migrations skipped:', e.message); }
 
   // Personal pins: a fan bookmarks a post for THEMSELVES (visible only to them,
@@ -299,6 +301,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       community: community ? { id: community.id, name: community.name, type: community.type } : undefined,
       body: r.body, media: mediaList(r.media), linkUrl: r.link_url || null, source: r.source,
       status: r.status, global: !!r.global, pinned: !!r.pinned,
+      toParent: !!r.to_parent,
       audience: audienceOf(r),
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
@@ -381,6 +384,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       out.link_url = u;
     }
     if (b.global !== undefined) out.global = b.global ? 1 : 0;
+    // Event → organiser roll-up: only meaningful for a nested event community.
+    if (b.toParent !== undefined) out.to_parent = (b.toParent && community?.parent_id) ? 1 : 0;
     // Targeting: holders / specific ticket types (event communities only).
     // A targeted post can never ride the Howler-wide feed.
     if (b.audience !== undefined) {
@@ -451,9 +456,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!v.community_id) throw new HttpError(400, 'communityId required');
     const id = `post_${uuid().slice(0, 12)}`;
     const publish = !!body.publish; // create-and-publish in one step (composer's "Publish now")
-    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, status, published_at, cta_label, cta_destination, audience, author_name, author_email, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0,
+    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, to_parent, status, published_at, cta_label, cta_destination, audience, author_name, author_email, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0, v.to_parent || 0,
         publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '', v.audience || '',
         String(body.authorName || '').slice(0, 120), user?.email || '', now(), now());
     return postRow(sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id), getCommunity(v.community_id));
@@ -620,13 +625,16 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   const { requireAppUser, optionalAppUser } = appAuth.helpers(verifyAppToken);
 
   // Published feed rows for one community (visible only when its entity's
-  // flag is on). Raw rows out — the endpoint filters targeted posts against
-  // the viewer's tickets and keeps the cursor exact (from RAW rows, so a
-  // filtered-out post never breaks paging).
+  // flag is on). An ORGANISER community's feed also carries child event
+  // posts that opted in (to_parent=1 — the event→organiser roll-up, same
+  // mechanic as global). Raw rows out — the endpoint filters targeted posts
+  // against the viewer's tickets and keeps the cursor exact (from RAW rows,
+  // so a filtered-out post never breaks paging).
   function communityFeedRows(c, { limit, before }) {
+    const scope = "(community_id=? OR (to_parent=1 AND community_id IN (SELECT id FROM social_feed_communities WHERE parent_id=? AND status='active')))";
     return before
-      ? sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(c.id, before, limit)
-      : sql.prepare("SELECT * FROM social_feed_posts WHERE community_id=? AND status='published' ORDER BY published_at DESC LIMIT ?").all(c.id, limit);
+      ? sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?`).all(c.id, c.id, before, limit)
+      : sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' ORDER BY published_at DESC LIMIT ?`).all(c.id, c.id, limit);
   }
 
   // Pinned strips for a feed's FIRST page (pages stay purely chronological so
@@ -701,11 +709,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const rows = communityFeedRows(c, page);
     const stripRows = page.before ? { pinned: [], myPins: [] } : pinnedStripRows('community_id=?', [c.id], viewer?.id);
     const tickets = await ticketsIfNeeded([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
-    const shape = (r) => postRow(r, c, { viewerId: viewer?.id });
-    const posts = rows.filter((r) => postVisible(r, c, tickets)).map(shape);
+    // Rolled-up child posts keep their HOME community for labels + ticket
+    // targeting (the audience matches against the EVENT's tickets).
+    const home = (r) => (r.community_id === c.id ? c : getCommunity(r.community_id));
+    const shape = (r) => postRow(r, home(r), { viewerId: viewer?.id });
+    const seen = (r) => postVisible(r, home(r), tickets);
+    const posts = rows.filter(seen).map(shape);
     const strips = page.before ? {} : {
-      pinned: stripRows.pinned.filter((r) => postVisible(r, c, tickets)).map(shape),
-      myPins: stripRows.myPins.filter((r) => postVisible(r, c, tickets)).map(shape),
+      pinned: stripRows.pinned.filter(seen).map(shape),
+      myPins: stripRows.myPins.filter(seen).map(shape),
     };
     const community = communityRow(c, {
       memberCount: memberCount(c.id),
@@ -738,7 +750,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
     const c = p && getCommunity(p.community_id);
     if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) throw new HttpError(404, 'Not available');
-    if (c.visibility === 'members' && !p.global && !isMember(c.id, user.id)) throw new HttpError(403, 'Join this community first');
+    // Posts syndicated out of their home community (global or rolled up to
+    // the organiser feed) are interactable by whoever can see them there.
+    if (c.visibility === 'members' && !p.global && !p.to_parent && !isMember(c.id, user.id)) throw new HttpError(403, 'Join this community first');
     if (p.audience) {
       let tickets = null;
       try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* fail closed below */ }
@@ -758,7 +772,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const c = p && getCommunity(p.community_id);
     if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) return gone(res);
     let viewer = null;
-    if (c.visibility === 'members' && !p.global) {
+    if (c.visibility === 'members' && !p.global && !p.to_parent) {
       viewer = await requireAppUser(req);
       if (!isMember(c.id, viewer.id)) throw new HttpError(403, 'Join this community first');
     } else {
