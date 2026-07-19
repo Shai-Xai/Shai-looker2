@@ -38,7 +38,7 @@ const MODES = ['chat', 'broadcast'];
 const MAX_TEXT = 2000;
 const PAGE_MAX = 100;
 
-function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerifyAppToken, resolveSegmentMembers = null }) {
+function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerifyAppToken, fetchAppTickets = appAuth.defaultFetchAppTickets, resolveSegmentMembers = null }) {
   const sql = db.db;
   // Strictly monotonic timestamps: unread counts and `after=` polling compare
   // ISO strings, so two writes in the same millisecond must never tie.
@@ -199,6 +199,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       if (pin) out.pinnedMessage = messageRow(pin);
       const myPin = sql.prepare('SELECT m.* FROM social_chat_messages m JOIN social_chat_user_pins u ON u.message_id=m.id AND u.howler_user_id=? WHERE m.channel_id=? AND m.deleted=0 ORDER BY u.created_at DESC LIMIT 1').get(String(userId), c.id);
       if (myPin) out.myPinnedMessage = messageRow(myPin);
+      // Last-message preview for channel lists (the app's chat tab).
+      const lastMsg = sql.prepare('SELECT author_name, body, created_at FROM social_chat_messages WHERE channel_id=? AND deleted=0 ORDER BY created_at DESC LIMIT 1').get(c.id);
+      if (lastMsg) {
+        out.lastMessage = lastMsg.body;
+        out.lastMessageSender = lastMsg.author_name || '';
+        out.lastMessageAt = lastMsg.created_at;
+      }
     }
     if (c.kind === 'group' && userId && (memberRow(c.id, userId)?.role === 'owner')) {
       out.inviteCode = c.invite_code;
@@ -222,6 +229,56 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const all = eventChannels(eventId).filter((c) => flagOn(c.entity_id));
     const visible = all.filter((c) => c.kind === 'official' || memberRow(c.id, user.id));
     res.json({ contractVersion: 1, channels: visible.map((c) => channelRow(c, { userId: user.id })) });
+  }));
+
+  // Every channel the user can chat in, ACROSS events — the app's chat tab.
+  // Union of: channels they're a member of (groups, invites, admin-adds) +
+  // official channels of events they hold tickets for (auto-visible).
+  app.get('/api/app/social/chat/my-channels', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const memberIds = sql.prepare('SELECT channel_id FROM social_chat_members WHERE howler_user_id=?').all(String(user.id)).map((r) => r.channel_id);
+    let tickets = null;
+    try { tickets = await fetchAppTickets((String(req.headers?.authorization || '').match(/^Bearer\s+(.+)$/i) || [])[1] || ''); } catch { /* membership still lists */ }
+    const held = [...new Set((tickets || []).map((t) => String(t.eventId)))];
+    const byId = new Map();
+    for (const id of memberIds) {
+      const c = getChannel(id);
+      if (c && c.status === 'active' && flagOn(c.entity_id)) byId.set(c.id, c);
+    }
+    for (const ev of held) {
+      for (const c of eventChannels(ev)) {
+        if (c.kind === 'official' && flagOn(c.entity_id) && accessFor(c, user.id).ok) byId.set(c.id, c);
+      }
+    }
+    const channels = [...byId.values()].map((c) => channelRow(c, { userId: user.id }));
+    channels.sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')));
+    res.json({ contractVersion: 1, channels });
+  }));
+
+  // Member list — visible to anyone who can read the channel.
+  app.get('/api/app/social/chat/channels/:id/members', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const c = getChannel(req.params.id);
+    if (!c || !flagOn(c.entity_id)) return gone(res);
+    if (!accessFor(c, user.id).ok) throw new HttpError(403, 'Join this channel first');
+    const members = sql.prepare('SELECT howler_user_id, member_name, role FROM social_chat_members WHERE channel_id=? ORDER BY created_at LIMIT 200').all(c.id)
+      .map((m) => ({ id: m.howler_user_id, name: m.member_name || 'Howler fan', role: m.role }));
+    res.json({ contractVersion: 1, members });
+  }));
+
+  // Group owner renames their group.
+  app.post('/api/app/social/chat/channels/:id/rename', writeLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const c = getChannel(req.params.id);
+    if (!c || c.kind !== 'group' || !flagOn(c.entity_id)) return gone(res);
+    if (memberRow(c.id, user.id)?.role !== 'owner') throw new HttpError(403, 'Only the group owner can rename it');
+    const name = String((req.body || {}).name || '').trim().slice(0, 60);
+    if (!name) throw new HttpError(400, 'Give the group a name');
+    sql.prepare('UPDATE social_chat_channels SET name=?, updated_at=? WHERE id=?').run(name, now(), c.id);
+    res.json(channelRow(getChannel(c.id), { userId: user.id }));
   }));
 
   // Fan creates a group for an event (invite-access, they become owner).
