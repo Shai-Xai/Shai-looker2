@@ -1011,6 +1011,87 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     res.send(fs.readFileSync(file));
   }));
 
+  // Single post (deep-link target / single-post screen). Same visibility as
+  // the feed: flag-on, published; members-only needs membership; targeted
+  // posts need the matching ticket.
+  app.get('/api/app/social/posts/:id', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
+    const c = p && getCommunity(p.community_id);
+    if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) return gone(res);
+    let viewer = null;
+    if (c.visibility === 'members' && !p.global && !p.to_parent) {
+      viewer = await requireAppUser(req);
+      if (!isMember(c.id, viewer.id)) throw new HttpError(403, 'Join this community to see this post');
+    } else {
+      viewer = await optionalAppUser(req);
+    }
+    if (p.audience) {
+      if (!viewer) throw new HttpError(403, 'This post is for specific ticket holders');
+      let tickets = null;
+      try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* fail closed */ }
+      if (!postVisible(p, c, tickets)) throw new HttpError(403, 'This post is for specific ticket holders');
+    }
+    res.json({ contractVersion: 1, post: postRow(p, c, { viewerId: viewer?.id }) });
+  }));
+
+  // Shareable web page for a post (the deep-link URL fans send). Carries Open
+  // Graph tags so it unfurls with a thumbnail + caption in WhatsApp/iMessage,
+  // renders the post for anyone (no app needed), and offers "open in the app"
+  // + store links. Private posts (members-only / ticket-targeted) don't leak
+  // their content — they show a generic get-the-app gate instead.
+  const APP_STORE_IOS = 'https://apps.apple.com/za/app/id6742250654';
+  const APP_STORE_ANDROID = 'https://play.google.com/store/apps/details?id=co.za.howler.app';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  app.get('/p/:id', asyncHandler(async (req, res) => {
+    const host = typeof req.get === 'function' ? req.get('host') : '';
+    const base = (process.env.PUBLIC_BASE_URL || (req.protocol && host ? `${req.protocol}://${host}` : '')).replace(/\/$/, '');
+    const abs = (u) => (/^https?:\/\//.test(u) ? u : `${base}${u}`);
+    const p = enabled() ? sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id)) : null;
+    const c = p && getCommunity(p.community_id);
+    const open = !!(p && c && c.status === 'active' && flagOn(p.entity_id) && c.visibility !== 'members' && !p.audience);
+    const media = open ? mediaList(p.media) : [];
+    const firstImg = media.find((m) => m.kind !== 'video');
+    const brand = open ? (c.name || 'Howler') : 'Howler';
+    const caption = open ? String(p.body || '').slice(0, 200) : 'Open this post in the Howler app.';
+    const ogImg = firstImg ? abs(firstImg.url) : '';
+    const mediaHtml = !open ? ''
+      : media.map((m) => (m.kind === 'video'
+        ? `<video src="${esc(abs(m.url))}" controls playsinline style="width:100%;border-radius:14px;margin-top:12px"></video>`
+        : `<img src="${esc(abs(m.url))}" alt="" style="width:100%;border-radius:14px;margin-top:12px"/>`)).join('');
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>${esc(brand)} on Howler</title>
+<meta property="og:type" content="article"/>
+<meta property="og:title" content="${esc(brand)} on Howler"/>
+<meta property="og:description" content="${esc(caption)}"/>
+${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
+<meta name="twitter:card" content="${ogImg ? 'summary_large_image' : 'summary'}"/>
+<style>
+  body{margin:0;background:#0e0f12;color:#ECEBE7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center}
+  .wrap{max-width:520px;width:100%;padding:22px 18px 44px}
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .ava{width:38px;height:38px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#c9a7ff,#5a2f8a);display:flex;align-items:center;justify-content:center;font-weight:800;color:#1d0b2b;box-shadow:0 0 0 2px #0e0f12,0 0 0 4px #F5B301}
+  .name{font-weight:800}
+  .cap{font-size:15px;line-height:1.45;margin:14px 2px 0}
+  .btns{display:flex;flex-direction:column;gap:10px;margin-top:22px}
+  .btn{display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:12px;padding:13px}
+  .amber{background:#F5B301;color:#241d05}
+  .ghost{background:#1b1d22;color:#ECEBE7;border:1px solid #2a2d34}
+  .muted{color:#9A9DA5;font-size:12.5px;text-align:center;margin-top:16px}
+</style></head><body><div class="wrap">
+  <div class="head"><div class="ava">${esc(brand.charAt(0).toUpperCase() || 'H')}</div><div class="name">${esc(brand)}</div></div>
+  ${open ? `<div class="cap">${esc(p.body || '')}</div>` : `<div class="cap">This post lives in the Howler app.</div>`}
+  ${mediaHtml}
+  <div class="btns">
+    <a class="btn amber" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>
+    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>
+  </div>
+  <div class="muted">Shared from Howler</div>
+</div></body></html>`);
+  }));
+
   return { listCommunities, createCommunity, createPost, updatePost, saveMedia };
 }
 
