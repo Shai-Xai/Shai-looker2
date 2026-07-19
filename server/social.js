@@ -217,6 +217,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       PRIMARY KEY (post_id, howler_user_id)
     );
 
+    -- Story-rail "seen" marks: when a viewer last opened a community's feed.
+    -- Drives the unseen ring on the rail (lastPostAt > last_seen_at).
+    CREATE TABLE IF NOT EXISTS social_feed_seen (
+      community_id   TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      last_seen_at   TEXT NOT NULL,
+      PRIMARY KEY (community_id, howler_user_id)
+    );
+
     -- App posters: Howler app accounts authorised to publish posts for this
     -- client STRAIGHT FROM THE APP (no Pulse login). Managed from both Pulse
     -- surfaces; the app endpoint checks the verified JWT identity against
@@ -759,6 +768,60 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       canPost: viewer ? !!posterRow(c.entity_id, viewer.id) : null,
     });
     res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: rows.length === page.limit ? rows[rows.length - 1].published_at : null });
+  }));
+
+  // ── Story rail — the quick-door row of community circles (mockup frame 7).
+  // Active, flag-on communities that have posted, with per-viewer state:
+  // joined (they follow it), hasTicket (verified holdings), unseen (posts
+  // since they last opened the feed). Sorted: joined → ticket-held → most
+  // recently active. ?parentId= scopes to one organiser's events (the rail
+  // ON an organiser feed); omit for the global rail (all levels).
+  app.get('/api/app/social/rail', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const viewer = await optionalAppUser(req);
+    const parentId = String(req.query.parentId || '').trim();
+    let rows = parentId
+      ? sql.prepare("SELECT * FROM social_feed_communities WHERE parent_id=? AND status='active'").all(parentId)
+      : sql.prepare("SELECT * FROM social_feed_communities WHERE status='active'").all();
+    rows = rows.filter((r) => flagOn(r.entity_id));
+    const kids = (id) => sql.prepare('SELECT id FROM social_feed_communities WHERE parent_id=?').all(id).map((k) => k.id);
+    // Last activity: own posts, plus child-event posts for organiser circles
+    // (the brand circle glows when any of its events posts).
+    const lastPostAt = (r) => {
+      const ids = [r.id, ...(r.type === 'organiser' ? kids(r.id) : [])];
+      const ph = ids.map(() => '?').join(',');
+      return sql.prepare(`SELECT MAX(published_at) t FROM social_feed_posts WHERE community_id IN (${ph}) AND status='published'`).get(...ids)?.t || null;
+    };
+    let tickets = null;
+    if (viewer) { try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* rail still renders */ } }
+    const held = new Set((tickets || []).map((t) => String(t.eventId)));
+    const items = rows.map((r) => {
+      const last = lastPostAt(r);
+      if (!last) return null; // quiet communities stay off the rail
+      const childEventIds = r.type === 'organiser' ? sql.prepare("SELECT event_id FROM social_feed_communities WHERE parent_id=? AND event_id!=''").all(r.id).map((k) => String(k.event_id)) : [];
+      const joined = viewer
+        ? !!(isMember(r.id, viewer.id) || (r.type === 'organiser' && kids(r.id).some((k) => isMember(k, viewer.id))))
+        : false;
+      const hasTicket = r.event_id ? held.has(String(r.event_id)) : childEventIds.some((e) => held.has(e));
+      const seen = viewer ? sql.prepare('SELECT last_seen_at FROM social_feed_seen WHERE community_id=? AND howler_user_id=?').get(r.id, String(viewer.id))?.last_seen_at || '' : '';
+      return {
+        communityId: r.id, name: r.name, type: r.type,
+        entityId: r.entity_id, eventId: r.event_id || null, parentId: r.parent_id || null,
+        lastPostAt: last, joined, hasTicket,
+        unseen: !!viewer && last > seen,
+      };
+    }).filter(Boolean);
+    items.sort((a, b) => (b.joined - a.joined) || (b.hasTicket - a.hasTicket) || (a.lastPostAt < b.lastPostAt ? 1 : -1));
+    res.json({ contractVersion: 1, rail: items.slice(0, 20) });
+  }));
+
+  // Mark a community's feed seen (clears its unseen ring on the rail).
+  app.post('/api/app/social/communities/:id/seen', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    sql.prepare('INSERT OR REPLACE INTO social_feed_seen (community_id, howler_user_id, last_seen_at) VALUES (?,?,?)')
+      .run(String(req.params.id), user.id, now());
+    res.json({ ok: true });
   }));
 
   // Explicit join / leave from the app — identity comes from the verified JWT.
