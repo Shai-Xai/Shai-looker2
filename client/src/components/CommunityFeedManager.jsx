@@ -71,6 +71,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
         </div>
       </section>
 
+      {/* ── House designation (platform admin only) ── */}
+      {scope === 'admin' && <HouseToggle entityId={entityId} onError={(m) => setError(m)} />}
+
       {/* ── App posters: Howler accounts allowed to post from the app ── */}
       <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
 
@@ -376,6 +379,28 @@ function Composer({ communities, onCreate, scope, entityId }) {
 
 // One comment row — shared by the per-post list and the moderation inbox.
 // Organiser replies get a brand badge; reported comments are flagged loudly.
+// Platform-level: which client is "Howler's own voice". The house entity's
+// global posts reach EVERYONE in the app (incl. before login); every other
+// client's global posts only reach their followers + ticket holders.
+function HouseToggle({ entityId, onError }) {
+  const [house, setHouse] = useState(null);
+  useEffect(() => { api.socialGetHouse().then((d) => setHouse(d.entityId || '')).catch(() => setHouse('')); }, []);
+  if (house === null) return null;
+  const isHouse = house === entityId;
+  return (
+    <section style={{ marginTop: 18 }}>
+      <label style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }} title="House posts on the Howler global feed reach every app user; other organisers only reach their followers and ticket holders">
+        <input
+          type="checkbox"
+          checked={isHouse}
+          onChange={(e) => api.socialSetHouse(e.target.checked ? entityId : '').then((d) => setHouse(d.entityId || '')).catch((err) => onError(err.message || 'Could not update'))}
+        /> 🏠 This client is <b>Howler’s own voice</b> — its global-feed posts reach everyone
+      </label>
+      {house && !isHouse && <p style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--muted)' }}>Another client currently holds the house role.</p>}
+    </section>
+  );
+}
+
 // Howler app accounts authorised to publish for this client straight from the
 // app (they see a composer in the app; posts go live in the brand's voice, or
 // under the display name set here). Find user ids in staging Active Admin.
