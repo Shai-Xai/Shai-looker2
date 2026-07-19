@@ -211,6 +211,18 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       created_at     TEXT NOT NULL,
       PRIMARY KEY (post_id, howler_user_id)
     );
+
+    -- App posters: Howler app accounts authorised to publish posts for this
+    -- client STRAIGHT FROM THE APP (no Pulse login). Managed from both Pulse
+    -- surfaces; the app endpoint checks the verified JWT identity against
+    -- this list. name '' = post in the brand's voice (community name shows).
+    CREATE TABLE IF NOT EXISTS social_feed_posters (
+      entity_id      TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL,
+      name           TEXT NOT NULL DEFAULT '',
+      created_at     TEXT NOT NULL,
+      PRIMARY KEY (entity_id, howler_user_id)
+    );
   `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
@@ -218,7 +230,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   // ── shapers (public wire shapes — SOCIAL_CONTRACT.md) ──
   const mediaList = (raw) => { try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; } };
-  function communityRow(r, { memberCount = null } = {}) {
+  function communityRow(r, { memberCount = null, canPost = null } = {}) {
     const out = {
       id: r.id, entityId: r.entity_id, type: r.type, name: r.name, description: r.description,
       visibility: r.visibility, status: r.status, parentId: r.parent_id || null,
@@ -227,6 +239,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       createdAt: r.created_at,
     };
     if (memberCount != null) out.memberCount = memberCount;
+    if (canPost != null) out.canPost = canPost; // viewer is an authorised app poster
     return out;
   }
   const reactionCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_reactions WHERE post_id=?').get(postId).n;
@@ -271,6 +284,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       createdAt: r.created_at, publishedAt: r.published_at || null,
     };
   }
+  const posterRow = (entityId, howlerUserId) => sql.prepare('SELECT * FROM social_feed_posters WHERE entity_id=? AND howler_user_id=?').get(entityId, String(howlerUserId));
   const getCommunity = (id) => sql.prepare('SELECT * FROM social_feed_communities WHERE id=?').get(id);
   const memberCount = (id) => sql.prepare('SELECT COUNT(*) n FROM social_feed_members WHERE community_id=?').get(id).n;
   const isMember = (id, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_members WHERE community_id=? AND howler_user_id=?').get(id, String(howlerUserId));
@@ -338,7 +352,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       out.link_url = u;
     }
     if (b.global !== undefined) out.global = b.global ? 1 : 0;
-    if (b.source !== undefined && ['pulse', 'instagram', 'tiktok'].includes(b.source)) out.source = b.source;
+    if (b.source !== undefined && ['pulse', 'instagram', 'tiktok', 'app'].includes(b.source)) out.source = b.source;
     if (b.ctaLabel !== undefined || b.ctaDestination !== undefined) {
       const ctaLabel = String(b.ctaLabel || '').trim().slice(0, 40);
       const dest = String(b.ctaDestination || '').trim().slice(0, 500);
@@ -412,6 +426,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const r = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
     return postRow(r, getCommunity(r.community_id));
   }
+  // App posters — who may publish for this client straight from the app.
+  function listPosters(entityId) {
+    return sql.prepare('SELECT * FROM social_feed_posters WHERE entity_id=? ORDER BY created_at').all(entityId)
+      .map((r) => ({ howlerUserId: r.howler_user_id, name: r.name, createdAt: r.created_at }));
+  }
+  function addPoster(entityId, body) {
+    const uid = String((body || {}).howlerUserId || '').trim();
+    if (!/^\d+$/.test(uid)) throw new HttpError(400, 'A numeric Howler user id is required');
+    sql.prepare('INSERT OR REPLACE INTO social_feed_posters (entity_id, howler_user_id, name, created_at) VALUES (?,?,?,?)')
+      .run(entityId, uid, String((body || {}).name || '').trim().slice(0, 80), now());
+    return { posters: listPosters(entityId) };
+  }
+  function removePoster(entityId, howlerUserId) {
+    sql.prepare('DELETE FROM social_feed_posters WHERE entity_id=? AND howler_user_id=?').run(entityId, String(howlerUserId));
+    return { posters: listPosters(entityId) };
+  }
+
   // Organiser pin/unpin: floats the post to the top of its feeds for everyone.
   function pinPost(entityId, id, pinned) {
     const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id);
@@ -499,6 +530,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.put(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(updatePost(req.params.entityId, req.params.id, req.body || {}))));
   app.delete(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { deletePost(req.params.entityId, req.params.id); res.json({ ok: true }); }));
   app.post(`${A}/posts/:id/pin`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(pinPost(req.params.entityId, req.params.id, !!(req.body || {}).pinned))));
+  app.get(`${A}/posters`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ posters: listPosters(req.params.entityId) })));
+  app.post(`${A}/posters`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(addPoster(req.params.entityId, req.body))));
+  app.delete(`${A}/posters/:userId`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(removePoster(req.params.entityId, req.params.userId))));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -520,6 +554,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.put(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(updatePost(eid(req), req.params.id, req.body || {}))));
   app.delete(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { deletePost(eid(req), req.params.id); res.json({ ok: true }); }));
   app.post(`${M}/posts/:id/pin`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(pinPost(eid(req), req.params.id, !!(req.body || {}).pinned))));
+  app.get(`${M}/posters`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ posters: listPosters(eid(req)) })));
+  app.post(`${M}/posters`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(addPoster(eid(req), req.body))));
+  app.delete(`${M}/posters/:userId`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(removePoster(eid(req), req.params.userId))));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -580,7 +617,14 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     else if (entityId) rows = sql.prepare("SELECT * FROM social_feed_communities WHERE entity_id=? AND status='active'").all(entityId);
     else throw new HttpError(400, 'eventId or entityId required');
     rows = rows.filter((r) => flagOn(r.entity_id));
-    res.json({ contractVersion: 1, communities: rows.map((r) => communityRow(r, { memberCount: memberCount(r.id) })) });
+    const viewer = await optionalAppUser(req);
+    res.json({
+      contractVersion: 1,
+      communities: rows.map((r) => communityRow(r, {
+        memberCount: memberCount(r.id),
+        canPost: viewer ? !!posterRow(r.entity_id, viewer.id) : null,
+      })),
+    });
   }));
 
   // One community's feed. `members` visibility requires a VERIFIED member —
@@ -599,7 +643,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const page = pageArgs(req.query);
     const posts = communityFeed(c, page, viewer?.id);
     const strips = page.before ? {} : pinnedStrips('community_id=?', [c.id], viewer?.id);
-    res.json({ contractVersion: 1, community: communityRow(c, { memberCount: memberCount(c.id) }), posts, ...strips, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
+    const community = communityRow(c, {
+      memberCount: memberCount(c.id),
+      canPost: viewer ? !!posterRow(c.entity_id, viewer.id) : null,
+    });
+    res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: posts.length === page.limit ? posts[posts.length - 1].publishedAt : null });
   }));
 
   // Explicit join / leave from the app — identity comes from the verified JWT.
@@ -723,6 +771,33 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const { user, post } = await reactablePost(req);
     sql.prepare('DELETE FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').run(post.id, user.id);
     res.json({ ok: true, reactionCount: reactionCount(post.id), hasReacted: false });
+  }));
+
+  // Post AS THE BRAND straight from the app — authorised app posters only
+  // (managed in Pulse → Community → App posters; checked against the VERIFIED
+  // JWT identity). Publishes immediately; images ride inline as base64 (the
+  // app converts to JPEG first, same as comment photos).
+  app.post('/api/app/social/posts', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const body = req.body || {};
+    const c = getCommunity(String(body.communityId || ''));
+    if (!c || c.status !== 'active' || !flagOn(c.entity_id)) return gone(res);
+    const poster = posterRow(c.entity_id, user.id);
+    if (!poster) throw new HttpError(403, 'You aren’t set up to post here — ask the organiser to add you as an app poster in Pulse');
+    const images = Array.isArray(body.images) ? body.images.slice(0, MAX_MEDIA_PER_POST) : [];
+    const media = images.map((img, i) => {
+      const saved = saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String((img || {}).mime || 'image/jpeg'), data: (img || {}).data });
+      return { id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime };
+    });
+    const text = String(body.text || '').trim().slice(0, MAX_BODY);
+    if (!text && media.length === 0) throw new HttpError(400, 'Write something or add a photo first');
+    // authorName '' → the post renders in the brand's voice (community name).
+    const post = createPost(c.entity_id, {
+      communityId: c.id, body: text, media, global: !!body.global, publish: true,
+      source: 'app', authorName: poster.name || '',
+    }, { email: `app:${user.id}` });
+    res.json(post);
   }));
 
   // Personal pin / unpin — a private bookmark, only ever visible to the pinner

@@ -453,3 +453,51 @@ test('pins: organiser pin floats a strip; fan personal pins are private', async 
   assert.equal(myPin.body.pinned, true);
   await call('POST /api/my/social/posts/:id/pin', { user: owner, query: { entityId: entity.id }, params: { id: a.id }, body: { pinned: false } });
 });
+
+test('app posters: organiser authorises a Howler account to post from the app', async () => {
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+
+  // Not authorised yet → 403 with a helpful message.
+  const denied = await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id, text: 'hello' } });
+  assert.equal(denied.code, 403);
+
+  // Admin adds the poster (both surfaces work; admin here).
+  const added = await call('POST /api/admin/entities/:entityId/social/posters', {
+    user: admin, params: { entityId: entity.id }, body: { howlerUserId: '661779', name: 'Shai from Howler' },
+  });
+  assert.equal(added.code, 200);
+  assert.equal(added.body.posters.length, 1);
+  assert.equal((await call('POST /api/admin/entities/:entityId/social/posters', { user: admin, params: { entityId: entity.id }, body: { howlerUserId: 'nope' } })).code, 400);
+
+  // canPost now rides the app's community payloads for that verified user.
+  const list = await call('GET /api/app/social/communities', { token: 'tok-661779', query: { entityId: entity.id } });
+  assert.equal(list.body.communities.find((c) => c.id === orgComm.id).canPost, true);
+  const other = await call('GET /api/app/social/communities', { token: 'tok-662076', query: { entityId: entity.id } });
+  assert.equal(other.body.communities.find((c) => c.id === orgComm.id).canPost, false);
+
+  // The poster publishes from the app — text + inline image, straight to live.
+  const img = Buffer.from('jpeg-ish-bytes').toString('base64');
+  const posted = await call('POST /api/app/social/posts', {
+    token: 'tok-661779',
+    body: { communityId: orgComm.id, text: 'Live from the venue 🎤', global: true, images: [{ data: img, mime: 'image/jpeg' }] },
+  });
+  assert.equal(posted.code, 200);
+  assert.equal(posted.body.status, 'published');
+  assert.equal(posted.body.source, 'app');
+  assert.equal(posted.body.author.name, 'Shai from Howler');
+  assert.equal(posted.body.media.length, 1);
+  assert.ok(posted.body.media[0].url.startsWith('/api/app/social/media/'));
+
+  // It's really in the global feed.
+  const feed = await call('GET /api/app/social/feed', {});
+  assert.ok(feed.body.posts.some((p) => p.id === posted.body.id));
+
+  // Empty posts and bad payloads are refused.
+  assert.equal((await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id } })).code, 400);
+
+  // Remove the poster → posting stops.
+  const removed = await call('DELETE /api/admin/entities/:entityId/social/posters/:userId', { user: admin, params: { entityId: entity.id, userId: '661779' } });
+  assert.equal(removed.body.posters.length, 0);
+  assert.equal((await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id, text: 'still me?' } })).code, 403);
+});

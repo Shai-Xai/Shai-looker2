@@ -71,6 +71,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
         </div>
       </section>
 
+      {/* ── App posters: Howler accounts allowed to post from the app ── */}
+      <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
+
       {/* ── Moderation inbox: every fan comment across all posts ── */}
       {posts.length > 0 && <CommentsInbox scope={scope} entityId={entityId} onError={(m) => setError(m)} />}
 
@@ -327,6 +330,47 @@ function Composer({ communities, onCreate, scope, entityId }) {
 
 // One comment row — shared by the per-post list and the moderation inbox.
 // Organiser replies get a brand badge; reported comments are flagged loudly.
+// Howler app accounts authorised to publish for this client straight from the
+// app (they see a composer in the app; posts go live in the brand's voice, or
+// under the display name set here). Find user ids in staging Active Admin.
+function AppPosters({ scope, entityId, onError }) {
+  const [posters, setPosters] = useState(null);
+  const [uid, setUid] = useState('');
+  const [name, setName] = useState('');
+  useEffect(() => { api.socialPosters(scope, entityId).then((d) => setPosters(d.posters || [])).catch(() => setPosters([])); }, [scope, entityId]);
+  const run = (p) => p.then((d) => setPosters(d.posters || [])).catch((e) => onError(e.message || 'That didn’t save'));
+  return (
+    <section style={{ marginTop: 18 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 750 }}>📲 App posters</h3>
+      <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>
+        These Howler app accounts can publish posts for you straight from the app — no Pulse login needed.
+        Leave the display name blank to post in the brand’s voice.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+        <input value={uid} onChange={(e) => setUid(e.target.value)} placeholder="Howler user id (e.g. 661779)" style={{ width: 210 }} />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name (optional)" style={{ width: 190 }} />
+        <button
+          disabled={!/^\d+$/.test(uid.trim())}
+          onClick={() => { run(api.socialAddPoster(scope, entityId, { howlerUserId: uid.trim(), name: name.trim() })); setUid(''); setName(''); }}
+        >＋ Allow</button>
+      </div>
+      {posters === null ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</p> : posters.length === 0
+        ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Nobody yet — posting stays Pulse-only until you allow someone.</p>
+        : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {posters.map((p) => (
+              <div key={p.howlerUserId} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                <span style={{ fontWeight: 600 }}>{p.name || 'Brand voice'}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>Howler user {p.howlerUserId}</span>
+                <button style={{ marginLeft: 'auto' }} title="Remove — they can no longer post from the app" onClick={() => run(api.socialRemovePoster(scope, entityId, p.howlerUserId))}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+    </section>
+  );
+}
+
 function CommentItem({ scope, entityId, comment, onChanged, onError, postContext }) {
   const [replying, setReplying] = useState(false);
   const [replyText, setReplyText] = useState('');

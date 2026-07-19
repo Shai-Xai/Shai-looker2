@@ -1117,6 +1117,11 @@ self-service), flag-gated per client (`community`, default off).
 - **Pins everywhere** 🧪 — organisers pin/unpin posts (float to the top of the
   feed for everyone) and chat messages; fans pin privately for themselves
   (posts + messages), and in their own groups pins are shared WhatsApp-style.
+- **Post from the app** 🧪 — authorised "app posters" (managed per client in
+  Community → App posters) publish for the brand straight from their phone —
+  text + photos, optional Howler-wide feed, live instantly, no Pulse login.
+  Instagram-style composer UI in design; fan/UGC posting rides the same rails
+  later.
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1164,6 +1169,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-19** — **📲 Post from the app (backend)** 🧪: per-client "App
+  posters" registry (Community tab, both surfaces) + a JWT-verified app
+  endpoint that lets authorised Howler accounts publish brand posts with
+  photos straight from the phone. Instagram-style in-app composer is in
+  design review.
 - **2026-07-19** — **📌 Pins across feed + chat** 🧪: organisers pin/unpin posts
   (feed shows a pinned strip for everyone) and chat messages from Pulse; fans
   get personal pins on posts and messages (visible only to them), and pins in
