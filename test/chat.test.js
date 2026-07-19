@@ -262,3 +262,57 @@ test('fan pins: shared in groups, personal in official channels', async () => {
   const cleared = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: group.id } });
   assert.equal(cleared.body.channel.pinnedMessage, undefined);
 });
+
+test('my-channels, member list, group rename (chat-tab surface)', async () => {
+  // tok-661779 holds a ticket for EVENT (fetchAppTickets stub below via mount?
+  // chat mount uses default fetch — re-mount with a stub for this test).
+  const routes2 = (() => {
+    const r = {};
+    const reg = (m) => (p, ...h) => { r[`${m} ${p}`] = h; };
+    const app2 = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE'), use: () => {} };
+    require('../server/chat').mount(app2, {
+      db, auth, rateLimit, verifyAppToken,
+      fetchAppTickets: async (t) => (t === 'tok-661779' ? [{ eventId: EVENT, name: 'VIP' }] : []),
+    });
+    return r;
+  })();
+  const call2 = async (key, opts) => {
+    let code = 200, payload;
+    const res = { status(c) { code = c; return res; }, json(d) { payload = d; return res; }, send(d) { payload = d; return res; }, set() { return res; } };
+    const req = { user: opts.user, params: opts.params || {}, body: opts.body || {}, query: opts.query || {}, ip: '7.7.7.7', headers: opts.token ? { authorization: `Bearer ${opts.token}` } : {} };
+    try {
+      for (const h of routes2[key]) {
+        let nextCalled = false, nextErr = null;
+        await h(req, res, (e) => { nextCalled = true; nextErr = e; });
+        if (nextErr) throw nextErr;
+        if (!nextCalled) break;
+      }
+    } catch (e) { code = Number.isInteger(e.status) ? e.status : 500; payload = { error: e.message }; }
+    return { code, body: payload };
+  };
+
+  // Ticket holder sees official channels across events + groups they joined;
+  // ordered by last activity; last-message preview present where chat exists.
+  const mine = await call2('GET /api/app/social/chat/my-channels', { token: 'tok-661779' });
+  assert.equal(mine.code, 200);
+  assert.ok(mine.body.channels.length > 0);
+  assert.ok(mine.body.channels.some((c) => c.name === 'Main'));
+  const main = mine.body.channels.find((c) => c.name === 'Main');
+  assert.ok(main.lastMessage, 'last-message preview rides the channel list');
+  assert.equal(main.eventId, EVENT);
+  // Ticketless stranger with no memberships → empty list, not an error.
+  const none = await call2('GET /api/app/social/chat/my-channels', { token: 'tok-999' });
+  assert.deepEqual(none.body.channels, []);
+
+  // Member list: readable by members/ticket holders, 403 for outsiders on groups.
+  const members = await call2('GET /api/app/social/chat/channels/:id/members', { token: 'tok-661779', params: { id: state.main.id } });
+  assert.equal(members.code, 200);
+  assert.ok(Array.isArray(members.body.members));
+
+  // Rename: owner only, groups only.
+  const group = (await call2('POST /api/app/social/chat/channels', { token: 'tok-661779', body: { eventId: EVENT, name: 'Old name' } })).body;
+  const renamed = await call2('POST /api/app/social/chat/channels/:id/rename', { token: 'tok-661779', params: { id: group.id }, body: { name: 'New name' } });
+  assert.equal(renamed.body.name, 'New name');
+  assert.equal((await call2('POST /api/app/social/chat/channels/:id/rename', { token: 'tok-662076', params: { id: group.id }, body: { name: 'Nope' } })).code, 403);
+  assert.equal((await call2('POST /api/app/social/chat/channels/:id/rename', { token: 'tok-661779', params: { id: state.main.id }, body: { name: 'Nope' } })).code, 404);
+});
