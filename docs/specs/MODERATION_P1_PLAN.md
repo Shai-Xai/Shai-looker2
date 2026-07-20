@@ -1,8 +1,9 @@
 # Build plan — Social Moderation **Phase 1**: rule engine + console
 
-> Status: **PR 1 SHIPPED** (2026-07-20 — §1–§4, §5's routes, §6 roles/flags,
-> report endpoints, tests: the whole server side). Remaining: the Moderation
-> tab UI (PR 2) and the app repo work (PR 3). · Contract:
+> Status: **PR 1 + PR 2 SHIPPED** (2026-07-20 — the whole server side, plus
+> the console UI: `ModerationManager` on all three surfaces — Engage → App →
+> 🛡️ Moderation for client + admin-on-behalf, Admin → Product → 🛡️ Moderation
+> for platform). Remaining: the app repo work (PR 3). · Contract:
 > `docs/specs/MODERATION_CONTRACT.md` (read
 > first) · Scope source: `docs/ai-social-moderation-scope.md` in the app repo
 > (decisions resolved 2026-07-20). This plan covers **phase 1 only** — the
