@@ -871,6 +871,24 @@ test('app presign + direct-upload media: posters only; URL items ride app posts'
   assert.equal(posted.body.media[0].kind, 'video');
   assert.equal(posted.body.media[0].url, 'https://media.example.com/social/e1/clip.mp4');
   assert.equal(posted.body.media[0].posterUrl, 'https://media.example.com/social/e1/clip.jpg');
+
+  // Reframe focus (composer drag): rides both inline base64 and URL items,
+  // clamped to [-1, 1]; centre (0) stays implicit.
+  const framed = await call('POST /api/app/social/posts', {
+    token: 'tok-661779',
+    body: {
+      communityId: orgComm.id, text: 'reframed',
+      images: [
+        { data: Buffer.from('fakejpeg').toString('base64'), mime: 'image/jpeg', focusX: -0.6, focusY: 3 },
+        { url: 'https://media.example.com/social/e1/wide.jpg', kind: 'image', mime: 'image/jpeg', focusX: 0.25 },
+      ],
+    },
+  });
+  assert.equal(framed.code, 200);
+  assert.equal(framed.body.media[0].focusX, -0.6);
+  assert.equal(framed.body.media[0].focusY, 1, 'focus clamps to [-1,1]');
+  assert.equal(framed.body.media[1].focusX, 0.25);
+  assert.equal(framed.body.media[1].focusY, undefined);
 });
 
 test('share page: CTA carries through, real logo, sharer attribution', async () => {
