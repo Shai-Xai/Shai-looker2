@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
+import EventSelect, { useEntityEvents } from './EventSelect.jsx';
 
 // Engage → Community → Channels: per-event chat channels + fan groups
 // (Social+ replacement phase 2, mockup approved 2026-07-18). Dual-surface
@@ -39,6 +40,8 @@ export default function ChatChannelsManager({ entityId, scope, eventIds = [] }) 
   const [channels, setChannels] = useState(null);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  // Event dropdown (linked suites + event communities) instead of a bare ID box.
+  const events = useEntityEvents(entityId, eventIds);
 
   const load = () => eventId && api.chatChannels(scope, entityId, eventId).then((r) => setChannels(r.channels || [])).catch(() => setChannels([]));
   useEffect(() => { setChannels(null); if (eventId) load(); }, [entityId, eventId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -51,12 +54,17 @@ export default function ChatChannelsManager({ entityId, scope, eventIds = [] }) 
     <section style={{ marginTop: 28 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 750 }}>💬 Channels</h3>
-        <input style={{ ...input, width: 120 }} value={eventId} onChange={(e) => setEventId(e.target.value.replace(/\D/g, ''))} placeholder="Event ID" inputMode="numeric" />
-        {eventIds.filter((id) => id && id !== eventId).map((id) => <button key={id} style={tiny} onClick={() => setEventId(id)}>{id}</button>)}
+        <EventSelect
+          value={eventId}
+          onChange={setEventId}
+          events={events}
+          style={{ ...input, width: 'auto', minWidth: 170 }}
+          inputStyle={{ ...input, width: 120 }}
+        />
         {eventId && <button style={{ ...mini, marginLeft: 'auto' }} onClick={() => setShowCreate((v) => !v)}>{showCreate ? 'Close' : '+ New channel'}</button>}
       </div>
       {error && <p style={{ color: '#c62828', fontSize: 13, margin: '0 0 8px' }}>{error}</p>}
-      {!eventId ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Enter the Howler event ID to manage its chat channels.</p> : channels === null ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
+      {!eventId ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Pick the event whose chat channels you want to manage.</p> : channels === null ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
         <>
           {showCreate && <CreateChannel scope={scope} entityId={entityId} eventId={eventId} onDone={() => { setShowCreate(false); load(); }} onError={setError} />}
           {/* Composer first — sending a message is the tab's main job, same

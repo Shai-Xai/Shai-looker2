@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import ChatChannelsManager from './ChatChannelsManager.jsx';
+import EventSelect, { useEntityEvents } from './EventSelect.jsx';
 
 // Engage → App: Howler-native communities + feed posts, managed in Pulse and
 // served straight to the Howler app (the Social+ replacement spike).
@@ -354,6 +355,8 @@ function CommunityForm({ communities, onCreate }) {
 
 function Composer({ communities, onCreate, scope, entityId }) {
   const [communityId, setCommunityId] = useState(communities[0]?.id || '');
+  // Event dropdown for CTA targets — linked suites + event communities.
+  const events = useEntityEvents(entityId, communities.map((c) => c.eventId).filter(Boolean));
   const [body, setBody] = useState('');
   const [global, setGlobal] = useState(false);
   const [media, setMedia] = useState([]); // [{id, kind, url, mime}]
@@ -584,7 +587,13 @@ function Composer({ communities, onCreate, scope, entityId }) {
             <input style={{ ...input, width: 'auto', flex: 2, minWidth: 180 }} value={ctaUrl} onChange={(e) => setCtaUrl(e.target.value)} placeholder="https://…" />
           )}
           {ctaNeedsEventId && (
-            <input style={{ ...input, width: 'auto', minWidth: 130 }} value={ctaEventId} onChange={(e) => setCtaEventId(e.target.value.replace(/\D/g, ''))} placeholder="Event ID" inputMode="numeric" title="Organiser-community posts need the target event's ID; event-community posts fill this automatically" />
+            <EventSelect
+              value={ctaEventId}
+              onChange={setCtaEventId}
+              events={events}
+              style={{ ...input, width: 'auto', minWidth: 160 }}
+              inputStyle={{ ...input, width: 'auto', minWidth: 110 }}
+            />
           )}
         </div>
       )}
@@ -834,6 +843,7 @@ function InstagramImport({ scope, entityId, communities, onImported, onError }) 
 function CommentItem({ scope, entityId, comment, onChanged, onError, postContext }) {
   const [replying, setReplying] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const events = useEntityEvents(entityId);
   // Optional CTA button on the reply — same vocabulary as post CTAs (native
   // screen or external link); rendered as a tappable button in the app.
   const [cta, setCta] = useState({ on: false, label: '', screen: 'open_url', url: '', eventId: '' });
@@ -883,7 +893,13 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
                   </select>
                   {cta.screen === 'open_url'
                     ? <input style={{ ...input, width: 'auto', flex: 1, fontSize: 12, padding: '5px 9px', minWidth: 150 }} value={cta.url} onChange={(e) => setCta({ ...cta, url: e.target.value })} placeholder="https://…" />
-                    : <input style={{ ...input, width: 'auto', fontSize: 12, padding: '5px 9px', minWidth: 100 }} value={cta.eventId} onChange={(e) => setCta({ ...cta, eventId: e.target.value.replace(/\D/g, '') })} placeholder="Event ID" inputMode="numeric" />}
+                    : <EventSelect
+                        value={cta.eventId}
+                        onChange={(id) => setCta({ ...cta, eventId: id })}
+                        events={events}
+                        style={{ ...input, width: 'auto', fontSize: 12, padding: '5px 9px', minWidth: 140 }}
+                        inputStyle={{ ...input, width: 'auto', fontSize: 12, padding: '5px 9px', minWidth: 90 }}
+                      />}
                   <button style={tiny} onClick={() => setCta({ on: false, label: '', screen: 'open_url', url: '', eventId: '' })}>✕</button>
                 </>}
           </div>
