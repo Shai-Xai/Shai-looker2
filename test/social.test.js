@@ -775,3 +775,18 @@ test('whoami + poster suggestions (no Active Admin id hunt)', async () => {
   const ids = sug.body.suggestions.map((s) => s.howlerUserId);
   assert.ok(ids.includes('661779'), 'active fan appears as a poster suggestion');
 });
+
+test('postable: lists communities the signed-in poster may post to', async () => {
+  // 661779 was registered as a poster for `entity` in the app-posting test;
+  // an unregistered fan gets an empty list, signed-out gets 401.
+  await call('POST /api/admin/entities/:entityId/social/posters', {
+    user: admin, params: { entityId: entity.id }, body: { howlerUserId: '661779', name: 'Shai' },
+  });
+  const mine = await call('GET /api/app/social/postable', { token: 'tok-661779' });
+  assert.equal(mine.code, 200);
+  assert.ok(mine.body.communities.length > 0, 'poster sees postable communities');
+  assert.ok(mine.body.communities.every((c) => c.entityId === entity.id && c.canPost === true));
+  const none = await call('GET /api/app/social/postable', { token: 'tok-999888' });
+  assert.deepEqual(none.body.communities, []);
+  assert.equal((await call('GET /api/app/social/postable', {})).code, 401);
+});
