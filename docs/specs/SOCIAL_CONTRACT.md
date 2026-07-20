@@ -362,6 +362,16 @@ The quick-door row of community circles (mockup frame 7).
   it reaches the inline `<style>`), falling back to Howler red `#EC0B62`.
 - Presentation only (non-secret), so it rides to the browser/app freely.
 
+## 16b. Video posters + range streaming (added 2026-07-20)
+
+- A video media item may carry `posterUrl` — a first-frame JPEG the Pulse
+  composer captures client-side at upload (canvas). Feed cards show it
+  instantly instead of a black box while (or if ever) the video loads; the
+  app falls back to the post's first image when a video has no poster.
+- `GET /api/app/social/media/:id` supports HTTP Range requests (206 partial
+  content) — iOS AVPlayer refuses to stream from servers without it, so
+  Pulse-hosted (fallback-uploaded) videos need this to play at all.
+
 ## 17. Whoami + poster suggestions (added 2026-07-20)
 
 - `GET /api/app/social/whoami` (JWT required) — echoes the VERIFIED identity

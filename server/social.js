@@ -424,6 +424,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const out = { id: String(m.id || uuid()), kind, url, mime: String(m.mime || '').slice(0, 100) };
     if (Number(m.width) > 0) out.width = Math.round(Number(m.width));
     if (Number(m.height) > 0) out.height = Math.round(Number(m.height));
+    // Poster/thumbnail image for a VIDEO (captured client-side at upload) —
+    // feed cards show it instantly instead of a black box while (or if ever)
+    // the video loads.
+    const poster = String(m.posterUrl || '').trim();
+    if (poster && (/^https?:\/\//.test(poster) || poster.startsWith('/api/app/social/media/'))) out.posterUrl = poster;
     return out;
   }
   function validPostInput(b, entityId, { forUpdate = false } = {}) {
@@ -1072,6 +1077,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!m || !fs.existsSync(file)) return gone(res);
     res.set('Content-Type', m.mime);
     res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Accept-Ranges', 'bytes');
+    // HTTP Range support — iOS AVPlayer refuses to stream video from servers
+    // that can't serve partial content, so Pulse-hosted (fallback-uploaded)
+    // videos would show as a black box without this.
+    const size = fs.statSync(file).size;
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+    if (range && (range[1] || range[2])) {
+      const start = range[1] ? Math.min(Number(range[1]), size - 1) : Math.max(0, size - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start > end) return res.status(416).set('Content-Range', `bytes */${size}`).end();
+      res.status(206).set('Content-Range', `bytes ${start}-${end}/${size}`).set('Content-Length', String(end - start + 1));
+      return fs.createReadStream(file, { start, end }).pipe(res);
+    }
     res.send(fs.readFileSync(file));
   }));
 

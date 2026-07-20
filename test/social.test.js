@@ -117,12 +117,16 @@ test('posts: draft → published lifecycle; only published reaches the app', asy
 
   const draft = await call(`POST /api/admin/entities/:entityId/social/posts`, {
     user: admin, params: { entityId: entity.id },
-    body: { communityId: orgComm.id, body: 'Coming soon 👀', global: true, media: [{ kind: 'image', url: '/api/app/social/media/x', width: 1080, height: 1350 }] },
+    body: { communityId: orgComm.id, body: 'Coming soon 👀', global: true, media: [{ kind: 'image', url: '/api/app/social/media/x', width: 1080, height: 1350 }, { kind: 'video', url: '/api/app/social/media/v1', posterUrl: '/api/app/social/media/v1poster' }] },
   });
   assert.equal(draft.code, 200);
   assert.equal(draft.body.status, 'draft');
   assert.equal(draft.body.publishedAt, null);
   assert.equal(draft.body.media[0].width, 1080);
+  // A video's poster (first-frame capture) rides the media item — feed cards
+  // preview it instead of a black box.
+  assert.equal(draft.body.media[1].posterUrl, '/api/app/social/media/v1poster');
+  assert.equal(draft.body.media[0].posterUrl, undefined); // images never carry one
 
   // Draft is invisible in the app-wide feed…
   let feed = await call('GET /api/app/social/feed', {});
