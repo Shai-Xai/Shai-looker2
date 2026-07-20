@@ -238,6 +238,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       id: c.id, eventId: c.event_id, name: c.name, emoji: c.emoji, kind: c.kind,
       access: c.access, mode: c.mode, status: c.status, memberCount: memberCount(c.id),
       messageCount: sql.prepare('SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0').get(c.id).n,
+      // Distinct people who have actually chatted. Public channels never write
+      // member rows (access is open, nobody "joins"), so memberCount reads 0
+      // there no matter how busy the room is — chatterCount is the real signal.
+      chatterCount: sql.prepare("SELECT COUNT(DISTINCT howler_user_id) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND howler_user_id!=''").get(c.id).n,
       brandColor: brand.brandColor, secondaryColor: brand.secondaryColor,
       locked: !acc.ok, ...(acc.ok ? {} : { lockedReason: acc.lockedReason }),
     };
