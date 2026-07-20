@@ -148,7 +148,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
               {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}</span></p>}
-              <CtaClicks scope={scope} entityId={entityId} post={p} onError={(m) => setError(m)} />
+              <CtaClicks scope={scope} entityId={entityId} kind="post" refId={p.id} label={p.ctaLabel} count={p.stats?.ctaClicks || 0} people={p.stats?.ctaUsers || 0} onError={(m) => setError(m)} />
               {p.media.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
                   {p.media.map((m) => m.kind === 'video'
@@ -187,22 +187,25 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
   );
 }
 
-// Who tapped a post's CTA — the audience behind the 👆 count. Expands to the
-// clicker list (JWT-verified name + email) with one-tap "make it a segment"
-// (paste-mode: the clickers' emails) so the audience can get a push/email
-// follow-up from Engage. Dual-surface like the rest of this manager.
-function CtaClicks({ scope, entityId, post, onError }) {
+// Who tapped a CTA — the audience behind the 👆 count, for posts, chat
+// broadcasts and organiser comment replies. Expands to the clicker list
+// (JWT-verified name + email) with one-tap "make it a segment" (paste-mode:
+// the clickers' emails) so the audience can get a push/email follow-up from
+// Engage. `count`/`people` are shown when the caller already knows them (post
+// stats); comment replies fetch on demand. Dual-surface like the manager.
+function CtaClicks({ scope, entityId, kind, refId, label, count = null, people = null, onError }) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [made, setMade] = useState('');
-  const s = post.stats || {};
-  if (!post.ctaLabel || !(s.ctaClicks > 0)) return null;
+  if (!label) return null;
+  // Posts know their tap count from stats — stay hidden until someone taps.
+  if (count !== null && !(count > 0)) return null;
   const toggle = async () => {
     if (open) { setOpen(false); return; }
     setOpen(true);
     if (!data) {
-      try { setData(await api.socialCtaClicks(scope, entityId, 'post', post.id)); }
+      try { setData(await api.socialCtaClicks(scope, entityId, kind, refId)); }
       catch (e) { onError?.(e.message || 'Could not load clickers'); setOpen(false); }
     }
   };
@@ -212,7 +215,7 @@ function CtaClicks({ scope, entityId, post, onError }) {
     setBusy(true);
     try {
       const r = await api.createSegment(entityId, {
-        name: `CTA · ${post.ctaLabel} · ${new Date().toISOString().slice(0, 10)}`.slice(0, 120),
+        name: `CTA · ${label} · ${new Date().toISOString().slice(0, 10)}`.slice(0, 120),
         definition: { mode: 'paste', pasted: emails.join('\n') },
       });
       if (r.error) throw new Error(r.error);
@@ -222,8 +225,10 @@ function CtaClicks({ scope, entityId, post, onError }) {
   };
   return (
     <div style={{ margin: '6px 0 0' }}>
-      <button style={mini} onClick={toggle} title="Every tap on this post’s CTA button in the app">
-        👆 {s.ctaClicks} tap{s.ctaClicks === 1 ? '' : 's'} · {s.ctaUsers || 0} {s.ctaUsers === 1 ? 'person' : 'people'} {open ? '▴' : '▾'}
+      <button style={mini} onClick={toggle} title="Every tap on this CTA button in the app">
+        {count !== null
+          ? <>👆 {count} tap{count === 1 ? '' : 's'} · {people || 0} {people === 1 ? 'person' : 'people'}</>
+          : <>👆 CTA taps</>} {open ? '▴' : '▾'}
       </button>
       {open && (
         <div style={{ marginTop: 6, padding: '8px 10px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 12.5 }}>
@@ -853,6 +858,7 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
           </p>
           {c.text && <p style={{ margin: '2px 0 0', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</p>}
           {c.ctaLabel && <p style={{ margin: '4px 0 0' }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '3px 10px' }}>{c.ctaLabel}</span> <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>→ {c.ctaDestination}</span></p>}
+          {c.ctaLabel && <CtaClicks scope={scope} entityId={entityId} kind="comment" refId={c.id} label={c.ctaLabel} onError={onError} />}
           {(c.media || []).map((m) => <img key={m.id} src={m.url} alt="" style={{ maxHeight: 90, borderRadius: 8, marginTop: 6 }} />)}
         </div>
         {!c.parentCommentId && c.authorType !== 'organiser' && (
