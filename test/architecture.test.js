@@ -25,6 +25,7 @@ const BUDGETS = {
   'db.js': 1620,     // tile-library cluster extracted to tileLibrary.js — locked in lower
   'insights.js': 1100,   // JSON-salvage layer extracted to aiJson.js — locked in lower
   'goals.js': 1100,
+  'social.js': 1480,     // share page extracted to socialShare.js — next split candidate: the media/presign cluster
 };
 
 function lineCount(file) {
