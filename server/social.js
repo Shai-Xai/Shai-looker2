@@ -238,6 +238,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       created_at     TEXT NOT NULL,
       PRIMARY KEY (entity_id, howler_user_id)
     );
+
+    -- Share-link attribution: every /p/:id hit, tagged with WHO shared it
+    -- (?s=<howlerUserId> appended by the app). Surfaces the organic promoters
+    -- driving virality. device 'preview-bot' = link-unfurl crawlers
+    -- (WhatsApp/Slack/…) fetching the OG preview, excluded from click counts.
+    CREATE TABLE IF NOT EXISTS social_feed_share_clicks (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    TEXT NOT NULL,
+      entity_id  TEXT NOT NULL,
+      sharer_howler_user_id TEXT NOT NULL DEFAULT '',
+      device     TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sfsc_entity ON social_feed_share_clicks(entity_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_sfsc_post ON social_feed_share_clicks(post_id);
   `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
@@ -561,6 +576,41 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     sql.prepare('DELETE FROM social_feed_posters WHERE entity_id=? AND howler_user_id=?').run(entityId, String(howlerUserId));
     return { posters: listPosters(entityId) };
   }
+  // Best-known display name for an app user id (posters registry, then chat,
+  // then comments). '' when the id has never carried a name.
+  function appUserName(id) {
+    const q = (t, col) => { try { const r = sql.prepare(`SELECT ${col} n FROM ${t} WHERE howler_user_id=? AND ${col}!='' ORDER BY created_at DESC LIMIT 1`).get(String(id)); return (r && r.n) || null; } catch { return null; } };
+    return q('social_feed_posters', 'name') || q('social_chat_messages', 'author_name') || q('social_feed_comments', 'author_name') || '';
+  }
+
+  // Share-link attribution rollup: who's driving clicks (organic promoters)
+  // and which posts travel. Human clicks only; unfurl-bot fetches reported
+  // separately (they indicate REACH — every WhatsApp recipient's preview).
+  function shareStats(entityId) {
+    const rows = sql.prepare('SELECT sharer_howler_user_id sharer, device, post_id, COUNT(*) n, MAX(created_at) last FROM social_feed_share_clicks WHERE entity_id=? GROUP BY sharer, device, post_id').all(entityId);
+    const sharers = new Map(); const posts = new Map();
+    let clicks = 0; let previews = 0;
+    for (const r of rows) {
+      if (r.device === 'preview-bot') { previews += r.n; continue; }
+      clicks += r.n;
+      posts.set(r.post_id, (posts.get(r.post_id) || 0) + r.n);
+      if (r.sharer) {
+        const s = sharers.get(r.sharer) || { howlerUserId: r.sharer, clicks: 0, lastAt: '' };
+        s.clicks += r.n;
+        if (r.last > s.lastAt) s.lastAt = r.last;
+        sharers.set(r.sharer, s);
+      }
+    }
+    return {
+      totalClicks: clicks,
+      previewFetches: previews,
+      sharers: [...sharers.values()].sort((a, b) => b.clicks - a.clicks).slice(0, 20)
+        .map((s) => ({ ...s, name: appUserName(s.howlerUserId) })),
+      posts: [...posts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
+        .map(([id, n]) => ({ postId: id, clicks: n, body: String(sql.prepare('SELECT body FROM social_feed_posts WHERE id=?').get(id)?.body || '').slice(0, 80) })),
+    };
+  }
+
   // Recently ACTIVE app users (id + best-known name) so an admin can pick a
   // poster without hunting user ids in Active Admin. Sources: chat messages &
   // members, feed comments and community joins already store howler_user_id.
@@ -677,6 +727,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.delete(`${A}/posters/:userId`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(removePoster(req.params.entityId, req.params.userId))));
   // Admins see platform-wide activity (the house entity has no fans of its own yet).
   app.get(`${A}/posters-suggestions`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ suggestions: posterSuggestions() })));
+  app.get(`${A}/share-stats`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(shareStats(req.params.entityId))));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -703,6 +754,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.delete(`${M}/posters/:userId`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(removePoster(eid(req), req.params.userId))));
   // Clients only see users active on THEIR OWN communities/chats (no cross-client leak).
   app.get(`${M}/posters-suggestions`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ suggestions: posterSuggestions(eid(req)) })));
+  app.get(`${M}/share-stats`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(shareStats(eid(req)))));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -1151,10 +1203,17 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const caption = open ? String(p.body || '').slice(0, 200) : 'Open this post in the Howler app.';
     const ogImg = firstImg ? abs(firstImg.url) : '';
     const avatar = open && communityAvatar(c) ? abs(communityAvatar(c)) : '';
-    // Howler watermark on every shared image/video (on the share page). NOTE:
-    // this is an overlay on THIS page — burning it into the media pixels
+    // Howler watermark on every shared image/video (on the share page) — the
+    // REAL Howler mark (same asset the branded emails use), not an emoji.
+    // NOTE: this is an overlay on THIS page — burning it into the media pixels
     // (survives screenshots / re-shares) is a separate media-processing step.
-    const wm = '<div class="wm">🐺 <b>Howler</b></div>';
+    const logo = `${base}/email-howler.png`;
+    const wm = `<div class="wm"><img class="wlogo" src="${esc(logo)}" alt=""/> <b>Howler</b></div>`;
+    // The post's CTA rides the share page too: a web URL links straight out;
+    // an in-app destination (explore_tickets:… etc.) routes to the store for
+    // the visitor's device — the intent carries either way.
+    const ctaDest = open ? String(p.cta_destination || '') : '';
+    const ctaHref = ctaDest.startsWith('open_url:') ? ctaDest.slice('open_url:'.length) : '';
     const mediaHtml = !open ? ''
       : media.map((m) => (m.kind === 'video'
         ? `<div class="mw"><video src="${esc(abs(m.url))}" controls playsinline></video>${wm}</div>`
@@ -1163,15 +1222,32 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const ua = String(req.headers['user-agent'] || '');
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const isAndroid = /Android/i.test(ua);
+    // Share attribution: log every hit with WHO shared the link (?s= appended
+    // by the app). Link-unfurl crawlers are tagged so click counts stay human.
+    if (p) {
+      const isBot = /WhatsApp|facebookexternalhit|Twitterbot|Slackbot|TelegramBot|LinkedInBot|Discordbot|bot|crawler|spider/i.test(ua);
+      const sharer = /^\d+$/.test(String(req.query?.s || '')) ? String(req.query.s) : '';
+      const device = isBot ? 'preview-bot' : isIOS ? 'ios' : isAndroid ? 'android' : 'other';
+      try {
+        sql.prepare('INSERT INTO social_feed_share_clicks (post_id, entity_id, sharer_howler_user_id, device, created_at) VALUES (?,?,?,?,?)')
+          .run(p.id, p.entity_id, sharer, device, now());
+      } catch { /* analytics must never break the page */ }
+    }
     // Accent = the organiser's Pulse brand colour (sanitised to a hex literal
     // before it goes into the <style> tag), falling back to Howler's brand red.
     const HOWLER_RED = '#EC0B62';
     const brandHex = communityBrand(c).brandColor || '';
     const accent = /^#[0-9a-fA-F]{3,8}$/.test(brandHex) ? brandHex : HOWLER_RED;
-    const iosBtn = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
-    const androidBtn = `<a class="btn brand" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
-    const bothBtns = `<a class="btn brand" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
-    const btns = isIOS ? iosBtn : isAndroid ? androidBtn : bothBtns;
+    const storeHref = isIOS ? APP_STORE_IOS : isAndroid ? APP_STORE_ANDROID : APP_STORE_IOS;
+    const ctaBtn = open && p.cta_label
+      ? `<a class="btn brand" href="${esc(ctaHref || storeHref)}">${esc(p.cta_label)}</a>`
+      : '';
+    // Store buttons drop to the quieter style when the post's own CTA leads.
+    const storeStyle = ctaBtn ? 'ghost' : 'brand';
+    const iosBtn = `<a class="btn ${storeStyle}" href="${esc(APP_STORE_IOS)}">Open in the Howler app</a>`;
+    const androidBtn = `<a class="btn ${storeStyle}" href="${esc(APP_STORE_ANDROID)}">Open in the Howler app</a>`;
+    const bothBtns = `<a class="btn ${storeStyle}" href="${esc(APP_STORE_IOS)}">Get it on iPhone</a>\n    <a class="btn ghost" href="${esc(APP_STORE_ANDROID)}">Get it on Android</a>`;
+    const btns = ctaBtn + (isIOS ? iosBtn : isAndroid ? androidBtn : bothBtns);
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -1190,8 +1266,10 @@ ${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
   .cap{font-size:15px;line-height:1.45;margin:14px 2px 0}
   .mw{position:relative;margin-top:12px}
   .mw img,.mw video{width:100%;border-radius:14px;display:block}
-  .wm{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.5);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:800;color:#fff;backdrop-filter:blur(2px)}
+  .wm{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.5);border-radius:999px;padding:4px 11px;font-size:12px;font-weight:800;color:#fff;backdrop-filter:blur(2px)}
   .wm b{color:${accent}}
+  .wlogo{width:16px;height:16px;border-radius:4px;display:block}
+  .flogo{width:18px;height:18px;border-radius:5px;vertical-align:middle;margin-right:6px}
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:22px}
   .btn{display:block;text-align:center;text-decoration:none;font-weight:800;border-radius:12px;padding:13px}
   .brand{background:${accent};color:#fff}
@@ -1204,7 +1282,7 @@ ${ogImg ? `<meta property="og:image" content="${esc(ogImg)}"/>` : ''}
   <div class="btns">
     ${btns}
   </div>
-  <div class="muted">🐺 Shared from Howler</div>
+  <div class="muted"><img class="flogo" src="${esc(logo)}" alt=""/>Shared from Howler</div>
 </div></body></html>`);
   }));
 

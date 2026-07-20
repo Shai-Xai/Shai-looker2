@@ -790,3 +790,31 @@ test('postable: lists communities the signed-in poster may post to', async () =>
   assert.deepEqual(none.body.communities, []);
   assert.equal((await call('GET /api/app/social/postable', {})).code, 401);
 });
+
+test('share page: CTA carries through, real logo, sharer attribution', async () => {
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  const post = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: orgComm.id, body: 'CTA share', global: true, publish: true, ctaLabel: 'Get tickets', ctaDestination: 'open_url:https://howler.co.za/e/x' },
+  })).body;
+
+  // The post's CTA leads on the share page; an open_url destination links out.
+  const page = await call('GET /p/:id', { params: { id: post.id }, headers: { 'user-agent': 'iPhone Safari' } });
+  const html = page.sent || page.body;
+  assert.match(html, /Get tickets/);
+  assert.match(html, /howler\.co\.za\/e\/x/);
+  // Real Howler mark (email asset), not an emoji.
+  assert.match(html, /email-howler\.png/);
+  assert.doesNotMatch(html, /🐺/);
+
+  // Attribution: ?s=<sharer> logs a human click; unfurl bots count as reach.
+  await call('GET /p/:id', { params: { id: post.id }, query: { s: '661779' }, headers: { 'user-agent': 'iPhone Safari' } });
+  await call('GET /p/:id', { params: { id: post.id }, query: { s: '661779' }, headers: { 'user-agent': 'WhatsApp/2.24.1' } });
+  const stats = await call('GET /api/admin/entities/:entityId/social/share-stats', { user: admin, params: { entityId: entity.id } });
+  const mine = stats.body.sharers.find((x) => x.howlerUserId === '661779');
+  assert.ok(mine && mine.clicks >= 1, 'sharer credited with a human click');
+  assert.equal(mine.name, 'Shai'); // best-known name from the posters registry
+  assert.ok(stats.body.previewFetches >= 1, 'bot fetch counted as reach, not a click');
+  assert.ok(stats.body.totalClicks >= 1);
+});
