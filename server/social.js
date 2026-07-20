@@ -198,6 +198,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!mcols.includes('parent_id')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''");
     if (!mcols.includes('author_type')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN author_type TEXT NOT NULL DEFAULT 'fan'");
     if (!mcols.includes('media')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN media TEXT NOT NULL DEFAULT '[]'");
+    // Organiser replies can carry a CTA button (same vocabulary as post CTAs:
+    // native screen keyword or open_url:https://…).
+    if (!mcols.includes('cta_label')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN cta_label TEXT NOT NULL DEFAULT ''");
+    if (!mcols.includes('cta_destination')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN cta_destination TEXT NOT NULL DEFAULT ''");
     // Organiser pin: pinned posts surface at the top of the feed for everyone.
     if (!cols.includes('pinned')) sql.exec('ALTER TABLE social_feed_posts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
     // Targeting: '' = everyone; else JSON {type:'holders'} (any ticket for the
@@ -317,6 +321,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       authorType: r.author_type || 'fan',
       author: { id: r.howler_user_id, name: r.author_name || 'Howler fan' },
       text: r.body, media: mediaList(r.media), reported: !!r.reported,
+      ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
       ...(viewerId ? { isOwner: r.author_type !== 'organiser' && r.howler_user_id === String(viewerId) } : {}),
       createdAt: r.created_at,
     };
@@ -710,14 +715,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     });
   }
   // Organiser reply — threads under the fan's comment, authored as the brand.
-  function organiserReply(entityId, commentId, text, authorName) {
+  // Optionally carries a CTA button (same vocabulary + validation as post CTAs).
+  function organiserReply(entityId, commentId, body, authorName) {
     const parent = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(commentId);
     if (!parent || parent.entity_id !== entityId) throw new HttpError(404, 'Comment not found');
-    const clean = String(text || '').trim().slice(0, 1000);
+    const b = body && typeof body === 'object' ? body : { text: body };
+    const clean = String(b.text || '').trim().slice(0, 1000);
     if (!clean) throw new HttpError(400, 'Write a reply first');
+    const ctaLabel = String(b.ctaLabel || '').trim().slice(0, 40);
+    const dest = String(b.ctaDestination || '').trim().slice(0, 500);
+    if (ctaLabel && !/^(open_url:https?:\/\/.+|[a-z][a-z0-9_]*(:\d+)?)$/.test(dest)) {
+      throw new HttpError(400, 'Button destination must be a known screen keyword (e.g. explore_tickets:19203) or open_url:https://…');
+    }
     const id = `cmt_${uuid().slice(0, 12)}`;
-    sql.prepare("INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, author_type, body, parent_id, created_at) VALUES (?,?,?,?,?,'organiser',?,?,?)")
-      .run(id, parent.post_id, entityId, '', authorName, clean, parent.parent_id || parent.id, now());
+    sql.prepare("INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, author_type, body, parent_id, cta_label, cta_destination, created_at) VALUES (?,?,?,?,?,'organiser',?,?,?,?,?)")
+      .run(id, parent.post_id, entityId, '', authorName, clean, parent.parent_id || parent.id, ctaLabel, ctaLabel ? dest : '', now());
     return commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id));
   }
   // Base64 media → persistent disk (dev path). Returns the served URL.
@@ -770,7 +782,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${A}/posts/:id/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listComments(req.params.entityId, req.params.id) })));
   app.get(`${A}/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listAllComments(req.params.entityId) })));
-  app.post(`${A}/comments/:id/reply`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(organiserReply(req.params.entityId, req.params.id, (req.body || {}).text, db.getEntity(req.params.entityId)?.name || 'Organiser'))));
+  app.post(`${A}/comments/:id/reply`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(organiserReply(req.params.entityId, req.params.id, req.body || {}, db.getEntity(req.params.entityId)?.name || 'Organiser'))));
   app.delete(`${A}/comments/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { moderateDeleteComment(req.params.entityId, req.params.id); res.json({ ok: true }); }));
 
   // ── CLIENT self-service surface (flag-gated at /api/my/social via flags GATES) ──
@@ -798,7 +810,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${M}/posts/:id/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listComments(eid(req), req.params.id) })));
   app.get(`${M}/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listAllComments(eid(req)) })));
-  app.post(`${M}/comments/:id/reply`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(organiserReply(eid(req), req.params.id, (req.body || {}).text, db.getEntity(eid(req))?.name || 'Organiser'))));
+  app.post(`${M}/comments/:id/reply`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(organiserReply(eid(req), req.params.id, req.body || {}, db.getEntity(eid(req))?.name || 'Organiser'))));
   app.delete(`${M}/comments/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { moderateDeleteComment(eid(req), req.params.id); res.json({ ok: true }); }));
 
   // ── PUBLIC app-facing surface ──

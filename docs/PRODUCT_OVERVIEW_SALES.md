@@ -4,7 +4,10 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-19 (📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-20 (📲 Engage → App: Community suite gets its own
+> section — Posts · Channels · Communities · Share links tabs, composer-first
+> Channels, App Analytics rename, CTA buttons on organiser comment replies,
+> app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1097,8 +1100,12 @@ next year's planning.
 Organisers post updates, photos and videos from Pulse straight into the Howler
 app — an organiser community for the brand, event communities ring-fenced to
 ticket holders and joiners, and a Howler-wide global feed for reach. Managed in
-Engage → Community (both surfaces: Howler admin per client, and client
-self-service), flag-gated per client (`community`, default off).
+**Engage → App** — its own section with four tabs (📰 Posts · 💬 Channels ·
+👥 Communities · 📣 Share links), no longer a single tab inside Campaigns
+(both surfaces: Howler admin per client, and client self-service), flag-gated
+per client (`community`, default off). On mobile, creating a post mirrors the
+app's own ＋ composer flow. The read-side analytics page in the sidebar is now
+called **App Analytics** to keep the two apart.
 
 - **Communities** — organiser-level and per-event (event communities nest under
   the organiser's), public or members-only.
@@ -1188,6 +1195,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-20** — **📲 Engage → App**: the Community suite moved out of the
+  Engage/Campaigns tab row into its own section with four tabs (Posts ·
+  Channels · Communities · Share links); Channels now leads with a message
+  composer (one channel or broadcast-to-all); the analytics page is renamed
+  **App Analytics**; organiser **comment replies can carry a CTA button**
+  (native app screen or external link — the same vocabulary posts and chat
+  messages already had); mobile posting uses an app-style ＋ full-screen
+  composer.
 - **2026-07-19** — **⭕ Story rail**: community circles on the app's feed
   (joined + ticketed first, unseen rings, one-tap into organiser/event
   feeds) served by a new rail endpoint with per-viewer state.
