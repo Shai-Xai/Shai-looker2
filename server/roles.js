@@ -24,6 +24,7 @@ const PERMISSIONS = {
   INTEGRATIONS_MANAGE: 'integrations.manage',// edit Looker/Anthropic + CC-the-Owl
   TEAM_MANAGE: 'team.manage',                // manage this client's own logins + roles
   EVENTOPS_MANAGE: 'eventops.manage',        // operate Event Ops — devices, stations, scans, issues
+  MODERATION_MANAGE: 'moderation.manage',    // social moderation: banned lists + review queue (MODERATION_CONTRACT.md)
 };
 const ALL = Object.values(PERMISSIONS);
 const P = PERMISSIONS;
@@ -39,7 +40,7 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE, P.MODERATION_MANAGE],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',
@@ -61,6 +62,11 @@ const ROLES = [
     description: 'On-the-ground event operations ONLY - devices, stations, staff, issues & checkpoints. No dashboards, campaigns or settings.',
     permissions: [P.EVENTOPS_MANAGE],
   },
+  {
+    key: 'moderator', label: 'Moderator', lens: 'exec',
+    description: 'Community trust & safety ONLY - this client\'s banned lists and the review queue for its communities and chat channels. No dashboards, campaigns or settings.',
+    permissions: [P.MODERATION_MANAGE],
+  },
 ];
 
 const ROLE_KEYS = ROLES.map((r) => r.key);
@@ -76,6 +82,16 @@ const DEFAULT_ROLE = 'owner';               // safe non-breaking default for exi
 const SUPER_ADMIN = 'super_admin';
 function isSuperAdmin(user) {
   return !!(user && user.role === 'admin' && (user.roles || []).includes(SUPER_ADMIN));
+}
+
+// ─── Platform moderator (global designation) ──────────────────────────────────
+// Same mechanic as SUPER_ADMIN: a global tag in users.roles, valid only on a
+// Howler admin login. Gates WRITES on the platform moderation surface (the
+// platform-wide banned lists + platform review queue — MODERATION_CONTRACT.md
+// §10); any Howler admin can view.
+const PLATFORM_MODERATOR = 'platform_moderator';
+function isPlatformModerator(user) {
+  return !!(user && user.role === 'admin' && (user.roles || []).includes(PLATFORM_MODERATOR));
 }
 
 // Howler-staff job titles — the kind of support a client deals with. Only applies
@@ -97,4 +113,4 @@ function lensForRole(key) { return getRole(key).lens || 'exec'; }
 // Public catalog (no internals) for the admin UI.
 function catalog() { return ROLES.map((r) => ({ key: r.key, label: r.label, description: r.description, lens: r.lens, permissions: r.permissions })); }
 
-module.exports = { PERMISSIONS, ROLES, ROLE_KEYS, DEFAULT_ROLE, getRole, permissionsForRole, lensForRole, catalog, HOWLER_ROLES, HOWLER_ROLE_KEYS, howlerRoleLabel, SUPER_ADMIN, isSuperAdmin };
+module.exports = { PERMISSIONS, ROLES, ROLE_KEYS, DEFAULT_ROLE, getRole, permissionsForRole, lensForRole, catalog, HOWLER_ROLES, HOWLER_ROLE_KEYS, howlerRoleLabel, SUPER_ADMIN, isSuperAdmin, PLATFORM_MODERATOR, isPlatformModerator };
