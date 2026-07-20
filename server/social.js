@@ -263,36 +263,6 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     CREATE INDEX IF NOT EXISTS idx_sfsc_entity ON social_feed_share_clicks(entity_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_sfsc_post ON social_feed_share_clicks(post_id);
 
-    -- Views & impressions, one counter row per (post, viewer, kind, day):
-    --   delivered → the post rode a feed response (logged server-side)
-    --   seen      → the app reported the card actually on screen
-    --   view      → a video played inline / the reel was opened
-    -- howler_user_id '' = anonymous reader (counts, but not unique reach).
-    CREATE TABLE IF NOT EXISTS social_feed_impressions (
-      post_id        TEXT NOT NULL,
-      howler_user_id TEXT NOT NULL DEFAULT '',
-      kind           TEXT NOT NULL DEFAULT 'delivered',
-      day            TEXT NOT NULL,
-      n              INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (post_id, howler_user_id, kind, day)
-    );
-
-    -- CTA taps, one rollup row per (surface, target, user): WHO tapped an
-    -- organiser CTA (feed post or chat broadcast), how many times, and the
-    -- JWT-verified name/email captured at tap time — so the clicker list can
-    -- become a paste segment for campaigns. howler_user_id '' = anonymous
-    -- (counts in the total, can't join a segment).
-    CREATE TABLE IF NOT EXISTS social_cta_clicks (
-      kind           TEXT NOT NULL DEFAULT 'post',  -- post | chat
-      ref_id         TEXT NOT NULL,
-      howler_user_id TEXT NOT NULL DEFAULT '',
-      name           TEXT NOT NULL DEFAULT '',
-      email          TEXT NOT NULL DEFAULT '',
-      n              INTEGER NOT NULL DEFAULT 0,
-      first_at       TEXT NOT NULL,
-      last_at        TEXT NOT NULL,
-      PRIMARY KEY (kind, ref_id, howler_user_id)
-    );
   `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
@@ -821,7 +791,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // Admins see platform-wide activity (the house entity has no fans of its own yet).
   app.get(`${A}/posters-suggestions`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ suggestions: posterSuggestions() })));
   app.get(`${A}/share-stats`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(shareStats(req.params.entityId))));
-  app.get(`${A}/cta-clicks`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(ctaClickers(req.params.entityId, req.query.kind, req.query.refId))));
+  app.get(`${A}/cta-clicks`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(engagement.clickers(req.params.entityId, req.query.kind, req.query.refId))));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -850,7 +820,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // Clients only see users active on THEIR OWN communities/chats (no cross-client leak).
   app.get(`${M}/posters-suggestions`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ suggestions: posterSuggestions(eid(req)) })));
   app.get(`${M}/share-stats`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(shareStats(eid(req)))));
-  app.get(`${M}/cta-clicks`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(ctaClickers(eid(req), req.query.kind, req.query.refId))));
+  app.get(`${M}/cta-clicks`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(engagement.clickers(eid(req), req.query.kind, req.query.refId))));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -918,76 +888,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
-  // ── views & impressions ──
-  function logImpressions(postIds, viewerId, kind) {
-    if (!postIds.length) return;
-    const day = new Date().toISOString().slice(0, 10);
-    const stmt = sql.prepare(`INSERT INTO social_feed_impressions (post_id, howler_user_id, kind, day, n) VALUES (?,?,?,?,1)
-      ON CONFLICT(post_id, howler_user_id, kind, day) DO UPDATE SET n=n+1`);
-    for (const id of postIds) stmt.run(String(id), String(viewerId || ''), kind, day);
-  }
-  // Per-post rollup for the management surfaces: delivered count + unique
-  // reach (signed-in viewers), on-screen count, video views.
-  function postStats(entityId) {
-    const rows = sql.prepare(`SELECT i.post_id, i.kind, SUM(i.n) n,
-        COUNT(DISTINCT CASE WHEN i.howler_user_id!='' THEN i.howler_user_id END) uniq
-      FROM social_feed_impressions i JOIN social_feed_posts p ON p.id=i.post_id
-      WHERE p.entity_id=? GROUP BY i.post_id, i.kind`).all(entityId);
-    const out = {};
-    for (const r of rows) {
-      const s = out[r.post_id] ||= { delivered: 0, reach: 0, seen: 0, views: 0 };
-      if (r.kind === 'delivered') { s.delivered = r.n; s.reach = r.uniq; }
-      else if (r.kind === 'seen') s.seen = r.n;
-      else if (r.kind === 'view') s.views = r.n;
-    }
-    // CTA taps ride the same stats object: total taps + unique signed-in tappers.
-    const clicks = sql.prepare(`SELECT c.ref_id post_id, SUM(c.n) n,
-        COUNT(DISTINCT CASE WHEN c.howler_user_id!='' THEN c.howler_user_id END) uniq
-      FROM social_cta_clicks c JOIN social_feed_posts p ON p.id=c.ref_id
-      WHERE c.kind='post' AND p.entity_id=? GROUP BY c.ref_id`).all(entityId);
-    for (const r of clicks) {
-      const s = out[r.post_id] ||= { delivered: 0, reach: 0, seen: 0, views: 0 };
-      s.ctaClicks = r.n; s.ctaUsers = r.uniq;
-    }
-    return out;
-  }
-
-  // WHO tapped a CTA — the audience behind the count, for the management
-  // surfaces. Ownership is enforced through the target: a post must belong to
-  // the entity; a chat broadcast's channel must (chat tables live in the same
-  // DB — read-only reach across the module seam, guarded for test envs where
-  // chat isn't mounted).
-  function ctaClickers(entityId, kindRaw, refId) {
-    const kind = kindRaw === 'chat' ? 'chat' : 'post';
-    const ref = String(refId || '').trim();
-    if (!ref) throw new HttpError(400, 'refId required');
-    if (kind === 'post') {
-      const p = sql.prepare('SELECT entity_id FROM social_feed_posts WHERE id=?').get(ref);
-      if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
-    } else {
-      let m = null;
-      try {
-        m = sql.prepare(`SELECT c.entity_id FROM social_chat_messages m
-          JOIN social_chat_channels c ON c.id=m.channel_id WHERE m.id=?`).get(ref);
-      } catch { /* chat module not mounted (tests) */ }
-      if (!m || m.entity_id !== entityId) throw new HttpError(404, 'Message not found');
-    }
-    const rows = sql.prepare('SELECT * FROM social_cta_clicks WHERE kind=? AND ref_id=? ORDER BY last_at DESC').all(kind, ref);
-    const users = rows.filter((r) => r.howler_user_id !== '').map((r) => ({
-      userId: r.howler_user_id,
-      name: r.name || appUserName(r.howler_user_id),
-      email: r.email,
-      clicks: r.n,
-      firstAt: r.first_at,
-      lastAt: r.last_at,
-    }));
-    const anon = rows.find((r) => r.howler_user_id === '');
-    return {
-      total: rows.reduce((a, r) => a + r.n, 0),
-      anonymous: anon ? anon.n : 0,
-      users,
-    };
-  }
+  // ── views & impressions + CTA click ledger (engine: server/socialStats.js) ──
+  const engagement = require('./socialStats').create({ sql, now, appUserName });
+  const { logImpressions, postStats } = engagement;
 
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
@@ -1084,24 +987,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     res.json({ ok: true });
   }));
 
-  // A CTA button was TAPPED — on a feed post (kind=post, ref=post id) or a
-  // chat broadcast (kind=chat, ref=message id). Anonymous ok (adds to the
-  // total, no identity); signed-in taps carry the JWT-verified name/email so
-  // the clicker list can become a campaign segment.
+  // A CTA button was TAPPED — feed post (ref=post id), chat broadcast
+  // (ref=message id) or organiser comment reply (ref=comment id). Anonymous ok
+  // (total only); signed-in taps carry the verified name/email for segments.
   app.post('/api/app/social/cta-click', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const viewer = await optionalAppUser(req);
-    const b = req.body || {};
-    const kind = b.kind === 'chat' ? 'chat' : 'post';
-    const refId = String(b.refId || '').trim().slice(0, 64);
-    if (!refId) throw new HttpError(400, 'refId required');
-    const t = now();
-    sql.prepare(`INSERT INTO social_cta_clicks (kind, ref_id, howler_user_id, name, email, n, first_at, last_at)
-      VALUES (?,?,?,?,?,1,?,?)
-      ON CONFLICT(kind, ref_id, howler_user_id) DO UPDATE SET n=n+1, last_at=excluded.last_at,
-        name=CASE WHEN excluded.name!='' THEN excluded.name ELSE name END,
-        email=CASE WHEN excluded.email!='' THEN excluded.email ELSE email END`)
-      .run(kind, refId, String(viewer?.id || ''), String(viewer?.name || ''), String(viewer?.email || ''), t, t);
+    engagement.logClick((req.body || {}).kind, (req.body || {}).refId, viewer);
     res.json({ ok: true });
   }));
 

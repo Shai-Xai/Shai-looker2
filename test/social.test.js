@@ -894,6 +894,23 @@ test('CTA clicks: per-user counts with email, clicker list + segment source, ent
   });
   assert.equal(chatWho.body.total, 1);
   assert.equal(chatWho.body.users[0].email, 'fan662076@test.local');
+
+  // Organiser comment replies count too (kind=comment, ref=comment id;
+  // ownership resolves through the comment's post).
+  const fanC = await call('POST /api/app/social/posts/:id/comments', {
+    params: { id: post.id }, token: 'tok-661779', body: { text: 'where do I go?', displayName: 'Fan' },
+  });
+  const reply = await call('POST /api/admin/entities/:entityId/social/comments/:id/reply', {
+    user: admin, params: { entityId: e3.id, id: fanC.body.id },
+    body: { text: 'Right here 👉', ctaLabel: 'Open map', ctaDestination: 'open_url:https://howler.co.za/map' },
+  });
+  assert.equal(reply.body.ctaLabel, 'Open map');
+  await call('POST /api/app/social/cta-click', { token: 'tok-661779', body: { kind: 'comment', refId: reply.body.id } });
+  const cWho = await call('GET /api/admin/entities/:entityId/social/cta-clicks', {
+    user: admin, params: { entityId: e3.id }, query: { kind: 'comment', refId: reply.body.id },
+  });
+  assert.equal(cWho.body.total, 1);
+  assert.equal(cWho.body.users[0].email, 'fan661779@test.local');
 });
 
 test('communities: rename via PUT, delete cascades, children block parent delete', async () => {

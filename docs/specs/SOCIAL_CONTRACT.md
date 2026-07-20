@@ -355,21 +355,24 @@ The quick-door row of community circles (mockup frame 7).
 
 ## 13c. CTA click tracking → segments (added 2026-07-20)
 
-- `POST /api/app/social/cta-click {kind: 'post'|'chat', refId}` (optional
-  JWT, best-effort) — the app reports a CTA button TAP on a feed post
-  (`refId` = post id) or a chat broadcast (`refId` = message id). Signed-in
-  taps store the JWT-verified name + email (identity introspection now reads
+- `POST /api/app/social/cta-click {kind: 'post'|'chat'|'comment', refId}`
+  (optional JWT, best-effort) — the app reports a CTA button TAP on a feed
+  post (`refId` = post id), a chat broadcast (`refId` = message id) or an
+  organiser comment reply (`refId` = comment id). Signed-in taps store the
+  JWT-verified name + email (identity introspection now reads
   `{ user { firstName lastName email } }` best-effort); anonymous taps count
-  in the total only. One rollup row per (kind, ref, user).
+  in the total only. One rollup row per (kind, ref, user). Engine:
+  `server/socialStats.js` (impressions + click ledger factory).
 - Post `stats` gains `ctaClicks` (total taps) + `ctaUsers` (unique signed-in
   tappers) — the 👆 figure on the Pulse post card.
 - `GET .../social/cta-clicks?kind=&refId=` (both management surfaces) — the
   clicker list: `{total, anonymous, users: [{userId, name, email, clicks,
   firstAt, lastAt}]}`. Ownership enforced through the target (post's entity /
-  chat channel's entity).
-- Pulse UI: the 👆 counter on a post expands to the clicker list with
-  **Create segment from clickers** — a paste-mode segment (the clickers'
-  emails) in Engage → Segments, ready for email/SMS/push campaigns.
+  comment's post's entity / chat channel's entity).
+- Pulse UI: the 👆 counter on a post (and the 👆 CTA-taps button on an
+  organiser comment reply) expands to the clicker list with **Create segment
+  from clickers** — a paste-mode segment (the clickers' emails) in Engage →
+  Segments, ready for email/SMS/push campaigns.
 
 ## 14. Shareable post links (added 2026-07-19)
 
