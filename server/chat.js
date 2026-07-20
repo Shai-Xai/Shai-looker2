@@ -185,11 +185,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     return { cta_label: ctaLabel, cta_destination: dest };
   }
-  // The client's Pulse brand colour(s) so the app can tint chat accents to the
-  // organiser's brand (falls back to the app brand when unset / unresolvable).
+  // The Pulse suite (event context) for a channel's Howler event id, so chat
+  // picks up the PER-EVENT branding override — a suite is matched by its
+  // `howler_event_id`. Blank/unmatched → undefined (entity-level branding).
+  const suiteForEvent = (eventId) => {
+    if (!eventId) return undefined;
+    try {
+      const r = sql.prepare("SELECT id FROM suites WHERE howler_event_id=? LIMIT 1").get(String(eventId));
+      return r ? r.id : undefined;
+    } catch { return undefined; }
+  };
+  // The client's (and event's) Pulse brand colour(s) so the app can tint chat
+  // accents to the organiser's brand: platform ← client ← event(suite), each
+  // blank tier inheriting the one below. Falls back to null when unresolvable.
   const channelBrand = (c) => {
     try {
-      const b = require('./mailer').resolveBranding(c.entity_id);
+      const b = require('./mailer').resolveBranding(c.entity_id, suiteForEvent(c.event_id));
       return { brandColor: b.brandColor || null, secondaryColor: b.secondaryColor || null };
     } catch { return { brandColor: null, secondaryColor: null }; }
   };
