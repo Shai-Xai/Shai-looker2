@@ -872,5 +872,7 @@ const tiny = { padding: '4px 8px', borderRadius: 7, border: '1px solid var(--hai
 const primary = { padding: '9px 18px', borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const card = { border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)', padding: '14px 16px', marginBottom: 12 };
 // Mobile ＋ button + full-screen composer — mirrors the app's post-creation flow.
-const fab = { position: 'fixed', right: 18, bottom: 22, width: 56, height: 56, borderRadius: '50%', border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 28, lineHeight: 1, cursor: 'pointer', boxShadow: '0 6px 18px rgba(var(--brand-rgb), 0.45)', zIndex: 40 };
+// Sits ABOVE the floating Owl launcher (fixed bottom 20 / right 16, 54px,
+// z 55 in ClientLayout) so the two never overlap.
+const fab = { position: 'fixed', right: 16, bottom: 88, width: 56, height: 56, borderRadius: '50%', border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 28, lineHeight: 1, cursor: 'pointer', boxShadow: '0 6px 18px rgba(var(--brand-rgb), 0.45)', zIndex: 54 };
 const composerOverlay = { position: 'fixed', inset: 0, zIndex: 60, background: 'var(--bg)', display: 'flex', flexDirection: 'column' };

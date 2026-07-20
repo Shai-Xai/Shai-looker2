@@ -73,7 +73,7 @@ export default function ChatChannelsManager({ entityId, scope, eventIds = [] }) 
                   <div key={c.id} style={{ ...card, marginBottom: 0, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ flex: 1, minWidth: 160 }}>
                       <p style={{ margin: 0, fontWeight: 700, fontSize: 13.5 }}>{c.emoji} {c.name}</p>
-                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>by {c.createdBy || 'a fan'} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}</p>
+                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>by {c.createdBy || 'a fan'} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'} · 💬 {c.messageCount ?? 0} message{c.messageCount === 1 ? '' : 's'}</p>
                     </div>
                     <button style={{ ...mini, color: '#c62828' }} onClick={() => window.confirm('Close this fan group? Members lose access.') && act(api.chatCloseChannel(scope, entityId, c.id))}>Close group</button>
                   </div>
@@ -197,7 +197,7 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 170 }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{c.emoji} {c.name} {c.mode === 'broadcast' && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>broadcast</span>}</p>
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>{ACCESS_LABEL[c.access]}{c.access === 'tickets' ? ` · ${(c.ticketTypes || []).length ? c.ticketTypes.join(', ') : 'any ticket holder'}` : ''}{c.segmentId ? ` · segment ${c.segmentId}` : ''} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}</p>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>{ACCESS_LABEL[c.access]}{c.access === 'tickets' ? ` · ${(c.ticketTypes || []).length ? c.ticketTypes.join(', ') : 'any ticket holder'}` : ''}{c.segmentId ? ` · segment ${c.segmentId}` : ''} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'} · 💬 {c.messageCount ?? 0} message{c.messageCount === 1 ? '' : 's'}</p>
         </div>
         {c.access === 'segment' && <button style={tiny} title="Pull members from the linked segment" onClick={() => act(api.chatSyncSegment(scope, entityId, c.id).then((r) => { if (r.pending) onError(r.message); }))}>⟳ Sync</button>}
         {c.access !== 'public' && (
