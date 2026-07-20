@@ -5555,6 +5555,17 @@ function ClientIntegrations({ entity }) {
 // local → production, and as an ongoing backup.
 function BackupRestore() {
   const [busy, setBusy] = useState('');
+  const [snap, setSnap] = useState(null); // GET /api/admin/backups — nightly snapshot status
+  useEffect(() => { api.backupStatus().then(setSnap).catch(() => setSnap({ error: true })); }, []);
+  async function doRunNow() {
+    setBusy('snapshot');
+    try {
+      const r = await api.runBackupNow();
+      if (!r.ok) alert('Snapshot failed: ' + (r.error || 'unknown error'));
+      setSnap(await api.backupStatus());
+    } catch (e) { alert('Snapshot failed: ' + e.message); }
+    finally { setBusy(''); }
+  }
   async function doExport() {
     setBusy('export');
     try {
@@ -5585,6 +5596,20 @@ function BackupRestore() {
   return (
     <div>
       <p style={hint}>Download a full snapshot of everything (clients, suites, sets, dashboards, logins, settings, tile library), or restore one. Use it to move your local setup to production, or as a backup.</p>
+      {snap && !snap.error && (
+        <div style={{ ...cardStyle, borderColor: snap.offBoxConfigured ? 'var(--border)' : 'var(--error)', background: snap.offBoxConfigured ? undefined : 'rgba(220,60,60,0.06)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>💾 Nightly database snapshots {snap.offBoxConfigured ? '— protected off-box ✅' : '— ⚠️ NOT protected off-box'}</div>
+          {!snap.offBoxConfigured && (
+            <div style={{ fontSize: 13, color: 'var(--error)', fontWeight: 600, marginBottom: 8 }}>{snap.warning}</div>
+          )}
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+            Last successful snapshot: {snap.lastSuccessAt ? new Date(snap.lastSuccessAt).toLocaleString() : 'never'}
+            {snap.runs?.[0] && <> · latest run: {snap.runs[0].status}{snap.runs[0].status === 'ok' ? (snap.runs[0].uploaded ? ', copied off-box' : ', local disk only') : ''}</>}
+            {' '}· {snap.local?.length || 0} snapshot{(snap.local?.length || 0) === 1 ? '' : 's'} on disk
+          </div>
+          <button style={saveBtn} onClick={doRunNow} disabled={!!busy}>{busy === 'snapshot' ? 'Running…' : 'Run snapshot now'}</button>
+        </div>
+      )}
       <div style={cardStyle}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>⬇ Export</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Saves a JSON backup of this server's data to your computer.</div>

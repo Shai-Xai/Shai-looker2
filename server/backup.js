@@ -185,6 +185,12 @@ async function runBackup(trigger = 'manual') {
       detail = `uploaded s3://${c.s3.bucket}/${key}`;
     } else {
       detail = 'no off-box storage configured — local snapshot only';
+      // The snapshot lives on the SAME disk as the database, so it does not
+      // survive disk loss. Say so loudly on every automatic run — this state
+      // must never sit quietly reporting "ok" (production-readiness F1).
+      if (trigger !== 'manual') {
+        notifyOps('Nightly backup ran LOCAL-ONLY — off-box storage (BACKUP_S3_*) is not configured, so disk loss is still total data loss. See docs/BACKUP_SETUP_RUNBOOK.md.');
+      }
     }
     recordRun({ status: 'ok', trigger, file: path.basename(gz), bytes, uploaded, detail });
     return { ok: true, file: path.basename(gz), bytes, uploaded };
@@ -222,6 +228,8 @@ function status() {
     hourUtc: c.hourUtc,
     keep: c.keep,
     offBoxConfigured: s3Configured(c),
+    atRisk: !s3Configured(c),
+    warning: s3Configured(c) ? '' : 'Snapshots are stored on the SAME disk as the database — disk loss is total data loss. Set the BACKUP_S3_* env vars in Render (docs/BACKUP_SETUP_RUNBOOK.md).',
     lastSuccessAt: lastSuccess(),
     local: listLocal(),
     runs: db.db.prepare('SELECT at, status, trigger, file, bytes, uploaded, detail FROM backup_runs ORDER BY id DESC LIMIT 20').all(),
