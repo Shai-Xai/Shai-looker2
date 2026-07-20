@@ -144,7 +144,10 @@ Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
 
 ## 4. Management surfaces (Pulse auth)
 
-- Admin: `GET/POST/PUT/DELETE /api/admin/entities/:id/social/{communities,posts}` +
+- Admin: `GET/POST/PUT/DELETE /api/admin/entities/:id/social/{communities,posts}`
+  (community DELETE hard-deletes the community with its posts, comments, likes,
+  pins, members and seen marks; an organiser community with nested event
+  communities refuses with 400 until the children are deleted first) +
   `POST .../media` (base64 `{name,mime,data}`, ≤10 MB, `image/*`|`video/*`) +
   `POST .../media/presign` (`{name,mime}` → `{uploadUrl,method,headers,publicUrl,kind}`
   presigned PUT; needs `SOCIAL_S3_*` + `SOCIAL_MEDIA_BASE_URL` env) +

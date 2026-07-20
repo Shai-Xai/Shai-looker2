@@ -651,6 +651,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     sql.prepare('DELETE FROM social_feed_comments WHERE post_id=?').run(id);
     sql.prepare('DELETE FROM social_feed_user_pins WHERE post_id=?').run(id);
   }
+  // Hard delete: the community, its posts (with their comments/likes/pins),
+  // memberships and seen marks. Organiser communities must shed their event
+  // children first — a guard against wiping a whole brand tree in one tap.
+  function deleteCommunity(entityId, id) {
+    const c = getCommunity(id);
+    if (!c || c.entity_id !== entityId) throw new HttpError(404, 'Community not found');
+    const kids = sql.prepare('SELECT COUNT(*) n FROM social_feed_communities WHERE parent_id=?').get(id).n;
+    if (kids) throw new HttpError(400, 'This community still has event communities nested under it — delete those first');
+    for (const p of sql.prepare('SELECT id FROM social_feed_posts WHERE community_id=?').all(id)) deletePost(entityId, p.id);
+    sql.prepare('DELETE FROM social_feed_members WHERE community_id=?').run(id);
+    sql.prepare('DELETE FROM social_feed_seen WHERE community_id=?').run(id);
+    sql.prepare('DELETE FROM social_feed_communities WHERE id=?').run(id);
+  }
   // Moderation (organiser/admin): list a post's comments incl. reported flags;
   // delete any comment. Exposed on both management surfaces.
   function listComments(entityId, postId) {
@@ -717,6 +730,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${A}/communities`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ communities: listCommunities(req.params.entityId) })));
   app.post(`${A}/communities`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(createCommunity(req.params.entityId, req.body || {}, req.user))));
   app.put(`${A}/communities/:id`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(updateCommunity(req.params.entityId, req.params.id, req.body || {}))));
+  app.delete(`${A}/communities/:id`, auth.requireAdmin, asyncHandler(async (req, res) => { deleteCommunity(req.params.entityId, req.params.id); res.json({ ok: true }); }));
   app.get(`${A}/posts`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ posts: listPosts(req.params.entityId, { status: req.query.status }) })));
   app.post(`${A}/posts`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(createPost(req.params.entityId, req.body || {}, req.user))));
   app.put(`${A}/posts/:id`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(updatePost(req.params.entityId, req.params.id, req.body || {}))));
@@ -744,6 +758,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${M}/communities`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ communities: listCommunities(eid(req)) })));
   app.post(`${M}/communities`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(createCommunity(eid(req), req.body || {}, req.user))));
   app.put(`${M}/communities/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(updateCommunity(eid(req), req.params.id, req.body || {}))));
+  app.delete(`${M}/communities/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => { deleteCommunity(eid(req), req.params.id); res.json({ ok: true }); }));
   app.get(`${M}/posts`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ posts: listPosts(eid(req), { status: req.query.status }) })));
   app.post(`${M}/posts`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(createPost(eid(req), req.body || {}, req.user))));
   app.put(`${M}/posts/:id`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(updatePost(eid(req), req.params.id, req.body || {}))));

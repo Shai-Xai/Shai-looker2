@@ -61,13 +61,22 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                 </div>
               </div>
               {/* Per-community comment settings — organiser opt-ins, off by default. */}
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!c.allowCommentImages} onChange={(e) => act(api.socialUpdateCommunity(scope, entityId, c.id, { allowCommentImages: e.target.checked }))} /> 📷 photos in comments
                 </label>
                 <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!c.allowCommentLinks} onChange={(e) => act(api.socialUpdateCommunity(scope, entityId, c.id, { allowCommentLinks: e.target.checked }))} /> 🔗 links in comments
                 </label>
+                <button style={mini} title="Rename this community" onClick={() => {
+                  const name = window.prompt('Community name', c.name);
+                  if (name && name.trim() && name.trim() !== c.name) act(api.socialUpdateCommunity(scope, entityId, c.id, { name: name.trim() }));
+                }}>✏️ Rename</button>
+                <button style={{ ...mini, color: '#c62828' }} title="Delete this community and everything in it" onClick={() => {
+                  if (window.confirm(`Delete “${c.name}”? Its posts, comments, likes and members are removed permanently — fans lose this feed in the app.`)) {
+                    act(api.socialDeleteCommunity(scope, entityId, c.id));
+                  }
+                }}>🗑 Delete</button>
               </div>
             </div>
           ))}

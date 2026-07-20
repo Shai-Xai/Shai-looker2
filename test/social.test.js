@@ -803,6 +803,46 @@ test('postable: lists communities the signed-in poster may post to', async () =>
   assert.equal((await call('GET /api/app/social/postable', {})).code, 401);
 });
 
+test('communities: rename via PUT, delete cascades, children block parent delete', async () => {
+  const e2 = makeEntity('Del Test', 'Del Test');
+  setFlagFor(e2.id);
+  const org = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: e2.id }, body: { name: 'Typo Brnad', type: 'organiser' },
+  })).body;
+  // Rename fixes the typo in place.
+  const renamed = await call('PUT /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: e2.id, id: org.id }, body: { name: 'Fixed Brand' },
+  });
+  assert.equal(renamed.body.name, 'Fixed Brand');
+  // A nested event community blocks deleting the parent…
+  const kid = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: e2.id }, body: { name: 'Kid Event', type: 'event', eventId: '777', parentId: org.id },
+  })).body;
+  const blocked = await call('DELETE /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: e2.id, id: org.id },
+  });
+  assert.equal(blocked.code, 400);
+  assert.match(blocked.body.error, /event communities/);
+  // …deleting the child (with a post in it) cascades, then the parent goes too.
+  const post = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: e2.id }, body: { communityId: kid.id, body: 'bye', publish: true },
+  })).body;
+  assert.equal((await call('DELETE /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: e2.id, id: kid.id },
+  })).body.ok, true);
+  assert.equal((await call('DELETE /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: e2.id, id: org.id },
+  })).body.ok, true);
+  const left = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: e2.id } });
+  assert.deepEqual(left.body.communities, []);
+  const posts = await call('GET /api/admin/entities/:entityId/social/posts', { user: admin, params: { entityId: e2.id } });
+  assert.ok(!posts.body.posts.some((p) => p.id === post.id), 'community posts deleted with it');
+  // Cross-entity guard: another entity's id 404s.
+  assert.equal((await call('DELETE /api/admin/entities/:entityId/social/communities/:id', {
+    user: admin, params: { entityId: entity.id, id: org.id },
+  })).code, 404);
+});
+
 test('app presign + direct-upload media: posters only; URL items ride app posts', async () => {
   // Registered poster (661779, from the postable test) reaches the presign
   // endpoint; without SOCIAL_S3_* configured it gets the client-safe 400, not
