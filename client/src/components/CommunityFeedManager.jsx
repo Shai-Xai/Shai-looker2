@@ -291,6 +291,28 @@ function Composer({ communities, onCreate, scope, entityId }) {
     r.readAsDataURL(blob);
   });
 
+  // First frame of a video as a JPEG blob — becomes the post's poster so feed
+  // cards show a real preview instead of a black box while the video loads.
+  const capturePoster = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    const done = (blob, w, h) => { URL.revokeObjectURL(url); resolve(blob ? { blob, width: w, height: h } : null); };
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+    v.onloadeddata = () => { try { v.currentTime = Math.min(0.1, (v.duration || 1) / 10); } catch { done(null); } };
+    v.onseeked = () => {
+      try {
+        const scale = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+        const w = Math.round(v.videoWidth * scale), h = Math.round(v.videoHeight * scale);
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(v, 0, 0, w, h);
+        cv.toBlob((blob) => done(blob, w, h), 'image/jpeg', 0.82);
+      } catch { done(null); }
+    };
+    v.onerror = () => done(null);
+    setTimeout(() => done(null), 8000); // never hang the composer on a bad file
+  });
+
   const MAX_MEDIA = 10; // matches the server's MAX_MEDIA_PER_POST
 
   // Upload one file → a served media item (Instagram-style multi-photo posts
@@ -323,6 +345,21 @@ function Composer({ communities, onCreate, scope, entityId }) {
           : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
       }
       item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
+    }
+    // Videos get a poster (first frame) so feed cards can show a preview.
+    // Best-effort: a failed capture never blocks the upload itself.
+    if (item && item.kind === 'video') {
+      try {
+        const poster = await capturePoster(f);
+        if (poster) {
+          const p = await api.socialUploadMedia(scope, entityId, {
+            name: name.replace(/\.[a-z0-9]+$/i, '') + '.poster.jpg',
+            mime: 'image/jpeg',
+            data: await toBase64(poster.blob),
+          });
+          if (p && p.url) item = { ...item, posterUrl: p.url, width: item.width || poster.width, height: item.height || poster.height };
+        }
+      } catch (err) { console.warn('[social] poster capture failed (video still posted):', err.message); }
     }
     return item;
   };
