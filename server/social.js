@@ -754,6 +754,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     res.json({ contractVersion: 1, id: String(user.id), name: user.name || '' });
   }));
 
+  // Communities the signed-in user may POST to (they're an app poster for the
+  // owning entity, entity flag on). Powers the production feed's compose
+  // button: shown only to authorised posters, with a target picker if several.
+  app.get('/api/app/social/postable', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const entityIds = sql.prepare('SELECT DISTINCT entity_id FROM social_feed_posters WHERE howler_user_id=?')
+      .all(String(user.id)).map((r) => r.entity_id).filter((id) => flagOn(id));
+    const rows = entityIds.flatMap((id) =>
+      sql.prepare("SELECT * FROM social_feed_communities WHERE entity_id=? AND status='active' ORDER BY type='event', created_at").all(id));
+    res.json({ contractVersion: 1, communities: rows.map((r) => communityRow(r, { canPost: true })) });
+  }));
+
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
