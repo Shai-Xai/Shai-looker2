@@ -321,6 +321,19 @@ test('CTA buttons: stored, validated, served with eventId', async () => {
     body: { communityId: evComm.id, ctaLabel: 'Site', ctaDestination: 'open_url:https://howler.co.za' },
   });
   assert.equal(openUrl.code, 200);
+  assert.equal(openUrl.body.ctaStyle, 'primary'); // default banner
+
+  // Secondary style (floating pill) round-trips; junk collapses to primary.
+  const floating = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, ctaLabel: 'Map', ctaDestination: 'explore_map:19203', ctaStyle: 'secondary', publish: true },
+  });
+  assert.equal(floating.body.ctaStyle, 'secondary');
+  const junk = await call(`POST /api/admin/entities/:entityId/social/posts`, {
+    user: admin, params: { entityId: entity.id },
+    body: { communityId: evComm.id, ctaLabel: 'X', ctaDestination: 'explore', ctaStyle: 'banana' },
+  });
+  assert.equal(junk.body.ctaStyle, 'primary');
 });
 
 test('comments: JWT-gated writes, ring-fenced reads, author + moderator delete, report', async () => {

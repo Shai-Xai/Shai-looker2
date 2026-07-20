@@ -148,7 +148,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
                 </p>
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
-              {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}</span></p>}
+              {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}{p.ctaStyle === 'secondary' ? ' · ✨ floating pill' : ''}</span></p>}
               <CtaClicks scope={scope} entityId={entityId} kind="post" refId={p.id} label={p.ctaLabel} count={p.stats?.ctaClicks || 0} people={p.stats?.ctaUsers || 0} onError={(m) => setError(m)} />
               {p.media.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
@@ -370,6 +370,9 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [ctaScreen, setCtaScreen] = useState('explore_tickets');
   const [ctaUrl, setCtaUrl] = useState('');
   const [ctaEventId, setCtaEventId] = useState('');
+  // primary = full-width banner under the photo; secondary = a compact glowing
+  // icon pill floating on the image (keeps busy feeds calm).
+  const [ctaStyle, setCtaStyle] = useState('primary');
   // Direct-to-cloud uploads (Cloudflare R2 via presigned PUT) when the server
   // has SOCIAL_S3_* configured — media bytes skip Pulse entirely. Falls back
   // to the base64→Pulse-disk path when unconfigured or blocked (e.g. CORS).
@@ -536,7 +539,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
     const destination = ctaScreen === 'open_url'
       ? `open_url:${ctaUrl.trim()}`
       : `${ctaScreen}${(selectedCommunity?.eventId || ctaEventId) ? `:${selectedCommunity?.eventId || ctaEventId}` : ''}`;
-    return { ctaLabel: ctaLabel.trim(), ctaDestination: destination };
+    return { ctaLabel: ctaLabel.trim(), ctaDestination: destination, ctaStyle };
   };
 
   const post = () => {
@@ -595,6 +598,10 @@ function Composer({ communities, onCreate, scope, entityId }) {
               inputStyle={{ ...input, width: 'auto', minWidth: 110 }}
             />
           )}
+          <select style={{ ...input, width: 'auto', minWidth: 150 }} value={ctaStyle} onChange={(e) => setCtaStyle(e.target.value)} title="Primary: a full-width button under the photo. Secondary: a small glowing icon pill floating on the image — subtler when lots of posts carry buttons.">
+            <option value="primary">🔳 Primary — banner</option>
+            <option value="secondary">✨ Secondary — floating pill</option>
+          </select>
         </div>
       )}
       {selectedCommunity?.eventId && (
