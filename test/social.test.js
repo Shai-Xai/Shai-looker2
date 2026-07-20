@@ -679,6 +679,18 @@ test('story rail: active circles, joined/ticket ordering, unseen rings clear on 
   const orgComm = comms.communities.find((c) => c.type === 'organiser');
   const scoped = await call('GET /api/app/social/rail', { query: { parentId: orgComm.id } });
   assert.ok(scoped.body.rail.every((i) => i.parentId === orgComm.id));
+
+  // House circles anchor the rail for everyone: for a viewer with no joins
+  // and no tickets (and for anonymous readers), Howler HQ ranks above every
+  // other organiser's circle. (The house entity was designated in the
+  // personalised-global-feed test above.)
+  const strangerRail = await call('GET /api/app/social/rail', { token: 'tok-999777' });
+  const anonRail = await call('GET /api/app/social/rail', {});
+  for (const r of [strangerRail, anonRail]) {
+    const names = r.body.rail.map((i) => i.name);
+    assert.ok(names.length > 1, 'rail has house + other circles');
+    assert.equal(r.body.rail[0].name, 'Howler HQ', 'house circle leads the rail');
+  }
 });
 
 test('single-post endpoint + shareable /p/:id page (deep-link phase 1)', async () => {

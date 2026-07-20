@@ -317,7 +317,9 @@ The quick-door row of community circles (mockup frame 7).
   entityId, eventId, parentId, lastPostAt, joined, hasTicket, unseen}` —
   joined counts membership of the circle or (organiser circles) any child;
   hasTicket via JWT ticket introspection; organiser circles glow on child
-  activity. Sorted joined → ticket-held → recency, capped at 20.
+  activity. Sorted joined → house (Howler's designated entity — its circles
+  anchor the rail for every viewer, anonymous included) → ticket-held →
+  recency, capped at 20.
 - `POST /api/app/social/communities/:id/seen` (JWT) marks the feed opened —
   clears that circle's `unseen` ring (the app fires it on every community
   feed load).
