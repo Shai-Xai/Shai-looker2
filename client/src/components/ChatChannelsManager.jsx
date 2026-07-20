@@ -5,11 +5,11 @@ import { api } from '../lib/api.js';
 // (Social+ replacement phase 2, mockup approved 2026-07-18). Dual-surface
 // (scope: 'my' | 'admin'). Wire contract: docs/specs/SOCIAL_CONTRACT.md §chat.
 
-const ACCESS_LABEL = { public: '🌍 Public', segment: '🎟 Segment-gated', manual: '🔒 Manual members', invite: '🔗 Invite link' };
+const ACCESS_LABEL = { public: '🌍 Public', tickets: '🎟 Ticket holders', segment: '🧩 Segment-gated', manual: '🔒 Manual members', invite: '🔗 Invite link' };
 const CTA_SCREENS = [
   ['explore_tickets', '🎟 Tickets'], ['explore', '📄 Event page'], ['explore_lineup', '🎤 Line-up'],
   ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
-  ['open_url', '🔗 Custom link'],
+  ['open_url', '🔗 External link'],
 ];
 
 // Shared CTA sub-form (same vocabulary the feed composer uses).
@@ -58,7 +58,9 @@ export default function ChatChannelsManager({ entityId, scope, eventIds = [] }) 
       {!eventId ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Enter the Howler event ID to manage its chat channels.</p> : channels === null ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
         <>
           {showCreate && <CreateChannel scope={scope} entityId={entityId} eventId={eventId} onDone={() => { setShowCreate(false); load(); }} onError={setError} />}
-          {official.length > 0 && <Broadcast scope={scope} entityId={entityId} eventId={eventId} onDone={load} onError={setError} />}
+          {/* Composer first — sending a message is the tab's main job, same
+              pattern as the Posts tab. Target one channel or broadcast to all. */}
+          {official.length > 0 && <Broadcast scope={scope} entityId={entityId} eventId={eventId} channels={official} onDone={load} onError={setError} />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
             {official.map((c) => <ChannelRow key={c.id} scope={scope} entityId={entityId} channel={c} eventId={eventId} onChanged={load} onError={setError} act={act} />)}
             {official.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>No channels yet — start with 📣 Main, then add Transport, Line-up…</p>}
@@ -91,7 +93,19 @@ function CreateChannel({ scope, entityId, eventId, onDone, onError }) {
   const [access, setAccess] = useState('public');
   const [mode, setMode] = useState('chat');
   const [segmentId, setSegmentId] = useState('');
-  const create = () => api.chatCreateChannel(scope, entityId, { eventId, name, emoji, access, mode, segmentId })
+  // Tickets access: the event's REAL ticket types, pulled from the same
+  // Howler/Looker lookup the survey builder uses — tap to gate. Empty
+  // selection = any ticket holder for the event.
+  const [ticketTypes, setTicketTypes] = useState([]);
+  const [knownTypes, setKnownTypes] = useState(null); // null = loading/not fetched
+  useEffect(() => {
+    if (access !== 'tickets' || knownTypes !== null) return;
+    api.surveyEventLookup(eventId)
+      .then((r) => setKnownTypes(r.ok ? (r.ticketTypes || []) : []))
+      .catch(() => setKnownTypes([]));
+  }, [access, eventId, knownTypes]);
+  const toggleType = (t) => setTicketTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
+  const create = () => api.chatCreateChannel(scope, entityId, { eventId, name, emoji, access, mode, segmentId, ticketTypes })
     .then(onDone).catch((e) => onError(e.message || 'Create failed'));
   return (
     <div style={{ ...card, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -99,9 +113,35 @@ function CreateChannel({ scope, entityId, eventId, onDone, onError }) {
       <input style={{ ...input, flex: 1, minWidth: 140 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Channel name, e.g. Transport" maxLength={60} />
       <select style={{ ...input, width: 'auto' }} value={access} onChange={(e) => setAccess(e.target.value)}>
         <option value="public">🌍 Public — everyone at the event</option>
-        <option value="segment">🎟 Segment-gated (ticket types)</option>
+        <option value="tickets">🎟 Ticket holders (pick types)</option>
+        <option value="segment">🧩 Segment (advanced)</option>
         <option value="manual">🔒 Manual — admin-added only</option>
       </select>
+      {access === 'tickets' && (
+        <div style={{ width: '100%', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {knownTypes === null && <span style={{ fontSize: 12, color: 'var(--muted)' }}>Loading ticket types…</span>}
+          {knownTypes !== null && knownTypes.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No ticket types found for this event — the channel opens to ANY ticket holder.</span>}
+          {(knownTypes || []).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => toggleType(t)}
+              style={{
+                fontSize: 12, padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
+                border: ticketTypes.includes(t) ? '1.5px solid var(--brand)' : '1px solid var(--line)',
+                background: ticketTypes.includes(t) ? 'rgba(236,11,98,0.1)' : 'transparent',
+                color: ticketTypes.includes(t) ? 'var(--brand)' : 'inherit',
+                fontWeight: ticketTypes.includes(t) ? 700 : 500,
+              }}
+            >🎟 {t}</button>
+          ))}
+          {knownTypes !== null && knownTypes.length > 0 && (
+            <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+              {ticketTypes.length === 0 ? 'None selected → ANY ticket holder gets in' : `Only ${ticketTypes.join(', ')} holders get in`} — checked live against verified tickets, no sync needed.
+            </span>
+          )}
+        </div>
+      )}
       {access === 'segment' && <input style={{ ...input, width: 150 }} value={segmentId} onChange={(e) => setSegmentId(e.target.value)} placeholder="Segment ID" title="From Engage → Segments — gating members sync from this segment" />}
       <select style={{ ...input, width: 'auto' }} value={mode} onChange={(e) => setMode(e.target.value)}>
         <option value="chat">💬 Open chat</option>
@@ -112,20 +152,30 @@ function CreateChannel({ scope, entityId, eventId, onDone, onError }) {
   );
 }
 
-function Broadcast({ scope, entityId, eventId, onDone, onError }) {
+// The tab's lead composer: message ONE channel as the organiser, or broadcast
+// to every channel at once ("all"). Pin/push ride broadcasts only.
+function Broadcast({ scope, entityId, eventId, channels = [], onDone, onError }) {
+  const [target, setTarget] = useState('all');
   const [text, setText] = useState('');
   const [pin, setPin] = useState(true);
   const [push, setPush] = useState(true);
   const [cta, setCta] = useState(emptyCta);
-  const send = () => api.chatBroadcast(scope, entityId, { eventId, text, pin, push, ...buildCta(cta, eventId) })
-    .then(() => { setText(''); setCta(emptyCta); onDone(); }).catch((e) => onError(e.message || 'Broadcast failed'));
+  const chan = channels.find((c) => c.id === target);
+  const send = () => (target === 'all'
+    ? api.chatBroadcast(scope, entityId, { eventId, text, pin, push, ...buildCta(cta, eventId) })
+    : api.chatSendMessage(scope, entityId, target, { text, ...buildCta(cta, eventId) }))
+    .then(() => { setText(''); setCta(emptyCta); onDone(); }).catch((e) => onError(e.message || 'Send failed'));
   return (
     <div style={{ ...card, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderStyle: 'dashed' }}>
-      <strong style={{ fontSize: 13 }}>📣 Broadcast</strong>
-      <input style={{ ...input, flex: 1, minWidth: 200 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Lands in every channel at once…" />
+      <strong style={{ fontSize: 13 }}>📣 Message</strong>
+      <select style={{ ...input, width: 'auto', maxWidth: 180 }} value={target} onChange={(e) => setTarget(e.target.value)}>
+        <option value="all">📢 Every channel</option>
+        {channels.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+      </select>
+      <input style={{ ...input, flex: 1, minWidth: 180 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={target === 'all' ? 'Lands in every channel at once…' : `Message #${chan?.name || 'channel'} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
       <CtaFields cta={cta} setCta={setCta} eventId={eventId} />
-      <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 📌 pin</label>
-      <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }} title="Recorded per message — delivery activates once the Firebase key is configured"><input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} /> 🔔 push</label>
+      {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 📌 pin</label>}
+      {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }} title="Recorded per message — delivery activates once the Firebase key is configured"><input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} /> 🔔 push</label>}
       <button style={{ ...primary, opacity: text.trim() ? 1 : 0.5 }} disabled={!text.trim()} onClick={send}>Send</button>
     </div>
   );
@@ -147,7 +197,7 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 170 }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{c.emoji} {c.name} {c.mode === 'broadcast' && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>broadcast</span>}</p>
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>{ACCESS_LABEL[c.access]}{c.segmentId ? ` · segment ${c.segmentId}` : ''} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}</p>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--muted)' }}>{ACCESS_LABEL[c.access]}{c.access === 'tickets' ? ` · ${(c.ticketTypes || []).length ? c.ticketTypes.join(', ') : 'any ticket holder'}` : ''}{c.segmentId ? ` · segment ${c.segmentId}` : ''} · {c.memberCount} member{c.memberCount === 1 ? '' : 's'}</p>
         </div>
         {c.access === 'segment' && <button style={tiny} title="Pull members from the linked segment" onClick={() => act(api.chatSyncSegment(scope, entityId, c.id).then((r) => { if (r.pending) onError(r.message); }))}>⟳ Sync</button>}
         {c.access !== 'public' && (

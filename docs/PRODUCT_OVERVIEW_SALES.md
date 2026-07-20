@@ -4,7 +4,10 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-19 (📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · 📑 Report Studio: block-based shareable client reports with a live WYSIWYG canvas — tiles + campaigns + app/goals/social/live blocks + AI analysis, share link + PDF, one-off or scheduled · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-20 (📲 Engage → App: Community suite gets its own
+> section — Posts · Channels · Communities · Share links tabs, composer-first
+> Channels, App Analytics rename, CTA buttons on organiser comment replies,
+> app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -207,18 +210,6 @@ marketing plan and it reads those too."
 The Owl's first **consumer-facing** surface: a widget the promoter drops onto their
 public event website with **one script tag**, where it guides fans to the right
 ticket like a well-informed friend who's already going.
-- **Loyalty & rewards (flag-gated)** 🧪 — the Owl can now *recognise* fans:
-  they verify their email with a 6-digit code and it greets them from their
-  real history with that organiser ("you were at the last two editions — you
-  usually buy GA"), including their own itemised past orders on request.
-  Organisers load **reward pools** (promo codes from ticketing, unique stock
-  or one shared code) targeted by tier — new / returning / loyal — and
-  signals like group buyer or comp guest; the Owl offers the right code to
-  the right fan, one per person, and **stops dead when the budget runs out**.
-  It only ever brings rewards up when pools are actually live, after it has
-  answered the fan's real questions first. Every verified fan is a real,
-  consented contact for the client's CRM. Setup: Fan Owl → 🎁 Rewards
-  (admin + client self-service); switched on per client from the flag matrix.
 - **Knows the page the fan is on** — on an artist page it leads with the ticket
   that gets you to that artist; on the tickets page, the best options; plus a
   no-AI "ribbon" teaser (offer + live availability tag) on every page.
@@ -356,27 +347,6 @@ on top of the event without logging in."
 **Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
 who you are and what your account can do, and it only ever describes features
 that have actually shipped."
-## 2c. Report Studio — shareable custom reports  🧪
-- Compose a **polished, client-branded report** from building blocks: dashboard
-  **tiles** (rendered as a chart, KPI chip or table), **📣 campaign results**
-  (audience, sent, opens, clicks, conversions from any Engage campaign),
-  **📱 native-app analytics** (app users, views, CTA taps, purchases — as KPIs, a
-  daily trend chart or a per-event table), **🎯 goals** (live progress vs target),
-  **🌐 organic social** (accounts, metric trends, top posts), **⚡ the latest
-  event-day Live Pulse update**, **section headings**, free **text**,
-  **images**, **link buttons** and **✨ AI analysis** blocks (per section or a
-  whole-report executive summary, with an optional focus prompt).
-- Generating **freezes the numbers into a snapshot** — a stakeholder opening it
-  weeks later sees exactly what was reported, not drifted data. Each snapshot gets
-  its own **public share link** (`/r/…`, no Pulse login — built for sponsors,
-  partners and execs) and a **Download PDF**.
-- **One-off or recurring:** set a daily / weekly / monthly schedule and Pulse
-  regenerates the report with fresh data and emails the recipients each run.
-- **Dual-surface:** Howler builds reports for a client (Admin → client → Reports),
-  and clients build their own at **/reports** (role-gated, mobile-first editor).
-
-**Pitch:** "Turn the dashboards into a branded report your client can forward to
-their sponsors — one link, always on-message, with the analysis already written."
 
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
@@ -1130,8 +1100,12 @@ next year's planning.
 Organisers post updates, photos and videos from Pulse straight into the Howler
 app — an organiser community for the brand, event communities ring-fenced to
 ticket holders and joiners, and a Howler-wide global feed for reach. Managed in
-Engage → Community (both surfaces: Howler admin per client, and client
-self-service), flag-gated per client (`community`, default off).
+**Engage → App** — its own section with four tabs (📰 Posts · 💬 Channels ·
+👥 Communities · 📣 Share links), no longer a single tab inside Campaigns
+(both surfaces: Howler admin per client, and client self-service), flag-gated
+per client (`community`, default off). On mobile, creating a post mirrors the
+app's own ＋ composer flow. The read-side analytics page in the sidebar is now
+called **App Analytics** to keep the two apart.
 
 - **Communities** — organiser-level and per-event (event communities nest under
   the organiser's), public or members-only.
@@ -1221,6 +1195,14 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-20** — **📲 Engage → App**: the Community suite moved out of the
+  Engage/Campaigns tab row into its own section with four tabs (Posts ·
+  Channels · Communities · Share links); Channels now leads with a message
+  composer (one channel or broadcast-to-all); the analytics page is renamed
+  **App Analytics**; organiser **comment replies can carry a CTA button**
+  (native app screen or external link — the same vocabulary posts and chat
+  messages already had); mobile posting uses an app-style ＋ full-screen
+  composer.
 - **2026-07-19** — **⭕ Story rail**: community circles on the app's feed
   (joined + ticketed first, unseen rings, one-tap into organiser/event
   feeds) served by a new rail endpoint with per-viewer state.
@@ -1310,42 +1292,12 @@ see "The continuous comms loop" above.)*
   **ticket-type filter** (CSV included) and **tap-to-drill-down** to the
   individual responses behind any bar. Contract v1.2 (ticketType on responses) +
   v1.3 (targeting) — additive, app builds catch up behind a flag.
-- **2026-07-17** — **📑 Report Studio: live design canvas** 🧪: the report editor
-  is now a **WYSIWYG canvas** — the report renders exactly as stakeholders will
-  see it while you build it, with **live real-data previews** for every data
-  block, **inline editing** of the title/headings/text right on the page, and
-  **drag-and-drop** block rearranging.
-
-- **2026-07-17** — **📑 Report Studio: goals, social & live-pulse blocks** 🧪:
-  reports can now also carry the client's **🎯 goals** (live progress table),
-  **🌐 organic social** (accounts / metric trend chart / top posts) and the
-  **⚡ latest event-day Live Pulse update** — every data block feeds the ✨ AI
-  analysis. All flag-gated per data source.
-- **2026-07-17** — **📑 Report Studio: campaign + app-analytics blocks** 🧪: reports
-  can now include **Engage campaign results** (audience/sent/opens/clicks/CTR/
-  conversions as KPI chips) and **native-app analytics** (summary KPIs, daily trend
-  chart, or per-event table over 7/14/28/90 days) alongside dashboard tiles — and
-  the ✨ AI analysis blocks read them too.
-
-- **2026-07-17** — **📑 Report Studio** 🧪 (new): build custom, shareable reports
-  from dashboard tiles + headings + text + images + **AI analysis** blocks; each
-  generate freezes a snapshot with a **public share link** (no login — for
-  sponsors/stakeholders) and **PDF download**; one-off or **recurring**
-  (daily/weekly/monthly, emailed). Dual-surface: Admin → client → Reports, and
-  client self-service at /reports. (Spec: docs/specs/REPORT_STUDIO_SPEC.md.)
-
 - **2026-07-17** — **📋 Fan surveys (post-event feedback)** 🧪 (new): surveys built
   in Pulse are answered by fans **inside the Howler app** and results (avg rating,
   option counts, comments, CSV) land back in Pulse. Four question types, per-survey
   form/cards layout for A/B testing, one response per fan (resubmit updates), live
   surveys immutable (close & duplicate to edit). API + results engine live
   (`server/surveys.js`, contract `docs/specs/SURVEY_CONTRACT.md`).
-- **2026-07-16** — **Fan Owl: loyalty & rewards engine** 🧪 (staging, flag-gated):
-  email-verified fan recognition (tier + history-aware guidance + itemised past
-  orders), budgeted reward pools (unique-code stock or shared multi-use code)
-  targeted by tier/signals with a comps include/exclude rule, one grant per fan,
-  burn-down views, and a proactive-but-earned offer that only fires when pools
-  are live. New 🎁 Rewards tab in the Fan Owl editor, both surfaces.
 - **2026-07-16** — **Campaigns — test send fix** ✅: "Send test to me" now sends
   the exact content shown in the preview pane. Previously, for a **drip sequence**
   (e.g. Abandoned Cart Recovery) the test email could arrive with an empty body

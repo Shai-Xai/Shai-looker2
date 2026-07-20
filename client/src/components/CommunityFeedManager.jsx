@@ -1,19 +1,31 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
+import { useIsMobile } from '../lib/useIsMobile.js';
 import ChatChannelsManager from './ChatChannelsManager.jsx';
 
-// Engage → Community: Howler-native communities + feed posts, managed in Pulse
-// and served straight to the Howler app (the Social+ replacement spike).
+// Engage → App: Howler-native communities + feed posts, managed in Pulse and
+// served straight to the Howler app (the Social+ replacement spike).
 // Dual-surface (scope: 'my' | 'admin'), same component. Contract:
 // docs/specs/SOCIAL_CONTRACT.md. Mobile-first: one column, everything stacks.
+// The `section` prop renders ONE of the App tabs (posts | channels |
+// communities | share) — EngageAppPage drives it from the URL.
 
 const VIS = { public: '🌍 Public', members: '🎟 Members only' };
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+// CTA destinations — the app's screen keywords plus an external link. Shared by
+// the post composer and organiser comment replies.
+const CTA_SCREENS = [
+  ['explore_tickets', '🎟 Tickets'], ['explore', '📄 Event page'], ['explore_lineup', '🎤 Line-up'],
+  ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
+  ['open_url', '🔗 External link'],
+];
 
-export default function CommunityFeedManager({ entityId, scope = 'my' }) {
+export default function CommunityFeedManager({ entityId, scope = 'my', section = 'posts' }) {
+  const isMobile = useIsMobile();
   const [communities, setCommunities] = useState(null);
   const [posts, setPosts] = useState(null);
   const [showCommunityForm, setShowCommunityForm] = useState(false);
+  const [mobileCompose, setMobileCompose] = useState(false);
   const [error, setError] = useState('');
 
   const load = () => Promise.all([
@@ -30,6 +42,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {error && <p style={{ color: '#c62828', fontSize: 13, margin: 0 }}>{error}</p>}
 
+      {section === 'communities' && <>
       {/* ── Communities ── */}
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
@@ -85,23 +98,33 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
 
       {/* ── House designation (platform admin only) ── */}
       {scope === 'admin' && <HouseToggle entityId={entityId} onError={(m) => setError(m)} />}
+      </>}
 
-      {/* ── App posters: Howler accounts allowed to post from the app ── */}
-      <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
-      <ShareStats scope={scope} entityId={entityId} />
+      {/* ── Share links: who spreads posts + which posts travel ── */}
+      {section === 'share' && <ShareStats scope={scope} entityId={entityId} standalone />}
 
-      {/* ── Instagram import: one-click repost of existing IG content ── */}
-      <InstagramImport scope={scope} entityId={entityId} communities={communities} onImported={load} onError={(m) => setError(m)} />
-
-      {/* ── Moderation inbox: every fan comment across all posts ── */}
-      {posts.length > 0 && <CommentsInbox scope={scope} entityId={entityId} onError={(m) => setError(m)} />}
-
-      {/* ── Composer + feed ── */}
+      {section === 'posts' && <>
+      {/* ── Composer + feed — composer first, mirroring the app's ＋ flow ── */}
       <section>
-        <h3 style={{ margin: '0 0 10px', fontSize: 15, fontWeight: 750 }}>Posts</h3>
         {communities.length === 0
-          ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Create a community first, then post to it.</p>
-          : <Composer communities={communities} onCreate={(body) => act(api.socialCreatePost(scope, entityId, body))} scope={scope} entityId={entityId} />}
+          ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Create a community first (👥 Communities tab), then post to it.</p>
+          : isMobile
+            ? <>
+                {/* Mobile: same UX as the app — a ＋ button opens a full-screen composer. */}
+                {!mobileCompose && <button style={fab} title="New post" onClick={() => setMobileCompose(true)}>＋</button>}
+                {mobileCompose && (
+                  <div style={composerOverlay}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px 8px' }}>
+                      <button style={tiny} onClick={() => setMobileCompose(false)}>✕</button>
+                      <strong style={{ fontSize: 16 }}>New post</strong>
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '4px 14px 30px' }}>
+                      <Composer communities={communities} onCreate={(body) => act(api.socialCreatePost(scope, entityId, body)).then(() => setMobileCompose(false))} scope={scope} entityId={entityId} />
+                    </div>
+                  </div>
+                )}
+              </>
+            : <Composer communities={communities} onCreate={(body) => act(api.socialCreatePost(scope, entityId, body))} scope={scope} entityId={entityId} />}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
           {posts.map((p) => (
             <div key={p.id} style={{ ...card, marginBottom: 0 }}>
@@ -147,8 +170,18 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
         </div>
       </section>
 
-      {/* ── Event chat channels (phase 2) — event ids suggested from event communities ── */}
-      <ChatChannelsManager entityId={entityId} scope={scope} eventIds={[...new Set(communities.filter((c) => c.eventId).map((c) => c.eventId))]} />
+      {/* ── Instagram import: one-click repost of existing IG content ── */}
+      <InstagramImport scope={scope} entityId={entityId} communities={communities} onImported={load} onError={(m) => setError(m)} />
+
+      {/* ── App posters: Howler accounts allowed to post from the app ── */}
+      <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
+
+      {/* ── Moderation inbox: every fan comment across all posts ── */}
+      {posts.length > 0 && <CommentsInbox scope={scope} entityId={entityId} onError={(m) => setError(m)} />}
+      </>}
+
+      {/* ── Channels: organiser chat — message composer first (see ChatChannelsManager) ── */}
+      {section === 'channels' && <ChatChannelsManager entityId={entityId} scope={scope} eventIds={[...new Set(communities.filter((c) => c.eventId).map((c) => c.eventId))]} />}
     </div>
   );
 }
@@ -259,11 +292,6 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [ctaScreen, setCtaScreen] = useState('explore_tickets');
   const [ctaUrl, setCtaUrl] = useState('');
   const [ctaEventId, setCtaEventId] = useState('');
-  const CTA_SCREENS = [
-    ['explore_tickets', '🎟 Tickets'], ['explore', '📄 Event page'], ['explore_lineup', '🎤 Line-up'],
-    ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
-    ['open_url', '🔗 Custom link'],
-  ];
   // Direct-to-cloud uploads (Cloudflare R2 via presigned PUT) when the server
   // has SOCIAL_S3_* configured — media bytes skip Pulse entirely. Falls back
   // to the base64→Pulse-disk path when unconfigured or blocked (e.g. CORS).
@@ -559,12 +587,18 @@ function HouseToggle({ entityId, onError }) {
 // under the display name set here). Find user ids in staging Active Admin.
 // Share-link attribution: who's driving clicks on shared posts (the organic
 // promoters) + which posts travel. Fed by ?s=<userId> on every shared /p/ link.
-function ShareStats({ scope, entityId }) {
+function ShareStats({ scope, entityId, standalone = false }) {
   const [stats, setStats] = useState(null);
-  useEffect(() => { api.socialShareStats(scope, entityId).then(setStats).catch(() => setStats(null)); }, [scope, entityId]);
-  if (!stats || (!stats.totalClicks && !stats.previewFetches)) return null;
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { setLoading(true); api.socialShareStats(scope, entityId).then(setStats).catch(() => setStats(null)).finally(() => setLoading(false)); }, [scope, entityId]);
+  if (!stats || (!stats.totalClicks && !stats.previewFetches)) {
+    if (!standalone) return null;
+    return loading
+      ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Loading…</p>
+      : <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>No share activity yet — every published post gets a share page (<code>/p/…</code>). Once fans start passing links around, clicks, chat-preview reach and your top sharers show up here.</p>;
+  }
   return (
-    <section style={{ marginTop: 18 }}>
+    <section style={{ marginTop: standalone ? 0 : 18 }}>
       <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 750 }}>📣 Share links</h3>
       <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>
         {stats.totalClicks} click{stats.totalClicks === 1 ? '' : 's'} on shared posts
@@ -725,9 +759,17 @@ function InstagramImport({ scope, entityId, communities, onImported, onError }) 
 function CommentItem({ scope, entityId, comment, onChanged, onError, postContext }) {
   const [replying, setReplying] = useState(false);
   const [replyText, setReplyText] = useState('');
+  // Optional CTA button on the reply — same vocabulary as post CTAs (native
+  // screen or external link); rendered as a tappable button in the app.
+  const [cta, setCta] = useState({ on: false, label: '', screen: 'open_url', url: '', eventId: '' });
   const c = comment;
-  const sendReply = () => api.socialReplyComment(scope, entityId, c.id, replyText)
-    .then(() => { setReplying(false); setReplyText(''); onChanged(); })
+  const replyCta = () => {
+    if (!cta.on || !cta.label.trim()) return {};
+    const destination = cta.screen === 'open_url' ? `open_url:${cta.url.trim()}` : `${cta.screen}${cta.eventId ? `:${cta.eventId}` : ''}`;
+    return { ctaLabel: cta.label.trim(), ctaDestination: destination };
+  };
+  const sendReply = () => api.socialReplyComment(scope, entityId, c.id, replyText, replyCta())
+    .then(() => { setReplying(false); setReplyText(''); setCta({ on: false, label: '', screen: 'open_url', url: '', eventId: '' }); onChanged(); })
     .catch((e) => onError(e.message || 'Reply failed'));
   return (
     <div style={{ background: c.reported ? 'rgba(198,40,40,0.07)' : 'rgba(128,128,128,0.06)', borderRadius: 10, padding: '7px 10px', marginLeft: c.parentCommentId ? 22 : 0 }}>
@@ -740,6 +782,7 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
             {postContext && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 8 }}>on “{postContext.body || postContext.communityName}…”</span>}
           </p>
           {c.text && <p style={{ margin: '2px 0 0', fontSize: 13, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.text}</p>}
+          {c.ctaLabel && <p style={{ margin: '4px 0 0' }}><span style={{ display: 'inline-block', fontSize: 11.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '3px 10px' }}>{c.ctaLabel}</span> <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>→ {c.ctaDestination}</span></p>}
           {(c.media || []).map((m) => <img key={m.id} src={m.url} alt="" style={{ maxHeight: 90, borderRadius: 8, marginTop: 6 }} />)}
         </div>
         {!c.parentCommentId && c.authorType !== 'organiser' && (
@@ -749,9 +792,25 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
           onClick={() => window.confirm('Delete this comment?') && api.socialDeleteComment(scope, entityId, c.id).then(onChanged).catch((e) => onError(e.message || 'Delete failed'))}>🗑</button>
       </div>
       {replying && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input style={{ ...input, fontSize: 12.5, padding: '6px 10px' }} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Reply as your brand…" onKeyDown={(e) => e.key === 'Enter' && replyText.trim() && sendReply()} />
-          <button style={{ ...mini, opacity: replyText.trim() ? 1 : 0.5 }} disabled={!replyText.trim()} onClick={sendReply}>Send</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input style={{ ...input, fontSize: 12.5, padding: '6px 10px' }} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Reply as your brand…" onKeyDown={(e) => e.key === 'Enter' && replyText.trim() && sendReply()} />
+            <button style={{ ...mini, opacity: replyText.trim() ? 1 : 0.5 }} disabled={!replyText.trim()} onClick={sendReply}>Send</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {!cta.on
+              ? <button style={tiny} title="Add a tappable button to this reply" onClick={() => setCta({ ...cta, on: true })}>🔘 Button</button>
+              : <>
+                  <input style={{ ...input, width: 'auto', flex: 'none', fontSize: 12, padding: '5px 9px', minWidth: 110 }} value={cta.label} onChange={(e) => setCta({ ...cta, label: e.target.value })} placeholder="Button label" maxLength={40} />
+                  <select style={{ ...input, width: 'auto', fontSize: 12, padding: '5px 9px' }} value={cta.screen} onChange={(e) => setCta({ ...cta, screen: e.target.value })}>
+                    {CTA_SCREENS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  {cta.screen === 'open_url'
+                    ? <input style={{ ...input, width: 'auto', flex: 1, fontSize: 12, padding: '5px 9px', minWidth: 150 }} value={cta.url} onChange={(e) => setCta({ ...cta, url: e.target.value })} placeholder="https://…" />
+                    : <input style={{ ...input, width: 'auto', fontSize: 12, padding: '5px 9px', minWidth: 100 }} value={cta.eventId} onChange={(e) => setCta({ ...cta, eventId: e.target.value.replace(/\D/g, '') })} placeholder="Event ID" inputMode="numeric" />}
+                  <button style={tiny} onClick={() => setCta({ on: false, label: '', screen: 'open_url', url: '', eventId: '' })}>✕</button>
+                </>}
+          </div>
         </div>
       )}
     </div>
@@ -812,3 +871,6 @@ const mini = { padding: '7px 12px', borderRadius: 8, border: '1px solid var(--ha
 const tiny = { padding: '4px 8px', borderRadius: 7, border: '1px solid var(--hairline)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' };
 const primary = { padding: '9px 18px', borderRadius: 980, border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' };
 const card = { border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)', padding: '14px 16px', marginBottom: 12 };
+// Mobile ＋ button + full-screen composer — mirrors the app's post-creation flow.
+const fab = { position: 'fixed', right: 18, bottom: 22, width: 56, height: 56, borderRadius: '50%', border: 'none', background: 'var(--brand)', color: '#fff', fontSize: 28, lineHeight: 1, cursor: 'pointer', boxShadow: '0 6px 18px rgba(var(--brand-rgb), 0.45)', zIndex: 40 };
+const composerOverlay = { position: 'fixed', inset: 0, zIndex: 60, background: 'var(--bg)', display: 'flex', flexDirection: 'column' };

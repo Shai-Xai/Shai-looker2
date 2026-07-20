@@ -112,8 +112,10 @@ export default function ClientLayout() {
   const onProduct = location.pathname.startsWith('/product');
   const onJourney = location.pathname.startsWith('/journey');
   // Engage hub tabs: Campaigns (/engage/campaigns, default /engage) + Segments.
+  // Engage → App (/engage/app) is its own section, not a Campaigns tab.
   const onSegments = location.pathname.startsWith('/segments') || location.pathname.startsWith('/engage/segments');
-  const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments;
+  const onEngageApp = location.pathname.startsWith('/engage/app') || location.pathname.startsWith('/engage/community');
+  const onActions = (location.pathname.startsWith('/actions') || location.pathname.startsWith('/engage')) && !onSegments && !onEngageApp;
 
   // Experience OS inbox: unread + must-acknowledge counts for the badge/banner.
   const [inbox, setInbox] = useState({ enabled: false, unread: 0, pending: [] });
@@ -536,7 +538,7 @@ export default function ClientLayout() {
             onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); if (isMobile) setNavOpen(false); }}
           >
             <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
-            <span style={ellip}>App</span>
+            <span style={ellip}>App Analytics</span>
           </button>
           )}
           {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
@@ -677,6 +679,17 @@ export default function ClientLayout() {
             <span style={ellip}>Segments</span>
           </button>
           )}
+          {fl('community') && (
+          <button
+            ref={onEngageApp ? activeRef : null}
+            className={`nav-row${onEngageApp ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onEngageApp ? 600 : 500 }}
+            onClick={() => { if (!onEngageApp) vtNavigate(navigate, '/engage/app'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>📲</span>
+            <span style={ellip}>App</span>
+          </button>
+          )}
           {fl('social') && (
           <button
             ref={onSocial ? activeRef : null}
@@ -790,7 +803,7 @@ export default function ClientLayout() {
                     onClick={() => { if (!onAppAnalytics) vtNavigate(navigate, '/app-analytics'); setNavOpen(false); }}
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📲</span>
-                    <span style={ellip}>App</span>
+                    <span style={ellip}>App Analytics</span>
                   </button>
                   )}
                   {!opsOnly && fl('goals') && (visibleSuites.length > 0 || isAdmin) && (
@@ -914,6 +927,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>🥧</span>
                     <span style={ellip}>Segments</span>
+                  </button>
+                  )}
+                  {fl('community') && (
+                  <button
+                    className={`nav-row${onEngageApp ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onEngageApp ? 700 : 500 }}
+                    onClick={() => { if (!onEngageApp) vtNavigate(navigate, '/engage/app'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 16, lineHeight: 1, flexShrink: 0 }}>📲</span>
+                    <span style={ellip}>App</span>
                   </button>
                   )}
                   </>

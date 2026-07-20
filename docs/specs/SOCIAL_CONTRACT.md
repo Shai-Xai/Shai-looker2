@@ -178,10 +178,16 @@ Owner: `server/chat.js` · flag `community.chat` (kid of `community`) · kill
 switch `social_chat_enabled` · every route requires the verified Howler JWT.
 
 **Channels** belong to an entity + Howler event. `kind` official|group;
-`access` public | segment (Pulse segment / ticket types — locked responses say
-`lockedReason: "tickets"` so the app shows a GET-TICKETS CTA) | manual
-(admin-added) | invite (fan groups); `mode` chat | broadcast (organiser posts,
-fans react/reply — `canPost:false` in the messages response).
+`access` public | **tickets** (gated LIVE against the viewer's VERIFIED
+holdings — same mechanism as targeted posts, no sync, no member rows: channel
+carries `ticketTypes: [...]` matched case-insensitively against ticket names,
+`[]` = any ticket holder for the event; the Pulse UI offers the event's real
+ticket types as tap-chips via the Howler/Looker event lookup) | segment
+(Pulse segment — legacy/advanced, members via sync or admin-add) | manual
+(admin-added) | invite (fan groups); locked responses say
+`lockedReason: "tickets"` so the app shows a GET-TICKETS CTA; `mode` chat |
+broadcast (organiser posts, fans react/reply — `canPost:false` in the
+messages response).
 
 **Fan groups**: `POST /api/app/social/chat/channels {eventId,name}` → creator
 becomes owner, gets `inviteCode`. `POST /api/app/social/chat/join {code}` joins

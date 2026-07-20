@@ -31,7 +31,16 @@ function mountRoutes() {
   const routes = {};
   const reg = (m) => (p, ...h) => { routes[`${m} ${p}`] = h; };
   const app = { get: reg('GET'), post: reg('POST'), put: reg('PUT'), patch: reg('PATCH'), delete: reg('DELETE'), use: () => {} };
-  chat.mount(app, { db, auth, rateLimit, verifyAppToken });
+  chat.mount(app, {
+    db, auth, rateLimit, verifyAppToken,
+    // Verified holdings stub for tickets-gated channels (mirrors the social
+    // tests): VIP holder, GA holder, everyone else empty-handed.
+    fetchAppTickets: async (t) => (t === 'tok-661779'
+      ? [{ eventId: EVENT, name: 'VIP' }]
+      : t === 'tok-662076'
+        ? [{ eventId: EVENT, name: 'General Admission' }]
+        : []),
+  });
   return routes;
 }
 const routes = mountRoutes();
@@ -130,6 +139,34 @@ test('segment/manual channels: admin-add unlocks; others stay locked', async () 
   assert.equal(sync.body.pending, true);
 });
 
+test('tickets-gated channels: live verified holdings, typed narrowing, no sync', async () => {
+  const mk = (body) => call('POST /api/admin/entities/:entityId/social/chat/channels', { user: admin, params: { entityId: entity.id }, body });
+  const backstage = (await mk({ eventId: EVENT, name: 'VIP Backstage', access: 'tickets', ticketTypes: ['VIP'] })).body;
+  const holders = (await mk({ eventId: EVENT, name: 'Holders Hall', access: 'tickets' })).body;
+
+  // Management list carries the gate config for the UI chips.
+  const listed = await call('GET /api/admin/entities/:entityId/social/chat/channels', { user: admin, params: { entityId: entity.id } });
+  const cfg = Object.fromEntries(listed.body.channels.map((c) => [c.name, c]));
+  assert.deepEqual(cfg['VIP Backstage'].ticketTypes, ['VIP']);
+  assert.deepEqual(cfg['Holders Hall'].ticketTypes, []);
+
+  // Typed channel: VIP holder in, GA holder + ticketless locked out — checked
+  // LIVE against verified holdings, no segment sync, no member rows.
+  assert.equal((await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: backstage.id } })).code, 200);
+  assert.equal((await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: backstage.id } })).code, 403);
+  assert.equal((await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-555', params: { id: backstage.id } })).code, 403);
+
+  // Untyped ([]): ANY ticket holder for the event gets in.
+  assert.equal((await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: holders.id } })).code, 200);
+  assert.equal((await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-555', params: { id: holders.id } })).code, 403);
+
+  // The app's channel list shows the lock with the tickets reason (→ CTA).
+  const list = await call('GET /api/app/social/chat/channels', { token: 'tok-555', query: { eventId: EVENT } });
+  const row = list.body.channels.find((c) => c.name === 'VIP Backstage');
+  assert.equal(row.locked, true);
+  assert.equal(row.lockedReason, 'tickets');
+});
+
 test('fan groups: create, invite code joins THAT group only, owner tools', async () => {
   const grp = await call('POST /api/app/social/chat/channels', { token: 'tok-661779', body: { eventId: EVENT, name: 'Squad Goals' } });
   assert.equal(grp.code, 200);
@@ -177,7 +214,7 @@ test('delete, report, pin, organiser broadcast with push flag', async () => {
 
   // Broadcast lands in every official channel (not the fan group), pin + push flags stored.
   const bc = await call('POST /api/admin/entities/:entityId/social/chat/broadcast', { user: admin, params: { entityId: entity.id }, body: { eventId: EVENT, text: 'Rain incoming — ponchos at Gate B', pin: true, push: true } });
-  assert.equal(bc.body.channels, 4); // Main, Line-up, VIP, Crew — group excluded
+  assert.equal(bc.body.channels, 6); // Main, Line-up, VIP, Crew, VIP Backstage, Holders Hall — group excluded
   const inGroup = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.group.id } });
   assert.ok(!inGroup.body.messages.some((m) => m.text?.includes('Rain incoming')));
   const inMain = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id } });

@@ -33,7 +33,7 @@ const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags');
 const appAuth = require('./appAuth');
 
-const ACCESS = ['public', 'segment', 'manual', 'invite'];
+const ACCESS = ['public', 'tickets', 'segment', 'manual', 'invite'];
 const MODES = ['chat', 'broadcast'];
 const MAX_TEXT = 2000;
 const PAGE_MAX = 100;
@@ -60,9 +60,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       name         TEXT NOT NULL,
       emoji        TEXT NOT NULL DEFAULT '',
       kind         TEXT NOT NULL DEFAULT 'official',  -- official | group
-      access       TEXT NOT NULL DEFAULT 'public',    -- public | segment | manual | invite
+      access       TEXT NOT NULL DEFAULT 'public',    -- public | tickets | segment | manual | invite
       mode         TEXT NOT NULL DEFAULT 'chat',      -- chat | broadcast
       segment_id   TEXT NOT NULL DEFAULT '',
+      ticket_types TEXT NOT NULL DEFAULT '[]',        -- tickets access: [] = any holder
       invite_code  TEXT NOT NULL DEFAULT '',
       created_by   TEXT NOT NULL DEFAULT '',          -- howler user id (fan groups)
       creator_name TEXT NOT NULL DEFAULT '',
@@ -131,6 +132,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     );
   `);
 
+  // Migration for pre-existing DBs (CREATE IF NOT EXISTS won't add columns).
+  try { sql.exec("ALTER TABLE social_chat_channels ADD COLUMN ticket_types TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
+
   const enabled = () => db.getSetting('social_chat_enabled', '1') !== '0';
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'community.chat'); } catch { return false; } };
   const gone = (res) => res.status(404).json({ error: 'Not available' });
@@ -141,12 +145,35 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   const memberCount = (chId) => sql.prepare('SELECT COUNT(*) n FROM social_chat_members WHERE channel_id=?').get(chId).n;
   const inviteCode = () => crypto.randomBytes(6).toString('base64url');
 
+  const ticketTypesOf = (c) => { try { const v = JSON.parse(c.ticket_types || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const bearerOf = (req) => (String(req.headers?.authorization || '').match(/^Bearer\s+(.+)$/i) || [])[1] || '';
+  // Verified holdings for tickets-gated channels — fetched from Howler ONCE
+  // per request, and only when a channel in scope actually needs it.
+  // Returns undefined (nothing needed it), null (couldn't verify → fail
+  // closed) or the holdings list.
+  async function viewerTickets(req, channels) {
+    if (!channels.some((c) => c.access === 'tickets')) return undefined;
+    try { return await fetchAppTickets(bearerOf(req)); } catch { return null; }
+  }
+
   // Can this verified user READ the channel? Returns { ok, lockedReason }.
-  function accessFor(c, userId) {
+  // `tickets` = the viewer's VERIFIED holdings (same live-check as targeted
+  // feed posts — no segment sync, no emails): a tickets-gated channel opens
+  // for anyone holding a ticket for its event, narrowed to the listed ticket
+  // types when the channel names any.
+  function accessFor(c, userId, tickets = undefined) {
     if (c.status !== 'active') return { ok: false, lockedReason: 'closed' };
     if (c.access === 'public') return { ok: true };
     const m = memberRow(c.id, userId);
     if (m) return { ok: true, member: m };
+    if (c.access === 'tickets') {
+      const mine = (tickets || []).filter((t) => String(t.eventId) === String(c.event_id));
+      if (!mine.length) return { ok: false, lockedReason: 'tickets' };
+      const wanted = ticketTypesOf(c).map((w) => String(w).toLowerCase());
+      if (!wanted.length) return { ok: true };
+      const held = new Set(mine.map((t) => String(t.name || '').toLowerCase()));
+      return wanted.some((w) => held.has(w)) ? { ok: true } : { ok: false, lockedReason: 'tickets' };
+    }
     if (c.access === 'segment') return { ok: false, lockedReason: 'tickets' }; // app shows "get tickets"
     return { ok: false, lockedReason: 'private' };
   }
@@ -204,8 +231,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       return { brandColor: b.brandColor || null, secondaryColor: b.secondaryColor || null };
     } catch { return { brandColor: null, secondaryColor: null }; }
   };
-  function channelRow(c, { userId = null } = {}) {
-    const acc = userId ? accessFor(c, userId) : { ok: c.access === 'public' };
+  function channelRow(c, { userId = null, tickets = undefined } = {}) {
+    const acc = userId ? accessFor(c, userId, tickets) : { ok: c.access === 'public' };
     const brand = channelBrand(c);
     const out = {
       id: c.id, eventId: c.event_id, name: c.name, emoji: c.emoji, kind: c.kind,
@@ -249,7 +276,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!/^\d+$/.test(eventId)) throw new HttpError(400, 'eventId required');
     const all = eventChannels(eventId).filter((c) => flagOn(c.entity_id));
     const visible = all.filter((c) => c.kind === 'official' || memberRow(c.id, user.id));
-    res.json({ contractVersion: 1, channels: visible.map((c) => channelRow(c, { userId: user.id })) });
+    const tickets = await viewerTickets(req, visible);
+    res.json({ contractVersion: 1, channels: visible.map((c) => channelRow(c, { userId: user.id, tickets })) });
   }));
 
   // Every channel the user can chat in, ACROSS events — the app's chat tab.
@@ -269,10 +297,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     for (const ev of held) {
       for (const c of eventChannels(ev)) {
-        if (c.kind === 'official' && flagOn(c.entity_id) && accessFor(c, user.id).ok) byId.set(c.id, c);
+        if (c.kind === 'official' && flagOn(c.entity_id) && accessFor(c, user.id, tickets).ok) byId.set(c.id, c);
       }
     }
-    const channels = [...byId.values()].map((c) => channelRow(c, { userId: user.id }));
+    const channels = [...byId.values()].map((c) => channelRow(c, { userId: user.id, tickets }));
     channels.sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')));
     res.json({ contractVersion: 1, channels });
   }));
@@ -283,7 +311,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const user = await requireAppUser(req);
     const c = getChannel(req.params.id);
     if (!c || !flagOn(c.entity_id)) return gone(res);
-    if (!accessFor(c, user.id).ok) throw new HttpError(403, 'Join this channel first');
+    if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
     const members = sql.prepare('SELECT howler_user_id, member_name, role FROM social_chat_members WHERE channel_id=? ORDER BY created_at LIMIT 200').all(c.id)
       .map((m) => ({ id: m.howler_user_id, name: m.member_name || 'Howler fan', role: m.role }));
     res.json({ contractVersion: 1, members });
@@ -343,7 +371,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const user = await requireAppUser(req);
     const c = getChannel(req.params.id);
     if (!c || !flagOn(c.entity_id)) return gone(res);
-    const acc = accessFor(c, user.id);
+    const tickets = await viewerTickets(req, [c]);
+    const acc = accessFor(c, user.id, tickets);
     if (!acc.ok) throw new HttpError(403, acc.lockedReason === 'tickets' ? 'This channel is for specific ticket holders' : 'This channel is private');
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), PAGE_MAX);
     const after = typeof req.query.after === 'string' ? req.query.after : '';
@@ -360,7 +389,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const myPins = new Set(sql.prepare('SELECT u.message_id FROM social_chat_user_pins u JOIN social_chat_messages m ON m.id=u.message_id WHERE m.channel_id=? AND u.howler_user_id=?').all(c.id, String(user.id)).map((r) => r.message_id));
     res.json({
       contractVersion: 1,
-      channel: channelRow(c, { userId: user.id }),
+      channel: channelRow(c, { userId: user.id, tickets }),
       canPost: canPost(c, user, false),
       hasOlder,
       messages: rows.map((r) => ({ ...messageRow(r, { reactions: reacts[r.id] || [], viewerId: user.id }), pinnedByMe: myPins.has(r.id) })),
@@ -372,7 +401,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const user = await requireAppUser(req);
     const c = getChannel(req.params.id);
     if (!c || !flagOn(c.entity_id)) return gone(res);
-    const acc = accessFor(c, user.id);
+    const acc = accessFor(c, user.id, await viewerTickets(req, [c]));
     if (!acc.ok) throw new HttpError(403, 'Join this channel first');
     if (!canPost(c, user, false)) throw new HttpError(403, 'Only the organiser posts here — you can react and reply in threads');
     const body = req.body || {};
@@ -410,7 +439,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND deleted=0').get(String(req.params.id));
     const c = r && getChannel(r.channel_id);
     if (!r || !c || !flagOn(c.entity_id)) return gone(res);
-    if (!accessFor(c, user.id).ok) throw new HttpError(403, 'Join this channel first');
+    if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
     const emoji = String((req.body || {}).emoji || '').trim().slice(0, 8);
     if (!emoji) throw new HttpError(400, 'emoji required');
     sql.prepare('INSERT OR IGNORE INTO social_chat_reactions (message_id, howler_user_id, emoji, created_at) VALUES (?,?,?,?)').run(r.id, user.id, emoji, now());
@@ -434,7 +463,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND deleted=0').get(String(req.params.id));
     const c = r && getChannel(r.channel_id);
     if (!r || !c || !flagOn(c.entity_id)) return gone(res);
-    if (!accessFor(c, user.id).ok) throw new HttpError(403, 'Join this channel first');
+    if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
     const pinned = (req.body || {}).pinned !== false;
     if (c.kind === 'group') {
       if (!memberRow(c.id, user.id)) throw new HttpError(403, 'Join this group first');
@@ -492,8 +521,14 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const rows = eventId
       ? sql.prepare('SELECT * FROM social_chat_channels WHERE entity_id=? AND event_id=? ORDER BY kind=\'group\', position, created_at').all(entityId, String(eventId))
       : sql.prepare('SELECT * FROM social_chat_channels WHERE entity_id=? ORDER BY event_id, kind=\'group\', position, created_at').all(entityId);
-    return rows.map((c) => ({ ...channelRow(c), inviteCode: c.kind === 'group' ? c.invite_code : undefined, segmentId: c.segment_id || null, createdBy: c.creator_name || null, status: c.status }));
+    return rows.map((c) => ({ ...channelRow(c), inviteCode: c.kind === 'group' ? c.invite_code : undefined, segmentId: c.segment_id || null, ticketTypes: ticketTypesOf(c), createdBy: c.creator_name || null, status: c.status }));
   }
+  // tickets access: the gate list of ticket type/category names ([] = any
+  // ticket holder for the event). Matched case-insensitively against the
+  // viewer's VERIFIED holdings at read time.
+  const validTicketTypes = (v) => (Array.isArray(v)
+    ? JSON.stringify(v.slice(0, 30).map((x) => String(x).trim().slice(0, 60)).filter(Boolean))
+    : '[]');
   function createChannel(entityId, body) {
     const eventId = String(body.eventId || '').trim();
     const name = String(body.name || '').trim().slice(0, 60);
@@ -501,9 +536,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const access = ACCESS.includes(body.access) && body.access !== 'invite' ? body.access : 'public';
     const mode = MODES.includes(body.mode) ? body.mode : 'chat';
     const id = `ch_${uuid().slice(0, 12)}`;
-    sql.prepare(`INSERT INTO social_chat_channels (id, entity_id, event_id, name, emoji, access, mode, segment_id, position, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, entityId, eventId, name, String(body.emoji || '').slice(0, 8), access, mode, String(body.segmentId || ''), Number(body.position) || 0, now(), now());
+    sql.prepare(`INSERT INTO social_chat_channels (id, entity_id, event_id, name, emoji, access, mode, segment_id, ticket_types, position, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, entityId, eventId, name, String(body.emoji || '').slice(0, 8), access, mode, String(body.segmentId || ''), validTicketTypes(body.ticketTypes), Number(body.position) || 0, now(), now());
     return channelRow(getChannel(id));
   }
   function updateChannel(entityId, id, body) {
@@ -515,6 +550,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (body.mode !== undefined && MODES.includes(body.mode)) v.mode = body.mode;
     if (body.access !== undefined && ACCESS.includes(body.access) && c.kind === 'official' && body.access !== 'invite') v.access = body.access;
     if (body.segmentId !== undefined) v.segment_id = String(body.segmentId || '');
+    if (body.ticketTypes !== undefined) v.ticket_types = validTicketTypes(body.ticketTypes);
     if (body.status !== undefined && ['active', 'closed'].includes(body.status)) v.status = body.status;
     if (body.position !== undefined) v.position = Number(body.position) || 0;
     const sets = Object.keys(v).map((k) => `${k}=?`).join(', ');
