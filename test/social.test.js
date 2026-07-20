@@ -791,6 +791,36 @@ test('postable: lists communities the signed-in poster may post to', async () =>
   assert.equal((await call('GET /api/app/social/postable', {})).code, 401);
 });
 
+test('app presign + direct-upload media: posters only; URL items ride app posts', async () => {
+  // Registered poster (661779, from the postable test) reaches the presign
+  // endpoint; without SOCIAL_S3_* configured it gets the client-safe 400, not
+  // a 403 — proving the auth gate passed and only config is missing.
+  const mine = await call('POST /api/app/social/presign', {
+    token: 'tok-661779', body: { name: 'clip.mp4', mime: 'video/mp4' },
+  });
+  assert.equal(mine.code, 400);
+  assert.match(mine.body.error, /not configured/);
+  // Unregistered fan and signed-out callers are refused before any S3 work.
+  assert.equal((await call('POST /api/app/social/presign', { token: 'tok-999888', body: { mime: 'video/mp4' } })).code, 403);
+  assert.equal((await call('POST /api/app/social/presign', { body: { mime: 'video/mp4' } })).code, 401);
+
+  // A direct-uploaded item (already in the bucket) is referenced by url in the
+  // app create-post payload — no base64 — and its video poster carries through.
+  const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
+  const orgComm = comms.communities.find((c) => c.type === 'organiser');
+  const posted = await call('POST /api/app/social/posts', {
+    token: 'tok-661779',
+    body: {
+      communityId: orgComm.id, text: 'big video via R2',
+      images: [{ url: 'https://media.example.com/social/e1/clip.mp4', kind: 'video', mime: 'video/mp4', posterUrl: 'https://media.example.com/social/e1/clip.jpg' }],
+    },
+  });
+  assert.equal(posted.code, 200);
+  assert.equal(posted.body.media[0].kind, 'video');
+  assert.equal(posted.body.media[0].url, 'https://media.example.com/social/e1/clip.mp4');
+  assert.equal(posted.body.media[0].posterUrl, 'https://media.example.com/social/e1/clip.jpg');
+});
+
 test('share page: CTA carries through, real logo, sharer attribution', async () => {
   const { body: comms } = await call('GET /api/admin/entities/:entityId/social/communities', { user: admin, params: { entityId: entity.id } });
   const orgComm = comms.communities.find((c) => c.type === 'organiser');

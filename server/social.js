@@ -1108,7 +1108,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!poster) throw new HttpError(403, 'You aren’t set up to post here — ask the organiser to add you as an app poster in Pulse');
     const images = Array.isArray(body.images) ? body.images.slice(0, MAX_MEDIA_PER_POST) : [];
     const media = images.map((img, i) => {
-      const saved = saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String((img || {}).mime || 'image/jpeg'), data: (img || {}).data });
+      const it = img || {};
+      // Direct-uploaded item (via /presign): already sitting in the bucket —
+      // reference it by url instead of re-uploading through Pulse.
+      if (it.url && !it.data) return validMediaItem(it);
+      const saved = saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String(it.mime || 'image/jpeg'), data: it.data });
       return { id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime };
     });
     const text = String(body.text || '').trim().slice(0, MAX_BODY);
@@ -1119,6 +1123,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       source: 'app', authorName: poster.name || '',
     }, { email: `app:${user.id}` });
     res.json(post);
+  }));
+
+  // Direct-to-bucket upload for APP posters — the same presigned-PUT path the
+  // Pulse composer uses, so big videos from the phone go straight to R2 and
+  // never hit Pulse's inline body cap. Registered posters only.
+  app.post('/api/app/social/presign', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const body = req.body || {};
+    // Scope the bucket key to the community's entity when given; otherwise any
+    // entity the caller is registered as a poster for.
+    const c = body.communityId ? getCommunity(String(body.communityId)) : null;
+    const posterOf = c ? (posterRow(c.entity_id, user.id) && { entity_id: c.entity_id })
+      : sql.prepare('SELECT entity_id FROM social_feed_posters WHERE howler_user_id=? LIMIT 1').get(String(user.id));
+    if (!posterOf) throw new HttpError(403, 'You aren’t set up to post here — ask the organiser to add you as an app poster in Pulse');
+    res.json({ contractVersion: 1, ...presignMedia(posterOf.entity_id, body) });
   }));
 
   // Personal pin / unpin — a private bookmark, only ever visible to the pinner
