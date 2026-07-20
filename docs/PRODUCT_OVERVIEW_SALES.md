@@ -1218,6 +1218,11 @@ see "The continuous comms loop" above.)*
   docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-20** — **👆 CTA click tracking → segments**: every tap on a post's
+  (or chat broadcast's) CTA button in the app is now counted — total taps AND
+  who tapped (signed-in fans, with verified email). The 👆 counter on a Pulse
+  post expands to the clicker list, with one-tap **Create segment from
+  clickers** so that audience can get an email/SMS/push follow-up from Engage.
 - **2026-07-20** — **📲 Engage → App**: the Community suite moved out of the
   Engage/Campaigns tab row into its own section with four tabs (Posts ·
   Channels · Communities · Share links); Channels now leads with a message

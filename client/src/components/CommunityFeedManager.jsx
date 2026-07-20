@@ -138,9 +138,9 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
                 <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>
-                  {p.stats && (p.stats.delivered > 0 || p.stats.seen > 0 || p.stats.views > 0) && (
-                    <span style={{ marginRight: 8 }} title={`Delivered to feeds ${p.stats.delivered}× (${p.stats.reach} unique signed-in readers) · on screen ${p.stats.seen}× · video views ${p.stats.views}`}>
-                      👁 {p.stats.reach} reach · {p.stats.seen} seen{p.stats.views > 0 ? ` · ▶ ${p.stats.views}` : ''}
+                  {p.stats && (p.stats.delivered > 0 || p.stats.seen > 0 || p.stats.views > 0 || p.stats.ctaClicks > 0) && (
+                    <span style={{ marginRight: 8 }} title={`Delivered to feeds ${p.stats.delivered}× (${p.stats.reach} unique signed-in readers) · on screen ${p.stats.seen}× · video views ${p.stats.views}${p.stats.ctaClicks > 0 ? ` · CTA tapped ${p.stats.ctaClicks}× by ${p.stats.ctaUsers} signed-in fans` : ''}`}>
+                      👁 {p.stats.reach} reach · {p.stats.seen} seen{p.stats.views > 0 ? ` · ▶ ${p.stats.views}` : ''}{p.stats.ctaClicks > 0 ? ` · 👆 ${p.stats.ctaClicks}` : ''}
                     </span>
                   )}
                   {p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}
@@ -148,6 +148,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
               {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}</span></p>}
+              <CtaClicks scope={scope} entityId={entityId} post={p} onError={(m) => setError(m)} />
               {p.media.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto' }}>
                   {p.media.map((m) => m.kind === 'video'
@@ -182,6 +183,75 @@ export default function CommunityFeedManager({ entityId, scope = 'my', section =
 
       {/* ── Channels: organiser chat — message composer first (see ChatChannelsManager) ── */}
       {section === 'channels' && <ChatChannelsManager entityId={entityId} scope={scope} eventIds={[...new Set(communities.filter((c) => c.eventId).map((c) => c.eventId))]} />}
+    </div>
+  );
+}
+
+// Who tapped a post's CTA — the audience behind the 👆 count. Expands to the
+// clicker list (JWT-verified name + email) with one-tap "make it a segment"
+// (paste-mode: the clickers' emails) so the audience can get a push/email
+// follow-up from Engage. Dual-surface like the rest of this manager.
+function CtaClicks({ scope, entityId, post, onError }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [made, setMade] = useState('');
+  const s = post.stats || {};
+  if (!post.ctaLabel || !(s.ctaClicks > 0)) return null;
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (!data) {
+      try { setData(await api.socialCtaClicks(scope, entityId, 'post', post.id)); }
+      catch (e) { onError?.(e.message || 'Could not load clickers'); setOpen(false); }
+    }
+  };
+  const makeSegment = async () => {
+    const emails = [...new Set((data?.users || []).map((u) => (u.email || '').trim().toLowerCase()).filter(Boolean))];
+    if (!emails.length) { onError?.('No clicker emails yet — only signed-in taps carry an identity.'); return; }
+    setBusy(true);
+    try {
+      const r = await api.createSegment(entityId, {
+        name: `CTA · ${post.ctaLabel} · ${new Date().toISOString().slice(0, 10)}`.slice(0, 120),
+        definition: { mode: 'paste', pasted: emails.join('\n') },
+      });
+      if (r.error) throw new Error(r.error);
+      setMade(r.segment?.name || 'Segment created');
+    } catch (e) { onError?.(e.message || 'Could not create the segment'); }
+    setBusy(false);
+  };
+  return (
+    <div style={{ margin: '6px 0 0' }}>
+      <button style={mini} onClick={toggle} title="Every tap on this post’s CTA button in the app">
+        👆 {s.ctaClicks} tap{s.ctaClicks === 1 ? '' : 's'} · {s.ctaUsers || 0} {s.ctaUsers === 1 ? 'person' : 'people'} {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, padding: '8px 10px', border: '1px solid var(--hairline)', borderRadius: 10, fontSize: 12.5 }}>
+          {!data && <span style={{ color: 'var(--muted)' }}>Loading…</span>}
+          {data && (
+            <>
+              {data.anonymous > 0 && <p style={{ margin: '0 0 6px', color: 'var(--muted)' }}>{data.anonymous} tap{data.anonymous === 1 ? '' : 's'} from signed-out readers (no identity).</p>}
+              {data.users.length === 0
+                ? <p style={{ margin: 0, color: 'var(--muted)' }}>No signed-in clickers yet.</p>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+                    {data.users.map((u) => (
+                      <div key={u.userId} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                        <span style={{ fontWeight: 600 }}>{u.name || `User ${u.userId}`}</span>
+                        <span style={{ color: 'var(--muted)' }}>{u.email || 'no email'}</span>
+                        {u.clicks > 1 && <span style={{ color: 'var(--muted)' }}>×{u.clicks}</span>}
+                      </div>
+                    ))}
+                  </div>}
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button style={mini} disabled={busy || made !== ''} onClick={makeSegment} title="Save the clickers (their emails) as a segment in Engage → Segments — target them with email/SMS/push campaigns">
+                  {busy ? 'Creating…' : made ? '✓ Segment created' : '➕ Create segment from clickers'}
+                </button>
+                {made && <span style={{ color: 'var(--muted)' }}>“{made}” — find it in Engage → Segments.</span>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
