@@ -187,6 +187,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   try {
     const cols = sql.prepare('PRAGMA table_info(social_feed_posts)').all().map((c) => c.name);
     if (!cols.includes('cta_label')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_label TEXT NOT NULL DEFAULT ''");
+    if (!cols.includes('cta_style')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_style TEXT NOT NULL DEFAULT 'primary'"); // primary banner | secondary floating pill
     if (!cols.includes('cta_destination')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN cta_destination TEXT NOT NULL DEFAULT ''");
     // Per-community comment settings: images + links in fan comments (both
     // default OFF — the organiser opts in per community).
@@ -405,8 +406,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       // Held/removed states (author-only rows — the read filters did the gating).
       ...(r.moderation_status && r.moderation_status !== 'visible' ? { moderation: { status: r.moderation_status } } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
-      // e.g. "explore_tickets:19203" or "open_url:https://…").
+      // e.g. "explore_tickets:19203" or "open_url:https://…"). Style:
+      // primary = full-width banner under the media; secondary = a compact
+      // glowing icon pill floating on the image (busy feeds stay calm).
       ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
+      ctaStyle: r.cta_label ? (r.cta_style === 'secondary' ? 'secondary' : 'primary') : null,
       eventId: community?.event_id || null,
       createdAt: r.created_at, publishedAt: r.published_at || null,
     };
@@ -531,6 +535,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       }
       out.cta_label = ctaLabel;
       out.cta_destination = ctaLabel ? dest : '';
+      out.cta_style = b.ctaStyle === 'secondary' ? 'secondary' : 'primary';
     }
     return out;
   }
@@ -580,10 +585,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // Only the app write path ever passes 'held' (rule-engine hold) — anything
     // else collapses to 'visible', so organiser callers are untouched.
     const modStatus = body.moderationStatus === 'held' ? 'held' : 'visible';
-    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, to_parent, status, published_at, cta_label, cta_destination, audience, author_name, author_email, moderation_status, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, to_parent, status, published_at, cta_label, cta_destination, cta_style, audience, author_name, author_email, moderation_status, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0, v.to_parent || 0,
-        publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '', v.audience || '',
+        publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '', v.cta_style || 'primary', v.audience || '',
         String(body.authorName || '').slice(0, 120), user?.email || '', modStatus, now(), now());
     return postRow(sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id), getCommunity(v.community_id));
   }

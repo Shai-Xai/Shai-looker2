@@ -138,7 +138,11 @@ Posts may carry a **CTA button**: `ctaLabel` + `ctaDestination` (the app's
 existing screen-keyword vocabulary, e.g. `explore_tickets:19203`,
 `explore_lineup:19203`, `open_url:https://…`) plus `eventId` (from the post's
 event community) — rendered and routed by the app's existing PostCtaResolver
-unchanged.
+unchanged. `ctaStyle` (added 2026-07-20) picks the rendering: `primary`
+(default) = a full-width rounded banner directly under the media, above the
+action row; `secondary` = a compact glowing icon pill floating on the image
+(bottom-right) — subtler when many posts carry buttons. Junk values collapse
+to `primary`.
 | `GET /api/app/social/media/:id` | Disk-stored media bytes | bytes, `Cache-Control: public, max-age=31536000, immutable` |
 
 Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
