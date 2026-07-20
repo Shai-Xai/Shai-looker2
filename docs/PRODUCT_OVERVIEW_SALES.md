@@ -4,7 +4,9 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-20 (📲 Engage → App: Community suite gets its own
+> **Last updated:** 2026-07-20 (🛡 Social moderation phase 1: banned lists +
+> held-for-review enforcement on every fan write, review-queue API, post
+> reports · 📲 Engage → App: Community suite gets its own
 > section — Posts · Channels · Communities · Share links tabs, composer-first
 > Channels, App Analytics rename, CTA buttons on organiser comment replies,
 > app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
@@ -1148,6 +1150,15 @@ called **App Analytics** to keep the two apart.
   grid, caption prefilled, carousels come across whole, media re-hosted on
   Howler's infrastructure. Needs the Meta connection + IG account id set under
   Integrations.
+- **Moderation** 🧪 — banned words/phrases/emoji enforced on Howler's servers
+  the moment a fan posts, comments, chats, reacts or names a group: exact hits
+  are rejected outright, near-miss/obfuscated attempts are **held for review**
+  (visible only to their author) until a moderator approves or declines.
+  Platform-wide list (Howler-managed) + each client's own additions; fan
+  reports (now on posts too) land in the same review queue. API + enforcement
+  live (docs/specs/MODERATION_CONTRACT.md); the Pulse console UI (banned-lists
+  manager + review queue) is the next drop. AI classification ("catches what
+  lists can't") is the phase after.
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1193,8 +1204,25 @@ see "The continuous comms loop" above.)*
 ---
 
 ## Changelog (newest first)
+
+- **2026-07-20** — **🛡 Social moderation phase 1 (server side)** 🧪: banned
+  words/phrases/emoji (platform list + per-client additions) enforced at write
+  time on every fan surface — posts, comments, chat messages, emoji reactions,
+  fan-group names. Exact hits blocked (never published), fuzzy/obfuscated hits
+  held for moderator review (author-only until approved), declines show the
+  author a "Removed by moderators" state. Fan reports (including the new
+  post-level report) feed the same review queue. New `moderator` client role +
+  `moderation.manage` permission, Howler `platform_moderator` designation,
+  flag `community.moderation` (console self-service; platform-rule enforcement
+  is always on). Console UI lands next; wire contract in
+  docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-20** — **👆 CTA click tracking → segments**: every tap on a post's
+  (or chat broadcast's) CTA button in the app is now counted — total taps AND
+  who tapped (signed-in fans, with verified email). The 👆 counter on a Pulse
+  post expands to the clicker list, with one-tap **Create segment from
+  clickers** so that audience can get an email/SMS/push follow-up from Engage.
 - **2026-07-20** — **📲 Engage → App**: the Community suite moved out of the
   Engage/Campaigns tab row into its own section with four tabs (Posts ·
   Channels · Communities · Share links); Channels now leads with a message

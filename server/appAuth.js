@@ -26,18 +26,25 @@ async function introspectOnBackend(url, token) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
-    // `{ user { id } }` is THE verification; the display name is a separate
-    // best-effort read (schema fields may differ per backend version) so a
-    // name-query error can never fail a valid token.
+    // `{ user { id } }` is THE verification; name + email are separate
+    // best-effort reads (schema fields may differ per backend version) so a
+    // profile-query error can never fail a valid token. The email powers
+    // "create a segment from CTA clickers" — identity, never authorisation.
     const user = await gqlWithToken(url, token, '{ user { id } }', ctrl.signal);
     const id = String(user?.id || '').split('/').pop(); // "gid://howler/User/661779"
     if (!/^\d+$/.test(id)) return null;
-    let name = '';
+    let name = '', email = '';
     try {
-      const named = await gqlWithToken(url, token, '{ user { firstName lastName } }', ctrl.signal);
+      const named = await gqlWithToken(url, token, '{ user { firstName lastName email } }', ctrl.signal);
       name = [named?.firstName, named?.lastName].filter(Boolean).join(' ').trim();
-    } catch { /* cosmetic only */ }
-    return { id, name };
+      email = String(named?.email || '').trim();
+    } catch {
+      try {
+        const named = await gqlWithToken(url, token, '{ user { firstName lastName } }', ctrl.signal);
+        name = [named?.firstName, named?.lastName].filter(Boolean).join(' ').trim();
+      } catch { /* cosmetic only */ }
+    }
+    return { id, name, email };
   } finally { clearTimeout(t); }
 }
 

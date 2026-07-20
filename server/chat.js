@@ -32,6 +32,7 @@ const crypto = require('crypto');
 const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags');
 const appAuth = require('./appAuth');
+const moderation = require('./moderation'); // phase-1 rule engine on every fan write (docs/specs/MODERATION_CONTRACT.md)
 
 const ACCESS = ['public', 'tickets', 'segment', 'manual', 'invite'];
 const MODES = ['chat', 'broadcast'];
@@ -134,6 +135,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   // Migration for pre-existing DBs (CREATE IF NOT EXISTS won't add columns).
   try { sql.exec("ALTER TABLE social_chat_channels ADD COLUMN ticket_types TEXT NOT NULL DEFAULT '[]'"); } catch { /* already there */ }
+  // Moderation content states (MODERATION_CONTRACT.md §5): visible | held
+  // (author-only until reviewed) | removed (moderator-declined placeholder).
+  try { sql.exec("ALTER TABLE social_chat_messages ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'visible'"); } catch { /* already there */ }
 
   const enabled = () => db.getSetting('social_chat_enabled', '1') !== '0';
   const flagOn = (entityId) => { try { return !!flags.enabled(entityId, 'community.chat'); } catch { return false; } };
@@ -188,8 +192,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     return out;
   }
   function messageRow(r, { reactions = [], viewerId = null } = {}) {
-    if (r.deleted) {
-      return { id: r.id, channelId: r.channel_id, deleted: true, authorType: r.author_type, parentId: r.parent_id || null, createdAt: r.created_at };
+    // Moderator-removed messages reuse the deleted-placeholder shape (old app
+    // builds render it fine) + a moderation status the app can label. The
+    // author-only gating of held/removed rows happened in the read queries.
+    if (r.deleted || r.moderation_status === 'removed') {
+      return {
+        id: r.id, channelId: r.channel_id, deleted: true, authorType: r.author_type, parentId: r.parent_id || null,
+        ...(r.moderation_status === 'removed' ? { moderation: { status: 'removed' } } : {}),
+        createdAt: r.created_at,
+      };
     }
     return {
       id: r.id, channelId: r.channel_id,
@@ -198,9 +209,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       pinned: !!r.pinned, reported: !!r.reported, reactions,
       ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
       ...(viewerId ? { isOwner: r.author_type !== 'organiser' && r.howler_user_id === String(viewerId) } : {}),
+      ...(r.moderation_status === 'held' ? { moderation: { status: 'held' } } : {}),
       createdAt: r.created_at,
     };
   }
+  // Moderation read filter: everyone sees 'visible'; held/removed rows return
+  // only to their author (MODERATION_CONTRACT.md §5).
+  const msgMod = "(moderation_status='visible' OR (moderation_status IN ('held','removed') AND howler_user_id=?))";
   // Same CTA vocabulary as feed posts (validated: screen keyword or open_url:https).
   function validCta(body) {
     const ctaLabel = String(body.ctaLabel || '').trim().slice(0, 40);
@@ -237,23 +252,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const out = {
       id: c.id, eventId: c.event_id, name: c.name, emoji: c.emoji, kind: c.kind,
       access: c.access, mode: c.mode, status: c.status, memberCount: memberCount(c.id),
-      messageCount: sql.prepare('SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0').get(c.id).n,
+      messageCount: sql.prepare("SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND moderation_status='visible'").get(c.id).n,
       // Distinct people who have actually chatted. Public channels never write
       // member rows (access is open, nobody "joins"), so memberCount reads 0
       // there no matter how busy the room is — chatterCount is the real signal.
-      chatterCount: sql.prepare("SELECT COUNT(DISTINCT howler_user_id) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND howler_user_id!=''").get(c.id).n,
+      chatterCount: sql.prepare("SELECT COUNT(DISTINCT howler_user_id) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND moderation_status='visible' AND howler_user_id!=''").get(c.id).n,
       brandColor: brand.brandColor, secondaryColor: brand.secondaryColor,
       locked: !acc.ok, ...(acc.ok ? {} : { lockedReason: acc.lockedReason }),
     };
     if (acc.ok && userId) {
       const lastRead = sql.prepare('SELECT last_read_at FROM social_chat_reads WHERE channel_id=? AND howler_user_id=?').get(c.id, String(userId))?.last_read_at || '';
-      out.unread = sql.prepare('SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND created_at>? AND howler_user_id!=?').get(c.id, lastRead, String(userId)).n;
-      const pin = sql.prepare('SELECT * FROM social_chat_messages WHERE channel_id=? AND pinned=1 AND deleted=0 ORDER BY created_at DESC LIMIT 1').get(c.id);
+      out.unread = sql.prepare("SELECT COUNT(*) n FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND moderation_status='visible' AND created_at>? AND howler_user_id!=?").get(c.id, lastRead, String(userId)).n;
+      const pin = sql.prepare("SELECT * FROM social_chat_messages WHERE channel_id=? AND pinned=1 AND deleted=0 AND moderation_status='visible' ORDER BY created_at DESC LIMIT 1").get(c.id);
       if (pin) out.pinnedMessage = messageRow(pin);
-      const myPin = sql.prepare('SELECT m.* FROM social_chat_messages m JOIN social_chat_user_pins u ON u.message_id=m.id AND u.howler_user_id=? WHERE m.channel_id=? AND m.deleted=0 ORDER BY u.created_at DESC LIMIT 1').get(String(userId), c.id);
+      const myPin = sql.prepare("SELECT m.* FROM social_chat_messages m JOIN social_chat_user_pins u ON u.message_id=m.id AND u.howler_user_id=? WHERE m.channel_id=? AND m.deleted=0 AND m.moderation_status='visible' ORDER BY u.created_at DESC LIMIT 1").get(String(userId), c.id);
       if (myPin) out.myPinnedMessage = messageRow(myPin);
       // Last-message preview for channel lists (the app's chat tab).
-      const lastMsg = sql.prepare('SELECT author_name, body, created_at FROM social_chat_messages WHERE channel_id=? AND deleted=0 ORDER BY created_at DESC LIMIT 1').get(c.id);
+      const lastMsg = sql.prepare("SELECT author_name, body, created_at FROM social_chat_messages WHERE channel_id=? AND deleted=0 AND moderation_status='visible' ORDER BY created_at DESC LIMIT 1").get(c.id);
       if (lastMsg) {
         out.lastMessage = lastMsg.body;
         out.lastMessageSender = lastMsg.author_name || '';
@@ -331,6 +346,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (memberRow(c.id, user.id)?.role !== 'owner') throw new HttpError(403, 'Only the group owner can rename it');
     const name = String((req.body || {}).name || '').trim().slice(0, 60);
     if (!name) throw new HttpError(400, 'Give the group a name');
+    // Group names are block-only (MODERATION_CONTRACT.md §7): a shared name
+    // has no author-only pending state, so exact AND fuzzy hits both reject.
+    const verdict = moderation.screenText(c.entity_id, name);
+    if (verdict.outcome !== 'pass') {
+      moderation.recordBlockedAttempt({ contentType: 'channel_name', snapshot: { name }, authorUserId: user.id, channelId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody(verdict.reason === 'similar_match' ? 'banned_term' : verdict.reason));
+    }
     sql.prepare('UPDATE social_chat_channels SET name=?, updated_at=? WHERE id=?').run(name, now(), c.id);
     res.json(channelRow(getChannel(c.id), { userId: user.id }));
   }));
@@ -346,6 +368,14 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // The event must have chat enabled (an official channel from a flag-on entity).
     const host = eventChannels(eventId).find((c) => c.kind === 'official' && flagOn(c.entity_id));
     if (!host) throw new HttpError(400, 'Chat isn’t enabled for this event yet');
+    // Group names + the group emoji are block-only (MODERATION_CONTRACT.md §7).
+    const nameVerdict = moderation.screenText(host.entity_id, name);
+    const emojiVerdict = moderation.screenEmoji(host.entity_id, String(body.emoji || ''));
+    if (nameVerdict.outcome !== 'pass' || emojiVerdict.outcome === 'block') {
+      const v = nameVerdict.outcome !== 'pass' ? nameVerdict : emojiVerdict;
+      moderation.recordBlockedAttempt({ contentType: 'channel_name', snapshot: { name, emoji: String(body.emoji || '') }, authorUserId: user.id, entityId: host.entity_id, evidence: { ruleIds: v.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody(v.reason === 'similar_match' ? 'banned_term' : v.reason));
+    }
     const id = `ch_${uuid().slice(0, 12)}`;
     const displayName = (user.name || String(body.displayName || '')).trim().slice(0, 80);
     sql.prepare(`INSERT INTO social_chat_channels (id, entity_id, event_id, name, emoji, kind, access, mode, invite_code, created_by, creator_name, created_at, updated_at)
@@ -384,13 +414,14 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const before = typeof req.query.before === 'string' ? req.query.before : '';
     // after= → newer than (polling); before= → older than (history paging);
     // neither → the latest page. Always returned chronologically.
+    const uid = String(user.id);
     const rows = after
-      ? sql.prepare('SELECT * FROM social_chat_messages WHERE channel_id=? AND created_at>? ORDER BY created_at LIMIT ?').all(c.id, after, limit)
+      ? sql.prepare(`SELECT * FROM social_chat_messages WHERE channel_id=? AND ${msgMod} AND created_at>? ORDER BY created_at LIMIT ?`).all(c.id, uid, after, limit)
       : before
-        ? sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? AND created_at<? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, before, limit)
-        : sql.prepare('SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at').all(c.id, limit);
+        ? sql.prepare(`SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? AND ${msgMod} AND created_at<? ORDER BY created_at DESC LIMIT ?) ORDER BY created_at`).all(c.id, uid, before, limit)
+        : sql.prepare(`SELECT * FROM (SELECT * FROM social_chat_messages WHERE channel_id=? AND ${msgMod} ORDER BY created_at DESC LIMIT ?) ORDER BY created_at`).all(c.id, uid, limit);
     const reacts = reactionsFor(rows.map((r) => r.id), user.id);
-    const hasOlder = rows.length > 0 && !!sql.prepare('SELECT 1 FROM social_chat_messages WHERE channel_id=? AND created_at<? LIMIT 1').get(c.id, rows[0].created_at);
+    const hasOlder = rows.length > 0 && !!sql.prepare(`SELECT 1 FROM social_chat_messages WHERE channel_id=? AND ${msgMod} AND created_at<? LIMIT 1`).get(c.id, uid, rows[0].created_at);
     const myPins = new Set(sql.prepare('SELECT u.message_id FROM social_chat_user_pins u JOIN social_chat_messages m ON m.id=u.message_id WHERE m.channel_id=? AND u.howler_user_id=?').all(c.id, String(user.id)).map((r) => r.message_id));
     res.json({
       contractVersion: 1,
@@ -420,10 +451,24 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     const id = `msg_${uuid().slice(0, 12)}`;
     const displayName = (user.name || String(body.displayName || '')).trim().slice(0, 80);
-    sql.prepare('INSERT INTO social_chat_messages (id, channel_id, entity_id, howler_user_id, author_name, body, parent_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(id, c.id, c.entity_id, user.id, displayName, text, parentId, now());
+    // Moderation (MODERATION_CONTRACT.md §2 #3): the text + the fan-supplied
+    // fallback display name. Exact hit → 422, nothing persisted; fuzzy hit →
+    // persisted 'held' (author-only, invisible to the channel) + 202.
+    const fallbackName = user.name ? '' : displayName;
+    const verdict = moderation.screenText(c.entity_id, fallbackName ? `${text}\n${fallbackName}` : text);
+    if (verdict.outcome === 'block') {
+      moderation.recordBlockedAttempt({ contentType: 'chat_message', snapshot: { text, displayName: fallbackName }, authorUserId: user.id, channelId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody(verdict.reason));
+    }
+    sql.prepare('INSERT INTO social_chat_messages (id, channel_id, entity_id, howler_user_id, author_name, body, parent_id, moderation_status, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(id, c.id, c.entity_id, user.id, displayName, text, parentId, verdict.outcome === 'hold' ? 'held' : 'visible', now());
     sql.prepare('INSERT OR REPLACE INTO social_chat_reads (channel_id, howler_user_id, last_read_at) VALUES (?,?,?)').run(c.id, user.id, now());
-    res.json(messageRow(sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(id), { viewerId: user.id }));
+    const row = sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(id);
+    if (verdict.outcome === 'hold') {
+      moderation.recordHold({ contentType: 'chat_message', contentId: id, snapshot: { text, displayName: fallbackName }, authorUserId: user.id, channelId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(202).json({ ...messageRow(row, { viewerId: user.id }), moderation: moderation.heldMeta(verdict.reason) });
+    }
+    res.json(messageRow(row, { viewerId: user.id }));
   }));
 
   // Soft delete own message ("message deleted" placeholder in the app).
@@ -441,12 +486,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.post('/api/app/social/chat/messages/:id/react', writeLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const user = await requireAppUser(req);
-    const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND deleted=0').get(String(req.params.id));
+    const r = sql.prepare("SELECT * FROM social_chat_messages WHERE id=? AND deleted=0 AND moderation_status='visible'").get(String(req.params.id));
     const c = r && getChannel(r.channel_id);
     if (!r || !c || !flagOn(c.entity_id)) return gone(res);
     if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
     const emoji = String((req.body || {}).emoji || '').trim().slice(0, 8);
     if (!emoji) throw new HttpError(400, 'emoji required');
+    // Banned-emoji reactions (MODERATION_CONTRACT.md §6): exact folded match
+    // against the merged emoji rules — a hit blocks, no hold state.
+    const verdict = moderation.screenEmoji(c.entity_id, emoji);
+    if (verdict.outcome === 'block') {
+      moderation.recordBlockedAttempt({ contentType: 'reaction', snapshot: { emoji }, authorUserId: user.id, channelId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody('banned_emoji'));
+    }
     sql.prepare('INSERT OR IGNORE INTO social_chat_reactions (message_id, howler_user_id, emoji, created_at) VALUES (?,?,?,?)').run(r.id, user.id, emoji, now());
     res.json({ ok: true, reactions: reactionsFor([r.id], user.id)[r.id] || [] });
   }));
@@ -465,7 +517,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.post('/api/app/social/chat/messages/:id/pin', writeLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const user = await requireAppUser(req);
-    const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND deleted=0').get(String(req.params.id));
+    const r = sql.prepare("SELECT * FROM social_chat_messages WHERE id=? AND deleted=0 AND moderation_status='visible'").get(String(req.params.id));
     const c = r && getChannel(r.channel_id);
     if (!r || !c || !flagOn(c.entity_id)) return gone(res);
     if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
@@ -482,8 +534,17 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   app.post('/api/app/social/chat/messages/:id/report', writeLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
-    await requireAppUser(req);
+    const user = await requireAppUser(req);
     sql.prepare('UPDATE social_chat_messages SET reported=1 WHERE id=?').run(String(req.params.id));
+    // Reports also land in the moderation review queue (content stays visible
+    // until a moderator declines); the reported flag stays for the old inbox.
+    const r = sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(String(req.params.id));
+    if (r) {
+      moderation.recordReport({
+        contentType: 'chat_message', contentId: r.id, reporterId: user.id, reason: (req.body || {}).reason,
+        snapshot: { text: r.body }, authorUserId: r.howler_user_id, channelId: r.channel_id, entityId: r.entity_id,
+      });
+    }
     res.json({ ok: true });
   }));
 

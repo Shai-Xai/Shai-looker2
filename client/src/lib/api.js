@@ -733,6 +733,7 @@ export const api = {
   socialRemovePoster: (scope, entityId, userId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters/${userId}` : `/api/my/social/posters/${userId}?entityId=${encodeURIComponent(entityId)}`, { method: 'DELETE' }).then(json),
   socialPosterSuggestions: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters-suggestions` : `/api/my/social/posters-suggestions?entityId=${encodeURIComponent(entityId)}`).then(json),
   socialShareStats: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/share-stats` : `/api/my/social/share-stats?entityId=${encodeURIComponent(entityId)}`).then(json),
+  socialCtaClicks: (scope, entityId, kind, refId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/cta-clicks?kind=${encodeURIComponent(kind)}&refId=${encodeURIComponent(refId)}` : `/api/my/social/cta-clicks?kind=${encodeURIComponent(kind)}&refId=${encodeURIComponent(refId)}&entityId=${encodeURIComponent(entityId)}`).then(json),
   socialGetHouse: () => fetch('/api/admin/social/house').then(json),
   socialSetHouse: (entityId) => fetch('/api/admin/social/house', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   socialInstagramMedia: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/instagram/media` : `/api/my/social/instagram/media?entityId=${encodeURIComponent(entityId)}`).then(json),

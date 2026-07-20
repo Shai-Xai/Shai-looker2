@@ -1,6 +1,9 @@
 # Build plan — Social Moderation **Phase 1**: rule engine + console
 
-> Status: **proposed** · Contract: `docs/specs/MODERATION_CONTRACT.md` (read
+> Status: **PR 1 SHIPPED** (2026-07-20 — §1–§4, §5's routes, §6 roles/flags,
+> report endpoints, tests: the whole server side). Remaining: the Moderation
+> tab UI (PR 2) and the app repo work (PR 3). · Contract:
+> `docs/specs/MODERATION_CONTRACT.md` (read
 > first) · Scope source: `docs/ai-social-moderation-scope.md` in the app repo
 > (decisions resolved 2026-07-20). This plan covers **phase 1 only** — the
 > deterministic rule engine, held/blocked content states, banned-lists +
@@ -54,10 +57,11 @@ Matching:
 - **Exact → block:** whole-word/phrase match on the normalized text against
   `value_normalized` (word-boundary aware — `class` must not trip on `ass`);
   emoji by folded codepoint sequence.
-- **Fuzzy → hold:** (a) bounded edit distance — 1 for entries ≤ 4 chars, 2
-  for longer; (b) spaced/punctuated-out variants (strip separators, re-run
-  exact); (c) normalized-substring hits inside longer tokens for entries
-  ≥ 5 chars (boundary rule waived, length floor avoids Scunthorpe).
+- **Fuzzy → hold:** (a) bounded edit distance — none for entries under 4
+  chars (too noisy), 1 for 4–6, 2 for 7+; (b) spaced-out variants (runs of
+  single-char tokens joined and re-matched exactly — "f u c k"); (c)
+  normalized-substring hits inside longer tokens for entries ≥ 5 chars
+  (boundary rule waived, length floor avoids Scunthorpe).
 - Per-entry `match_action` override respected (`block`|`hold`).
 
 No JS deps needed — plain string ops + a small Levenshtein. Golden-case tests

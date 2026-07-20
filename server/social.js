@@ -43,6 +43,7 @@ const path = require('path');
 const { HttpError, asyncHandler } = require('./http');
 const flags = require('./flags'); // per-client gate: `community` (default OFF, beta)
 const appAuth = require('./appAuth'); // shared Howler-JWT introspection (see server/appAuth.js)
+const moderation = require('./moderation'); // phase-1 rule engine on every fan write (docs/specs/MODERATION_CONTRACT.md)
 
 const COMMUNITY_TYPES = ['organiser', 'event'];
 const VISIBILITIES = ['public', 'members'];
@@ -209,6 +210,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!cols.includes('audience')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN audience TEXT NOT NULL DEFAULT ''");
     // Event → organiser roll-up: per-post opt-in, same mechanic as `global`.
     if (!cols.includes('to_parent')) sql.exec('ALTER TABLE social_feed_posts ADD COLUMN to_parent INTEGER NOT NULL DEFAULT 0');
+    // Moderation content states (MODERATION_CONTRACT.md §5): visible | held
+    // (author-only until reviewed) | removed (moderator-declined stub).
+    if (!cols.includes('moderation_status')) sql.exec("ALTER TABLE social_feed_posts ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'visible'");
+    if (!mcols.includes('moderation_status')) sql.exec("ALTER TABLE social_feed_comments ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'visible'");
   } catch (e) { console.error('[social] column migrations skipped:', e.message); }
 
   // Personal pins: a fan bookmarks a post for THEMSELVES (visible only to them,
@@ -271,6 +276,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       n              INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (post_id, howler_user_id, kind, day)
     );
+
+    -- CTA taps, one rollup row per (surface, target, user): WHO tapped an
+    -- organiser CTA (feed post or chat broadcast), how many times, and the
+    -- JWT-verified name/email captured at tap time — so the clicker list can
+    -- become a paste segment for campaigns. howler_user_id '' = anonymous
+    -- (counts in the total, can't join a segment).
+    CREATE TABLE IF NOT EXISTS social_cta_clicks (
+      kind           TEXT NOT NULL DEFAULT 'post',  -- post | chat
+      ref_id         TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL DEFAULT '',
+      name           TEXT NOT NULL DEFAULT '',
+      email          TEXT NOT NULL DEFAULT '',
+      n              INTEGER NOT NULL DEFAULT 0,
+      first_at       TEXT NOT NULL,
+      last_at        TEXT NOT NULL,
+      PRIMARY KEY (kind, ref_id, howler_user_id)
+    );
   `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
@@ -314,8 +336,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     return out;
   }
   const reactionCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_reactions WHERE post_id=?').get(postId).n;
-  const commentCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_comments WHERE post_id=?').get(postId).n;
+  const commentCount = (postId) => sql.prepare("SELECT COUNT(*) n FROM social_feed_comments WHERE post_id=? AND moderation_status='visible'").get(postId).n;
   function commentRow(r, { viewerId = null } = {}) {
+    // Moderation states ride the shape when set; a removed comment collapses
+    // to a stub ("Removed by moderators" in the app) — the author-only read
+    // filtering happened in the query, so any removed row here is the author's.
+    const mod = r.moderation_status && r.moderation_status !== 'visible' ? { moderation: { status: r.moderation_status } } : {};
+    if (r.moderation_status === 'removed') {
+      return { id: r.id, postId: r.post_id, parentCommentId: r.parent_id || null, authorType: r.author_type || 'fan', ...mod, createdAt: r.created_at };
+    }
     return {
       id: r.id, postId: r.post_id, parentCommentId: r.parent_id || null,
       authorType: r.author_type || 'fan',
@@ -323,6 +352,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       text: r.body, media: mediaList(r.media), reported: !!r.reported,
       ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
       ...(viewerId ? { isOwner: r.author_type !== 'organiser' && r.howler_user_id === String(viewerId) } : {}),
+      ...mod,
       createdAt: r.created_at,
     };
   }
@@ -402,6 +432,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       reactionCount: reactionCount(r.id),
       commentCount: commentCount(r.id),
       ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId), pinnedByMe: hasPinned(r.id, viewerId) } : {}),
+      // Held/removed states (author-only rows — the read filters did the gating).
+      ...(r.moderation_status && r.moderation_status !== 'visible' ? { moderation: { status: r.moderation_status } } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
       // e.g. "explore_tickets:19203" or "open_url:https://…").
       ctaLabel: r.cta_label || null, ctaDestination: r.cta_destination || null,
@@ -413,6 +445,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   const getCommunity = (id) => sql.prepare('SELECT * FROM social_feed_communities WHERE id=?').get(id);
   const memberCount = (id) => sql.prepare('SELECT COUNT(*) n FROM social_feed_members WHERE community_id=?').get(id).n;
   const isMember = (id, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_members WHERE community_id=? AND howler_user_id=?').get(id, String(howlerUserId));
+
+  // ── moderation read filters (MODERATION_CONTRACT.md §5) ──
+  // Everyone sees 'visible'; held/removed rows return ONLY to their author
+  // (with a moderation:{status} object on the shape). App-authored posts carry
+  // their author as author_email 'app:<howlerUserId>'; comments carry
+  // howler_user_id directly. `a` prefixes an alias for joined queries.
+  const postMod = (a = '') => `(${a}moderation_status='visible' OR (${a}moderation_status IN ('held','removed') AND ${a}author_email=?))`;
+  const asPostAuthor = (viewerId) => `app:${viewerId || '-'}`;
+  const cmtMod = "(moderation_status='visible' OR (moderation_status IN ('held','removed') AND howler_user_id=?))";
 
   // Cursor pagination: `before` is the previous page's last publishedAt.
   const pageArgs = (q) => ({
@@ -566,11 +607,14 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!v.community_id) throw new HttpError(400, 'communityId required');
     const id = `post_${uuid().slice(0, 12)}`;
     const publish = !!body.publish; // create-and-publish in one step (composer's "Publish now")
-    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, to_parent, status, published_at, cta_label, cta_destination, audience, author_name, author_email, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    // Only the app write path ever passes 'held' (rule-engine hold) — anything
+    // else collapses to 'visible', so organiser callers are untouched.
+    const modStatus = body.moderationStatus === 'held' ? 'held' : 'visible';
+    sql.prepare(`INSERT INTO social_feed_posts (id, entity_id, community_id, body, media, link_url, source, global, to_parent, status, published_at, cta_label, cta_destination, audience, author_name, author_email, moderation_status, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, entityId, v.community_id, v.body || '', v.media || '[]', v.link_url || '', v.source || 'pulse', v.global || 0, v.to_parent || 0,
         publish ? 'published' : 'draft', publish ? now() : '', v.cta_label || '', v.cta_destination || '', v.audience || '',
-        String(body.authorName || '').slice(0, 120), user?.email || '', now(), now());
+        String(body.authorName || '').slice(0, 120), user?.email || '', modStatus, now(), now());
     return postRow(sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(id), getCommunity(v.community_id));
   }
   function updatePost(entityId, id, body) {
@@ -777,6 +821,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // Admins see platform-wide activity (the house entity has no fans of its own yet).
   app.get(`${A}/posters-suggestions`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ suggestions: posterSuggestions() })));
   app.get(`${A}/share-stats`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(shareStats(req.params.entityId))));
+  app.get(`${A}/cta-clicks`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(ctaClickers(req.params.entityId, req.query.kind, req.query.refId))));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -805,6 +850,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // Clients only see users active on THEIR OWN communities/chats (no cross-client leak).
   app.get(`${M}/posters-suggestions`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ suggestions: posterSuggestions(eid(req)) })));
   app.get(`${M}/share-stats`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(shareStats(eid(req)))));
+  app.get(`${M}/cta-clicks`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(ctaClickers(eid(req), req.query.kind, req.query.refId))));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -826,11 +872,12 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // mechanic as global). Raw rows out — the endpoint filters targeted posts
   // against the viewer's tickets and keeps the cursor exact (from RAW rows,
   // so a filtered-out post never breaks paging).
-  function communityFeedRows(c, { limit, before }) {
+  function communityFeedRows(c, { limit, before }, viewerId) {
     const scope = "(community_id=? OR (to_parent=1 AND community_id IN (SELECT id FROM social_feed_communities WHERE parent_id=? AND status='active')))";
+    const base = [c.id, c.id, asPostAuthor(viewerId)];
     return before
-      ? sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?`).all(c.id, c.id, before, limit)
-      : sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' ORDER BY published_at DESC LIMIT ?`).all(c.id, c.id, limit);
+      ? sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' AND ${postMod()} AND published_at<? ORDER BY published_at DESC LIMIT ?`).all(...base, before, limit)
+      : sql.prepare(`SELECT * FROM social_feed_posts WHERE ${scope} AND status='published' AND ${postMod()} ORDER BY published_at DESC LIMIT ?`).all(...base, limit);
   }
 
   // Pinned strips for a feed's FIRST page (pages stay purely chronological so
@@ -838,10 +885,10 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // posts, plus the viewer's own personal pins, each capped at 10. Raw rows —
   // callers apply ticket-targeting filters where relevant.
   function pinnedStripRows(where, args, viewerId) {
-    const pinned = sql.prepare(`SELECT * FROM social_feed_posts WHERE ${where} AND status='published' AND pinned=1 ORDER BY published_at DESC LIMIT 10`).all(...args)
+    const pinned = sql.prepare(`SELECT * FROM social_feed_posts WHERE ${where} AND status='published' AND ${postMod()} AND pinned=1 ORDER BY published_at DESC LIMIT 10`).all(...args, asPostAuthor(viewerId))
       .filter((r) => flagOn(r.entity_id));
     const myPins = viewerId
-      ? sql.prepare(`SELECT p.* FROM social_feed_posts p JOIN social_feed_user_pins u ON u.post_id=p.id AND u.howler_user_id=? WHERE ${where} AND p.status='published' ORDER BY u.created_at DESC LIMIT 10`).all(String(viewerId), ...args)
+      ? sql.prepare(`SELECT p.* FROM social_feed_posts p JOIN social_feed_user_pins u ON u.post_id=p.id AND u.howler_user_id=? WHERE ${where} AND p.status='published' AND ${postMod('p.')} ORDER BY u.created_at DESC LIMIT 10`).all(String(viewerId), ...args, asPostAuthor(viewerId))
         .filter((r) => flagOn(r.entity_id))
       : [];
     return { pinned, myPins };
@@ -893,7 +940,53 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       else if (r.kind === 'seen') s.seen = r.n;
       else if (r.kind === 'view') s.views = r.n;
     }
+    // CTA taps ride the same stats object: total taps + unique signed-in tappers.
+    const clicks = sql.prepare(`SELECT c.ref_id post_id, SUM(c.n) n,
+        COUNT(DISTINCT CASE WHEN c.howler_user_id!='' THEN c.howler_user_id END) uniq
+      FROM social_cta_clicks c JOIN social_feed_posts p ON p.id=c.ref_id
+      WHERE c.kind='post' AND p.entity_id=? GROUP BY c.ref_id`).all(entityId);
+    for (const r of clicks) {
+      const s = out[r.post_id] ||= { delivered: 0, reach: 0, seen: 0, views: 0 };
+      s.ctaClicks = r.n; s.ctaUsers = r.uniq;
+    }
     return out;
+  }
+
+  // WHO tapped a CTA — the audience behind the count, for the management
+  // surfaces. Ownership is enforced through the target: a post must belong to
+  // the entity; a chat broadcast's channel must (chat tables live in the same
+  // DB — read-only reach across the module seam, guarded for test envs where
+  // chat isn't mounted).
+  function ctaClickers(entityId, kindRaw, refId) {
+    const kind = kindRaw === 'chat' ? 'chat' : 'post';
+    const ref = String(refId || '').trim();
+    if (!ref) throw new HttpError(400, 'refId required');
+    if (kind === 'post') {
+      const p = sql.prepare('SELECT entity_id FROM social_feed_posts WHERE id=?').get(ref);
+      if (!p || p.entity_id !== entityId) throw new HttpError(404, 'Post not found');
+    } else {
+      let m = null;
+      try {
+        m = sql.prepare(`SELECT c.entity_id FROM social_chat_messages m
+          JOIN social_chat_channels c ON c.id=m.channel_id WHERE m.id=?`).get(ref);
+      } catch { /* chat module not mounted (tests) */ }
+      if (!m || m.entity_id !== entityId) throw new HttpError(404, 'Message not found');
+    }
+    const rows = sql.prepare('SELECT * FROM social_cta_clicks WHERE kind=? AND ref_id=? ORDER BY last_at DESC').all(kind, ref);
+    const users = rows.filter((r) => r.howler_user_id !== '').map((r) => ({
+      userId: r.howler_user_id,
+      name: r.name || appUserName(r.howler_user_id),
+      email: r.email,
+      clicks: r.n,
+      firstAt: r.first_at,
+      lastAt: r.last_at,
+    }));
+    const anon = rows.find((r) => r.howler_user_id === '');
+    return {
+      total: rows.reduce((a, r) => a + r.n, 0),
+      anonymous: anon ? anon.n : 0,
+      users,
+    };
   }
 
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
@@ -901,8 +994,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const viewer = await optionalAppUser(req);
     const { limit, before } = pageArgs(req.query);
     const rows = before
-      ? sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND published_at<? ORDER BY published_at DESC LIMIT ?").all(before, limit)
-      : sql.prepare("SELECT * FROM social_feed_posts WHERE global=1 AND status='published' ORDER BY published_at DESC LIMIT ?").all(limit);
+      ? sql.prepare(`SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND ${postMod()} AND published_at<? ORDER BY published_at DESC LIMIT ?`).all(asPostAuthor(viewer?.id), before, limit)
+      : sql.prepare(`SELECT * FROM social_feed_posts WHERE global=1 AND status='published' AND ${postMod()} ORDER BY published_at DESC LIMIT ?`).all(asPostAuthor(viewer?.id), limit);
     const stripRows = before ? { pinned: [], myPins: [] } : pinnedStripRows('global=1', [], viewer?.id);
     const allowed = await allowedGlobalEntities([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
     const visible = (r) => flagOn(r.entity_id) && (allowed === null || allowed.has(r.entity_id));
@@ -957,7 +1050,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       viewer = await optionalAppUser(req);
     }
     const page = pageArgs(req.query);
-    const rows = communityFeedRows(c, page);
+    const rows = communityFeedRows(c, page, viewer?.id);
     const stripRows = page.before ? { pinned: [], myPins: [] } : pinnedStripRows('community_id=?', [c.id], viewer?.id);
     const tickets = await ticketsIfNeeded([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
     // Rolled-up child posts keep their HOME community for labels + ticket
@@ -991,6 +1084,27 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     res.json({ ok: true });
   }));
 
+  // A CTA button was TAPPED — on a feed post (kind=post, ref=post id) or a
+  // chat broadcast (kind=chat, ref=message id). Anonymous ok (adds to the
+  // total, no identity); signed-in taps carry the JWT-verified name/email so
+  // the clicker list can become a campaign segment.
+  app.post('/api/app/social/cta-click', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const viewer = await optionalAppUser(req);
+    const b = req.body || {};
+    const kind = b.kind === 'chat' ? 'chat' : 'post';
+    const refId = String(b.refId || '').trim().slice(0, 64);
+    if (!refId) throw new HttpError(400, 'refId required');
+    const t = now();
+    sql.prepare(`INSERT INTO social_cta_clicks (kind, ref_id, howler_user_id, name, email, n, first_at, last_at)
+      VALUES (?,?,?,?,?,1,?,?)
+      ON CONFLICT(kind, ref_id, howler_user_id) DO UPDATE SET n=n+1, last_at=excluded.last_at,
+        name=CASE WHEN excluded.name!='' THEN excluded.name ELSE name END,
+        email=CASE WHEN excluded.email!='' THEN excluded.email ELSE email END`)
+      .run(kind, refId, String(viewer?.id || ''), String(viewer?.name || ''), String(viewer?.email || ''), t, t);
+    res.json({ ok: true });
+  }));
+
   // ── Story rail — the quick-door row of community circles (mockup frame 7).
   // Active, flag-on communities that have posted, with per-viewer state:
   // joined (they follow it), hasTicket (verified holdings), unseen (posts
@@ -1011,7 +1125,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const lastPostAt = (r) => {
       const ids = [r.id, ...(r.type === 'organiser' ? kids(r.id) : [])];
       const ph = ids.map(() => '?').join(',');
-      return sql.prepare(`SELECT MAX(published_at) t FROM social_feed_posts WHERE community_id IN (${ph}) AND status='published'`).get(...ids)?.t || null;
+      return sql.prepare(`SELECT MAX(published_at) t FROM social_feed_posts WHERE community_id IN (${ph}) AND status='published' AND moderation_status='visible'`).get(...ids)?.t || null;
     };
     let tickets = null;
     if (viewer) { try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* rail still renders */ } }
@@ -1075,7 +1189,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // Members-only ring-fencing applies: you can only like what you can see.
   async function reactablePost(req) {
     const user = await requireAppUser(req);
-    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
+    // Held/removed posts are not interactable — not even by their author.
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published' AND moderation_status='visible'").get(String(req.params.id));
     const c = p && getCommunity(p.community_id);
     if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) throw new HttpError(404, 'Not available');
     // Posts syndicated out of their home community (global or rolled up to
@@ -1096,7 +1211,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   // anonymously; members-only posts by verified members.
   app.get('/api/app/social/posts/:id/comments', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
-    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id));
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published' AND moderation_status='visible'").get(String(req.params.id));
     const c = p && getCommunity(p.community_id);
     if (!p || !c || c.status !== 'active' || !flagOn(p.entity_id)) return gone(res);
     let viewer = null;
@@ -1114,11 +1229,12 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     const { limit, before } = pageArgs(req.query);
     // Page over TOP-LEVEL comments; replies ride nested under their parent.
+    const cmtViewer = String(viewer?.id || '-');
     const top = before
-      ? sql.prepare("SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' AND created_at<? ORDER BY created_at DESC LIMIT ?").all(p.id, before, limit)
-      : sql.prepare("SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' ORDER BY created_at DESC LIMIT ?").all(p.id, limit);
+      ? sql.prepare(`SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' AND ${cmtMod} AND created_at<? ORDER BY created_at DESC LIMIT ?`).all(p.id, cmtViewer, before, limit)
+      : sql.prepare(`SELECT * FROM social_feed_comments WHERE post_id=? AND parent_id='' AND ${cmtMod} ORDER BY created_at DESC LIMIT ?`).all(p.id, cmtViewer, limit);
     const replies = top.length
-      ? sql.prepare(`SELECT * FROM social_feed_comments WHERE parent_id IN (${top.map(() => '?').join(',')})`).all(...top.map((r) => r.id))
+      ? sql.prepare(`SELECT * FROM social_feed_comments WHERE parent_id IN (${top.map(() => '?').join(',')}) AND ${cmtMod}`).all(...top.map((r) => r.id), cmtViewer)
       : [];
     res.json({
       contractVersion: 1, commentCount: commentCount(p.id),
@@ -1156,9 +1272,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (!text && media === '[]') throw new HttpError(400, 'Write something first');
     const id = `cmt_${uuid().slice(0, 12)}`;
     const name = (user.name || String(body.displayName || '')).trim().slice(0, 80);
-    sql.prepare('INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, body, parent_id, media, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(id, post.id, post.entity_id, user.id, name, text, parentId, media, now());
-    res.json(commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id), { viewerId: user.id }));
+    // Moderation (MODERATION_CONTRACT.md §2 #2): the text + the fan-supplied
+    // fallback display name (the verified Howler name is trusted). Exact hit →
+    // 422, nothing persisted; fuzzy hit → persisted 'held', author-only, 202.
+    const fallbackName = user.name ? '' : name;
+    const verdict = moderation.screenText(post.entity_id, fallbackName ? `${text}\n${fallbackName}` : text);
+    if (verdict.outcome === 'block') {
+      moderation.recordBlockedAttempt({ contentType: 'comment', snapshot: { text, displayName: fallbackName }, authorUserId: user.id, communityId: community.id, entityId: post.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody(verdict.reason));
+    }
+    sql.prepare('INSERT INTO social_feed_comments (id, post_id, entity_id, howler_user_id, author_name, body, parent_id, media, moderation_status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, post.id, post.entity_id, user.id, name, text, parentId, media, verdict.outcome === 'hold' ? 'held' : 'visible', now());
+    const row = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id);
+    if (verdict.outcome === 'hold') {
+      moderation.recordHold({ contentType: 'comment', contentId: id, snapshot: { text, displayName: fallbackName }, authorUserId: user.id, communityId: community.id, entityId: post.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(202).json({ ...commentRow(row, { viewerId: user.id }), moderation: moderation.heldMeta(verdict.reason) });
+    }
+    res.json(commentRow(row, { viewerId: user.id }));
   }));
 
   // Author deletes their own comment; anyone verified can report one.
@@ -1173,8 +1303,32 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   }));
   app.post('/api/app/social/comments/:id/report', commentLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
-    await requireAppUser(req);
+    const user = await requireAppUser(req);
     sql.prepare('UPDATE social_feed_comments SET reported=1 WHERE id=?').run(String(req.params.id));
+    // Reports also land in the moderation review queue (content stays visible
+    // until a moderator declines); the reported flag stays for the old inbox.
+    const r = sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(String(req.params.id));
+    if (r) {
+      moderation.recordReport({
+        contentType: 'comment', contentId: r.id, reporterId: user.id, reason: (req.body || {}).reason,
+        snapshot: { text: r.body }, authorUserId: r.howler_user_id, entityId: r.entity_id,
+      });
+    }
+    res.json({ ok: true });
+  }));
+  // Post-level report — parity with comments/messages (MODERATION_CONTRACT.md
+  // §8.1). Files a queue item; the post stays visible until declined.
+  app.post('/api/app/social/posts/:id/report', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const p = sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published' AND moderation_status='visible'").get(String(req.params.id));
+    if (!p || !flagOn(p.entity_id)) return gone(res);
+    moderation.recordReport({
+      contentType: 'post', contentId: p.id, reporterId: user.id, reason: (req.body || {}).reason,
+      snapshot: { text: p.body },
+      authorUserId: String(p.author_email || '').startsWith('app:') ? p.author_email.slice(4) : '',
+      communityId: p.community_id, entityId: p.entity_id,
+    });
     res.json({ ok: true });
   }));
   app.post('/api/app/social/posts/:id/react', joinLimit, asyncHandler(async (req, res) => {
@@ -1215,11 +1369,23 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     });
     const text = String(body.text || '').trim().slice(0, MAX_BODY);
     if (!text && media.length === 0) throw new HttpError(400, 'Write something or add a photo first');
+    // Moderation (MODERATION_CONTRACT.md §2 #1): screen the text before
+    // anything publishes. Media checks (pHash) are phase 2.
+    const verdict = moderation.screenText(c.entity_id, text);
+    if (verdict.outcome === 'block') {
+      moderation.recordBlockedAttempt({ contentType: 'post', snapshot: { text }, authorUserId: user.id, communityId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(422).json(moderation.blockedBody(verdict.reason));
+    }
     // authorName '' → the post renders in the brand's voice (community name).
     const post = createPost(c.entity_id, {
       communityId: c.id, body: text, media, global: !!body.global, publish: true,
       source: 'app', authorName: poster.name || '',
+      moderationStatus: verdict.outcome === 'hold' ? 'held' : undefined,
     }, { email: `app:${user.id}` });
+    if (verdict.outcome === 'hold') {
+      moderation.recordHold({ contentType: 'post', contentId: post.id, snapshot: { text }, authorUserId: user.id, communityId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
+      return res.status(202).json({ ...post, moderation: moderation.heldMeta(verdict.reason) });
+    }
     res.json(post);
   }));
 
@@ -1297,6 +1463,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       try { tickets = await fetchAppTickets(tokenOf(req)); } catch { /* fail closed */ }
       if (!postVisible(p, c, tickets)) throw new HttpError(403, 'This post is for specific ticket holders');
     }
+    // Held/removed posts exist only for their author (pending/removed states).
+    if (p.moderation_status !== 'visible' && asPostAuthor(viewer?.id) !== p.author_email) return gone(res);
     res.json({ contractVersion: 1, post: postRow(p, c, { viewerId: viewer?.id }) });
   }));
 
@@ -1314,7 +1482,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const abs = (u) => (/^https?:\/\//.test(u) ? u : `${base}${u}`);
     const p = enabled() ? sql.prepare("SELECT * FROM social_feed_posts WHERE id=? AND status='published'").get(String(req.params.id)) : null;
     const c = p && getCommunity(p.community_id);
-    const open = !!(p && c && c.status === 'active' && flagOn(p.entity_id) && c.visibility !== 'members' && !p.audience);
+    const open = !!(p && c && c.status === 'active' && flagOn(p.entity_id) && c.visibility !== 'members' && !p.audience && p.moderation_status === 'visible');
     const media = open ? mediaList(p.media) : [];
     const firstImg = media.find((m) => m.kind !== 'video');
     const brand = open ? (c.name || 'Howler') : 'Howler';

@@ -36,7 +36,8 @@ const setFlagFor = (entityId) => setFlag(entityId, 'on');
 const verifyAppToken = async (token) => {
   if (token === 'tok-down') throw new Error('backend unreachable');
   const m = token.match(/^tok-(\d+)$/);
-  return m ? { id: m[1] } : null;
+  // email rides along like production introspection's best-effort profile read
+  return m ? { id: m[1], email: `fan${m[1]}@test.local` } : null;
 };
 
 function mount() {
@@ -833,6 +834,66 @@ test('views & impressions: feed reads log delivered; app reports seen/views; sta
   assert.ok(withStats.stats.reach >= 1, 'signed-in reader counts as unique reach');
   assert.equal(withStats.stats.seen, 2, 'signed-in + anonymous seen reports');
   assert.equal(withStats.stats.views, 1);
+});
+
+test('CTA clicks: per-user counts with email, clicker list + segment source, entity guard, chat refs', async () => {
+  const e3 = makeEntity('Cta Org', 'Cta Org');
+  setFlagFor(e3.id);
+  const comm = (await call('POST /api/admin/entities/:entityId/social/communities', {
+    user: admin, params: { entityId: e3.id }, body: { name: 'CTA Comm', type: 'organiser' },
+  })).body;
+  const post = (await call('POST /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: e3.id },
+    body: { communityId: comm.id, body: 'Tap it 🎟', publish: true, ctaLabel: 'Buy now', ctaDestination: 'open_url:https://howler.co.za' },
+  })).body;
+
+  // Two signed-in fans tap (one taps twice), plus one anonymous tap.
+  assert.equal((await call('POST /api/app/social/cta-click', { token: 'tok-661779', body: { kind: 'post', refId: post.id } })).body.ok, true);
+  await call('POST /api/app/social/cta-click', { token: 'tok-661779', body: { kind: 'post', refId: post.id } });
+  await call('POST /api/app/social/cta-click', { token: 'tok-662076', body: { kind: 'post', refId: post.id } });
+  await call('POST /api/app/social/cta-click', { body: { kind: 'post', refId: post.id } });
+  assert.equal((await call('POST /api/app/social/cta-click', { body: {} })).code, 400);
+
+  // Post stats roll the taps up: 4 total, 2 unique signed-in tappers.
+  const listed = await call('GET /api/admin/entities/:entityId/social/posts', { user: admin, params: { entityId: e3.id } });
+  const stats = listed.body.posts.find((p) => p.id === post.id).stats;
+  assert.equal(stats.ctaClicks, 4);
+  assert.equal(stats.ctaUsers, 2);
+
+  // The clicker list carries the JWT-verified emails — segment raw material.
+  const who = await call('GET /api/admin/entities/:entityId/social/cta-clicks', {
+    user: admin, params: { entityId: e3.id }, query: { kind: 'post', refId: post.id },
+  });
+  assert.equal(who.body.total, 4);
+  assert.equal(who.body.anonymous, 1);
+  assert.equal(who.body.users.length, 2);
+  const repeat = who.body.users.find((u) => u.userId === '661779');
+  assert.equal(repeat.clicks, 2);
+  assert.equal(repeat.email, 'fan661779@test.local');
+
+  // Client self-service surface sees the same list; a foreign entity cannot.
+  const mine = await call('GET /api/my/social/cta-clicks', {
+    user: makeClient('cta-owner@social.test', [e3.id], 'owner'), query: { kind: 'post', refId: post.id, entityId: e3.id },
+  });
+  assert.equal(mine.body.total, 4);
+  const foreign = await call('GET /api/admin/entities/:entityId/social/cta-clicks', {
+    user: admin, params: { entityId: entity.id }, query: { kind: 'post', refId: post.id },
+  });
+  assert.equal(foreign.code, 404);
+
+  // Chat broadcasts use kind=chat with the message id; ownership resolves
+  // through the channel. The chat tables live in the same DB — create the
+  // minimal rows the join needs.
+  db.db.exec(`CREATE TABLE IF NOT EXISTS social_chat_channels (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS social_chat_messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL);`);
+  db.db.prepare('INSERT INTO social_chat_channels (id, entity_id) VALUES (?,?)').run('ch-cta', e3.id);
+  db.db.prepare('INSERT INTO social_chat_messages (id, channel_id) VALUES (?,?)').run('msg-cta', 'ch-cta');
+  await call('POST /api/app/social/cta-click', { token: 'tok-662076', body: { kind: 'chat', refId: 'msg-cta' } });
+  const chatWho = await call('GET /api/admin/entities/:entityId/social/cta-clicks', {
+    user: admin, params: { entityId: e3.id }, query: { kind: 'chat', refId: 'msg-cta' },
+  });
+  assert.equal(chatWho.body.total, 1);
+  assert.equal(chatWho.body.users[0].email, 'fan662076@test.local');
 });
 
 test('communities: rename via PUT, delete cascades, children block parent delete', async () => {

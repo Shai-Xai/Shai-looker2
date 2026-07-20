@@ -353,6 +353,24 @@ The quick-door row of community circles (mockup frame 7).
   `stats: {delivered, reach, seen, views}` (reach = unique signed-in
   viewers delivered). Shown on the Pulse post card (👁 line).
 
+## 13c. CTA click tracking → segments (added 2026-07-20)
+
+- `POST /api/app/social/cta-click {kind: 'post'|'chat', refId}` (optional
+  JWT, best-effort) — the app reports a CTA button TAP on a feed post
+  (`refId` = post id) or a chat broadcast (`refId` = message id). Signed-in
+  taps store the JWT-verified name + email (identity introspection now reads
+  `{ user { firstName lastName email } }` best-effort); anonymous taps count
+  in the total only. One rollup row per (kind, ref, user).
+- Post `stats` gains `ctaClicks` (total taps) + `ctaUsers` (unique signed-in
+  tappers) — the 👆 figure on the Pulse post card.
+- `GET .../social/cta-clicks?kind=&refId=` (both management surfaces) — the
+  clicker list: `{total, anonymous, users: [{userId, name, email, clicks,
+  firstAt, lastAt}]}`. Ownership enforced through the target (post's entity /
+  chat channel's entity).
+- Pulse UI: the 👆 counter on a post expands to the clicker list with
+  **Create segment from clickers** — a paste-mode segment (the clickers'
+  emails) in Engage → Segments, ready for email/SMS/push campaigns.
+
 ## 14. Shareable post links (added 2026-07-19)
 
 - `GET /api/app/social/posts/:id` — a single published post as JSON (same
@@ -439,7 +457,7 @@ The quick-door row of community circles (mockup frame 7).
   only see users active on THEIR OWN communities/chats. The App posters UI
   renders them as one-click "＋ name #id" chips.
 
-## 18. Moderation (spec approved 2026-07-20 — not yet implemented)
+## 18. Moderation (server-side enforcement LIVE 2026-07-20; console UI next)
 
 All fan-generated content on this surface (app posts, comments, chat
 messages, emoji reactions, fan-group names) gets server-side moderation at
