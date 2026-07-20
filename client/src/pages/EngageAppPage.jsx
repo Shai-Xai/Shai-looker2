@@ -5,6 +5,7 @@ import { vtNavigate } from '../lib/viewTransition.js';
 import { useMyFlags, flagOn } from '../lib/flags.js';
 import PageHeader from '../components/PageHeader.jsx';
 import CommunityFeedManager from '../components/CommunityFeedManager.jsx';
+import ModerationManager from '../components/ModerationManager.jsx';
 
 // Engage → App — the client's presence INSIDE the Howler consumer app, as a
 // first-class section (moved out of the Engage tab row where it lived as one
@@ -17,6 +18,9 @@ const TABS = [
   { key: 'channels', label: 'Channels', icon: '💬', blurb: 'Per-event chat — message one channel or broadcast to all, run official channels, and keep an eye on fan-made groups.' },
   { key: 'communities', label: 'Communities', icon: '👥', blurb: 'The containers fans join: one for your brand, one per event. Event communities are ring-fenced to ticket holders and joiners.' },
   { key: 'share', label: 'Share links', icon: '📣', blurb: 'How your posts travel outside the app — clicks on shared links, chat-preview reach, and the fans driving them.' },
+  // Gated separately (community.moderation): clients see it only when their
+  // self-serve console is on; admins always can (they manage on behalf).
+  { key: 'moderation', label: 'Moderation', icon: '🛡️', blurb: 'Banned words, phrases and emoji — enforced the moment a fan posts, comments or chats. Near-miss attempts wait here for your approve/decline.', flag: 'community.moderation' },
 ];
 
 export default function EngageAppPage() {
@@ -29,10 +33,11 @@ export default function EngageAppPage() {
   const entityId = previewEntityId || (isAdmin ? null : activeEntityId);
   const myFlags = useMyFlags(entityId);
   const enabled = flagOn(myFlags, 'community');
+  const tabs = TABS.filter((t) => !t.flag || isAdmin || flagOn(myFlags, t.flag));
 
-  const active = TABS.find((t) => t.key === tab) ? tab : 'posts';
+  const active = tabs.find((t) => t.key === tab) ? tab : 'posts';
   const go = (key) => { if (key !== active) vtNavigate(navigate, `/engage/app/${key}`); };
-  const blurb = TABS.find((t) => t.key === active)?.blurb;
+  const blurb = tabs.find((t) => t.key === active)?.blurb;
 
   return (
     <main style={{ flex: 1, padding: '26px 22px', maxWidth: 1080, margin: '0 auto', width: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -41,7 +46,7 @@ export default function EngageAppPage() {
       {/* Tab bar — scrolls horizontally on small screens (mobile-first) and
           sticks to the top of the scroll area, same pattern as EngagePage. */}
       <div className="no-scrollbar" style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, overflowX: 'auto', borderBottom: '1px solid var(--hairline)', marginBottom: 18, marginLeft: -22, marginRight: -22, padding: '6px 22px 0', background: 'var(--bg)', WebkitOverflowScrolling: 'touch' }}>
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const on = t.key === active;
           return (
             <button
@@ -68,7 +73,9 @@ export default function EngageAppPage() {
       ) : (
         <>
           {blurb && <p style={{ color: 'var(--muted)', marginBottom: 18, fontSize: 14 }}>{blurb}</p>}
-          <CommunityFeedManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} section={active} />
+          {active === 'moderation'
+            ? <ModerationManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} />
+            : <CommunityFeedManager entityId={entityId} scope={isAdmin ? 'admin' : 'my'} section={active} />}
         </>
       )}
     </main>

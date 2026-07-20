@@ -762,6 +762,22 @@ export const api = {
   chatModerate: (scope, entityId, id, action) => fetch(`${api.chatBase(scope, entityId)}/messages/${id}/${action}?${api.chatQ(scope, entityId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? {} : { entityId }) }).then(json),
   socialPresignMedia: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/media/presign` : '/api/my/social/media/presign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
 
+  // Social moderation: banned lists + review queue — docs/specs/MODERATION_CONTRACT.md §8.2.
+  // scope: 'platform' (Howler-wide rules + cross-client queue) | 'admin'
+  // (per-client, on behalf) | 'my' (client self-service, entityId in query/body).
+  modBase: (scope, entityId) => (scope === 'platform' ? '/api/admin/moderation' : scope === 'admin' ? `/api/admin/entities/${entityId}/moderation` : '/api/my/moderation'),
+  modQ: (scope, entityId, extra = {}) => new URLSearchParams(scope === 'my' ? { entityId, ...extra } : extra).toString(),
+  modBody: (scope, entityId, body = {}) => JSON.stringify(scope === 'my' ? { ...body, entityId } : body),
+  modRules: (scope, entityId) => fetch(`${api.modBase(scope, entityId)}/rules?${api.modQ(scope, entityId)}`).then(json),
+  modCreateRule: (scope, entityId, body) => fetch(`${api.modBase(scope, entityId)}/rules`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: api.modBody(scope, entityId, body) }).then(json),
+  modImportRules: (scope, entityId, entries) => fetch(`${api.modBase(scope, entityId)}/rules/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: api.modBody(scope, entityId, { entries }) }).then(json),
+  modTestRules: (scope, entityId, text) => fetch(`${api.modBase(scope, entityId)}/rules/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: api.modBody(scope, entityId, { text }) }).then(json),
+  modPatchRule: (scope, entityId, id, patch) => fetch(`${api.modBase(scope, entityId)}/rules/${id}?${api.modQ(scope, entityId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: api.modBody(scope, entityId, patch) }).then(json),
+  modDeleteRule: (scope, entityId, id) => fetch(`${api.modBase(scope, entityId)}/rules/${id}?${api.modQ(scope, entityId)}`, { method: 'DELETE' }).then(json),
+  modQueue: (scope, entityId, opts = {}) => fetch(`${api.modBase(scope, entityId)}/queue?${api.modQ(scope, entityId, Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined && v !== null)))}`).then(json),
+  modDecide: (scope, entityId, id, approve) => fetch(`${api.modBase(scope, entityId)}/queue/${id}/${approve ? 'approve' : 'decline'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: api.modBody(scope, entityId, {}) }).then(json),
+  modAudit: (scope, entityId, opts = {}) => fetch(`${api.modBase(scope, entityId)}/audit?${api.modQ(scope, entityId, opts)}`).then(json),
+
   // API keys for the public surface (/api/v1 + MCP) — dual-surface management.
   listEntityApiKeys: (id) => fetch(`/api/admin/entities/${id}/api-keys`).then(json),
   createEntityApiKey: (id, p) => fetch(`/api/admin/entities/${id}/api-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(json),

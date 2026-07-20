@@ -1155,10 +1155,13 @@ called **App Analytics** to keep the two apart.
   are rejected outright, near-miss/obfuscated attempts are **held for review**
   (visible only to their author) until a moderator approves or declines.
   Platform-wide list (Howler-managed) + each client's own additions; fan
-  reports (now on posts too) land in the same review queue. API + enforcement
-  live (docs/specs/MODERATION_CONTRACT.md); the Pulse console UI (banned-lists
-  manager + review queue) is the next drop. AI classification ("catches what
-  lists can't") is the phase after.
+  reports (now on posts too) land in the same review queue. Managed in
+  **Engage → App → 🛡️ Moderation** (banned list with a "would this be
+  caught?" test box, review queue, audit trail — client self-service behind
+  the `community.moderation` flag, Howler admins on behalf regardless);
+  Howler's platform-wide list + cross-client queue live in Admin → Product →
+  🛡️ Moderation. AI classification ("catches what lists can't") is the next
+  phase (docs/specs/MODERATION_CONTRACT.md).
 
 **Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
 docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
@@ -1214,8 +1217,10 @@ see "The continuous comms loop" above.)*
   post-level report) feed the same review queue. New `moderator` client role +
   `moderation.manage` permission, Howler `platform_moderator` designation,
   flag `community.moderation` (console self-service; platform-rule enforcement
-  is always on). Console UI lands next; wire contract in
-  docs/specs/MODERATION_CONTRACT.md.
+  is always on). Console UI shipped the same day: Engage → App → 🛡️ Moderation
+  (client + admin-on-behalf) and Admin → Product → 🛡️ Moderation (platform
+  list + cross-client queue), with a live "would this be caught?" test box and
+  the audit trail. Wire contract in docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
 - **2026-07-20** — **👆 CTA click tracking → segments**: every tap on a post's

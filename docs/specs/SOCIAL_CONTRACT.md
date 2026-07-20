@@ -457,7 +457,7 @@ The quick-door row of community circles (mockup frame 7).
   only see users active on THEIR OWN communities/chats. The App posters UI
   renders them as one-click "＋ name #id" chips.
 
-## 18. Moderation (server-side enforcement LIVE 2026-07-20; console UI next)
+## 18. Moderation (enforcement + Pulse console LIVE 2026-07-20; app-side UI next)
 
 All fan-generated content on this surface (app posts, comments, chat
 messages, emoji reactions, fan-group names) gets server-side moderation at

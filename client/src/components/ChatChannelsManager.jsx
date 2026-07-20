@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api.js';
+import { useIsMobile } from '../lib/useIsMobile.js';
 
 // Engage → Community → Channels: per-event chat channels + fan groups
 // (Social+ replacement phase 2, mockup approved 2026-07-18). Dual-surface
@@ -155,6 +156,7 @@ function CreateChannel({ scope, entityId, eventId, onDone, onError }) {
 // The tab's lead composer: message ONE channel as the organiser, or broadcast
 // to every channel at once ("all"). Pin/push ride broadcasts only.
 function Broadcast({ scope, entityId, eventId, channels = [], onDone, onError }) {
+  const isMobile = useIsMobile();
   const [target, setTarget] = useState('all');
   const [text, setText] = useState('');
   const [pin, setPin] = useState(true);
@@ -172,7 +174,9 @@ function Broadcast({ scope, entityId, eventId, channels = [], onDone, onError })
         <option value="all">📢 Every channel</option>
         {channels.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
       </select>
-      <input style={{ ...input, flex: 1, minWidth: 180 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={target === 'all' ? 'Lands in every channel at once…' : `Message #${chan?.name || 'channel'} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
+      {/* Mobile: the message box takes its own full-width row (16px font so
+          iOS doesn't zoom on focus) instead of squeezing beside the controls. */}
+      <input style={{ ...input, flex: 1, minWidth: isMobile ? '100%' : 180, ...(isMobile ? { fontSize: 16, padding: '12px 14px' } : {}) }} value={text} onChange={(e) => setText(e.target.value)} placeholder={target === 'all' ? 'Lands in every channel at once…' : `Message #${chan?.name || 'channel'} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
       <CtaFields cta={cta} setCta={setCta} eventId={eventId} />
       {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 📌 pin</label>}
       {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }} title="Recorded per message — delivery activates once the Firebase key is configured"><input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} /> 🔔 push</label>}
@@ -182,6 +186,7 @@ function Broadcast({ scope, entityId, eventId, channels = [], onDone, onError })
 }
 
 function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, act }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState(null);
   const [text, setText] = useState('');
@@ -214,7 +219,7 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
       {open && (
         <div style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-            <input style={{ ...input, flex: 1, minWidth: 180 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message #${c.name} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
+            <input style={{ ...input, flex: 1, minWidth: isMobile ? '100%' : 180, ...(isMobile ? { fontSize: 16, padding: '12px 14px' } : {}) }} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message #${c.name} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
             <CtaFields cta={cta} setCta={setCta} eventId={eventId} />
             <button style={{ ...mini, opacity: text.trim() ? 1 : 0.5 }} disabled={!text.trim()} onClick={send}>Send</button>
           </div>

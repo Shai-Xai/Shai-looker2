@@ -1,8 +1,9 @@
 # Moderation Contract — Pulse Social (posts · comments · chat · reactions)
 
-**Version:** 1 · **Status:** phase 1 **server side LIVE** (2026-07-20 — rule
-engine, content states, queue/rules API, post report; console UI + app-side
-handling pending; plan: `docs/specs/MODERATION_P1_PLAN.md`) · **Owner:** Pulse
+**Version:** 1 · **Status:** phase 1 **LIVE in Pulse** (2026-07-20 — rule
+engine, content states, queue/rules API, post report, and the console UI on
+all three surfaces; app-side 422/202 handling pending; plan:
+`docs/specs/MODERATION_P1_PLAN.md`) · **Owner:** Pulse
 (`server/moderation.js`) · **Consumers:** the Howler app fork
 (`howler_app/lib/data/repositories/pulse_social_repository_impl.dart`) + the
 Pulse dashboard (Engage → Community) · **Extends:**
