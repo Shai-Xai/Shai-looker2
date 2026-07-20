@@ -945,7 +945,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
         unseen: !!viewer && last > seen,
       };
     }).filter(Boolean);
-    items.sort((a, b) => (b.joined - a.joined) || (b.hasTicket - a.hasTicket) || (a.lastPostAt < b.lastPostAt ? 1 : -1));
+    // Howler's house circles anchor the rail for everyone (right after the
+    // viewer's own joined circles) — the platform voice is always in reach.
+    const house = houseEntity();
+    items.sort((a, b) => (b.joined - a.joined)
+      || ((b.entityId === house) - (a.entityId === house))
+      || (b.hasTicket - a.hasTicket)
+      || (a.lastPostAt < b.lastPostAt ? 1 : -1));
     res.json({ contractVersion: 1, rail: items.slice(0, 20) });
   }));
 
