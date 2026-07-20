@@ -735,6 +735,7 @@ export const api = {
   socialAllComments: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/comments` : `/api/my/social/comments?entityId=${encodeURIComponent(entityId)}`).then(json),
   socialReplyComment: (scope, entityId, id, text) => fetch((scope === 'admin' ? `/api/admin/entities/${entityId}/social/comments/${id}` : `/api/my/social/comments/${id}`) + '/reply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? { text } : { text, entityId }) }).then(json),
   socialUpdateCommunity: (scope, entityId, id, patch) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/communities/${id}` : `/api/my/social/communities/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? patch : { ...patch, entityId }) }).then(json),
+  socialDeleteCommunity: (scope, entityId, id) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/communities/${id}` : `/api/my/social/communities/${id}?entityId=${entityId}`, { method: 'DELETE' }).then(json),
 
   // Event chat channels (Social+ replacement phase 2) — docs/specs/SOCIAL_CONTRACT.md §chat
   chatBase: (scope, entityId) => (scope === 'admin' ? `/api/admin/entities/${entityId}/social/chat` : '/api/my/social/chat'),
