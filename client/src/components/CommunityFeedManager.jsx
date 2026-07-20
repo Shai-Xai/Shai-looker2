@@ -79,6 +79,7 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
 
       {/* ── App posters: Howler accounts allowed to post from the app ── */}
       <AppPosters scope={scope} entityId={entityId} onError={(m) => setError(m)} />
+      <ShareStats scope={scope} entityId={entityId} />
 
       {/* ── Instagram import: one-click repost of existing IG content ── */}
       <InstagramImport scope={scope} entityId={entityId} communities={communities} onImported={load} onError={(m) => setError(m)} />
@@ -540,6 +541,40 @@ function HouseToggle({ entityId, onError }) {
 // Howler app accounts authorised to publish for this client straight from the
 // app (they see a composer in the app; posts go live in the brand's voice, or
 // under the display name set here). Find user ids in staging Active Admin.
+// Share-link attribution: who's driving clicks on shared posts (the organic
+// promoters) + which posts travel. Fed by ?s=<userId> on every shared /p/ link.
+function ShareStats({ scope, entityId }) {
+  const [stats, setStats] = useState(null);
+  useEffect(() => { api.socialShareStats(scope, entityId).then(setStats).catch(() => setStats(null)); }, [scope, entityId]);
+  if (!stats || (!stats.totalClicks && !stats.previewFetches)) return null;
+  return (
+    <section style={{ marginTop: 18 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 750 }}>📣 Share links</h3>
+      <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--muted)' }}>
+        {stats.totalClicks} click{stats.totalClicks === 1 ? '' : 's'} on shared posts
+        {stats.previewFetches ? ` · ${stats.previewFetches} chat-preview fetches (reach)` : ''}.
+      </p>
+      {stats.sharers.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {stats.sharers.map((s, i) => (
+            <div key={s.howlerUserId} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <span>{['🥇', '🥈', '🥉'][i] || '🔗'}</span>
+              <span style={{ fontWeight: 600 }}>{s.name || `User ${s.howlerUserId}`}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>#{s.howlerUserId}</span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700 }}>{s.clicks}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {stats.posts.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+          Top post: “{stats.posts[0].body || '(media post)'}” · {stats.posts[0].clicks} clicks
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AppPosters({ scope, entityId, onError }) {
   const [posters, setPosters] = useState(null);
   const [uid, setUid] = useState('');

@@ -372,6 +372,22 @@ The quick-door row of community circles (mockup frame 7).
   content) — iOS AVPlayer refuses to stream from servers without it, so
   Pulse-hosted (fallback-uploaded) videos need this to play at all.
 
+## 16c. Share page CTA + attribution (added 2026-07-20)
+
+- A post's CTA rides its `/p/:id` share page: `open_url:` destinations link
+  straight out; in-app destinations route to the store for the visitor's
+  device. The store buttons drop to the quiet style when the post's own CTA
+  leads. The page uses the real Howler mark (`/email-howler.png`, the same
+  asset branded emails use) for the watermark + footer.
+- Share attribution: the app appends `?s=<verified howlerUserId>` to every
+  shared link; every `/p/:id` hit is logged (`social_feed_share_clicks`) with
+  sharer + device. Link-unfurl crawlers (WhatsApp/Slack/…) are tagged
+  `preview-bot` and reported as REACH, not clicks. Rollup at
+  `GET .../social/share-stats` (both management surfaces): total clicks,
+  preview fetches, top sharers (id + best-known name) and top posts — the
+  "who are our organic promoters" leaderboard, shown in the Pulse Community
+  tab as 📣 Share links.
+
 ## 17. Whoami + poster suggestions (added 2026-07-20)
 
 - `GET /api/app/social/whoami` (JWT required) — echoes the VERIFIED identity
