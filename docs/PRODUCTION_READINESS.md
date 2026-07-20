@@ -42,17 +42,18 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 
 ## 🔴 Blockers — configuration (verify in Render, ~1 afternoon)
 
-- [ ] **Off-box backups**: set `BACKUP_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY`
-  (Cloudflare R2 works) in Render → Environment, run
-  `POST /api/admin/backups/run`, confirm `uploaded: true` in
-  `GET /api/admin/backups`. Until then the nightly snapshots live on the SAME
-  disk as the database — disk loss is total data loss. Click-by-click guide:
-  `docs/BACKUP_SETUP_RUNBOOK.md`. (Since 2026-07-20 this state is no longer
-  silent: every automatic local-only run raises an ops Slack alert, and
-  Admin → Backup shows a red warning card until off-box storage is verified.)
-- [ ] **Escrow `MASTER_KEY` + `SESSION_SECRET`** from Render into a password
-  manager. A restore into a fresh service regenerates `MASTER_KEY`, which
-  makes every encrypted integration secret in the backup undecryptable.
+- [x] **Off-box backups** — **Done 2026-07-20** (configured by Shai per
+  `docs/BACKUP_SETUP_RUNBOOK.md`): `BACKUP_S3_*` set in Render pointing at the
+  Cloudflare R2 bucket `pulse-backups`; nightly snapshots now upload off-box.
+  Ongoing guardrails (shipped same day): any automatic local-only run raises an
+  ops Slack alert, and Admin → Backup shows the live off-box status with a
+  Run-snapshot-now button — if the card ever turns red again, treat it as an
+  incident, not a nag.
+- [x] **Escrow `MASTER_KEY` + `SESSION_SECRET`** — **Done 2026-07-20:** both
+  values copied from Render into the company password manager (labelled
+  "Pulse production — needed for any restore"). A restore into a fresh service
+  regenerates `MASTER_KEY`, which makes every encrypted integration secret in
+  the backup undecryptable — the escrowed copy is what prevents that.
 - [ ] **Rehearse a restore once** (on staging): fetch a snapshot from R2,
   gunzip to `$DATA_DIR/howler.db` (remove `-wal`/`-shm`), boot with the OLD
   `MASTER_KEY`, log in. Write the timings into DEPLOY.md.
