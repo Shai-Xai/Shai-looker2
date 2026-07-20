@@ -233,8 +233,17 @@ Authorised **app posters** publish for a client without a Pulse login.
   community feed `community`) for the verified viewer.
 - Publish: `POST /api/app/social/posts {communityId, text, global?, images?}`
   (JWT required; 403 unless the id is in that entity's poster list). `images`
-  = inline base64 `[{data, mime}]` (app pre-scales to JPEG, same as comment
-  photos; HEIC refused). The post goes live immediately with `source:"app"`.
+  items are either inline base64 `{data, mime}` (app pre-scales to JPEG, same
+  as comment photos; HEIC refused; ≤10 MB) or an already-uploaded reference
+  `{url, kind, mime, posterUrl?}` from the direct-upload path below. The post
+  goes live immediately with `source:"app"`.
+- Direct-to-bucket upload (big videos): `POST /api/app/social/presign
+  {name, mime, communityId?}` (JWT; registered posters only, 403 otherwise) →
+  `{contractVersion, uploadUrl, method, headers, publicUrl, kind}` — the same
+  presigned-PUT contract as the Pulse composer (§4). The app PUTs the raw bytes
+  to `uploadUrl` with the returned `Content-Type`, then references `publicUrl`
+  in the post's `images`. 400 when `SOCIAL_S3_*` isn't configured — the app
+  falls back to inline base64 (and its ~9 MB cap) in that case.
 Fan/UGC posting later rides the same endpoint with a different authorisation
 policy (e.g. per-community "fans may post" setting) — the wire shape is ready.
 
