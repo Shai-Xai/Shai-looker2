@@ -444,6 +444,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // the video loads.
     const poster = String(m.posterUrl || '').trim();
     if (poster && (/^https?:\/\//.test(poster) || poster.startsWith('/api/app/social/media/'))) out.posterUrl = poster;
+    // Reframe focus (composer drag, IG-style): which part of the image
+    // survives when a feed card must crop. -1..1 per axis, 0 = centre.
+    const fx = Number(m.focusX), fy = Number(m.focusY);
+    if (Number.isFinite(fx) && fx !== 0) out.focusX = Math.max(-1, Math.min(1, fx));
+    if (Number.isFinite(fy) && fy !== 0) out.focusY = Math.max(-1, Math.min(1, fy));
     return out;
   }
   function validPostInput(b, entityId, { forUpdate = false } = {}) {
@@ -1134,7 +1139,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       // reference it by url instead of re-uploading through Pulse.
       if (it.url && !it.data) return validMediaItem(it);
       const saved = saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String(it.mime || 'image/jpeg'), data: it.data });
-      return { id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime };
+      // validMediaItem re-validates the saved url and carries the reframe
+      // focus / poster metadata the composer attached to the inline item.
+      return validMediaItem({ ...it, id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime, data: undefined });
     });
     const text = String(body.text || '').trim().slice(0, MAX_BODY);
     if (!text && media.length === 0) throw new HttpError(400, 'Write something or add a photo first');
