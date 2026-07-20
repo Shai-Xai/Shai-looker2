@@ -932,6 +932,8 @@ export const api = {
   deleteCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(json),
 
   // Backup / restore
+  backupStatus: () => fetch('/api/admin/backups').then(json),
+  runBackupNow: () => fetch('/api/admin/backups/run', { method: 'POST' }).then(json),
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
   importData: (data) => fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json),
 

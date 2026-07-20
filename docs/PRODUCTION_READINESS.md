@@ -46,8 +46,10 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
   (Cloudflare R2 works) in Render → Environment, run
   `POST /api/admin/backups/run`, confirm `uploaded: true` in
   `GET /api/admin/backups`. Until then the nightly snapshots live on the SAME
-  disk as the database — disk loss is total data loss, and the run still
-  reports "ok".
+  disk as the database — disk loss is total data loss. Click-by-click guide:
+  `docs/BACKUP_SETUP_RUNBOOK.md`. (Since 2026-07-20 this state is no longer
+  silent: every automatic local-only run raises an ops Slack alert, and
+  Admin → Backup shows a red warning card until off-box storage is verified.)
 - [ ] **Escrow `MASTER_KEY` + `SESSION_SECRET`** from Render into a password
   manager. A restore into a fresh service regenerates `MASTER_KEY`, which
   makes every encrypted integration secret in the backup undecryptable.
