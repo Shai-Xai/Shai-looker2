@@ -361,3 +361,16 @@ The quick-door row of community circles (mockup frame 7).
   watermark to the community's `brandColor` (sanitised to a hex literal before
   it reaches the inline `<style>`), falling back to Howler red `#EC0B62`.
 - Presentation only (non-secret), so it rides to the browser/app freely.
+
+## 17. Whoami + poster suggestions (added 2026-07-20)
+
+- `GET /api/app/social/whoami` (JWT required) — echoes the VERIFIED identity
+  behind the token (`{ id, name }`): the exact id poster/membership checks
+  use. The app's debug feed screen shows it via a 👤 badge button so a tester
+  can register themselves as an app poster without an Active Admin id hunt.
+- Poster suggestions — "recently active app users" (id + best-known name from
+  chat messages/members, feed comments and community joins), newest first:
+  `GET .../social/posters-suggestions` on both management surfaces. Admins see
+  platform-wide activity (the house entity has no fans of its own); clients
+  only see users active on THEIR OWN communities/chats. The App posters UI
+  renders them as one-click "＋ name #id" chips.

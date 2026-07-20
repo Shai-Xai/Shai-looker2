@@ -507,7 +507,9 @@ function AppPosters({ scope, entityId, onError }) {
   const [posters, setPosters] = useState(null);
   const [uid, setUid] = useState('');
   const [name, setName] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
   useEffect(() => { api.socialPosters(scope, entityId).then((d) => setPosters(d.posters || [])).catch(() => setPosters([])); }, [scope, entityId]);
+  useEffect(() => { api.socialPosterSuggestions(scope, entityId).then((d) => setSuggestions(d.suggestions || [])).catch(() => setSuggestions([])); }, [scope, entityId]);
   const run = (p) => p.then((d) => setPosters(d.posters || [])).catch((e) => onError(e.message || 'That didn’t save'));
   return (
     <section style={{ marginTop: 18 }}>
@@ -524,6 +526,28 @@ function AppPosters({ scope, entityId, onError }) {
           onClick={() => { run(api.socialAddPoster(scope, entityId, { howlerUserId: uid.trim(), name: name.trim() })); setUid(''); setName(''); }}
         >＋ Allow</button>
       </div>
+      {(() => {
+        const existing = new Set((posters || []).map((p) => String(p.howlerUserId)));
+        const fresh = suggestions.filter((s) => !existing.has(String(s.howlerUserId)));
+        if (!fresh.length) return null;
+        return (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 5 }}>
+              Recently active in the app — click to allow (no need to hunt user ids):
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {fresh.slice(0, 10).map((s) => (
+                <button
+                  key={s.howlerUserId}
+                  style={{ fontSize: 12 }}
+                  title={`Last seen ${s.lastSeenAt || ''}`}
+                  onClick={() => run(api.socialAddPoster(scope, entityId, { howlerUserId: s.howlerUserId, name: s.name }))}
+                >＋ {s.name || `User ${s.howlerUserId}`} <span style={{ color: 'var(--muted)' }}>#{s.howlerUserId}</span></button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {posters === null ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>Loading…</p> : posters.length === 0
         ? <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>Nobody yet — posting stays Pulse-only until you allow someone.</p>
         : (
