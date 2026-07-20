@@ -13,7 +13,9 @@ Dev Fork - Shai app build, verified by Shai); v1 adds Howler-JWT auth · **Owner
 > the feature graduates.
 
 This is the wire contract for the Howler-native social layer that replaces
-Social+ (see `docs/SOCIAL_PLATFORM_INVESTIGATION.md` for the full plan). Pulse
+Social+ (see `docs/SOCIAL_PLATFORM_INVESTIGATION.md` for the full plan).
+Moderation (banned lists, held/blocked states, review queue) is specified
+separately in **`docs/specs/MODERATION_CONTRACT.md`** — see §18. Pulse
 owns communities and posts; the app reads them over the public app-facing API.
 v0 is deliberately small: organiser-authored posts, image/video media by URL,
 explicit joins. Reactions, comments, ticket-holder sync, chat channels and
@@ -436,3 +438,19 @@ The quick-door row of community circles (mockup frame 7).
   platform-wide activity (the house entity has no fans of its own); clients
   only see users active on THEIR OWN communities/chats. The App posters UI
   renders them as one-click "＋ name #id" chips.
+
+## 18. Moderation (spec approved 2026-07-20 — not yet implemented)
+
+All fan-generated content on this surface (app posts, comments, chat
+messages, emoji reactions, fan-group names) gets server-side moderation at
+write time: banned lists (platform + per-client), exact hits **blocked**
+(`422 { error: "content_blocked", moderation: {...} }`), fuzzy hits **held
+for review** (`202` + `moderation: { status: "held" }`, author-only until a
+moderator approves), a Pulse review queue fed by rule holds and user reports
+(including the new `POST /api/app/social/posts/:id/report`), and a
+`moderation_status` filter on every read. Full wire contract:
+**`docs/specs/MODERATION_CONTRACT.md`** · phase-1 build plan:
+`docs/specs/MODERATION_P1_PLAN.md` · scope + decisions: the app repo's
+`docs/ai-social-moderation-scope.md`. Existing report endpoints (§3) and the
+chat `reported` flag keep their shapes and feed the same queue. Every
+moderation field is additive — `contractVersion` unchanged.
