@@ -350,6 +350,11 @@ The quick-door row of community circles (mockup frame 7).
   resolved server-side (platform ← client ← event(suite)) via the mailer's
   `resolveBranding`. Unset tiers inherit the one below; the platform default is
   returned when a client hasn't set its own.
+- Communities carry an explicit `suite_id`, so their (and their posts') colours
+  pick up the per-event override directly. Chat channels store the Howler
+  `event_id` instead, so they resolve the event's suite by matching
+  `suites.howler_event_id` — giving chat the SAME per-event branding as the
+  feed (blank/unmatched → the client-level colour).
 - Clients tint their accents to `brandColor` (feed-card avatar rings / CTAs,
   chat chips + bubbles, story rings) and fall back to the app brand when it's
   null/unusable. The `/p/:id` share page tints its buttons, avatar ring and

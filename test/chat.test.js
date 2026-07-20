@@ -14,6 +14,9 @@ const flags = require('../server/flags');
 const rateLimit = require('../server/ratelimit');
 
 flags.init(db);
+// Wire the mailer so branding (client + per-event suite override) resolves
+// against the test db — chat channels expose the resolved brandColor.
+require('../server/mailer').init({ db });
 const setFlag = (entityId, flag, value) => db.db
   .prepare('INSERT INTO feature_flags (entity_id, flag, value, updated_by, updated_at) VALUES (?,?,?,\'test\',?) ON CONFLICT(entity_id, flag) DO UPDATE SET value=excluded.value')
   .run(entityId, flag, value, new Date().toISOString());
@@ -318,4 +321,16 @@ test('my-channels, member list, group rename (chat-tab surface)', async () => {
   assert.equal(renamed.body.name, 'New name');
   assert.equal((await call2('POST /api/app/social/chat/channels/:id/rename', { token: 'tok-662076', params: { id: group.id }, body: { name: 'Nope' } })).code, 403);
   assert.equal((await call2('POST /api/app/social/chat/channels/:id/rename', { token: 'tok-661779', params: { id: state.main.id }, body: { name: 'Nope' } })).code, 404);
+});
+
+test('chat channels tint to the per-EVENT Pulse brand override', async () => {
+  // Link a Pulse suite to this Howler event and give it a distinct brand colour.
+  // resolveBranding layers platform ← client ← event(suite); a channel finds its
+  // suite by the event's howler_event_id, so the event override must win.
+  const suite = db.createSuite({ entityId: entity.id, name: 'Chat Event Suite' });
+  db.updateSuite(suite.id, { howlerEventId: EVENT });
+  db.setSuiteMailBranding(suite.id, { brandColor: '#0A7E42' });
+  const list = await call('GET /api/app/social/chat/channels', { token: 'tok-661779', query: { eventId: EVENT } });
+  const main = list.body.channels.find((c) => c.name === 'Main');
+  assert.equal(main.brandColor, '#0A7E42'); // per-event override, not the client/platform default
 });
