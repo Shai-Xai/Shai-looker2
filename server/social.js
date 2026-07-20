@@ -253,6 +253,20 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     );
     CREATE INDEX IF NOT EXISTS idx_sfsc_entity ON social_feed_share_clicks(entity_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_sfsc_post ON social_feed_share_clicks(post_id);
+
+    -- Views & impressions, one counter row per (post, viewer, kind, day):
+    --   delivered → the post rode a feed response (logged server-side)
+    --   seen      → the app reported the card actually on screen
+    --   view      → a video played inline / the reel was opened
+    -- howler_user_id '' = anonymous reader (counts, but not unique reach).
+    CREATE TABLE IF NOT EXISTS social_feed_impressions (
+      post_id        TEXT NOT NULL,
+      howler_user_id TEXT NOT NULL DEFAULT '',
+      kind           TEXT NOT NULL DEFAULT 'delivered',
+      day            TEXT NOT NULL,
+      n              INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (post_id, howler_user_id, kind, day)
+    );
   `);
 
   const enabled = () => db.getSetting('social_feed_enabled', '1') !== '0'; // global kill switch
@@ -536,7 +550,11 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const rows = status
       ? sql.prepare('SELECT * FROM social_feed_posts WHERE entity_id=? AND status=? ORDER BY COALESCE(NULLIF(published_at, \'\'), created_at) DESC').all(entityId, status)
       : sql.prepare('SELECT * FROM social_feed_posts WHERE entity_id=? ORDER BY COALESCE(NULLIF(published_at, \'\'), created_at) DESC').all(entityId);
-    return rows.map((r) => postRow(r, getCommunity(r.community_id)));
+    const stats = postStats(entityId);
+    return rows.map((r) => ({
+      ...postRow(r, getCommunity(r.community_id)),
+      stats: stats[r.id] || { delivered: 0, reach: 0, seen: 0, views: 0 },
+    }));
   }
   function createPost(entityId, body, user) {
     const v = validPostInput(body, entityId);
@@ -841,6 +859,31 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
 
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.
+  // ── views & impressions ──
+  function logImpressions(postIds, viewerId, kind) {
+    if (!postIds.length) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const stmt = sql.prepare(`INSERT INTO social_feed_impressions (post_id, howler_user_id, kind, day, n) VALUES (?,?,?,?,1)
+      ON CONFLICT(post_id, howler_user_id, kind, day) DO UPDATE SET n=n+1`);
+    for (const id of postIds) stmt.run(String(id), String(viewerId || ''), kind, day);
+  }
+  // Per-post rollup for the management surfaces: delivered count + unique
+  // reach (signed-in viewers), on-screen count, video views.
+  function postStats(entityId) {
+    const rows = sql.prepare(`SELECT i.post_id, i.kind, SUM(i.n) n,
+        COUNT(DISTINCT CASE WHEN i.howler_user_id!='' THEN i.howler_user_id END) uniq
+      FROM social_feed_impressions i JOIN social_feed_posts p ON p.id=i.post_id
+      WHERE p.entity_id=? GROUP BY i.post_id, i.kind`).all(entityId);
+    const out = {};
+    for (const r of rows) {
+      const s = out[r.post_id] ||= { delivered: 0, reach: 0, seen: 0, views: 0 };
+      if (r.kind === 'delivered') { s.delivered = r.n; s.reach = r.uniq; }
+      else if (r.kind === 'seen') s.seen = r.n;
+      else if (r.kind === 'view') s.views = r.n;
+    }
+    return out;
+  }
+
   app.get('/api/app/social/feed', readLimit, asyncHandler(async (req, res) => {
     if (!enabled()) return gone(res);
     const viewer = await optionalAppUser(req);
@@ -857,6 +900,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       pinned: stripRows.pinned.filter(visible).map(shape),
       myPins: stripRows.myPins.filter(visible).map(shape),
     };
+    logImpressions(posts.map((p) => p.id), viewer?.id, 'delivered');
     res.json({ contractVersion: 1, posts, ...strips, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
   }));
 
@@ -918,7 +962,21 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       memberCount: memberCount(c.id),
       canPost: viewer ? !!posterRow(c.entity_id, viewer.id) : null,
     });
+    logImpressions(posts.map((p) => p.id), viewer?.id, 'delivered');
     res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: rows.length === page.limit ? rows[rows.length - 1].published_at : null });
+  }));
+
+  // Tier-2 impressions from the app, batched + best-effort: which cards were
+  // actually SEEN on screen and which videos were watched. Anonymous ok —
+  // anonymous counts add to totals but not unique reach.
+  app.post('/api/app/social/impressions', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const viewer = await optionalAppUser(req);
+    const b = req.body || {};
+    const ids = (v) => (Array.isArray(v) ? v.slice(0, 100).map((x) => String(x)) : []);
+    logImpressions(ids(b.seen), viewer?.id, 'seen');
+    logImpressions(ids(b.views), viewer?.id, 'view');
+    res.json({ ok: true });
   }));
 
   // ── Story rail — the quick-door row of community circles (mockup frame 7).

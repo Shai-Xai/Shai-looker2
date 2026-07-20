@@ -332,6 +332,19 @@ The quick-door row of community circles (mockup frame 7).
 - In the app the rail rides the feed tab's existing story row (StoryTarget
   mapping); tapping an event circle opens `/event/:id/feed`.
 
+## 13b. Views & impressions (added 2026-07-20)
+
+- Server logs a **delivered** impression for every post a feed response
+  returns (global + community feeds), keyed per viewer per day — works for
+  every app build with no client change.
+- `POST /api/app/social/impressions {seen?: [postIds], views?: [postIds]}`
+  (optional JWT, batched, best-effort, ≤100 ids per list) — the app reports
+  cards actually **seen** on screen and videos **view**ed (inline play /
+  reel open). Anonymous reports count toward totals but not unique reach.
+- Management surfaces: each post in `GET .../social/posts` carries
+  `stats: {delivered, reach, seen, views}` (reach = unique signed-in
+  viewers delivered). Shown on the Pulse post card (👁 line).
+
 ## 14. Shareable post links (added 2026-07-19)
 
 - `GET /api/app/social/posts/:id` — a single published post as JSON (same

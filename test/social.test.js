@@ -803,6 +803,38 @@ test('postable: lists communities the signed-in poster may post to', async () =>
   assert.equal((await call('GET /api/app/social/postable', {})).code, 401);
 });
 
+test('views & impressions: feed reads log delivered; app reports seen/views; stats on management posts', async () => {
+  // Reading the global feed as a verified user logs a DELIVERED impression
+  // for every post it returns.
+  const feed = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.ok(feed.body.posts.length > 0);
+  // Pick a delivered post that belongs to the test entity, so the admin
+  // listing below can see its stats.
+  const mine = new Set((await call('GET /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id },
+  })).body.posts.map((p) => p.id));
+  const postId = feed.body.posts.map((p) => p.id).find((id) => mine.has(id));
+  assert.ok(postId, 'a test-entity post rode the global feed');
+
+  // The app reports tier-2 signals: card actually on screen + video watched.
+  assert.equal((await call('POST /api/app/social/impressions', {
+    token: 'tok-661779', body: { seen: [postId], views: [postId] },
+  })).body.ok, true);
+  // Anonymous reports count too (totals, not unique reach).
+  await call('POST /api/app/social/impressions', { body: { seen: [postId] } });
+
+  // Management list rolls it up per post.
+  const listed = await call('GET /api/admin/entities/:entityId/social/posts', {
+    user: admin, params: { entityId: entity.id },
+  });
+  const withStats = listed.body.posts.find((p) => p.id === postId);
+  assert.ok(withStats, 'reported post belongs to the test entity');
+  assert.ok(withStats.stats.delivered >= 1, 'feed read logged delivered');
+  assert.ok(withStats.stats.reach >= 1, 'signed-in reader counts as unique reach');
+  assert.equal(withStats.stats.seen, 2, 'signed-in + anonymous seen reports');
+  assert.equal(withStats.stats.views, 1);
+});
+
 test('communities: rename via PUT, delete cascades, children block parent delete', async () => {
   const e2 = makeEntity('Del Test', 'Del Test');
   setFlagFor(e2.id);

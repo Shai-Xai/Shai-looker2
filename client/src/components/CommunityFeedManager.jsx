@@ -114,7 +114,14 @@ export default function CommunityFeedManager({ entityId, scope = 'my' }) {
                   {p.audience && <span style={pill('rgba(122,62,201,0.13)', '#7a3ec9')} title="Only matching ticket holders see this post in the app">{p.audience.type === 'holders' ? '🎟 ticket holders' : `🎯 ${(p.audience.ticketTypes || []).join(', ')}`}</span>}
                   <span style={pill(p.status === 'published' ? 'rgba(29,138,59,0.13)' : 'rgba(255,159,10,0.16)', p.status === 'published' ? '#1d8a3b' : '#b25000')}>{p.status}</span>
                 </p>
-                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>{p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}</p>
+                <p style={{ margin: 0, fontSize: 11.5, color: 'var(--muted)' }}>
+                  {p.stats && (p.stats.delivered > 0 || p.stats.seen > 0 || p.stats.views > 0) && (
+                    <span style={{ marginRight: 8 }} title={`Delivered to feeds ${p.stats.delivered}× (${p.stats.reach} unique signed-in readers) · on screen ${p.stats.seen}× · video views ${p.stats.views}`}>
+                      👁 {p.stats.reach} reach · {p.stats.seen} seen{p.stats.views > 0 ? ` · ▶ ${p.stats.views}` : ''}
+                    </span>
+                  )}
+                  {p.reactionCount > 0 && <span style={{ marginRight: 8 }}>❤️ {p.reactionCount}</span>}{fmt(p.publishedAt || p.createdAt)}
+                </p>
               </div>
               {p.body && <p style={{ margin: '8px 0 0', fontSize: 14, whiteSpace: 'pre-wrap' }}>{p.body}</p>}
               {p.ctaLabel && <p style={{ margin: '8px 0 0' }}><span style={{ display: 'inline-block', fontSize: 12.5, fontWeight: 700, background: 'var(--brand)', color: '#fff', borderRadius: 980, padding: '5px 14px' }}>{p.ctaLabel}</span> <span style={{ fontSize: 11, color: 'var(--muted)' }}>→ {p.ctaDestination}</span></p>}
