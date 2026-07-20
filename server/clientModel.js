@@ -175,6 +175,9 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
       return {
         id: su.id, name: su.name, icon: su.icon || '', entityId: su.entityId,
         entityName: ent?.name || '', entityLogo: ent?.logo || '',
+        // Non-secret event link — powers "pick an event" dropdowns (social CTAs,
+        // chat channels) instead of bare event-ID fields.
+        howlerEventId: su.howlerEventId || '',
         setCount: su.setIds.length, dashboardCount: db.dashboardsInSuite(su.id).length,
         // One-tap LIVE button target — only surfaced if it's still a dashboard in
         // the suite (a deleted/removed one silently drops the button).
