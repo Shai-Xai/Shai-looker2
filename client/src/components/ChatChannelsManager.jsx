@@ -9,7 +9,7 @@ const ACCESS_LABEL = { public: '🌍 Public', segment: '🎟 Segment-gated', man
 const CTA_SCREENS = [
   ['explore_tickets', '🎟 Tickets'], ['explore', '📄 Event page'], ['explore_lineup', '🎤 Line-up'],
   ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
-  ['open_url', '🔗 Custom link'],
+  ['open_url', '🔗 External link'],
 ];
 
 // Shared CTA sub-form (same vocabulary the feed composer uses).
@@ -58,7 +58,9 @@ export default function ChatChannelsManager({ entityId, scope, eventIds = [] }) 
       {!eventId ? <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>Enter the Howler event ID to manage its chat channels.</p> : channels === null ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
         <>
           {showCreate && <CreateChannel scope={scope} entityId={entityId} eventId={eventId} onDone={() => { setShowCreate(false); load(); }} onError={setError} />}
-          {official.length > 0 && <Broadcast scope={scope} entityId={entityId} eventId={eventId} onDone={load} onError={setError} />}
+          {/* Composer first — sending a message is the tab's main job, same
+              pattern as the Posts tab. Target one channel or broadcast to all. */}
+          {official.length > 0 && <Broadcast scope={scope} entityId={entityId} eventId={eventId} channels={official} onDone={load} onError={setError} />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
             {official.map((c) => <ChannelRow key={c.id} scope={scope} entityId={entityId} channel={c} eventId={eventId} onChanged={load} onError={setError} act={act} />)}
             {official.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>No channels yet — start with 📣 Main, then add Transport, Line-up…</p>}
@@ -112,20 +114,30 @@ function CreateChannel({ scope, entityId, eventId, onDone, onError }) {
   );
 }
 
-function Broadcast({ scope, entityId, eventId, onDone, onError }) {
+// The tab's lead composer: message ONE channel as the organiser, or broadcast
+// to every channel at once ("all"). Pin/push ride broadcasts only.
+function Broadcast({ scope, entityId, eventId, channels = [], onDone, onError }) {
+  const [target, setTarget] = useState('all');
   const [text, setText] = useState('');
   const [pin, setPin] = useState(true);
   const [push, setPush] = useState(true);
   const [cta, setCta] = useState(emptyCta);
-  const send = () => api.chatBroadcast(scope, entityId, { eventId, text, pin, push, ...buildCta(cta, eventId) })
-    .then(() => { setText(''); setCta(emptyCta); onDone(); }).catch((e) => onError(e.message || 'Broadcast failed'));
+  const chan = channels.find((c) => c.id === target);
+  const send = () => (target === 'all'
+    ? api.chatBroadcast(scope, entityId, { eventId, text, pin, push, ...buildCta(cta, eventId) })
+    : api.chatSendMessage(scope, entityId, target, { text, ...buildCta(cta, eventId) }))
+    .then(() => { setText(''); setCta(emptyCta); onDone(); }).catch((e) => onError(e.message || 'Send failed'));
   return (
     <div style={{ ...card, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderStyle: 'dashed' }}>
-      <strong style={{ fontSize: 13 }}>📣 Broadcast</strong>
-      <input style={{ ...input, flex: 1, minWidth: 200 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Lands in every channel at once…" />
+      <strong style={{ fontSize: 13 }}>📣 Message</strong>
+      <select style={{ ...input, width: 'auto', maxWidth: 180 }} value={target} onChange={(e) => setTarget(e.target.value)}>
+        <option value="all">📢 Every channel</option>
+        {channels.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+      </select>
+      <input style={{ ...input, flex: 1, minWidth: 180 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={target === 'all' ? 'Lands in every channel at once…' : `Message #${chan?.name || 'channel'} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
       <CtaFields cta={cta} setCta={setCta} eventId={eventId} />
-      <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 📌 pin</label>
-      <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }} title="Recorded per message — delivery activates once the Firebase key is configured"><input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} /> 🔔 push</label>
+      {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }}><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 📌 pin</label>}
+      {target === 'all' && <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 5, alignItems: 'center' }} title="Recorded per message — delivery activates once the Firebase key is configured"><input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} /> 🔔 push</label>}
       <button style={{ ...primary, opacity: text.trim() ? 1 : 0.5 }} disabled={!text.trim()} onClick={send}>Send</button>
     </div>
   );

@@ -26,6 +26,7 @@ const SplitPage = lazy(() => import('./pages/SplitPage.jsx'));
 const EditorPage = lazy(() => import('./pages/EditorPage.jsx'));
 const ClonePage = lazy(() => import('./pages/ClonePage.jsx'));
 const EngagePage = lazy(() => import('./pages/EngagePage.jsx'));
+const EngageAppPage = lazy(() => import('./pages/EngageAppPage.jsx'));
 const SettlementViewPage = lazy(() => import('./pages/SettlementViewPage.jsx'));
 const DocumentViewPage = lazy(() => import('./pages/DocumentViewPage.jsx'));
 const DigestsPage = lazy(() => import('./pages/DigestsPage.jsx'));
@@ -327,6 +328,10 @@ function Shell() {
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />
+                <Route path="/engage/app" element={<EngageAppPage />} />
+                <Route path="/engage/app/:tab" element={<EngageAppPage />} />
+                {/* Community moved out of the Engage tab row into Engage → App. */}
+                <Route path="/engage/community" element={<RedirectTo to="/engage/app/posts" />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
@@ -359,6 +364,10 @@ function Shell() {
                 <Route path="/engage" element={<EngagePage />} />
                 <Route path="/ask" element={<InventiveAskPage />} />
                 <Route path="/event-ops" element={<EventOpsPage />} />
+                <Route path="/engage/app" element={<EngageAppPage />} />
+                <Route path="/engage/app/:tab" element={<EngageAppPage />} />
+                {/* Community moved out of the Engage tab row into Engage → App. */}
+                <Route path="/engage/community" element={<RedirectTo to="/engage/app/posts" />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />

@@ -5,7 +5,8 @@ import { useMyFlags, flagOn } from '../lib/flags.js';
 import { AppAnalyticsPanel } from '../components/AppAnalytics.jsx';
 import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
 
-// 📲 App — how the client's events perform inside the Howler consumer app.
+// 📲 App Analytics — how the client's events perform inside the Howler consumer
+// app (the read side; managing the in-app presence lives in Engage → App).
 // Three tabs: Analytics (PostHog engagement — views, CTA taps, funnel, revenue),
 // Audience (WHO the app users are — audience match, super fans, the user
 // directory), and Community (Social+ — linked in-app communities & chats; flag
@@ -22,7 +23,7 @@ export default function AppAnalyticsPage() {
   return (
     <div style={{ maxWidth: 880, margin: '0 auto', padding: isMobile ? '16px 14px 40px' : '24px 24px 56px', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
-        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 800, margin: 0, flex: 1 }}>App</h1>
+        <h1 style={{ fontSize: isMobile ? 22 : 26, fontWeight: 800, margin: 0, flex: 1 }}>App Analytics</h1>
       </div>
       <SubTabs
         tabs={[
