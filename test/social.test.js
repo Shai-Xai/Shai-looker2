@@ -754,3 +754,20 @@ test('community avatar + device-aware share buttons + watermark', async () => {
   // Share page tints its accent to the organiser's brand colour.
   assert.ok(iosHtml.includes(comm.brandColor), 'share page uses the brand accent');
 });
+
+test('whoami + poster suggestions (no Active Admin id hunt)', async () => {
+  // whoami echoes the VERIFIED identity behind the JWT; 401 signed out.
+  const me = await call('GET /api/app/social/whoami', { token: 'tok-661779' });
+  assert.equal(me.code, 200);
+  assert.equal(me.body.id, '661779');
+  assert.equal((await call('GET /api/app/social/whoami', {})).code, 401);
+
+  // Admin suggestions list recently active app users platform-wide — fans who
+  // joined communities earlier in this file show up with their ids.
+  const sug = await call('GET /api/admin/entities/:entityId/social/posters-suggestions', {
+    user: admin, params: { entityId: entity.id },
+  });
+  assert.equal(sug.code, 200);
+  const ids = sug.body.suggestions.map((s) => s.howlerUserId);
+  assert.ok(ids.includes('661779'), 'active fan appears as a poster suggestion');
+});

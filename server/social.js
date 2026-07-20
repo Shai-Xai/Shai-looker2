@@ -556,6 +556,29 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     sql.prepare('DELETE FROM social_feed_posters WHERE entity_id=? AND howler_user_id=?').run(entityId, String(howlerUserId));
     return { posters: listPosters(entityId) };
   }
+  // Recently ACTIVE app users (id + best-known name) so an admin can pick a
+  // poster without hunting user ids in Active Admin. Sources: chat messages &
+  // members, feed comments and community joins already store howler_user_id.
+  // scopeEntityId limits to one client's activity (the /my self-service
+  // surface must not see other clients' users); admins see platform-wide.
+  function posterSuggestions(scopeEntityId = null) {
+    const hasTable = (t) => !!sql.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+    const a = scopeEntityId ? [scopeEntityId] : [];
+    const parts = [];
+    // Feed sources always exist (owned by this module).
+    parts.push(`SELECT howler_user_id, author_name name, created_at at FROM social_feed_comments ${scopeEntityId ? 'WHERE entity_id=?' : ''}`);
+    parts.push(`SELECT m.howler_user_id, '' name, m.created_at at FROM social_feed_members m
+      JOIN social_feed_communities c ON c.id=m.community_id ${scopeEntityId ? 'WHERE c.entity_id=?' : ''}`);
+    // Chat sources exist only once server/chat.js has mounted.
+    if (hasTable('social_chat_messages')) parts.push(`SELECT howler_user_id, author_name name, created_at at FROM social_chat_messages ${scopeEntityId ? 'WHERE entity_id=?' : ''}`);
+    if (hasTable('social_chat_members') && hasTable('social_chat_channels')) parts.push(`SELECT m.howler_user_id, m.member_name name, m.created_at at FROM social_chat_members m
+      JOIN social_chat_channels c ON c.id=m.channel_id ${scopeEntityId ? 'WHERE c.entity_id=?' : ''}`);
+    const rows = sql.prepare(`
+      SELECT howler_user_id id, MAX(name) name, MAX(at) lastSeenAt FROM (${parts.join(' UNION ALL ')})
+      GROUP BY howler_user_id ORDER BY lastSeenAt DESC LIMIT 25`)
+      .all(...Array(parts.length).fill(a).flat());
+    return rows.map((r) => ({ howlerUserId: String(r.id), name: r.name || '', lastSeenAt: r.lastSeenAt }));
+  }
 
   // Organiser pin/unpin: floats the post to the top of its feeds for everyone.
   function pinPost(entityId, id, pinned) {
@@ -647,6 +670,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${A}/posters`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ posters: listPosters(req.params.entityId) })));
   app.post(`${A}/posters`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(addPoster(req.params.entityId, req.body))));
   app.delete(`${A}/posters/:userId`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(removePoster(req.params.entityId, req.params.userId))));
+  // Admins see platform-wide activity (the house entity has no fans of its own yet).
+  app.get(`${A}/posters-suggestions`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ suggestions: posterSuggestions() })));
   app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -671,6 +696,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${M}/posters`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ posters: listPosters(eid(req)) })));
   app.post(`${M}/posters`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(addPoster(eid(req), req.body))));
   app.delete(`${M}/posters/:userId`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(removePoster(eid(req), req.params.userId))));
+  // Clients only see users active on THEIR OWN communities/chats (no cross-client leak).
+  app.get(`${M}/posters-suggestions`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ suggestions: posterSuggestions(eid(req)) })));
   app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
@@ -712,6 +739,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       : [];
     return { pinned, myPins };
   }
+
+  // Who am I — echoes the VERIFIED identity behind the presented Howler JWT
+  // (the exact id the posters/membership checks use). Lets a tester read their
+  // own user id in-app instead of hunting it in Active Admin.
+  app.get('/api/app/social/whoami', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    res.json({ contractVersion: 1, id: String(user.id), name: user.name || '' });
+  }));
 
   // The Howler-wide feed: every published post marked global, newest first,
   // regardless of home community — but only from flag-on entities.

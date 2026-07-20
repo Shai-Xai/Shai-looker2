@@ -722,6 +722,7 @@ export const api = {
   socialPosters: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters` : `/api/my/social/posters?entityId=${encodeURIComponent(entityId)}`).then(json),
   socialAddPoster: (scope, entityId, body) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters` : `/api/my/social/posters?entityId=${encodeURIComponent(entityId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(scope === 'admin' ? body : { ...body, entityId }) }).then(json),
   socialRemovePoster: (scope, entityId, userId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters/${userId}` : `/api/my/social/posters/${userId}?entityId=${encodeURIComponent(entityId)}`, { method: 'DELETE' }).then(json),
+  socialPosterSuggestions: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/posters-suggestions` : `/api/my/social/posters-suggestions?entityId=${encodeURIComponent(entityId)}`).then(json),
   socialGetHouse: () => fetch('/api/admin/social/house').then(json),
   socialSetHouse: (entityId) => fetch('/api/admin/social/house', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entityId }) }).then(json),
   socialInstagramMedia: (scope, entityId) => fetch(scope === 'admin' ? `/api/admin/entities/${entityId}/social/instagram/media` : `/api/my/social/instagram/media?entityId=${encodeURIComponent(entityId)}`).then(json),
