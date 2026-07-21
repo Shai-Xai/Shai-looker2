@@ -15,7 +15,7 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
-const { asyncHandler, errorMiddleware, serverError, allowInlineScripts } = require('./http'); const mailer = require('./mailer');
+const { asyncHandler, errorMiddleware, serverError, allowInlineScripts, securityHeaders } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
 const roles = require('./roles'); // role catalog — required early so early mounts (team.js) can use it
@@ -58,24 +58,13 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Security headers (dependency-free, helmet essentials): frame-ancestors 'self' — cross-origin framing (clickjacking) stays blocked,
-// SELF-framing allowed for the admin /split view's two same-origin panes. Plus nosniff, Referrer-Policy, HSTS in prod.
-// CSP: script-src is the XSS backstop — a stored-XSS slip (message body, ticket,
-// inbound email HTML) can no longer execute injected inline <script> or pull one
-// from an attacker host; React escaping stops being the ONLY line of defence.
-// apis.google.com + gstatic are the Google Drive picker (DriveSourcesCard).
-// No default-src on purpose: images/styles/fonts/connect stay open (data-URL
-// logos, inline styles and the ECharts canvas are everywhere). The few
-// server-rendered pages with their own inline <script> (digest feedback, docs)
-// override this header per-response.
-app.use((req, res, next) => {
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'SAMEORIGIN');
-  res.set('Content-Security-Policy', "script-src 'self' https://apis.google.com https://www.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'self'");
-  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  next();
-});
+// Request ids + structured access log (JSON lines) + browser-crash intake —
+// the diagnosability spine -> server/reqlog.js. First so every request
+// (even one that fails in a later middleware) carries an id.
+const reqlog = require('./reqlog');
+app.use(reqlog.requestId);
+app.use(reqlog.accessLog);
+app.use(securityHeaders); // dependency-free helmet essentials -> server/http.js
 // Global JSON parser at a modest limit, EXCEPT routes that take large bodies
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
@@ -103,6 +92,7 @@ require('./audit').mount(app, { db });
 // Internal ops alerts (Howler Slack) — background failures raise a human instead
 // of dying in the log stream. Disposable: remove these lines + server/ops.js.
 const ops = require('./ops'); ops.init({ db }); ops.mount(app, { auth });
+reqlog.mount(app, { ops }); // POST /api/client-error -> structured log + throttled ops alert
 // Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
 require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
