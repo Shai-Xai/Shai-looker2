@@ -79,10 +79,16 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
   .pmark.sel .bub { outline: 3px solid #ff385c; outline-offset: 2px; }
   .pmark .lbl { transition: opacity .15s ease; }
   .pins-tiny .pmark .lbl { opacity: 0; } /* far out: bubbles only, no label clutter */
-  .home-fab { position: absolute; right: 10px; bottom: 150px; z-index: 20; width: 40px; height: 40px; border-radius: 50%;
+  /* Home + 2D/3D live bottom-LEFT — the bottom-right column belongs to the
+     Mapbox controls (zoom/compass/geolocate), so nothing ever stacks on them. */
+  .home-fab { position: absolute; left: 10px; bottom: calc(52px + env(safe-area-inset-bottom)); z-index: 20; width: 40px; height: 40px; border-radius: 50%;
     border: none; background: rgba(20,24,29,.85); color: #fff; font-size: 18px; cursor: pointer;
     display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
-  .tilt-fab { bottom: 198px; font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+  .tilt-fab { bottom: calc(100px + env(safe-area-inset-bottom)); font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+  /* Inside the Howler app (?app=1): the app overlays its own back button top-left
+     and refresh top-right — inset the title and chips so nothing sits under them. */
+  .inapp .ttl { margin-left: 54px; margin-right: 76px; min-height: 40px; display: flex; flex-direction: column; justify-content: center; }
+  .inapp .chips { margin-right: 84px; }
   /* bottom sheet */
   .sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30; background: #1c1f24; color: #eef1f5;
     border-radius: 20px 20px 0 0; padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
@@ -115,7 +121,7 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
   .fb-row .bub img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; background: #fff; }
   .fb-row .nm { font-size: 14px; font-weight: 600; }
   .fb-row .ct { font-size: 11.5px; color: #9aa4af; }
-  .powered { position: absolute; right: 10px; bottom: 8px; z-index: 15; font-size: 9.5px; color: #7d8794;
+  .powered { position: absolute; right: 42px; bottom: 8px; z-index: 15; font-size: 9.5px; color: #7d8794;
     background: rgba(10,13,16,.55); padding: 3px 9px; border-radius: 999px; }
   .errbar { position: absolute; left: 12px; right: 12px; top: 50%; transform: translateY(-50%); z-index: 18;
     background: rgba(74,16,13,.92); color: #ffd7d4; border: 1px solid rgba(255,84,73,.4); border-radius: 12px;
@@ -150,6 +156,9 @@ ${token ? '<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"
 const BOOT = ${boot};
 let cfg = BOOT.config;
 const LIVE = BOOT.mode === 'live';
+// Loaded inside the Howler app WebView? (the resolver appends ?app=1) — inset
+// the header around the app's own back/refresh overlay buttons.
+if (new URLSearchParams(location.search).has('app')) document.body.classList.add('inapp');
 let filter = 'all';
 let selectedId = '';
 let lockedFlag = false; // edit mode only: published maps open locked
