@@ -58,14 +58,23 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
     padding: 8px 13px; cursor: pointer; font-family: inherit; min-height: 36px; }
   .chip .sw { width: 8px; height: 8px; border-radius: 50%; }
   .chip.on { background: #fff; color: #16181c; border-color: #fff; }
-  /* markers */
-  .pmark { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
-  .pmark .bub { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
+  /* markers — the root box IS the bubble, so the marker's anchor point is the
+     bubble centre and pins stay glued to their coordinate at every zoom. The
+     label hangs below via absolute positioning (doesn't shift the anchor). */
+  .pmark { position: relative; cursor: pointer; }
+  .pmark .bub { width: 100%; height: 100%; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
     border: 2px solid rgba(255,255,255,.9); box-shadow: 0 4px 10px rgba(0,0,0,.45); background: #666; overflow: hidden; }
+  .pmark.sz-s { width: 26px; height: 26px; } .pmark.sz-s .bub { font-size: 12px; }
+  .pmark.sz-m { width: 34px; height: 34px; }
+  .pmark.sz-l { width: 46px; height: 46px; } .pmark.sz-l .bub { font-size: 22px; }
   .pmark .bub img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; background: #fff; }
-  .pmark .lbl { font-size: 10px; font-weight: 600; color: #eef1f5; background: rgba(10,13,16,.72);
+  .pmark .lbl { position: absolute; top: calc(100% + 3px); left: 50%; transform: translateX(-50%);
+    font-size: 10px; font-weight: 600; color: #eef1f5; background: rgba(10,13,16,.72);
     padding: 2px 8px; border-radius: 999px; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .pmark.sel .bub { outline: 3px solid #ff385c; outline-offset: 2px; }
+  .home-fab { position: absolute; right: 10px; bottom: 150px; z-index: 20; width: 40px; height: 40px; border-radius: 50%;
+    border: none; background: rgba(20,24,29,.85); color: #fff; font-size: 18px; cursor: pointer;
+    display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
   /* bottom sheet */
   .sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30; background: #1c1f24; color: #eef1f5;
     border-radius: 20px 20px 0 0; padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
@@ -135,6 +144,7 @@ let cfg = BOOT.config;
 const LIVE = BOOT.mode === 'live';
 let filter = 'all';
 let selectedId = '';
+let lockedFlag = false; // edit mode only: published maps open locked
 let map = null;
 const markers = new Map(); // placeId -> mapboxgl.Marker
 
@@ -171,7 +181,7 @@ const visiblePlaces = () => (cfg.places || []).filter((p) => (filter === 'all' |
 function markerEl(p) {
   const cat = catOf(p.kind);
   const el = document.createElement('div');
-  el.className = 'pmark' + (p.id === selectedId ? ' sel' : '');
+  el.className = 'pmark sz-' + (['s','m','l'].includes(p.size) ? p.size : 'm') + (p.id === selectedId ? ' sel' : '');
   el.innerHTML = '<span class="bub" style="background:' + cat.color + '">' +
     (p.logo ? '<img alt="" src="' + p.logo + '">' : (p.icon || cat.icon || '📍')) +
     '</span><span class="lbl"></span>';
@@ -188,12 +198,15 @@ function renderPlaces() {
     vis.forEach((p) => {
       let m = markers.get(p.id);
       if (!m) {
-        m = new mapboxgl.Marker({ element: markerEl(p), anchor: 'bottom', draggable: !LIVE });
+        // anchor 'center' + bubble-sized element: the coordinate is the bubble
+        // centre, so pins never drift against the basemap while zooming.
+        m = new mapboxgl.Marker({ element: markerEl(p), anchor: 'center', draggable: !LIVE && !lockedFlag });
         m.setLngLat([p.lng, p.lat]).addTo(map);
         if (!LIVE) m.on('dragend', () => { const ll = m.getLngLat(); post({ type: 'poi:moved', id: p.id, lat: ll.lat, lng: ll.lng }); });
         markers.set(p.id, m);
       } else {
         m.setLngLat([p.lng, p.lat]);
+        if (!LIVE) m.setDraggable(!lockedFlag);
         const el = markerEl(p); m.getElement().replaceChildren(...el.childNodes); m.getElement().className = el.className;
       }
     });
@@ -271,9 +284,22 @@ function bootMap() {
   map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
   map.addControl(new mapboxgl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true }), 'bottom-right');
   map.on('click', (e) => {
-    if (!LIVE) post({ type: 'map:click', lat: e.lngLat.lat, lng: e.lngLat.lng });
-    else closeSheet();
+    if (!LIVE && !lockedFlag) post({ type: 'map:click', lat: e.lngLat.lat, lng: e.lngLat.lng });
+    if (LIVE) closeSheet();
   });
+  // Home: always takes you back to the saved venue view (after wandering or
+  // following your own location).
+  if (LIVE) {
+    const home = document.createElement('button');
+    home.className = 'home-fab';
+    home.setAttribute('aria-label', 'Back to venue');
+    home.textContent = '⌂';
+    home.addEventListener('click', () => {
+      const c = cfg.camera || {};
+      if (Number.isFinite(c.lat)) map.easeTo({ center: [c.lng, c.lat], zoom: c.zoom ?? 16, pitch: c.pitch ?? 0, bearing: c.bearing ?? 0, duration: 700 });
+    });
+    document.body.appendChild(home);
+  }
   map.on('load', () => { renderChips(); renderPlaces(); });
   // Never fail black: surface token/tile problems visibly (first hard error only).
   let errShown = false;
@@ -294,6 +320,7 @@ window.addEventListener('message', (e) => {
   if (LIVE || e.origin !== window.location.origin || !e.data || e.data.src !== 'mapstudio-editor') return;
   if (e.data.type === 'state') {
     cfg = e.data.config;
+    if (typeof e.data.locked === 'boolean') lockedFlag = e.data.locked;
     if (typeof e.data.selectedId === 'string') selectedId = e.data.selectedId;
     renderChips(); renderPlaces();
     if (selectedId && e.data.openSheet) select(selectedId);

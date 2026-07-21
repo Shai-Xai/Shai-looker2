@@ -49,13 +49,20 @@ function Editor({ suiteId, scope }) {
   const [busy, setBusy] = useState('');
   const [analytics, setAnalytics] = useState(null);
   const [showCats, setShowCats] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  // Published maps open LOCKED (safe to browse on a phone, nothing can move);
+  // Edit map consciously re-enters edit mode. null = not decided yet (loading).
+  const [unlocked, setUnlocked] = useState(null);
   const [iframeKey, setIframeKey] = useState(0);   // bump to reload preview (style change)
   const frameRef = useRef(null);
   const readyRef = useRef(false);
-  const stateRef = useRef({ data: null, selId: '', addMode: false });
-  stateRef.current = { data, selId, addMode };
+  const stateRef = useRef({ data: null, selId: '', addMode: false, unlocked: null });
+  stateRef.current = { data, selId, addMode, unlocked };
 
-  const load = useCallback(() => api.mapstudioGet(suiteId).then(setData).catch((e) => alert(e.message)), [suiteId]);
+  const load = useCallback(() => api.mapstudioGet(suiteId).then((d) => {
+    setData(d);
+    setUnlocked((cur) => (cur === null ? !d.config.published : cur));
+  }).catch((e) => alert(e.message)), [suiteId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (data?.config?.published) api.mapstudioAnalytics(suiteId).then(setAnalytics).catch(() => {});
@@ -67,9 +74,10 @@ function Editor({ suiteId, scope }) {
   }, []);
   const sendState = useCallback((d = stateRef.current.data, sid = stateRef.current.selId) => {
     if (!d || !readyRef.current) return;
-    post({ type: 'state', config: { ...d.config, places: d.places }, selectedId: sid, openSheet: false });
+    const locked = !(d.canManage && stateRef.current.unlocked === true);
+    post({ type: 'state', config: { ...d.config, places: d.places }, selectedId: sid, locked, openSheet: false });
   }, [post]);
-  useEffect(() => { sendState(); }, [data, selId, sendState]);
+  useEffect(() => { sendState(); }, [data, selId, unlocked, sendState]);
 
   useEffect(() => {
     async function onMsg(e) {
@@ -83,7 +91,7 @@ function Editor({ suiteId, scope }) {
           setData((cur) => cur && ({ ...cur, places: cur.places.map((p) => (p.id === r.place.id ? r.place : p)) }));
         } catch (err) { alert(err.message); }
       }
-      if (e.data.type === 'map:click' && adding && d?.canManage) {
+      if (e.data.type === 'map:click' && adding && d?.canManage && stateRef.current.unlocked === true) {
         setAddMode(false);
         try {
           const r = await api.mapstudioCreatePlace(suiteId, { name: 'New place', kind: d.config.categories[0]?.key, lat: e.data.lat, lng: e.data.lng });
@@ -105,6 +113,7 @@ function Editor({ suiteId, scope }) {
 
   if (!data) return <div style={{ padding: 24, color: 'var(--muted)' }}>Loading map…</div>;
   const { config, places, tokenSet, canManage } = data;
+  const canEdit = canManage && unlocked === true;
   const selected = places.find((p) => p.id === selId) || null;
   const publicUrl = config.publicPath ? window.location.origin + config.publicPath : '';
 
@@ -141,7 +150,7 @@ function Editor({ suiteId, scope }) {
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
         onLoad={() => { readyRef.current = true; sendState(); }}
       />
-      {canManage && (
+      {canEdit && (
         <button onClick={() => setAddMode((v) => !v)} style={{ ...addBtn, background: addMode ? 'var(--brand)' : 'rgba(20,24,29,0.85)' }}>
           {addMode ? 'Tap the map to drop the pin…' : '+ Add place'}
         </button>
@@ -152,7 +161,7 @@ function Editor({ suiteId, scope }) {
   return (
     <div>
       {/* find the venue: search or paste coordinates, then frame + Save this view */}
-      {canManage && (
+      {canEdit && (
         <VenueSearch
           token={data.token}
           near={config.camera && Number.isFinite(config.camera.lat) ? config.camera : null}
@@ -162,17 +171,27 @@ function Editor({ suiteId, scope }) {
           }}
         />
       )}
-      {/* top bar: style, camera, import, publish */}
+      {/* top bar: lock/edit, style, camera, import, stats, publish */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        <select value={config.style} onChange={(e) => setStyle(e.target.value)} style={sel} disabled={!canManage}>
-          <option value="dark">Dark</option><option value="satellite">Satellite</option>
-          <option value="streets">Streets</option><option value="outdoors">Outdoors</option>
-        </select>
-        {canManage && <button style={btn} disabled={busy === 'camera'} onClick={() => { setBusy('camera'); post({ type: 'camera:get' }); }}>📷 Save this view</button>}
-        {canManage && <button style={btn} disabled={busy === 'import'} onClick={importStations}>⇄ Import Event Ops stations</button>}
-        <button style={btn} onClick={() => setShowCats((v) => !v)}>🏷 Categories ({config.categories.length})</button>
+        {canManage && config.published && (
+          unlocked
+            ? <button style={btn} onClick={() => { setAddMode(false); setUnlocked(false); }}>✅ Done — lock map</button>
+            : <button style={{ ...btn, fontWeight: 700 }} onClick={() => setUnlocked(true)}>🔒 Published · locked — Edit map</button>
+        )}
+        {canEdit && (
+          <>
+            <select value={config.style} onChange={(e) => setStyle(e.target.value)} style={sel}>
+              <option value="dark">Dark</option><option value="satellite">Satellite</option>
+              <option value="streets">Streets</option><option value="outdoors">Outdoors</option>
+            </select>
+            <button style={btn} disabled={busy === 'camera'} onClick={() => { setBusy('camera'); post({ type: 'camera:get' }); }}>📷 Save this view</button>
+            <button style={btn} disabled={busy === 'import'} onClick={importStations}>⇄ Import Event Ops stations</button>
+            <button style={btn} onClick={() => setShowCats((v) => !v)}>🏷 Categories ({config.categories.length})</button>
+          </>
+        )}
+        {config.published && <button style={btn} onClick={() => setShowStats((v) => !v)}>📊 Map stats</button>}
         <span style={{ flex: 1 }} />
-        {canManage && (
+        {canEdit && (
           <button style={{ ...btn, background: 'var(--brand)', color: '#fff', border: 'none', fontWeight: 700 }} disabled={busy === 'publish'} onClick={publish}>
             {busy === 'publish' ? 'Publishing…' : config.published ? `Republish (v${config.version})` : 'Publish map'}
           </button>
@@ -197,15 +216,42 @@ function Editor({ suiteId, scope }) {
         </div>
       )}
 
-      {canManage && (
+      {canEdit && (
         <EventLink
           suiteId={suiteId}
           config={config}
           onSaved={(cfg) => setData((c) => ({ ...c, config: { ...c.config, ...cfg } }))}
         />
       )}
+      {canEdit && (
+        <ExternalMapUrl
+          suiteId={suiteId}
+          config={config}
+          onSaved={(cfg) => setData((c) => ({ ...c, config: { ...c.config, ...cfg } }))}
+        />
+      )}
 
-      {showCats && <CategoriesEditor suiteId={suiteId} config={config} canManage={canManage} onSaved={(cfg) => { setData((c) => ({ ...c, config: { ...c.config, ...cfg } })); }} />}
+      {showCats && canEdit && <CategoriesEditor suiteId={suiteId} config={config} canManage={canEdit} onSaved={(cfg) => { setData((c) => ({ ...c, config: { ...c.config, ...cfg } })); }} />}
+
+      {showStats && analytics && (
+        <div style={{ ...card, marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>Map stats · last {analytics.sinceDays} days</div>
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, flexWrap: 'wrap' }}>
+            <span><b>{analytics.opens}</b> opens</span>
+            <span><b>{analytics.poiTaps}</b> place taps</span>
+            <span><b>{analytics.ctaClicks}</b> CTA clicks</span>
+          </div>
+          {analytics.topPlaces.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {analytics.topPlaces.map((t) => (
+                <div key={t.placeId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '3px 0', borderTop: '1px solid var(--hairline)' }}>
+                  <span>{t.name}</span><span style={{ color: 'var(--muted)' }}>{t.taps} taps</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* main layout: preview + side panel (stacked on mobile) */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 360px', gap: 14, alignItems: 'start' }}>
@@ -218,30 +264,19 @@ function Editor({ suiteId, scope }) {
               suiteId={suiteId}
               place={selected}
               categories={config.categories}
-              canManage={canManage}
+              canManage={canEdit}
               onSaved={(pl) => setData((cur) => ({ ...cur, places: cur.places.map((p) => (p.id === pl.id ? pl : p)) }))}
               onDeleted={(id) => { setData((cur) => ({ ...cur, places: cur.places.filter((p) => p.id !== id) })); setSelId(''); }}
             />
           )}
-          {!selected && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10 }}>{canManage ? 'Select a place to edit it, or use “+ Add place” and tap the map.' : 'Select a place to view it.'}</p>}
-          {analytics && (
-            <div style={{ ...card, marginTop: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>Last {analytics.sinceDays} days</div>
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, flexWrap: 'wrap' }}>
-                <span><b>{analytics.opens}</b> opens</span>
-                <span><b>{analytics.poiTaps}</b> place taps</span>
-                <span><b>{analytics.ctaClicks}</b> CTA clicks</span>
-              </div>
-              {analytics.topPlaces.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  {analytics.topPlaces.map((t) => (
-                    <div key={t.placeId} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '3px 0', borderTop: '1px solid var(--hairline)' }}>
-                      <span>{t.name}</span><span style={{ color: 'var(--muted)' }}>{t.taps} taps</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          {!selected && (
+            <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10 }}>
+              {canEdit
+                ? 'Select a place to edit it, or use “+ Add place” and tap the map.'
+                : canManage && config.published
+                  ? 'This map is published and locked — hit “Edit map” above to make changes.'
+                  : 'Select a place to view it.'}
+            </p>
           )}
         </div>
       </div>
@@ -308,7 +343,7 @@ function PlaceForm({ suiteId, place, categories, canManage, onSaved, onDeleted }
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>Edit place</div>
       <label style={lbl}>Name</label>
       <input style={inp} value={f.name} onChange={(e) => set('name', e.target.value)} disabled={!canManage} maxLength={80} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 76px 86px', gap: 8 }}>
         <div>
           <label style={lbl}>Category</label>
           <select style={{ ...inp, width: '100%' }} value={f.kind} onChange={(e) => set('kind', e.target.value)} disabled={!canManage}>
@@ -318,6 +353,12 @@ function PlaceForm({ suiteId, place, categories, canManage, onSaved, onDeleted }
         <div>
           <label style={lbl}>Icon</label>
           <input style={inp} value={f.icon} placeholder="emoji" onChange={(e) => set('icon', e.target.value)} disabled={!canManage} maxLength={8} />
+        </div>
+        <div>
+          <label style={lbl}>Pin size</label>
+          <select style={{ ...inp, width: '100%' }} value={f.size || 'm'} onChange={(e) => set('size', e.target.value)} disabled={!canManage}>
+            <option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option>
+          </select>
         </div>
       </div>
       <label style={lbl}>Logo (shown as the pin — e.g. a sponsor logo)</label>
@@ -426,6 +467,33 @@ function EventLink({ suiteId, config, onSaved }) {
       >
         {busy ? 'Saving…' : saved ? (id ? 'Linked ✓' : 'Not linked') : 'Save link'}
       </button>
+    </div>
+  );
+}
+
+function ExternalMapUrl({ suiteId, config, onSaved }) {
+  const [url, setUrl] = useState(config.externalUrl || '');
+  const [busy, setBusy] = useState(false);
+  const saved = (config.externalUrl || '') === url.trim();
+  async function save(next) {
+    setBusy(true);
+    try { const r = await api.mapstudioSaveConfig(suiteId, { externalUrl: next }); onSaved(r.config); setUrl(r.config.externalUrl || ''); }
+    catch (e) { alert(e.message); }
+    setBusy(false);
+  }
+  return (
+    <div style={{ ...note, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+        <b>Outsourced map?</b>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+          If a professional built this event's map elsewhere, paste its URL — publishing then points the app (and /maps link) at it instead of the studio map. Leave blank to use the studio map.
+        </div>
+      </div>
+      <input style={{ ...inp, marginBottom: 0, flex: '1 1 240px' }} value={url} placeholder="https://…" onChange={(e) => setUrl(e.target.value)} />
+      <button style={{ ...btn, fontWeight: 600 }} disabled={busy || saved} onClick={() => save(url.trim())}>
+        {busy ? 'Saving…' : saved ? (url ? 'External map ✓' : 'Using studio map') : 'Save'}
+      </button>
+      {config.externalUrl && <button style={{ ...btn, fontSize: 12 }} disabled={busy} onClick={() => save('')}>Use studio map instead</button>}
     </div>
   );
 }

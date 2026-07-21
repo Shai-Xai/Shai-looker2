@@ -89,6 +89,9 @@ function mount(app, { db, auth, eventops }) {
   // Howler event link: lets the Howler app resolve "published map for event N"
   // straight from Pulse (GET /api/maps/by-event/:id) — no Howler admin field needed.
   try { sql.exec("ALTER TABLE map_configs ADD COLUMN howler_event_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
+  // Outsourced maps live in the same registry: when external_url is set, publish
+  // serves/resolves THAT url instead of the studio-built page.
+  try { sql.exec("ALTER TABLE map_configs ADD COLUMN external_url TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
   sql.exec(`
     CREATE TABLE IF NOT EXISTS map_places (
       id           TEXT PRIMARY KEY,
@@ -106,6 +109,7 @@ function mount(app, { db, auth, eventops }) {
       show_in_filters INTEGER NOT NULL DEFAULT 1,
       sort         INTEGER NOT NULL DEFAULT 0,
       station_id   TEXT NOT NULL DEFAULT '',        -- Event Ops station link (shared registry)
+      size         TEXT NOT NULL DEFAULT 'm',       -- pin size: s | m | l
       created_at   TEXT NOT NULL,
       updated_at   TEXT NOT NULL
     );
@@ -119,6 +123,8 @@ function mount(app, { db, auth, eventops }) {
     );
     CREATE INDEX IF NOT EXISTS idx_map_events_suite ON map_events(suite_id, at);
   `);
+  // Existing deployments created map_places before `size` existed.
+  try { sql.exec("ALTER TABLE map_places ADD COLUMN size TEXT NOT NULL DEFAULT 'm'"); } catch { /* already there */ }
 
   // ── access guards (mirror eventops: view = suite member; manage = map.manage) ──
   const isAdmin = (u) => u && u.role === 'admin';
@@ -149,11 +155,11 @@ function mount(app, { db, auth, eventops }) {
     categories: J(r.categories, DEFAULT_CATEGORIES), slug: r.slug,
     published: !!r.published, publishedAt: r.published_at, version: r.version,
     publicPath: r.slug ? `/maps/${r.slug}` : '', howlerEventId: r.howler_event_id || '',
-    updatedAt: r.updated_at,
+    externalUrl: r.external_url || '', updatedAt: r.updated_at,
   });
   const placeView = (p) => ({
     id: p.id, name: p.name, kind: p.kind, icon: p.icon, logo: p.logo, description: p.description,
-    ctaLabel: p.cta_label, ctaUrl: p.cta_url, lat: p.lat, lng: p.lng,
+    ctaLabel: p.cta_label, ctaUrl: p.cta_url, lat: p.lat, lng: p.lng, size: p.size || 'm',
     showInFilters: !!p.show_in_filters, sort: p.sort, stationId: p.station_id || null,
     createdAt: p.created_at, updatedAt: p.updated_at,
   });
@@ -183,6 +189,7 @@ function mount(app, { db, auth, eventops }) {
       lat: clampLat(b.lat), lng: clampLng(b.lng),
       show_in_filters: b.showInFilters === false ? 0 : 1,
       sort: Math.max(0, Math.min(9999, num(b.sort, 0))),
+      size: ['s', 'm', 'l'].includes(b.size) ? b.size : 'm',
     };
   }
 
@@ -237,11 +244,12 @@ function mount(app, { db, auth, eventops }) {
       pitch: Math.max(0, Math.min(85, num(b.camera?.pitch, 0))),
       bearing: Math.max(-180, Math.min(180, num(b.camera?.bearing, 0))),
     } : J(cfg.camera, {});
-    sql.prepare('UPDATE map_configs SET name=?, style=?, camera=?, categories=?, howler_event_id=?, updated_at=? WHERE suite_id=?').run(
+    sql.prepare('UPDATE map_configs SET name=?, style=?, camera=?, categories=?, howler_event_id=?, external_url=?, updated_at=? WHERE suite_id=?').run(
       b.name !== undefined ? (plain(b.name, 80) || su.name || 'Event map') : cfg.name,
       STYLE_KEYS.includes(b.style) ? b.style : cfg.style,
       JSON.stringify(cam), JSON.stringify(cats),
       b.howlerEventId !== undefined ? String(b.howlerEventId).replace(/\D/g, '').slice(0, 20) : (cfg.howler_event_id || ''),
+      b.externalUrl !== undefined ? (/^https:\/\//i.test(str(b.externalUrl, 600)) ? str(b.externalUrl, 600) : '') : (cfg.external_url || ''),
       now(), su.id,
     );
     res.json({ config: configView(sql.prepare('SELECT * FROM map_configs WHERE suite_id=?').get(su.id)) });
@@ -257,9 +265,9 @@ function mount(app, { db, auth, eventops }) {
     const c = cleanPlaceBody(req.body || {}, J(cfg.categories, DEFAULT_CATEGORIES));
     if (!c.name) return res.status(400).json({ error: 'Give the place a name.' });
     const id = uuid(); const ts = now();
-    sql.prepare(`INSERT INTO map_places (id, entity_id, suite_id, name, kind, icon, logo, description, cta_label, cta_url, lat, lng, show_in_filters, sort, station_id, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, su.entityId, su.id, c.name, c.kind, c.icon, c.logo, c.description, c.cta_label, c.cta_url, c.lat, c.lng, c.show_in_filters, c.sort, str(req.body?.stationId, 64), ts, ts);
+    sql.prepare(`INSERT INTO map_places (id, entity_id, suite_id, name, kind, icon, logo, description, cta_label, cta_url, lat, lng, show_in_filters, sort, station_id, size, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, su.entityId, su.id, c.name, c.kind, c.icon, c.logo, c.description, c.cta_label, c.cta_url, c.lat, c.lng, c.show_in_filters, c.sort, str(req.body?.stationId, 64), c.size, ts, ts);
     res.json({ place: placeView(sql.prepare('SELECT * FROM map_places WHERE id=?').get(id)) });
   });
   app.put('/api/mapstudio/suites/:suiteId/places/:id', auth.requireAuth, (req, res) => {
@@ -270,8 +278,8 @@ function mount(app, { db, auth, eventops }) {
     const merged = { ...placeView(p), ...(req.body || {}) };
     const c = cleanPlaceBody(merged, J(cfg.categories, DEFAULT_CATEGORIES));
     if (!c.name) return res.status(400).json({ error: 'Give the place a name.' });
-    sql.prepare(`UPDATE map_places SET name=?, kind=?, icon=?, logo=?, description=?, cta_label=?, cta_url=?, lat=?, lng=?, show_in_filters=?, sort=?, station_id=?, updated_at=? WHERE id=?`)
-      .run(c.name, c.kind, c.icon, c.logo, c.description, c.cta_label, c.cta_url, c.lat, c.lng, c.show_in_filters, c.sort, str(merged.stationId, 64), now(), p.id);
+    sql.prepare(`UPDATE map_places SET name=?, kind=?, icon=?, logo=?, description=?, cta_label=?, cta_url=?, lat=?, lng=?, show_in_filters=?, sort=?, station_id=?, size=?, updated_at=? WHERE id=?`)
+      .run(c.name, c.kind, c.icon, c.logo, c.description, c.cta_label, c.cta_url, c.lat, c.lng, c.show_in_filters, c.sort, str(merged.stationId, 64), c.size, now(), p.id);
     res.json({ place: placeView(sql.prepare('SELECT * FROM map_places WHERE id=?').get(p.id)) });
   });
   app.delete('/api/mapstudio/suites/:suiteId/places/:id', auth.requireAuth, (req, res) => {
@@ -376,6 +384,7 @@ function mount(app, { db, auth, eventops }) {
     mapPageHeaders(res, { embeddable: true });
     const r = bySlug(req.params.slug);
     if (!r || !r.published) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Map not found</title><body style="font-family:sans-serif;background:#101418;color:#eef1f5;display:grid;place-items:center;height:100vh;margin:0"><p>This event map isn’t published.</p>');
+    if (r.external_url) return res.redirect(302, r.external_url); // outsourced map: one link, wherever it lives
     const config = J(r.published, null);
     if (!config) return res.status(404).end();
     res.setHeader('Cache-Control', 'public, max-age=60'); // fresh-ish, but survives festival re-opens
@@ -389,7 +398,8 @@ function mount(app, { db, auth, eventops }) {
     if (!id) return res.status(404).json({ error: 'No map' });
     const r = sql.prepare("SELECT * FROM map_configs WHERE howler_event_id=? AND published!='' AND slug!=''").get(id);
     if (!r || !flags.enabled(r.entity_id, 'mapstudio')) return res.status(404).json({ error: 'No map' });
-    const url = `${req.protocol}://${req.get('host')}/maps/${r.slug}`;
+    // Outsourced/professional map: the registry hands the app that URL instead.
+    const url = r.external_url || `${req.protocol}://${req.get('host')}/maps/${r.slug}`;
     res.setHeader('Cache-Control', 'public, max-age=60');
     if (req.query.redirect) return res.redirect(302, url);
     res.json({ url, slug: r.slug, version: r.version, name: r.name });
