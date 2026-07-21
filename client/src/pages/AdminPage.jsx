@@ -5567,7 +5567,19 @@ function ClientIntegrations({ entity }) {
 function BackupRestore() {
   const [busy, setBusy] = useState('');
   const [snap, setSnap] = useState(null); // GET /api/admin/backups — nightly snapshot status
-  useEffect(() => { api.backupStatus().then(setSnap).catch(() => setSnap({ error: true })); }, []);
+  const [opsInfo, setOpsInfo] = useState(null); // GET /api/admin/ops — Slack alerting configured?
+  useEffect(() => {
+    api.backupStatus().then(setSnap).catch(() => setSnap({ error: true }));
+    api.opsStatus().then(setOpsInfo).catch(() => setOpsInfo(null));
+  }, []);
+  async function doTestAlert() {
+    setBusy('opstest');
+    try {
+      const r = await api.opsTestAlert();
+      alert(r.sent ? 'Test alert sent — check the ops Slack channel now.' : `Test alert NOT delivered: ${r.error}`);
+    } catch (e) { alert('Test alert failed: ' + e.message); }
+    finally { setBusy(''); }
+  }
   async function doRunNow() {
     setBusy('snapshot');
     try {
@@ -5619,6 +5631,17 @@ function BackupRestore() {
             {' '}· {snap.local?.length || 0} snapshot{(snap.local?.length || 0) === 1 ? '' : 's'} on disk
           </div>
           <button style={saveBtn} onClick={doRunNow} disabled={!!busy}>{busy === 'snapshot' ? 'Running…' : 'Run snapshot now'}</button>
+        </div>
+      )}
+      {opsInfo && (
+        <div style={{ ...cardStyle, borderColor: opsInfo.configured ? 'var(--border)' : 'var(--error)', background: opsInfo.configured ? undefined : 'rgba(220,60,60,0.06)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>🔔 Ops alerts (Slack) {opsInfo.configured ? '— configured' : '— ⚠️ NOT configured'}</div>
+          <div style={{ fontSize: 13, color: opsInfo.configured ? 'var(--muted)' : 'var(--error)', marginBottom: 12 }}>
+            {opsInfo.configured
+              ? 'Background failures (backups, mailer, disk) page the internal Slack channel. Send a test to prove the channel actually works.'
+              : 'Background failures currently die in the server log stream — nobody is paged. Set OPS_SLACK_WEBHOOK_URL in Render → Environment to fix this.'}
+          </div>
+          <button style={saveBtn} onClick={doTestAlert} disabled={!!busy}>{busy === 'opstest' ? 'Sending…' : 'Send test alert'}</button>
         </div>
       )}
       <div style={cardStyle}>

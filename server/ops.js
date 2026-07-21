@@ -48,4 +48,32 @@ function alert(kind, message) {
   }).catch((e) => console.error('[ops] alert delivery failed:', e.message));
 }
 
-module.exports = { init, alert, isConfigured, _recent: recent };
+// Deliberate test send: bypasses the throttle and AWAITS the Slack response so
+// the admin gets an honest sent/failed answer — the whole point is proving the
+// channel works before a real incident needs it (silence must not look like
+// success, same lesson as backups).
+async function sendTest() {
+  const url = webhook();
+  if (!url) return { configured: false, sent: false, error: 'No ops Slack webhook configured — set OPS_SLACK_WEBHOOK_URL in Render → Environment.' };
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '✅ [pulse:test] Ops alert test — if you can read this, background failures (backups, mailer, disk) will reach this channel.' }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return { configured: true, sent: false, error: `Slack responded HTTP ${r.status} — the webhook URL may be revoked or wrong.` };
+    return { configured: true, sent: true };
+  } catch {
+    return { configured: true, sent: false, error: 'Could not reach Slack (network error or timeout).' };
+  }
+}
+
+function mount(app, { auth }) {
+  const { asyncHandler } = require('./http');
+  app.get('/api/admin/ops', auth.requireAdmin, (_req, res) => res.json({ configured: isConfigured() }));
+  app.post('/api/admin/ops/test', auth.requireSuperAdmin, asyncHandler(async (_req, res) => res.json(await sendTest())));
+  return module.exports;
+}
+
+module.exports = { init, mount, alert, isConfigured, sendTest, _recent: recent };

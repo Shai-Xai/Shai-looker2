@@ -160,7 +160,9 @@ one instance), a deploy has to stop the old instance and start the new one — a
   `docs/POSTGRES_MIGRATION_SCOPE.md`.
 
 ## Pre-production checklist
-- [ ] **Rotate the Looker API3 secret** (it was shared in chat during dev) and set the new one.
+- [x] **Rotate the Looker API3 secret** — **Done 2026-07-21:** new API3 key
+  created in Looker, set in Pulse Admin → Integrations, dashboards verified
+  loading, and the old (chat-shared) key deleted in Looker.
 - [ ] Strong `SESSION_SECRET` and admin password.
 - [ ] `NODE_ENV=production` (Secure cookies + trust proxy).
 - [ ] **Looker IP allowlist:** if Looker restricts API by IP, add the server's IP.
