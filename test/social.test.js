@@ -522,6 +522,21 @@ test('app posters: organiser authorises a Howler account to post from the app', 
   const feed = await call('GET /api/app/social/feed', {});
   assert.ok(feed.body.posts.some((p) => p.id === posted.body.id));
 
+  // App posts carry CTAs too — same validation as the Pulse composer.
+  const withCta = await call('POST /api/app/social/posts', {
+    token: 'tok-661779',
+    body: { communityId: orgComm.id, text: 'Doors at noon', ctaLabel: 'Get tickets', ctaDestination: 'explore_tickets:19203', ctaStyle: 'secondary' },
+  });
+  assert.equal(withCta.code, 200);
+  assert.equal(withCta.body.ctaLabel, 'Get tickets');
+  assert.equal(withCta.body.ctaDestination, 'explore_tickets:19203');
+  assert.equal(withCta.body.ctaStyle, 'secondary');
+  const badCta = await call('POST /api/app/social/posts', {
+    token: 'tok-661779',
+    body: { communityId: orgComm.id, text: 'nope', ctaLabel: 'Bad', ctaDestination: 'javascript:alert(1)' },
+  });
+  assert.equal(badCta.code, 400);
+
   // Empty posts and bad payloads are refused.
   assert.equal((await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id } })).code, 400);
 

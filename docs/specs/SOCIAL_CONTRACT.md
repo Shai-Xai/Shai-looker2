@@ -255,6 +255,10 @@ Authorised **app posters** publish for a client without a Pulse login.
   centre — the composer's IG-style drag choosing which part of the image
   survives when a feed card crops); it rides the media item back out in feeds.
   The post goes live immediately with `source:"app"`.
+  App posts may also carry a CTA button — `ctaLabel` (≤40 chars),
+  `ctaDestination` (screen keyword like `explore_tickets:19203` or
+  `open_url:https://…`) and `ctaStyle` (`primary` banner / `secondary` icon
+  pill) — the same fields and validation as the Pulse composer (2026-07-21).
 - Direct-to-bucket upload (big videos): `POST /api/app/social/presign
   {name, mime, communityId?}` (JWT; registered posters only, 403 otherwise) →
   `{contractVersion, uploadUrl, method, headers, publicUrl, kind}` — the same
