@@ -361,6 +361,9 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const [global, setGlobal] = useState(false);
   const [media, setMedia] = useState([]); // [{id, kind, url, mime}]
   const [busy, setBusy] = useState(false);
+  // Live upload progress ({label, pct}) — big videos take a while, so the
+  // organiser sees a moving bar instead of a frozen composer.
+  const [upload, setUpload] = useState(null);
   const [publishNow, setPublishNow] = useState(true);
   // Optional CTA button on the post — rendered by the app with its existing
   // CTA system (destinations are the app's screen keywords; event id rides
@@ -381,10 +384,25 @@ function Composer({ communities, onCreate, scope, entityId }) {
     api.socialMediaConfig(scope, entityId).then((c) => setDirect(!!c.direct)).catch(() => setDirect(false));
   }, [scope, entityId]);
 
-  const directUpload = async (blobOrFile, name, mime, dims) => {
+  // XHR instead of fetch purely for upload progress — fetch can't report how
+  // much of the request body has gone up, XHR's upload.onprogress can.
+  const xhrSend = (method, url, { headers = {}, body } = {}, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    Object.entries(headers).forEach(([k, v]) => { try { xhr.setRequestHeader(k, v); } catch { /* signed headers only */ } });
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); };
+    }
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300)
+      ? resolve(xhr.responseText)
+      : reject(new Error((() => { try { return JSON.parse(xhr.responseText).error; } catch { return ''; } })() || `Upload failed (${xhr.status})`));
+    xhr.onerror = () => reject(new Error('Upload failed — network error'));
+    xhr.send(body);
+  });
+
+  const directUpload = async (blobOrFile, name, mime, dims, onProgress) => {
     const pre = await api.socialPresignMedia(scope, entityId, { name, mime });
-    const put = await fetch(pre.uploadUrl, { method: 'PUT', headers: pre.headers, body: blobOrFile });
-    if (!put.ok) throw new Error(`Cloud upload failed (${put.status})`);
+    await xhrSend('PUT', pre.uploadUrl, { headers: pre.headers, body: blobOrFile }, onProgress);
     return { kind: pre.kind, url: pre.publicUrl, mime, ...dims };
   };
 
@@ -443,7 +461,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
 
   // Upload one file → a served media item (Instagram-style multi-photo posts
   // share this per-file path; the composer loops over the whole selection).
-  const uploadOne = async (f) => {
+  const uploadOne = async (f, onProgress) => {
     // Images: always normalised (HEIC→JPEG, ≤1920px) whichever path uploads.
     let blob = f, name = f.name, mime = f.type, dims = {};
     if (f.type.startsWith('image/')) {
@@ -457,7 +475,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
     let item = null;
     let directErr = null;
     if (direct) {
-      try { item = await directUpload(blob, name, mime, dims); }
+      try { item = await directUpload(blob, name, mime, dims, onProgress); }
       catch (err) { directErr = err; console.warn('[social] direct upload failed, falling back to Pulse upload:', err.message); }
     }
     if (!item) {
@@ -470,7 +488,14 @@ function Composer({ communities, onCreate, scope, entityId }) {
           ? `The cloud upload failed and this video is too big for the fallback.${why}`
           : 'Videos over ~3.5MB need direct-to-cloud uploads (Cloudflare R2, not configured yet) — use a short clip for now.');
       }
-      item = { ...(await api.socialUploadMedia(scope, entityId, { name, mime, data: await toBase64(blob) })), ...dims };
+      // Same JSON body api.socialUploadMedia sends — via XHR so the bar moves.
+      const upUrl = scope === 'admin' ? `/api/admin/entities/${entityId}/social/media` : '/api/my/social/media';
+      const payload = { name, mime, data: await toBase64(blob), ...(scope === 'admin' ? {} : { entityId }) };
+      const resText = await xhrSend('POST', upUrl, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, onProgress);
+      item = { ...JSON.parse(resText), ...dims };
     }
     // Videos get a poster (first frame) so feed cards can show a preview.
     // Best-effort: a failed capture never blocks the upload itself.
@@ -502,14 +527,19 @@ function Composer({ communities, onCreate, scope, entityId }) {
     if (files.length > room) alert(`Only the first ${room} added — a post holds up to ${MAX_MEDIA}.`);
     setBusy(true);
     try {
-      for (const f of toAdd) {
-        const item = await uploadOne(f); // sequential keeps upload order = pick order
+      for (let i = 0; i < toAdd.length; i++) {
+        const f = toAdd[i];
+        const label = toAdd.length > 1 ? `${i + 1}/${toAdd.length} · ${f.name}` : f.name;
+        setUpload({ label, pct: 0 });
+        // sequential keeps upload order = pick order
+        const item = await uploadOne(f, (p) => setUpload({ label, pct: Math.round(p * 100) }));
         setMedia((list) => [...list, item]);
       }
     } catch (err) {
       alert(err.message || 'Upload failed');
     } finally {
       setBusy(false);
+      setUpload(null);
     }
   };
 
@@ -622,6 +652,17 @@ function Composer({ communities, onCreate, scope, entityId }) {
             />
           )}
           {targeted && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>targeted posts stay off the Howler-wide feed</span>}
+        </div>
+      )}
+      {upload && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--muted)', marginBottom: 4 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>⬆ Uploading {upload.label}</span>
+            <span>{upload.pct}%</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 4, background: 'var(--card)', border: '1px solid var(--hairline, #ccc)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${upload.pct}%`, background: 'var(--accent, #0b6bcb)', transition: 'width 0.2s' }} />
+          </div>
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>

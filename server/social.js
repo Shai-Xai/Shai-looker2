@@ -1274,9 +1274,13 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       return res.status(422).json(moderation.blockedBody(verdict.reason));
     }
     // authorName '' → the post renders in the brand's voice (community name).
+    // CTA fields ride through validPostInput — same validation as the Pulse
+    // composer (label needs a destination, destination must be a screen
+    // keyword or open_url:https://…), so app posters get real 400s not junk.
     const post = createPost(c.entity_id, {
       communityId: c.id, body: text, media, global: !!body.global, publish: true,
       source: 'app', authorName: poster.name || '',
+      ctaLabel: body.ctaLabel, ctaDestination: body.ctaDestination, ctaStyle: body.ctaStyle,
       moderationStatus: verdict.outcome === 'hold' ? 'held' : undefined,
     }, { email: `app:${user.id}` });
     if (verdict.outcome === 'hold') {
