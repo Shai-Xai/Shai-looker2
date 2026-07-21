@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import crashReport from '../lib/crashReport.js';
 
 // Isolates render errors to a single tile instead of blanking the dashboard.
 export default class ErrorBoundary extends Component {
@@ -8,6 +9,9 @@ export default class ErrorBoundary extends Component {
   }
   static getDerivedStateFromError(error) {
     return { error };
+  }
+  componentDidCatch(error, info) {
+    crashReport(error, info); // tile crashes were invisible to the team before
   }
   componentDidUpdate(prev) {
     // Reset when the tile's data changes so a transient error can recover.
