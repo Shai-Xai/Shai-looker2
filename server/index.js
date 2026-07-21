@@ -102,7 +102,7 @@ app.use(auth.attachUser);
 require('./audit').mount(app, { db });
 // Internal ops alerts (Howler Slack) — background failures raise a human instead
 // of dying in the log stream. Disposable: remove these lines + server/ops.js.
-const ops = require('./ops'); ops.init({ db });
+const ops = require('./ops'); ops.init({ db }); ops.mount(app, { auth });
 // Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
 require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 

@@ -903,7 +903,9 @@ export const api = {
   addCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(json),
   deleteCategory: (entityId, name) => fetch(`/api/my/categories/${entityId}/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(json),
 
-  // Backup / restore
+  // Backup / restore + ops alerting
+  opsStatus: () => fetch('/api/admin/ops').then(json),
+  opsTestAlert: () => fetch('/api/admin/ops/test', { method: 'POST' }).then(json),
   backupStatus: () => fetch('/api/admin/backups').then(json),
   runBackupNow: () => fetch('/api/admin/backups/run', { method: 'POST' }).then(json),
   exportData: () => fetch('/api/admin/export').then((r) => r.json()),
