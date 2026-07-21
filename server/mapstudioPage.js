@@ -23,6 +23,7 @@ const STYLES = {
   streets: 'mapbox://styles/mapbox/streets-v12',
   satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
   outdoors: 'mapbox://styles/mapbox/outdoors-v12',
+  standard: 'mapbox://styles/mapbox/standard', // true 3D: buildings, landmarks, lighting
 };
 const styleUrl = (key) => STYLES[key] || STYLES.dark;
 
@@ -81,6 +82,7 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
   .home-fab { position: absolute; right: 10px; bottom: 150px; z-index: 20; width: 40px; height: 40px; border-radius: 50%;
     border: none; background: rgba(20,24,29,.85); color: #fff; font-size: 18px; cursor: pointer;
     display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  .tilt-fab { bottom: 198px; font-size: 12px; font-weight: 800; letter-spacing: .02em; }
   /* bottom sheet */
   .sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30; background: #1c1f24; color: #eef1f5;
     border-radius: 20px 20px 0 0; padding: 10px 18px calc(20px + env(safe-area-inset-bottom));
@@ -286,7 +288,18 @@ function bootMap() {
     center: [cam.lng ?? 18.42, cam.lat ?? -33.92],
     zoom: cam.zoom ?? 15, pitch: cam.pitch ?? 0, bearing: cam.bearing ?? 0,
     attributionControl: true,
+    pitchWithRotate: true, // two-finger twist/tilt (touch) + right-click drag (desktop)
   });
+  // Real elevation under satellite/outdoors — hills and amphitheatres read as
+  // terrain instead of a flat sheet. (Standard style handles its own 3D.)
+  if (cfg.style === 'satellite' || cfg.style === 'outdoors') {
+    map.on('style.load', () => {
+      try {
+        map.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.15 });
+      } catch { /* terrain unavailable: stay flat */ }
+    });
+  }
   // Pins scale with zoom relative to the saved venue view: full size at the
   // saved zoom and closer, shrinking (never past 35%) as you zoom out — so a
   // pin reads as sitting ON its spot rather than floating over the map.
@@ -316,6 +329,19 @@ function bootMap() {
       if (Number.isFinite(c.lat)) map.easeTo({ center: [c.lng, c.lat], zoom: c.zoom ?? 16, pitch: c.pitch ?? 0, bearing: c.bearing ?? 0, duration: 700 });
     });
     document.body.appendChild(home);
+    // 2D/3D toggle — one tap tilts the camera (attendees shouldn't need to
+    // know the two-finger gesture). Label shows the view you'd switch TO.
+    const tilt = document.createElement('button');
+    tilt.className = 'home-fab tilt-fab';
+    tilt.setAttribute('aria-label', 'Toggle 3D view');
+    const tiltLabel = () => { tilt.textContent = map.getPitch() > 20 ? '2D' : '3D'; };
+    tilt.addEventListener('click', () => {
+      map.easeTo({ pitch: map.getPitch() > 20 ? 0 : 62, duration: 600 });
+    });
+    map.on('pitchend', tiltLabel);
+    map.on('load', tiltLabel);
+    tiltLabel();
+    document.body.appendChild(tilt);
   }
   map.on('load', () => { renderChips(); renderPlaces(); });
   // Never fail black: surface token/tile problems visibly (first hard error only).

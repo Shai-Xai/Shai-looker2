@@ -182,7 +182,7 @@ function Editor({ suiteId, scope }) {
           <>
             <select value={config.style} onChange={(e) => setStyle(e.target.value)} style={sel}>
               <option value="dark">Dark</option><option value="satellite">Satellite</option>
-              <option value="streets">Streets</option><option value="outdoors">Outdoors</option>
+              <option value="streets">Streets</option><option value="outdoors">Outdoors</option><option value="standard">3D (Standard)</option>
             </select>
             <button style={btn} disabled={busy === 'camera'} onClick={() => { setBusy('camera'); post({ type: 'camera:get' }); }}>📷 Save this view</button>
             <button style={btn} disabled={busy === 'import'} onClick={importStations}>⇄ Import Event Ops stations</button>

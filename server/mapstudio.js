@@ -39,7 +39,7 @@ const DEFAULT_CATEGORIES = [
 // Event Ops station kinds → starter category keys (for the import).
 const STATION_KIND_TO_CAT = { bar: 'bar', gate: 'entrance', booth: 'vendor', topup: 'facility', vendor: 'vendor', other: 'facility' };
 
-const STYLE_KEYS = ['dark', 'streets', 'satellite', 'outdoors'];
+const STYLE_KEYS = ['dark', 'streets', 'satellite', 'outdoors', 'standard'];
 const LOGO_CAP = 300 * 1024; // ~300KB data-URL per place logo (matches entity-logo convention)
 
 // ── sanitisers (write-time; the public page trusts what's in the DB) ─────────────
