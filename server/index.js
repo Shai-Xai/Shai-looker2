@@ -93,6 +93,8 @@ require('./audit').mount(app, { db });
 // of dying in the log stream. Disposable: remove these lines + server/ops.js.
 const ops = require('./ops'); ops.init({ db }); ops.mount(app, { auth });
 reqlog.mount(app, { ops }); // POST /api/client-error -> structured log + throttled ops alert
+// POPIA/GDPR: contact forget/export + entity purge registry -> server/dsar.js.
+const dsar = require('./dsar').mount(app, { db, auth });
 // Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
 require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
@@ -424,7 +426,8 @@ app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
   if (!e) return res.status(404).json({ error: 'Entity not found' });
   res.json(e);
 });
-app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.deleteEntity(req.params.id); res.status(204).end(); });
+// Offboarding must be COMPLETE — FK cascade reaches 4 tables; dsar sweeps the ~50 no-FK feature tables (audit F4).
+app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => res.json(dsar.offboardEntity(req.params.id, req.user.id)));
 
 // Reusable Inventive workspaces — create (name + reference), then link users to them.
 app.get('/api/admin/inventive-workspaces', auth.requireAdmin, (_req, res) => res.json(db.listInventiveWorkspaces()));
