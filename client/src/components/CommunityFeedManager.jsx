@@ -20,6 +20,12 @@ const CTA_SCREENS = [
   ['explore_map', '🗺 Map'], ['explore_merch', '🛍 Merch'], ['explore_feed', '📰 Event feed'],
   ['open_url', '🔗 External link'],
 ];
+// Nobody should have to type the scheme — "howler.co.za" becomes a valid
+// https:// link (the server's open_url validation requires one).
+const webUrl = (u) => {
+  const t = String(u || '').trim();
+  return !t || /^https?:\/\//i.test(t) ? t : `https://${t}`;
+};
 
 export default function CommunityFeedManager({ entityId, scope = 'my', section = 'posts' }) {
   const isMobile = useIsMobile();
@@ -567,7 +573,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
   const buildCta = () => {
     if (!showCta || !ctaLabel.trim()) return {};
     const destination = ctaScreen === 'open_url'
-      ? `open_url:${ctaUrl.trim()}`
+      ? `open_url:${webUrl(ctaUrl)}`
       : `${ctaScreen}${(selectedCommunity?.eventId || ctaEventId) ? `:${selectedCommunity?.eventId || ctaEventId}` : ''}`;
     return { ctaLabel: ctaLabel.trim(), ctaDestination: destination, ctaStyle };
   };
@@ -617,7 +623,7 @@ function Composer({ communities, onCreate, scope, entityId }) {
             {CTA_SCREENS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           {ctaScreen === 'open_url' && (
-            <input style={{ ...input, width: 'auto', flex: 2, minWidth: 180 }} value={ctaUrl} onChange={(e) => setCtaUrl(e.target.value)} placeholder="https://…" />
+            <input style={{ ...input, width: 'auto', flex: 2, minWidth: 180 }} value={ctaUrl} onChange={(e) => setCtaUrl(e.target.value)} placeholder="Link — e.g. howler.co.za/signup" />
           )}
           {ctaNeedsEventId && (
             <EventSelect
@@ -898,7 +904,7 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
   const c = comment;
   const replyCta = () => {
     if (!cta.on || !cta.label.trim()) return {};
-    const destination = cta.screen === 'open_url' ? `open_url:${cta.url.trim()}` : `${cta.screen}${cta.eventId ? `:${cta.eventId}` : ''}`;
+    const destination = cta.screen === 'open_url' ? `open_url:${webUrl(cta.url)}` : `${cta.screen}${cta.eventId ? `:${cta.eventId}` : ''}`;
     return { ctaLabel: cta.label.trim(), ctaDestination: destination };
   };
   const sendReply = () => api.socialReplyComment(scope, entityId, c.id, replyText, replyCta())
@@ -940,7 +946,7 @@ function CommentItem({ scope, entityId, comment, onChanged, onError, postContext
                     {CTA_SCREENS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                   {cta.screen === 'open_url'
-                    ? <input style={{ ...input, width: 'auto', flex: 1, fontSize: 12, padding: '5px 9px', minWidth: 150 }} value={cta.url} onChange={(e) => setCta({ ...cta, url: e.target.value })} placeholder="https://…" />
+                    ? <input style={{ ...input, width: 'auto', flex: 1, fontSize: 12, padding: '5px 9px', minWidth: 150 }} value={cta.url} onChange={(e) => setCta({ ...cta, url: e.target.value })} placeholder="Link — e.g. howler.co.za/signup" />
                     : <EventSelect
                         value={cta.eventId}
                         onChange={(id) => setCta({ ...cta, eventId: id })}
