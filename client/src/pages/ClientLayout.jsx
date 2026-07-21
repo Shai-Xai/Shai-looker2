@@ -101,6 +101,7 @@ export default function ClientLayout() {
   const [eopEntities, setEopEntities] = useState([]);
   useEffect(() => { api.eventopsEnabled().then((r) => setEopEntities(r.entities || [])).catch(() => {}); }, []);
   const onEventOps = location.pathname.startsWith('/event-ops');
+  const onEventMap = location.pathname.startsWith('/event-map');
   const onGoals = location.pathname.startsWith('/goals');
   const onAlerts = location.pathname.startsWith('/alerts');
   const onSocial = location.pathname.startsWith('/social');
@@ -574,6 +575,17 @@ export default function ClientLayout() {
             <span style={ellip}>Event Ops</span>
           </button>
           )}
+          {fl('mapstudio') && can(PERMS.MAP_MANAGE) && (
+          <button
+            ref={onEventMap ? activeRef : null}
+            className={`nav-row${onEventMap ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onEventMap ? 600 : 500 }}
+            onClick={() => { if (!onEventMap) vtNavigate(navigate, '/event-map'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🗺️</span>
+            <span style={ellip}>Event Map</span>
+          </button>
+          )}
           {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -834,6 +846,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>📟</span>
                     <span style={ellip}>Event Ops</span>
+                  </button>
+                  )}
+                  {fl('mapstudio') && can(PERMS.MAP_MANAGE) && (
+                  <button
+                    className={`nav-row${onEventMap ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onEventMap ? 700 : 500 }}
+                    onClick={() => { if (!onEventMap) vtNavigate(navigate, '/event-map'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗺️</span>
+                    <span style={ellip}>Event Map</span>
                   </button>
                   )}
                   {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (

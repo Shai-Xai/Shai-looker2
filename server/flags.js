@@ -49,6 +49,7 @@ const REGISTRY = [
     { key: 'engage.links', name: 'Links', def: true, beta: true, desc: 'ChottuLink short links into the Howler app — created from Pulse, click-tracked. OFF hides the tab + removes the Owl link tools.' },
     { key: 'engage.surveys', name: 'Surveys', def: false, beta: true, desc: 'Post-event fan surveys answered in the Howler app, results back in Pulse. OFF hides the tab AND stops the app being served this client\'s surveys.' },
   ] },
+  { key: 'mapstudio', emoji: '🗺️', name: 'Map Studio', def: false, beta: true, desc: 'Self-service event maps — pins, logos, CTAs and filters built in Pulse, published at /maps/:slug for the Howler app\'s map WebView. OFF hides the studio (client side) AND stops serving the client\'s published maps.' },
   { key: 'social', emoji: '📊', name: 'Social', def: false, beta: true, desc: 'Social performance reporting.' },
   { key: 'community', emoji: '📰', name: 'Community feed', def: false, beta: true, desc: 'Howler-native communities & feed posts served to the app from Pulse (Social+ replacement spike). OFF hides the composer AND drops this client\'s posts/communities from the app feed.', kids: [
     { key: 'community.chat', name: 'Event chat', def: true, beta: true, desc: 'Per-event chat channels + fan groups (mini WhatsApp). OFF hides the Channels manager AND drops this client\'s channels from the app.' },
@@ -146,6 +147,7 @@ const GATES = [
   ['/api/my/social', 'community'],
   ['/api/my/social/chat', 'community.chat'],
   ['/api/my/moderation', 'community.moderation'],
+  ['/api/mapstudio', 'mapstudio'],
 ];
 
 // ── Resolution ──────────────────────────────────────────────────────────────────
