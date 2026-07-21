@@ -525,7 +525,7 @@ test('app posters: organiser authorises a Howler account to post from the app', 
   // App posts carry CTAs too — same validation as the Pulse composer.
   const withCta = await call('POST /api/app/social/posts', {
     token: 'tok-661779',
-    body: { communityId: orgComm.id, text: 'Doors at noon', ctaLabel: 'Get tickets', ctaDestination: 'explore_tickets:19203', ctaStyle: 'secondary' },
+    body: { communityId: orgComm.id, text: 'Doors at noon', global: true, ctaLabel: 'Get tickets', ctaDestination: 'explore_tickets:19203', ctaStyle: 'secondary' },
   });
   assert.equal(withCta.code, 200);
   assert.equal(withCta.body.ctaLabel, 'Get tickets');
@@ -536,6 +536,26 @@ test('app posters: organiser authorises a Howler account to post from the app', 
     body: { communityId: orgComm.id, text: 'nope', ctaLabel: 'Bad', ctaDestination: 'javascript:alert(1)' },
   });
   assert.equal(badCta.code, 400);
+
+  // Own-post edit/delete: the author sees canEdit, can PATCH the caption +
+  // CTA, and DELETE archives it out of the feed. Anyone else gets 404.
+  const mineFeed = await call('GET /api/app/social/feed', { token: 'tok-661779' });
+  assert.equal(mineFeed.body.posts.find((p) => p.id === withCta.body.id).canEdit, true);
+  const otherFeed = await call('GET /api/app/social/feed', { token: 'tok-662076' });
+  assert.equal(otherFeed.body.posts.find((p) => p.id === withCta.body.id).canEdit, false);
+  const edited = await call('PATCH /api/app/social/posts/:id', {
+    token: 'tok-661779', params: { id: withCta.body.id },
+    body: { text: 'Doors at 1pm actually', ctaLabel: 'Tickets', ctaDestination: 'explore_tickets:19203', ctaStyle: 'primary' },
+  });
+  assert.equal(edited.code, 200);
+  assert.equal(edited.body.body, 'Doors at 1pm actually');
+  assert.equal(edited.body.ctaStyle, 'primary');
+  assert.equal((await call('PATCH /api/app/social/posts/:id', { token: 'tok-662076', params: { id: withCta.body.id }, body: { text: 'hijack' } })).code, 404);
+  assert.equal((await call('DELETE /api/app/social/posts/:id', { token: 'tok-662076', params: { id: withCta.body.id } })).code, 404);
+  const gone = await call('DELETE /api/app/social/posts/:id', { token: 'tok-661779', params: { id: withCta.body.id } });
+  assert.equal(gone.code, 200);
+  const afterDelete = await call('GET /api/app/social/feed', {});
+  assert.ok(!afterDelete.body.posts.some((p) => p.id === withCta.body.id));
 
   // Empty posts and bad payloads are refused.
   assert.equal((await call('POST /api/app/social/posts', { token: 'tok-661779', body: { communityId: orgComm.id } })).code, 400);

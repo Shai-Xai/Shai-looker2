@@ -402,7 +402,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       author: { name: r.author_name || community?.name || '' },
       reactionCount: reactionCount(r.id),
       commentCount: commentCount(r.id),
-      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId), pinnedByMe: hasPinned(r.id, viewerId) } : {}),
+      // canEdit: the viewer authored this post from the app — unlocks the
+      // app's own edit/delete affordance (server-enforced on the endpoints).
+      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId), pinnedByMe: hasPinned(r.id, viewerId), canEdit: r.author_email === `app:${viewerId}` } : {}),
       // Held/removed states (author-only rows — the read filters did the gating).
       ...(r.moderation_status && r.moderation_status !== 'visible' ? { moderation: { status: r.moderation_status } } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
@@ -1288,6 +1290,40 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       return res.status(202).json({ ...post, moderation: moderation.heldMeta(verdict.reason) });
     }
     res.json(post);
+  }));
+
+  // Edit / delete an OWN app post (canEdit on feed shapes flags these to the
+  // app). Ownership = the post was authored from the app by THIS verified user
+  // (author_email 'app:<id>') AND they're still a registered poster. Edits
+  // cover the caption + CTA (media stays — delete and repost to change it);
+  // delete archives (stats and the click ledger survive for Pulse reporting).
+  const requireOwnAppPost = async (req) => {
+    const user = await requireAppUser(req);
+    const p = sql.prepare('SELECT * FROM social_feed_posts WHERE id=?').get(req.params.id);
+    if (!p || p.author_email !== `app:${user.id}` || !posterRow(p.entity_id, user.id)) {
+      throw new HttpError(404, 'Post not found');
+    }
+    return { user, p };
+  };
+  app.patch('/api/app/social/posts/:id', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { p } = await requireOwnAppPost(req);
+    const b = req.body || {};
+    const text = String(b.text ?? p.body).trim().slice(0, MAX_BODY);
+    if (!text && !mediaList(p.media).length) throw new HttpError(400, 'Write something first');
+    const verdict = moderation.screenText(p.entity_id, text);
+    if (verdict.outcome === 'block') return res.status(422).json(moderation.blockedBody(verdict.reason));
+    res.json(updatePost(p.entity_id, p.id, {
+      body: text,
+      ...(b.ctaLabel !== undefined || b.ctaDestination !== undefined
+        ? { ctaLabel: b.ctaLabel, ctaDestination: b.ctaDestination, ctaStyle: b.ctaStyle } : {}),
+    }));
+  }));
+  app.delete('/api/app/social/posts/:id', commentLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const { p } = await requireOwnAppPost(req);
+    updatePost(p.entity_id, p.id, { status: 'archived' });
+    res.json({ ok: true });
   }));
 
   // Direct-to-bucket upload for APP posters — the same presigned-PUT path the
