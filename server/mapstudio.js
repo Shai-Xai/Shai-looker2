@@ -399,7 +399,9 @@ function mount(app, { db, auth, eventops }) {
     const r = sql.prepare("SELECT * FROM map_configs WHERE howler_event_id=? AND published!='' AND slug!=''").get(id);
     if (!r || !flags.enabled(r.entity_id, 'mapstudio')) return res.status(404).json({ error: 'No map' });
     // Outsourced/professional map: the registry hands the app that URL instead.
-    const url = r.external_url || `${req.protocol}://${req.get('host')}/maps/${r.slug}`;
+    // Studio maps get ?app=1 so the page insets its header around the app's own
+    // back/refresh overlay buttons (external pro maps are passed through untouched).
+    const url = r.external_url || `${req.protocol}://${req.get('host')}/maps/${r.slug}?app=1`;
     res.setHeader('Cache-Control', 'public, max-age=60');
     if (req.query.redirect) return res.redirect(302, url);
     res.json({ url, slug: r.slug, version: r.version, name: r.name });
