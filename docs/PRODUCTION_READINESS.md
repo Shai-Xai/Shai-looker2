@@ -57,9 +57,13 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 - [ ] **Rehearse a restore once** (on staging): fetch a snapshot from R2,
   gunzip to `$DATA_DIR/howler.db` (remove `-wal`/`-shm`), boot with the OLD
   `MASTER_KEY`, log in. Write the timings into DEPLOY.md.
-- [ ] **Ops alerting**: confirm `OPS_SLACK_WEBHOOK_URL` is set (it is the whole
-  "would I know it's broken" spine) + add an external uptime ping on
-  `https://howler-pulse-v2.onrender.com/health` (UptimeRobot or similar).
+- [x] **External uptime probe** — **Done 2026-07-20:** UptimeRobot monitor
+  pinging `https://howler-pulse-v2.onrender.com/health` every 5 minutes
+  (catches full outages that Pulse's own Slack alerting can't report, since
+  Pulse sends those itself).
+- [ ] **Ops alerting**: confirm `OPS_SLACK_WEBHOOK_URL` is set in Render (it is
+  the whole "would I know it's broken" spine — without it, background failures
+  fall back to the log stream only).
 - [ ] **CI-gated deploys**: do DEPLOY.md §7 (Render deploy hook secret +
   Auto-Deploy OFF). Today a red test suite on `main` still deploys instantly.
 
