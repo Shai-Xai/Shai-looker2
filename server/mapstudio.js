@@ -85,6 +85,11 @@ function mount(app, { db, auth, eventops }) {
       updated_at   TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_map_configs_slug ON map_configs(slug) WHERE slug != '';
+  `);
+  // Howler event link: lets the Howler app resolve "published map for event N"
+  // straight from Pulse (GET /api/maps/by-event/:id) — no Howler admin field needed.
+  try { sql.exec("ALTER TABLE map_configs ADD COLUMN howler_event_id TEXT NOT NULL DEFAULT ''"); } catch { /* already there */ }
+  sql.exec(`
     CREATE TABLE IF NOT EXISTS map_places (
       id           TEXT PRIMARY KEY,
       entity_id    TEXT NOT NULL,
@@ -143,7 +148,8 @@ function mount(app, { db, auth, eventops }) {
     suiteId: r.suite_id, name: r.name, style: r.style, camera: J(r.camera, {}),
     categories: J(r.categories, DEFAULT_CATEGORIES), slug: r.slug,
     published: !!r.published, publishedAt: r.published_at, version: r.version,
-    publicPath: r.slug ? `/maps/${r.slug}` : '', updatedAt: r.updated_at,
+    publicPath: r.slug ? `/maps/${r.slug}` : '', howlerEventId: r.howler_event_id || '',
+    updatedAt: r.updated_at,
   });
   const placeView = (p) => ({
     id: p.id, name: p.name, kind: p.kind, icon: p.icon, logo: p.logo, description: p.description,
@@ -231,10 +237,12 @@ function mount(app, { db, auth, eventops }) {
       pitch: Math.max(0, Math.min(85, num(b.camera?.pitch, 0))),
       bearing: Math.max(-180, Math.min(180, num(b.camera?.bearing, 0))),
     } : J(cfg.camera, {});
-    sql.prepare('UPDATE map_configs SET name=?, style=?, camera=?, categories=?, updated_at=? WHERE suite_id=?').run(
+    sql.prepare('UPDATE map_configs SET name=?, style=?, camera=?, categories=?, howler_event_id=?, updated_at=? WHERE suite_id=?').run(
       b.name !== undefined ? (plain(b.name, 80) || su.name || 'Event map') : cfg.name,
       STYLE_KEYS.includes(b.style) ? b.style : cfg.style,
-      JSON.stringify(cam), JSON.stringify(cats), now(), su.id,
+      JSON.stringify(cam), JSON.stringify(cats),
+      b.howlerEventId !== undefined ? String(b.howlerEventId).replace(/\D/g, '').slice(0, 20) : (cfg.howler_event_id || ''),
+      now(), su.id,
     );
     res.json({ config: configView(sql.prepare('SELECT * FROM map_configs WHERE suite_id=?').get(su.id)) });
   });
@@ -372,6 +380,19 @@ function mount(app, { db, auth, eventops }) {
     if (!config) return res.status(404).end();
     res.setHeader('Cache-Control', 'public, max-age=60'); // fresh-ish, but survives festival re-opens
     res.type('html').send(renderMapPage({ mode: 'live', title: config.name || 'Event map', token: mapboxToken(), config, beaconPath: `/maps/${r.slug}/e` }));
+  });
+
+  // Howler-app resolver: "does event N have a published map?" — public, tiny, and
+  // deliberately quiet on misses (the app treats any non-200 as "use the old path").
+  app.get('/api/maps/by-event/:eventId', (req, res) => {
+    const id = String(req.params.eventId || '').replace(/\D/g, '').slice(0, 20);
+    if (!id) return res.status(404).json({ error: 'No map' });
+    const r = sql.prepare("SELECT * FROM map_configs WHERE howler_event_id=? AND published!='' AND slug!=''").get(id);
+    if (!r || !flags.enabled(r.entity_id, 'mapstudio')) return res.status(404).json({ error: 'No map' });
+    const url = `${req.protocol}://${req.get('host')}/maps/${r.slug}`;
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    if (req.query.redirect) return res.redirect(302, url);
+    res.json({ url, slug: r.slug, version: r.version, name: r.name });
   });
 
   app.get('/maps/:slug/config.json', (req, res) => {

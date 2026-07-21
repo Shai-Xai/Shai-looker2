@@ -197,6 +197,14 @@ function Editor({ suiteId, scope }) {
         </div>
       )}
 
+      {canManage && (
+        <EventLink
+          suiteId={suiteId}
+          config={config}
+          onSaved={(cfg) => setData((c) => ({ ...c, config: { ...c.config, ...cfg } }))}
+        />
+      )}
+
       {showCats && <CategoriesEditor suiteId={suiteId} config={config} canManage={canManage} onSaved={(cfg) => { setData((c) => ({ ...c, config: { ...c.config, ...cfg } })); }} />}
 
       {/* main layout: preview + side panel (stacked on mobile) */}
@@ -383,6 +391,41 @@ function CategoriesEditor({ suiteId, config, canManage, onSaved }) {
           <button style={{ ...btn, background: 'var(--brand)', color: '#fff', border: 'none', fontWeight: 700 }} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save categories'}</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function EventLink({ suiteId, config, onSaved }) {
+  const [id, setId] = useState(config.howlerEventId || '');
+  const [busy, setBusy] = useState(false);
+  const saved = (config.howlerEventId || '') === id.trim();
+  return (
+    <div style={{ ...note, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+        <b>Howler app link</b>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+          Enter the Howler <b>event ID</b> (the number in the Active Admin event URL, e.g. 7701). The app then finds this map by itself — no admin field to update, ever.
+        </div>
+      </div>
+      <input
+        style={{ ...inp, marginBottom: 0, width: 120 }}
+        value={id}
+        inputMode="numeric"
+        placeholder="e.g. 7701"
+        onChange={(e) => setId(e.target.value.replace(/\D/g, ''))}
+      />
+      <button
+        style={{ ...btn, fontWeight: 600 }}
+        disabled={busy || saved}
+        onClick={async () => {
+          setBusy(true);
+          try { const r = await api.mapstudioSaveConfig(suiteId, { howlerEventId: id.trim() }); onSaved(r.config); }
+          catch (e) { alert(e.message); }
+          setBusy(false);
+        }}
+      >
+        {busy ? 'Saving…' : saved ? (id ? 'Linked ✓' : 'Not linked') : 'Save link'}
+      </button>
     </div>
   );
 }
