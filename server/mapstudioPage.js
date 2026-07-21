@@ -62,6 +62,10 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
      bubble centre and pins stay glued to their coordinate at every zoom. The
      label hangs below via absolute positioning (doesn't shift the anchor). */
   .pmark { position: relative; cursor: pointer; }
+  /* Ground-anchored feel: pins shrink as you zoom OUT (scale set on --pinscale
+     from the map's zoom vs the saved venue zoom). The scale lives on an inner
+     wrapper so it never fights Mapbox's positioning transform on the root. */
+  .pmark .pin-in { position: absolute; inset: 0; transform: scale(var(--pinscale, 1)); transform-origin: 50% 50%; transition: transform .15s ease-out; }
   .pmark .bub { width: 100%; height: 100%; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
     border: 2px solid rgba(255,255,255,.9); box-shadow: 0 4px 10px rgba(0,0,0,.45); background: #666; overflow: hidden; }
   .pmark.sz-s { width: 26px; height: 26px; } .pmark.sz-s .bub { font-size: 12px; }
@@ -72,6 +76,8 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
     font-size: 10px; font-weight: 600; color: #eef1f5; background: rgba(10,13,16,.72);
     padding: 2px 8px; border-radius: 999px; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .pmark.sel .bub { outline: 3px solid #ff385c; outline-offset: 2px; }
+  .pmark .lbl { transition: opacity .15s ease; }
+  .pins-tiny .pmark .lbl { opacity: 0; } /* far out: bubbles only, no label clutter */
   .home-fab { position: absolute; right: 10px; bottom: 150px; z-index: 20; width: 40px; height: 40px; border-radius: 50%;
     border: none; background: rgba(20,24,29,.85); color: #fff; font-size: 18px; cursor: pointer;
     display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
@@ -182,9 +188,9 @@ function markerEl(p) {
   const cat = catOf(p.kind);
   const el = document.createElement('div');
   el.className = 'pmark sz-' + (['s','m','l'].includes(p.size) ? p.size : 'm') + (p.id === selectedId ? ' sel' : '');
-  el.innerHTML = '<span class="bub" style="background:' + cat.color + '">' +
+  el.innerHTML = '<span class="pin-in"><span class="bub" style="background:' + cat.color + '">' +
     (p.logo ? '<img alt="" src="' + p.logo + '">' : (p.icon || cat.icon || '📍')) +
-    '</span><span class="lbl"></span>';
+    '</span><span class="lbl"></span></span>';
   el.querySelector('.lbl').textContent = p.name;
   el.addEventListener('click', (e) => { e.stopPropagation(); select(p.id); });
   return el;
@@ -281,6 +287,17 @@ function bootMap() {
     zoom: cam.zoom ?? 15, pitch: cam.pitch ?? 0, bearing: cam.bearing ?? 0,
     attributionControl: true,
   });
+  // Pins scale with zoom relative to the saved venue view: full size at the
+  // saved zoom and closer, shrinking (never past 35%) as you zoom out — so a
+  // pin reads as sitting ON its spot rather than floating over the map.
+  const refZoom = () => (cfg.camera && Number.isFinite(cfg.camera.zoom)) ? cfg.camera.zoom : 16;
+  const applyPinScale = () => {
+    const s = Math.max(0.35, Math.min(1.15, Math.pow(2, (map.getZoom() - refZoom()) * 0.7)));
+    document.documentElement.style.setProperty('--pinscale', s.toFixed(3));
+    document.documentElement.classList.toggle('pins-tiny', s < 0.55);
+  };
+  map.on('zoom', applyPinScale);
+  map.on('load', applyPinScale);
   map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'bottom-right');
   map.addControl(new mapboxgl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showUserHeading: true }), 'bottom-right');
   map.on('click', (e) => {
