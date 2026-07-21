@@ -64,8 +64,11 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
 - [ ] **Ops alerting**: confirm `OPS_SLACK_WEBHOOK_URL` is set in Render (it is
   the whole "would I know it's broken" spine — without it, background failures
   fall back to the log stream only).
-- [ ] **CI-gated deploys**: do DEPLOY.md §7 (Render deploy hook secret +
-  Auto-Deploy OFF). Today a red test suite on `main` still deploys instantly.
+- [x] **CI-gated deploys** — **Done 2026-07-20:** `RENDER_DEPLOY_HOOK` secret
+  set in GitHub Actions and Render Auto-Deploy turned OFF (DEPLOY.md §7).
+  Deploys now fire only after lint + tests + build are green; a red suite on
+  `main` no longer reaches production. (This very commit was the live
+  verification run of the gate.)
 
 ## 🟠 First weeks after onboarding starts
 
