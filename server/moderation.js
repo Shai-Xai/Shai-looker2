@@ -64,7 +64,9 @@ function joinedSingles(s) {
 }
 // Emoji folding: strip skin tones + variation selectors so a banned base emoji
 // matches all its tone/ZWJ variants (🖕🏽 → 🖕). Sequence order is preserved.
-const foldEmoji = (s) => String(s || '').normalize('NFKC').replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0E}\u{FE0F}]/gu, '');
+// (Variation selectors stripped via alternation, not a character class —
+// no-misleading-character-class rejects combining chars inside classes.)
+const foldEmoji = (s) => String(s || '').normalize('NFKC').replace(/[\u{1F3FB}-\u{1F3FF}]/gu, '').replace(/\uFE0E|\uFE0F/g, '');
 
 function levenshtein(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;
