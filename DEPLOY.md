@@ -117,6 +117,14 @@ From then on every push to `main` deploys only after CI passes. (Until the
 secret is set, the job skips harmlessly and Auto-Deploy keeps working as
 before.)
 
+**Activated 2026-07-21** (secret set, Auto-Deploy off, gate verified live —
+the first gated run also caught and fixed a pre-existing lint error that had
+been failing CI silently). **Side effect to remember:** with Auto-Deploy off,
+saving environment-variable changes in Render does NOT restart the service —
+after editing env vars, click **Manual Deploy → Deploy latest commit** (or the
+new value silently never reaches the app; this bit us configuring
+`OPS_SLACK_WEBHOOK_URL`).
+
 ### 8. Ops alerts (know when the night went wrong)
 Set `OPS_SLACK_WEBHOOK_URL` to a **Howler-internal** Slack incoming webhook.
 Backup failures, failed scheduled digests, email delivery failures and

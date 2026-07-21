@@ -61,9 +61,11 @@ Severity key: 🔴 blocker before onboarding · 🟠 first weeks · 🟡 hardeni
   pinging `https://howler-pulse-v2.onrender.com/health` every 5 minutes
   (catches full outages that Pulse's own Slack alerting can't report, since
   Pulse sends those itself).
-- [ ] **Ops alerting**: confirm `OPS_SLACK_WEBHOOK_URL` is set in Render (it is
-  the whole "would I know it's broken" spine — without it, background failures
-  fall back to the log stream only).
+- [x] **Ops alerting** — **Done 2026-07-21:** `OPS_SLACK_WEBHOOK_URL` set in
+  Render (Slack app "Pulse Ops Alerts", dedicated ops channel) and proven
+  end-to-end with the new Admin → Backup "Send test alert" button. Gotcha
+  captured in DEPLOY.md: with Auto-Deploy off, env-var changes need a Manual
+  Deploy before the app sees them.
 - [x] **CI-gated deploys** — **Done 2026-07-20:** `RENDER_DEPLOY_HOOK` secret
   set in GitHub Actions and Render Auto-Deploy turned OFF (DEPLOY.md §7).
   Deploys now fire only after lint + tests + build are green; a red suite on
