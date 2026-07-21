@@ -182,6 +182,18 @@ function mount(app, { db, auth, eventops }) {
 
   const mapboxToken = () => db.getSetting('mapbox_public_token', '') || process.env.MAPBOX_TOKEN || '';
 
+  // The app-wide CSP (server/http.js) pins script-src to 'self' — correct for the
+  // SPA, but it kills the map pages: they carry their own inline <script> and load
+  // Mapbox GL from api.mapbox.com (script/styles/tiles/glyphs + blob: workers).
+  // These are static server-rendered pages with no session-scoped actions, so they
+  // relax the policy for themselves only (same pattern as surveyWeb/fanOwl).
+  const MAP_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://api.mapbox.com; style-src 'self' 'unsafe-inline' https://api.mapbox.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.mapbox.com https://events.mapbox.com; worker-src blob:; child-src blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'";
+  // Public map: embeddable anywhere (event websites); preview: same-origin iframe only.
+  const mapPageHeaders = (res, { embeddable }) => {
+    res.set('Content-Security-Policy', MAP_CSP + (embeddable ? '; frame-ancestors *' : "; frame-ancestors 'self'"));
+    if (embeddable) res.removeHeader('X-Frame-Options');
+  };
+
   // ════════════════════════════ authed studio API ═══════════════════════════════
   // Which of my entities can use Map Studio (drives the client nav item).
   app.get('/api/mapstudio/enabled', auth.requireAuth, (req, res) => {
@@ -203,7 +215,8 @@ function mount(app, { db, auth, eventops }) {
   app.get('/api/mapstudio/suites/:suiteId', auth.requireAuth, (req, res) => {
     const su = gateSuite(req, res); if (!su) return;
     const cfg = getConfig(su);
-    res.json({ config: configView(cfg), places: listPlaces(su.id), tokenSet: !!mapboxToken(), canManage: canManage(req.user, su) });
+    // token rides along for the editor's venue-search geocoding (pk. tokens are public by design)
+    res.json({ config: configView(cfg), places: listPlaces(su.id), tokenSet: !!mapboxToken(), token: mapboxToken(), canManage: canManage(req.user, su) });
   });
 
   // Update config (name / style / camera / categories).
@@ -314,6 +327,7 @@ function mount(app, { db, auth, eventops }) {
     const cfg = getConfig(su);
     const config = { name: cfg.name, style: cfg.style, camera: J(cfg.camera, {}), categories: J(cfg.categories, DEFAULT_CATEGORIES), places: listPlaces(su.id) };
     res.setHeader('Cache-Control', 'no-store');
+    mapPageHeaders(res, { embeddable: false });
     res.type('html').send(renderMapPage({ mode: 'edit', title: `${config.name} — preview`, token: mapboxToken(), config }));
   });
 
@@ -351,6 +365,7 @@ function mount(app, { db, auth, eventops }) {
   };
 
   app.get('/maps/:slug', (req, res) => {
+    mapPageHeaders(res, { embeddable: true });
     const r = bySlug(req.params.slug);
     if (!r || !r.published) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><title>Map not found</title><body style="font-family:sans-serif;background:#101418;color:#eef1f5;display:grid;place-items:center;height:100vh;margin:0"><p>This event map isn’t published.</p>');
     const config = J(r.published, null);

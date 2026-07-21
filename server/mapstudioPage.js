@@ -100,6 +100,9 @@ ${token ? '<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css"
   .fb-row .ct { font-size: 11.5px; color: #9aa4af; }
   .powered { position: absolute; right: 10px; bottom: 8px; z-index: 15; font-size: 9.5px; color: #7d8794;
     background: rgba(10,13,16,.55); padding: 3px 9px; border-radius: 999px; }
+  .errbar { position: absolute; left: 12px; right: 12px; top: 50%; transform: translateY(-50%); z-index: 18;
+    background: rgba(74,16,13,.92); color: #ffd7d4; border: 1px solid rgba(255,84,73,.4); border-radius: 12px;
+    padding: 12px 16px; font-size: 13px; line-height: 1.5; text-align: center; }
   .editbar { position: absolute; left: 10px; bottom: 10px; z-index: 25; font-size: 11px; color: #c8d0d9;
     background: rgba(10,13,16,.7); padding: 6px 12px; border-radius: 999px; }
 </style>
@@ -272,6 +275,17 @@ function bootMap() {
     else closeSheet();
   });
   map.on('load', () => { renderChips(); renderPlaces(); });
+  // Never fail black: surface token/tile problems visibly (first hard error only).
+  let errShown = false;
+  map.on('error', (e) => {
+    const status = e && e.error && (e.error.status || e.error.statusCode);
+    if (errShown || !(status === 401 || status === 403)) return;
+    errShown = true;
+    const bar = document.createElement('div');
+    bar.className = 'errbar';
+    bar.textContent = 'The map tiles were rejected (HTTP ' + status + ') — the Mapbox token is invalid or its URL restrictions don\\'t include this domain. Fix the token in the studio; places and filters still work.';
+    document.body.appendChild(bar);
+  });
 }
 
 // ── editor bridge (edit mode only) ───────────────────────────────────────────

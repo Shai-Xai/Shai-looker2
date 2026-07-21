@@ -151,6 +151,16 @@ function Editor({ suiteId, scope }) {
 
   return (
     <div>
+      {/* find the venue: search or paste coordinates, then frame + Save this view */}
+      {canManage && (
+        <VenueSearch
+          token={data.token}
+          onGo={({ lat, lng, name }) => {
+            post({ type: 'camera:set', camera: { lat, lng, zoom: 16, pitch: 0, bearing: 0 } });
+            if (name) post({ type: 'fly', lat, lng });
+          }}
+        />
+      )}
       {/* top bar: style, camera, import, publish */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <select value={config.style} onChange={(e) => setStyle(e.target.value)} style={sel} disabled={!canManage}>
@@ -372,6 +382,58 @@ function CategoriesEditor({ suiteId, config, canManage, onSaved }) {
           <button style={{ ...btn, background: 'var(--brand)', color: '#fff', border: 'none', fontWeight: 700 }} disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save categories'}</button>
         </div>
       )}
+    </div>
+  );
+}
+
+function VenueSearch({ token, onGo }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function go(e) {
+    e.preventDefault();
+    const s = q.trim();
+    if (!s) return;
+    // direct coordinates: "lat, lng" (e.g. -33.9481, 18.8602)
+    const m = s.match(/^(-?\d{1,2}(?:\.\d+)?)[,;\s]+(-?\d{1,3}(?:\.\d+)?)$/);
+    if (m) { setResults(null); onGo({ lat: +m[1], lng: +m[2] }); return; }
+    if (!token) { alert('Add the Mapbox token first — venue search uses it. (Pasting coordinates like “-33.9481, 18.8602” works without it.)'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(s)}&limit=5&access_token=${encodeURIComponent(token)}`).then((x) => x.json());
+      const feats = (r.features || []).map((f) => ({
+        name: f.properties?.full_address || f.properties?.name || 'Result',
+        lat: f.properties?.coordinates?.latitude, lng: f.properties?.coordinates?.longitude,
+      })).filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng));
+      setResults(feats.length ? feats : []);
+    } catch (err) { alert('Search failed: ' + err.message); }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ position: 'relative', marginBottom: 10 }}>
+      <form onSubmit={go} style={{ display: 'flex', gap: 8 }}>
+        <input
+          style={{ ...inp, marginBottom: 0, flex: 1 }}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 Find the venue — search an address/place, or paste coordinates like -33.9481, 18.8602"
+        />
+        <button type="submit" style={{ ...btn, fontWeight: 600 }} disabled={busy}>{busy ? 'Searching…' : 'Go'}</button>
+      </form>
+      {results && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 10, marginTop: 4, boxShadow: '0 8px 30px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+          {results.length === 0 && <div style={{ padding: '10px 12px', fontSize: 13, color: 'var(--muted)' }}>No results — try adding the town/country, or paste coordinates.</div>}
+          {results.map((r, i) => (
+            <button key={i} onClick={() => { setResults(null); setQ(r.name); onGo(r); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', fontSize: 13, fontFamily: 'inherit', color: 'var(--text)', background: 'none', border: 'none', borderTop: i ? '1px solid var(--hairline)' : 'none', cursor: 'pointer' }}>
+              📍 {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>The preview flies there — frame it how attendees should first see it, then hit “📷 Save this view”.</div>
     </div>
   );
 }
