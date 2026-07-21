@@ -259,6 +259,14 @@ Authorised **app posters** publish for a client without a Pulse login.
   `ctaDestination` (screen keyword like `explore_tickets:19203` or
   `open_url:https://…`) and `ctaStyle` (`primary` banner / `secondary` icon
   pill) — the same fields and validation as the Pulse composer (2026-07-21).
+- Own-post edit/delete (2026-07-21): feed shapes flag posts the verified
+  viewer authored from the app with `canEdit: true`. `PATCH
+  /api/app/social/posts/:id {text?, ctaLabel?, ctaDestination?, ctaStyle?}`
+  edits the caption/button (text re-screened by moderation; media is
+  immutable — delete and repost to change it). `DELETE .../posts/:id`
+  archives the post (it leaves every feed; stats + the CTA click ledger
+  survive for Pulse reporting). Both are 404 unless the post was authored by
+  this user from the app AND they're still a registered poster.
 - Direct-to-bucket upload (big videos): `POST /api/app/social/presign
   {name, mime, communityId?}` (JWT; registered posters only, 403 otherwise) →
   `{contractVersion, uploadUrl, method, headers, publicUrl, kind}` — the same
