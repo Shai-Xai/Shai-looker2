@@ -155,6 +155,7 @@ function Editor({ suiteId, scope }) {
       {canManage && (
         <VenueSearch
           token={data.token}
+          near={config.camera && Number.isFinite(config.camera.lat) ? config.camera : null}
           onGo={({ lat, lng, name }) => {
             post({ type: 'camera:set', camera: { lat, lng, zoom: 16, pitch: 0, bearing: 0 } });
             if (name) post({ type: 'fly', lat, lng });
@@ -386,7 +387,7 @@ function CategoriesEditor({ suiteId, config, canManage, onSaved }) {
   );
 }
 
-function VenueSearch({ token, onGo }) {
+function VenueSearch({ token, near, onGo }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -401,10 +402,14 @@ function VenueSearch({ token, onGo }) {
     if (!token) { alert('Add the Mapbox token first — venue search uses it. (Pasting coordinates like “-33.9481, 18.8602” works without it.)'); return; }
     setBusy(true);
     try {
-      const r = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(s)}&limit=5&access_token=${encodeURIComponent(token)}`).then((x) => x.json());
+      // Search Box API — unlike plain geocoding it finds VENUES/POIs ("The Ostrich
+      // Farm"), not just towns and streets. Bias results to where the map is looking.
+      const prox = near ? `&proximity=${near.lng},${near.lat}` : '';
+      const url = `https://api.mapbox.com/search/searchbox/v1/forward?q=${encodeURIComponent(s)}&limit=6&types=poi,address,place,locality,neighborhood${prox}&access_token=${encodeURIComponent(token)}`;
+      const r = await fetch(url).then((x) => x.json());
       const feats = (r.features || []).map((f) => ({
-        name: f.properties?.full_address || f.properties?.name || 'Result',
-        lat: f.properties?.coordinates?.latitude, lng: f.properties?.coordinates?.longitude,
+        name: [f.properties?.name, f.properties?.full_address].filter(Boolean).join(' — ') || 'Result',
+        lat: f.geometry?.coordinates?.[1], lng: f.geometry?.coordinates?.[0],
       })).filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng));
       setResults(feats.length ? feats : []);
     } catch (err) { alert('Search failed: ' + err.message); }
