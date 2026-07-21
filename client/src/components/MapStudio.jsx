@@ -231,7 +231,7 @@ function Editor({ suiteId, scope }) {
         />
       )}
 
-      {showCats && canEdit && <CategoriesEditor suiteId={suiteId} config={config} canManage={canEdit} onSaved={(cfg) => { setData((c) => ({ ...c, config: { ...c.config, ...cfg } })); }} />}
+      {showCats && canEdit && <CategoriesEditor suiteId={suiteId} config={config} canManage={canEdit} onClose={() => setShowCats(false)} onSaved={(cfg) => { setData((c) => ({ ...c, config: { ...c.config, ...cfg } })); }} />}
 
       {showStats && analytics && (
         <div style={{ ...card, marginBottom: 12 }}>
@@ -405,19 +405,22 @@ function PlaceForm({ suiteId, place, categories, canManage, onSaved, onDeleted }
   );
 }
 
-function CategoriesEditor({ suiteId, config, canManage, onSaved }) {
+function CategoriesEditor({ suiteId, config, canManage, onClose, onSaved }) {
   const [cats, setCats] = useState(config.categories.map((c) => ({ ...c })));
   const [busy, setBusy] = useState(false);
   const set = (i, k, v) => setCats((cur) => cur.map((c, j) => (i === j ? { ...c, [k]: v } : c)));
   async function save() {
     setBusy(true);
-    try { const r = await api.mapstudioSaveConfig(suiteId, { categories: cats }); onSaved(r.config); }
+    try { const r = await api.mapstudioSaveConfig(suiteId, { categories: cats }); onSaved(r.config); onClose?.(); }
     catch (e) { alert(e.message); }
     setBusy(false);
   }
   return (
     <div style={{ ...card, marginBottom: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 8 }}>Categories — these become the filter chips</div>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Categories — these become the filter chips</div>
+        <button onClick={() => onClose?.()} aria-label="Close categories" style={{ ...btn, marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }}>✕ Close</button>
+      </div>
       {cats.map((c, i) => (
         <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
           <input style={{ ...inp, width: 52, marginBottom: 0, textAlign: 'center' }} value={c.icon} onChange={(e) => set(i, 'icon', e.target.value)} disabled={!canManage} maxLength={8} />
