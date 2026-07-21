@@ -25,6 +25,7 @@ const PERMISSIONS = {
   TEAM_MANAGE: 'team.manage',                // manage this client's own logins + roles
   EVENTOPS_MANAGE: 'eventops.manage',        // operate Event Ops — devices, stations, scans, issues
   MODERATION_MANAGE: 'moderation.manage',    // social moderation: banned lists + review queue (MODERATION_CONTRACT.md)
+  MAP_MANAGE: 'map.manage',                  // build & publish the event map (Map Studio)
 };
 const ALL = Object.values(PERMISSIONS);
 const P = PERMISSIONS;
@@ -40,12 +41,12 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE, P.MODERATION_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE, P.MODERATION_MANAGE, P.MAP_MANAGE],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',
     description: 'Marketing & ticketing dashboards and campaigns, with a marketing briefing focus.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.MAP_MANAGE],
   },
   {
     key: 'finance', label: 'Finance', lens: 'finance',
@@ -60,7 +61,7 @@ const ROLES = [
   {
     key: 'ops', label: 'Event Ops', lens: 'exec',
     description: 'On-the-ground event operations ONLY - devices, stations, staff, issues & checkpoints. No dashboards, campaigns or settings.',
-    permissions: [P.EVENTOPS_MANAGE],
+    permissions: [P.EVENTOPS_MANAGE, P.MAP_MANAGE],
   },
   {
     key: 'moderator', label: 'Moderator', lens: 'exec',

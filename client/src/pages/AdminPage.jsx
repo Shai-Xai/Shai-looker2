@@ -23,6 +23,7 @@ import SegmentManager from '../components/SegmentManager.jsx';
 import ChottuLinks from '../components/ChottuLinks.jsx';
 import SurveyManager from '../components/SurveyManager.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
+import MapStudio from '../components/MapStudio.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
@@ -3076,7 +3077,7 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ['map', '🗺️ Map Studio'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -3147,6 +3148,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Event Ops pilot for <b>{entity.name}</b> — track devices &amp; stations live at an event. Switch it on per client; they can then run it themselves too.</p>
               <EventOpsAdmin entityId={entity.id} />
+            </div>
+          )}
+          {section === 'map' && (
+            <div>
+              <p style={hint}>Build &amp; publish the event map for <b>{entity.name}</b> — pins, logos, descriptions, CTAs and filters. Publishing gives a URL for the Howler app's per-event map WebView. Clients with the <code>map.manage</code> permission can build it themselves at /event-map.</p>
+              <MapStudio entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'digests' && (

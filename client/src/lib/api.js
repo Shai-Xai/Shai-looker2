@@ -1061,6 +1061,20 @@ export const api = {
   // Event Ops — live device + station logistics per event (suite). Pilot, per-client
   // opt-in. One guarded route set serves admin + client self-service (server decides who
   // may write). bustCache('/api/eventops') after mutations so the next read is fresh.
+  // ── Map Studio (self-service event maps → server/mapstudio.js) ──
+  mapstudioEnabled: () => fetch('/api/mapstudio/enabled').then(json), // which of my entities can use it
+  mapstudioSuites: (entityId) => fetch(`/api/mapstudio/entities/${entityId}/suites`).then(json),
+  mapstudioGet: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}`).then(json),
+  mapstudioSaveConfig: (suiteId, b) => fetch(`/api/mapstudio/suites/${suiteId}/config`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  mapstudioCreatePlace: (suiteId, b) => fetch(`/api/mapstudio/suites/${suiteId}/places`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  mapstudioUpdatePlace: (suiteId, id, b) => fetch(`/api/mapstudio/suites/${suiteId}/places/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  mapstudioDeletePlace: (suiteId, id) => fetch(`/api/mapstudio/suites/${suiteId}/places/${id}`, { method: 'DELETE' }).then(json),
+  mapstudioImportStations: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}/import-stations`, { method: 'POST' }).then(json),
+  mapstudioPublish: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}/publish`, { method: 'POST' }).then(json),
+  mapstudioUnpublish: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}/unpublish`, { method: 'POST' }).then(json),
+  mapstudioAnalytics: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}/analytics`).then(json),
+  mapstudioSetToken: (token) => fetch('/api/mapstudio/token', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
+
   eventopsEnabled: () => fetch('/api/eventops/enabled').then(json), // which of my entities have it on
   eventopsSetEnabled: (entityId, enabled) => fetch(`/api/eventops/entities/${entityId}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
   eventopsGetEnabled: (entityId) => fetch(`/api/eventops/entities/${entityId}/enabled`).then(json),

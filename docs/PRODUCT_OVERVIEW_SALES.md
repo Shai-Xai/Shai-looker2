@@ -4,12 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-20 (🛡 Social moderation phase 1: banned lists +
-> held-for-review enforcement on every fan write, review-queue API, post
-> reports · 📲 Engage → App: Community suite gets its own
-> section — Posts · Channels · Communities · Share links tabs, composer-first
-> Channels, App Analytics rename, CTA buttons on organiser comment replies,
-> app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-21 (🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -985,7 +980,31 @@ and you'll have the evidence report if it was the network."
 
 ---
 
-## 13. Pulse API & AI-agent access (MCP)  🧪
+## 13. Map Studio — build the event map yourself  🧪
+No more outsourcing the event map to a designer. An AM or the client builds it in
+Pulse — drop pins for stages, bars, gates, food, medical; upload **sponsor logos as
+pins**; write descriptions; add a **button on every pin** (order a drink, view the
+line-up, any link) — then hits **Publish**. The map becomes a fast mobile web page
+hosted by Pulse, and the Howler app's existing per-event map link points at it: **no
+app update, no app-store release**. Edit mid-event ("the bar moved") and it's live on
+attendees' phones on the next open.
+- **Build it in minutes** 🧪 — tap the map to drop a pin, drag to move it; categories
+  become the attendee filter chips (Bars, Stages, Entrances…); pick dark/satellite/
+  streets styling and save the exact camera view you framed.
+- **One set of places with Event Ops** 🧪 — one click imports the event's Event Ops
+  stations (bars/gates/booths) as map places, linked by id — the foundation for the
+  upcoming **live busyness layer** (quiet/busy/packed from real scan & till activity).
+- **Measurable** 🧪 — map opens, pin taps and button clicks are counted (anonymously),
+  so "3,400 people tapped the sponsor's bar pin" becomes a sellable number.
+- **Self-service both sides** 🧪 — Admin → client → **Map Studio** for Howler; the
+  client team does the same at **Event Map** (permission: `map.manage`).
+- Needs a one-time **Mapbox public token** (set once by Howler; free tier covers
+  typical volumes). Desktop browsers get a full layout of the same URL — embeddable
+  on the event's website.
+- Per-client switch: **Admin → Product → Flags → Map Studio** (off by default while
+  in beta; off also stops serving that client's published maps).
+
+## 14. Pulse API & AI-agent access (MCP)  🧪
 **The pitch:** "Your Pulse data isn't locked in — read it from your own tools,
 or point an AI agent (like Claude) at it and ask questions in plain language."
 
@@ -1016,7 +1035,7 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
 
 ---
 
-## 14. Client onboarding journey — layered, guided activation  🧪
+## 15. Client onboarding journey — layered, guided activation  🧪
 **The pitch:** "New clients don't get dumped into a tool — Pulse walks them (and
 your account team) through it in layers, from first login to full automation,
 and celebrates each milestone on the way."
@@ -1059,7 +1078,7 @@ and celebrates each milestone on the way."
 
 ---
 
-## 15. Fan surveys — post-event feedback in the Howler app  🧪
+## 16. Fan surveys — post-event feedback in the Howler app  🧪
 
 **What it is:** design a short post-event survey in Pulse (star ratings,
 pick-one, pick-many, free text — max ~2 minutes for a fan) and it appears in
@@ -1097,7 +1116,7 @@ next year's planning.
 
 ---
 
-## 16. Community feed — your own social layer in the Howler app  🧪
+## 17. Community feed — your own social layer in the Howler app  🧪
 
 Organisers post updates, photos and videos from Pulse straight into the Howler
 app — an organiser community for the brand, event communities ring-fenced to
@@ -1223,6 +1242,13 @@ see "The continuous comms loop" above.)*
   the audit trail. Wire contract in docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-21** — **🗺️ Map Studio** 🧪 (new): build & publish the event map
+  self-service — pins with logos/descriptions/CTA buttons, filter categories, style
+  + camera control, one-click import of Event Ops stations, anonymous tap analytics.
+  Published as a fast mobile page at `/maps/<event>` that the Howler app's existing
+  per-event map WebView loads — no app release; republish updates it live mid-event.
+  Admin surface: Admin → client → Map Studio; client surface: Event Map
+  (`map.manage`). Spec: `docs/MAP_STUDIO_SPEC.md`.
 - **2026-07-20** — **👆 CTA click tracking → segments**: every tap on a post's
   (or chat broadcast's) CTA button in the app is now counted — total taps AND
   who tapped (signed-in fans, with verified email). The 👆 counter on a Pulse
