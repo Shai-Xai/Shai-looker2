@@ -23,6 +23,10 @@ function resolve() {
 function mount(app, { auth }) {
   const info = resolve(); // once at boot — the running process IS one build
   app.get('/api/version', auth.requireAuth, (_req, res) => res.json(info));
+  // Public build stamp (commit hash + boot time — nothing secret): lets a sibling
+  // environment confirm a deploy landed, e.g. production holding a "go test it on
+  // staging" notification until staging actually runs the new build (tickets.js).
+  app.get('/health/build', (_req, res) => res.json({ commit: info.commit, startedAt: info.startedAt }));
   console.log(`[version] ${info.version} mounted`);
   return info;
 }

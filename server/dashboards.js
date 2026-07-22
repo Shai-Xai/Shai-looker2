@@ -9,13 +9,16 @@
 // boundary across the whole app (see server/query.js). collectFolderTree is
 // private to this module.
 
+const { serverError, asyncHandler } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const fx = require('./filterExpression'); // combined-field OR → Looker filter_expression
 
 function mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache, folderDaysSync,
 }) {
+  // Re-sync an imported dashboard from its Looker source (merge, preserving Pulse edits).
+  const resync = require('./resync')({ looker, fetchDashboard, convertDashboard });
 // Admin: hard-wipe the server's query cache (all dashboards). The client's
 // "Clear cache" refresh calls this first, then re-fetches its tiles live.
 app.post('/api/admin/clear-query-cache', auth.requireAdmin, (req, res) => {
@@ -51,6 +54,69 @@ app.post('/api/dashboards/folder/keep-imported', auth.requireAdmin, (req, res) =
   res.json({ ok: true, folder, on });
 });
 
+// Folder-level Days-to-go sync (cascades to every dashboard in the folder by tile
+// title). GET returns the whole map; POST sets/clears one folder's sync.
+app.get('/api/dashboards/folder/days-sync', auth.requireAdmin, (_req, res) => res.json({ syncs: folderDaysSync ? folderDaysSync.read() : {} }));
+app.post('/api/dashboards/folder/days-sync', auth.requireAdmin, (req, res) => {
+  if (!folderDaysSync) return res.status(501).json({ error: 'Not available' });
+  const folder = String((req.body || {}).folder || '');
+  const sync = folderDaysSync.save(folder, (req.body || {}).sync);
+  res.json({ ok: true, folder, sync });
+});
+
+// Bulk: force comparison-events tiles' EVENT sort to DESCENDING across a folder
+// (+ subfolders), so those charts lead with the most recent event. Scoped so it can
+// be rolled out one folder at a time. Only touches tiles that (a) listen to a
+// Comparison Events filter, (b) are NOT offset() "change" tiles (their order is
+// forced current-first at query time anyway), and (c) sort by the event/date
+// dimension — never a measure sort (a top-N-by-value chart is left alone). dryRun
+// by default.
+app.post('/api/admin/comparison-sort-desc', auth.requireAdmin, (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const dashboardId = String((req.body || {}).dashboardId || ''); // scope to ONE dashboard (else the folder)
+  const apply = !!(req.body || {}).apply;
+  const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
+  const COMBO = new Set(['Comparison Events', 'Current & Past Events', 'Comparison Cashless Events', 'Current Event', 'Past Event', 'Event Name']);
+  const isEventField = (s) => /core_events\./i.test(String(s)) || /(^|[._])event/i.test(String(s)) || /(^|[._])date/i.test(String(s));
+  // Narrower: the event DIMENSION itself (e.g. "events", "core_events.start_date",
+  // "event_name") — deliberately excludes generic dates so daily time-series charts
+  // sorting by day aren't flipped.
+  const isEventDim = (s) => /core_events\./i.test(String(s)) || /(^|[._])events?\b/i.test(String(s)) || /(^|[._])event[._]/i.test(String(s));
+  const toDesc = (s) => { const str = String(s); if (!isEventField(str) || /\s+desc$/i.test(str)) return str; return `${str.replace(/\s+(asc|desc)$/i, '')} desc`; }; // event sort → desc; already-desc & measure sorts untouched
+  const hasOffset = (q) => { try { const dyn = typeof q?.dynamic_fields === 'string' ? JSON.parse(q.dynamic_fields) : q?.dynamic_fields; return Array.isArray(dyn) && dyn.some((d) => /\boffset\s*\(/i.test(String(d?.expression || ''))); } catch { return false; } };
+  // A tile is a comparison tile if it listens to a comparison-events filter, OR its
+  // query sorts/filters/pivots reference the event dimension (broader — catches tiles
+  // that don't wire the filter through listenTo, incl. ones that merely sort by event).
+  const isComparisonTile = (t) => {
+    if (Object.keys(t.listenTo || {}).some((k) => COMBO.has(k))) return true;
+    const q = t.query || {};
+    if (Array.isArray(q.sorts) && q.sorts.some(isEventDim)) return true;
+    return Object.keys(q.filters || {}).some(isEventDim) || (Array.isArray(q.pivots) && q.pivots.some(isEventDim));
+  };
+  const defs = dashboardId
+    ? [store.get(dashboardId)].filter(Boolean)
+    : store.list().filter((m) => inFolder(m.folder)).map((m) => store.get(m.id)).filter(Boolean);
+  const changes = [];
+  // Diagnostic breakdown so a "nothing to change" result can explain WHY: offset
+  // comparison tiles are skipped because their order is already forced to
+  // current-event-first at view time; already-desc & non-comparison tiles are no-ops.
+  const skip = { offsetAuto: 0, alreadyDesc: 0, notComparison: 0 };
+  for (const def of defs) {
+    let touched = false;
+    for (const t of [...(def.tiles || []), ...((def.carousels || []).flatMap((c) => c.tiles || []))]) {
+      const q = t.query;
+      if (!q || !Array.isArray(q.sorts) || !q.sorts.length) continue;
+      if (!isComparisonTile(t)) { skip.notComparison++; continue; }
+      if (hasOffset(q)) { skip.offsetAuto++; continue; } // already current-first at view time
+      const next = q.sorts.map(toDesc);
+      if (next.some((s, i) => s !== q.sorts[i])) { q.sorts = next; touched = true; changes.push({ dashboard: def.title, tile: t.title || t.id }); }
+      else skip.alreadyDesc++;
+    }
+    if (touched && apply) store.update(def.id, def);
+  }
+  res.json({ folder, dashboardId, apply, changed: changes.length, skip, changes: changes.slice(0, 300) });
+});
+
 app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
   const d = store.get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Dashboard not found' });
@@ -58,7 +124,10 @@ app.get('/api/dashboards/:id', auth.requireAuth, (req, res) => {
   // View-time cascade: a persistent folder setting can pin imported filters for the
   // whole folder. Surfaced as a separate hint so the editor still shows the
   // dashboard's OWN flag; it's never persisted onto the dashboard.
-  res.json({ ...d, folderKeepImported: db.folderKeepImportedFor(d.folder) });
+  // Also apply the folder-level Days-to-go sync (resolved to this dashboard by tile
+  // title) when the dashboard has none of its own — same view-time inheritance.
+  const withSync = folderDaysSync ? folderDaysSync.withFolderSync(d) : d;
+  res.json({ ...withSync, folderKeepImported: db.folderKeepImportedFor(d.folder) });
 });
 
 // Create / edit / delete / import — admin only (Howler builds; clients view).
@@ -88,7 +157,7 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -114,7 +183,7 @@ app.get('/api/looker/folder/:id', auth.requireAdmin, async (req, res) => {
       byId.get(d.folderId).dashboards.push({ id: d.id, title: d.title });
     }
     res.json({ id: String(root.id), name: root.name, folders: order.map((fid) => byId.get(fid)), total: tree.length });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 // Recursively collect every dashboard in a folder and its subfolders.
@@ -176,9 +245,48 @@ app.post('/api/dashboards/import-folder', auth.requireAdmin, async (req, res) =>
     res.json({ folder: rootName, imported, total: list.length, failed, folders: folders.length });
   } catch (err) {
     console.error('[POST /api/dashboards/import-folder]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
+
+// Re-sync ONE dashboard from its Looker source. Dry-run by default (returns a
+// summary of what would change); with { apply:true } it merges + saves. The merge
+// refreshes Looker content but keeps every Pulse customization (see server/resync.js).
+app.post('/api/admin/dashboards/:id/resync', auth.requireAdmin, asyncHandler(async (req, res) => {
+  const cur = store.get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Dashboard not found' });
+  if (!(cur.source && cur.source.lookerDashboardId)) return res.status(400).json({ error: 'This dashboard was not imported from Looker, so there is nothing to re-sync.' });
+  const { def, summary } = await resync.resync(cur);
+  const lookerDashboardId = cur.source.lookerDashboardId;
+  if (!(req.body || {}).apply) return res.json({ applied: false, summary, lookerDashboardId });
+  def.source = { ...(def.source || {}), lastSyncedAt: new Date().toISOString() };
+  const saved = store.update(cur.id, def);
+  try { db.harvestDashboardTiles(saved, { sourceDashboardId: saved.id }); } catch (e) { console.error('[resync harvest]', e.message); }
+  if (clearCache) clearCache(); // drop cached query results so refreshed tiles render live
+  res.json({ applied: true, summary, lookerDashboardId });
+}));
+
+// Re-sync EVERY imported dashboard in a folder (and subfolders). Dry-run returns a
+// per-dashboard summary; { apply:true } merges + saves each. Skips dashboards with
+// no Looker origin. Sequential — a big folder can take a while.
+app.post('/api/admin/folders/resync', auth.requireAdmin, asyncHandler(async (req, res) => {
+  const folder = String((req.body || {}).folder || '');
+  const apply = !!(req.body || {}).apply;
+  const inFolder = (p) => (folder === '' ? true : (p === folder || String(p || '').startsWith(`${folder}/`)));
+  const defs = db.listDashboards().filter((m) => inFolder(m.folder) && m.source && m.source.lookerDashboardId).map((m) => store.get(m.id)).filter(Boolean);
+  const results = []; const failed = [];
+  let updated = 0; let added = 0; let removedInLooker = 0;
+  for (const cur of defs) {
+    try {
+      const { def, summary } = await resync.resync(cur);
+      updated += summary.updated; added += summary.added; removedInLooker += summary.removedInLooker;
+      if (apply) { def.source = { ...(def.source || {}), lastSyncedAt: new Date().toISOString() }; const saved = store.update(cur.id, def); try { db.harvestDashboardTiles(saved, { sourceDashboardId: saved.id }); } catch { /* best-effort */ } }
+      results.push({ id: cur.id, title: cur.title, ...summary });
+    } catch (e) { failed.push({ id: cur.id, title: cur.title, error: e.message }); }
+  }
+  if (apply && clearCache) clearCache(); // refreshed tiles render live, not from cache
+  res.json({ folder, apply, dashboards: results.length, totals: { updated, added, removedInLooker }, failed, results: results.slice(0, 300) });
+}));
 
 // Backfill folders: for already-imported dashboards with no folder, look up
 // their source Looker dashboard's folder name and file them under it.
@@ -285,11 +393,11 @@ app.post('/api/admin/folders/delete', auth.requireAdmin, (req, res) => {
 // ─── LookML metadata (admin builds tiles) ──────────────────────────────────────
 app.get('/api/looker/models', auth.requireAdmin, async (_req, res) => {
   try { res.json(await looker.listModels()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { serverError(res, err); }
 });
 app.get('/api/looker/explores/:model/:explore', auth.requireAdmin, async (req, res) => {
   try { res.json(await looker.getExploreFields(req.params.model, req.params.explore)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (err) { serverError(res, err); }
 });
 
 // ─── Query execution (the calculation engine) — scoped per tenant ──────────────
@@ -338,8 +446,11 @@ app.post('/api/run-query', auth.requireAuth, async (req, res) => {
     }
     res.json(data);
   } catch (err) {
-    console.error('[POST /api/run-query]', err.message);
-    res.status(500).json({ error: err.message });
+    // Admins get the raw Looker error (they're EDITING tiles and need "unknown
+    // field …" detail); clients get the sanitized generic message — Looker's
+    // error body carries internal URLs/model names that must not reach them.
+    if (req.user?.role === 'admin') { console.error('[POST /api/run-query]', err.message); return res.status(500).json({ error: err.message }); }
+    serverError(res, err, 'POST /api/run-query');
   }
 });
 
@@ -357,8 +468,8 @@ app.post('/api/drill', auth.requireAuth, async (req, res) => {
     const data = await runLookerQuery('/queries/run/json_detail', query);
     res.json({ query, data });
   } catch (err) {
-    console.error('[POST /api/drill]', err.message);
-    res.status(500).json({ error: err.message });
+    if (req.user?.role === 'admin') { console.error('[POST /api/drill]', err.message); return res.status(500).json({ error: err.message }); }
+    serverError(res, err, 'POST /api/drill');
   }
 });
 

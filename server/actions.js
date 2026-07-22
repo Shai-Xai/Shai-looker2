@@ -19,7 +19,7 @@ const { parseContactLines, csvHeader, parseContactTable, fetchGoogleSheetCsv, go
 
 // Audience person-mapping (dedupe + per-channel consent + reach) lives in a shared
 // module so chat-created "query" segments reuse the SAME logic — see audienceMap.js.
-const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience } = require('./audienceMap');
+const { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience, contactKey, isSuppressed } = require('./audienceMap');
 // Block-builder email content (Mailchimp-style stacked blocks → email-safe HTML).
 const emailBlocks = require('./emailBlocks');
 const cleanBlocks = emailBlocks.cleanBlocks;
@@ -28,7 +28,7 @@ const emailTheme = require('./emailTheme'); // the campaign's visual "look" (Tie
 // AI-drafted) campaign copy on save, so what sends reads professionally.
 const { deEmDash } = require('./textStyle');
 
-function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents }) {
+function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAudience, draftCopy, listEvents, appAudience }) {
   const sql = db.db;
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -260,53 +260,23 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     return action;
   }
 
-  const suppressed = (entityId) => new Set(sql.prepare('SELECT email FROM action_suppressions WHERE entity_id=?').all(entityId).map((r) => r.email));
+  // Signed recipient tokens (/u opt-out, open/click attribution), SMS short
+  // links and the phone-aware suppression set — extracted to actionTokens.js.
+  const { unsubToken, parseUnsubToken, registerTarget, shortLink, suppressed, canonicalContact } = require('./actionTokens')({ db, sql, mailer });
   // Resolver for `query`-source segments (cohorts the Owl builds in chat) — scoped
   // people-query over the curated catalogue. Shares audienceMap shaping; we apply our
   // own suppression below, exactly like the tile/paste paths.
   const { resolveQueryAudience } = require('./audienceQuery')({ auth, db });
-  const unsubSecret = () => {
-    let s = db.getSetting('unsub_secret', '');
-    if (!s) { s = crypto.randomBytes(18).toString('base64url'); db.setSetting('unsub_secret', s); }
-    return s;
-  };
-  const unsubToken = (entityId, email) => {
-    const payload = Buffer.from(JSON.stringify({ e: email, n: entityId })).toString('base64url');
-    const sig = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
-    return `${payload}.${sig}`;
-  };
-  // Store a URL → a tiny deterministic HMAC code (identical URLs collapse to one
-  // row). Powers the SMS /k/<code> short links and per-link /c/?k=<code> tracking
-  // of custom HTML. Returns '' if the store is unavailable (callers keep raw URL).
-  const registerTarget = (url) => {
-    if (!url) return '';
-    try {
-      const code = crypto.createHmac('sha256', unsubSecret()).update(url).digest('base64url').slice(0, 8);
-      sql.prepare('INSERT OR IGNORE INTO action_short_links (code, target, at) VALUES (?,?,?)').run(code, url, now());
-      return code;
-    } catch { return ''; }
-  };
-  // Shorten a long absolute URL to a /k/<code> redirect so SMS stays in one segment.
-  const shortLink = (targetUrl) => {
-    if (!targetUrl) return targetUrl;
-    const code = registerTarget(targetUrl);
-    return code ? `${mailer.baseUrl()}/k/${code}` : targetUrl;
-  };
-  const parseUnsubToken = (token) => {
-    const [payload, sig] = String(token || '').split('.');
-    if (!payload || !sig) return null;
-    const want = crypto.createHmac('sha256', unsubSecret()).update(payload).digest('base64url').slice(0, 16);
-    if (sig !== want) return null;
-    try { const j = JSON.parse(Buffer.from(payload, 'base64url').toString()); return j.e && j.n ? j : null; } catch { return null; }
-  };
 
   // Sanitise an audience config (one source). At depth 0 it also carries a
   // multi-source `sources`/`combine` (each block shaped recursively, one level deep).
   function shapeAudience(aud = {}, depth = 0) {
     const out = {
-      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query'].includes(aud.mode) ? aud.mode : 'tile',
+      mode: ['paste', 'gsheet', 'snapshot', 'segment', 'query', 'appmatch'].includes(aud.mode) ? aud.mode : 'tile',
       gsheetUrl: String(aud.gsheetUrl || '').slice(0, 1000), // when mode = 'gsheet' (linked Google Sheet, read live)
       segmentId: String(aud.segmentId || ''), // when mode = 'segment' (reference, resolved live)
+      // when mode = 'appmatch' (a LIVE App-analytics group — the app↔ticketing join, re-computed server-side at every resolve via appMatch.groupEmails).
+      group: String(aud.group || ''), appEvent: String(aud.appEvent || '').slice(0, 64), appSize: Math.min(Math.max(Number(aud.appSize) || 0, 0), 500),
       // when mode = 'query' (an Owl-built cohort) — curated explore + dim filters, resolved by audienceFor's query branch (identity columns fixed server-side).
       model: String(aud.model || ''),
       view: String(aud.view || ''),
@@ -362,10 +332,13 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       // each recipient gets an email (if they have an address) and an SMS (if
       // they have a number).
       channel: ['sms', 'both'].includes(body.channel) ? body.channel : 'email',
+      // What the campaign DRIVES (app/ticketing/cashless/…) — set in the composer;
+      // powers the App analytics moments overlay and channel reporting. '' = untagged.
+      channelTag: ['app', 'ticketing', 'cashless', 'web', 'other'].includes(body.channelTag) ? body.channelTag : '',
       audience: shapeAudience(aud),
-      // Delivery mode: 'once' = single send to the current list; 'sequence' = an
-      // automated drip (enroll abandoners, send timed steps, drop on purchase).
+      // Delivery mode: 'once' = single send; 'sequence' = automated drip (enroll, timed steps, drop on purchase).
       campaignMode: body.campaignMode === 'sequence' ? 'sequence' : 'once',
+      journey: (() => { try { return body.journey ? require('./journeys').validateJourney(body.journey) : undefined; } catch { return undefined; } })(), // full branching tree (Owl journeys) — steps carry the opening sequence; the tree powers the Journeys page
       // Drip timing: 'abandonment' = anchor each person on their abandonment time
       // and only enrol FRESH ones (within freshHours); 'send' = run forward from
       // enrolment for the whole list; '' = legacy (anchor if mapped, enrol all).
@@ -518,7 +491,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   async function combineSources(entityId, cfg, user, depth) {
     const combine = ['union', 'intersect', 'exclude'].includes(cfg.audience.combine) ? cfg.audience.combine : 'union';
     const blocks = (cfg.audience.sources || []).slice(0, 10);
-    const keyOf = (m) => String(m.email || m.phone || '').toLowerCase();
+    const keyOf = contactKey; // canonical email-else-normalised-phone identity (shared with finalizeAudience)
     const subs = [];
     const lists = [];
     for (const b of blocks) {
@@ -573,7 +546,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     let filterFields = [];
     let columns = []; // header columns of a delimited list (paste/gsheet) — for column-mapping
     let filteredOut = 0;
-    if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
+    if (cfg.audience.mode === 'appmatch') {
+      // LIVE app↔ticketing group (App analytics): appMatch.groupEmails re-computes
+      // from PostHog + Looker on every resolve — the segment refreshes at send time.
+      const am = appAudience && appAudience();
+      if (!am) return { list: [], fields: [], filterFields: [], excluded: 0, noConsent: 0, filteredOut: 0 };
+      const { emails } = await am.groupEmails(entityId, user, { group: cfg.audience.group, event: cfg.audience.appEvent || '', size: cfg.audience.appSize || 0 });
+      raw = emails.map((email) => ({ email, phone: '', name: '', emailOk: true, smsOk: false })); // same contactable shape as a pasted list
+    } else if (cfg.audience.mode === 'paste' || cfg.audience.mode === 'gsheet') {
       // Pasted text / uploaded CSV-Excel (parsed to text client-side), or a linked
       // Google Sheet fetched LIVE each resolve so the segment tracks the sheet.
       const text = cfg.audience.mode === 'gsheet'
@@ -660,7 +640,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (existing) return existing.code;
     const free = sql.prepare("SELECT code FROM action_promo_codes WHERE action_id=? AND email='' LIMIT 1").get(actionId);
     if (!free) return '';
-    sql.prepare('UPDATE action_promo_codes SET email=?, assigned_at=? WHERE action_id=? AND code=?').run(email, now(), actionId, free.code);
+    // Conditional claim: today this SELECT→UPDATE runs with no await between, but
+    // the moment anyone adds one, two recipients could claim the same "unique"
+    // code — the AND email='' guard makes the race lose loudly (retry next code).
+    const claim = sql.prepare("UPDATE action_promo_codes SET email=?, assigned_at=? WHERE action_id=? AND code=? AND email=''").run(email, now(), actionId, free.code);
+    if (claim.changes !== 1) return assignPromo(actionId, email); // raced — claim the next free code
     return free.code;
   }
   // Resolve the promo a recipient should see (generic = same for all; unique =
@@ -679,7 +663,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // (case-insensitive by header/label/name), applied AFTER the special tokens ({{name}},
   // {{ticketType}}, {{cta}}, {{unsubscribe}}). Known-but-empty → '' ; unknown token (typo)
   // is left untouched so preview catches it; valid tokens never leak braces.
-  function fillAttrs(s, recipient) {
+  // `xform` (optional) runs over each substituted VALUE — the html/blocks render
+  // passes the HTML escaper so recipient-supplied data (a name registered as
+  // '<a href=…>') can never become live markup in someone's branded email.
+  function fillAttrs(s, recipient, xform) {
     const attrs = (recipient && recipient.attributes) || {};
     const keys = Object.keys(attrs);
     if (!keys.length) return String(s || '');
@@ -687,9 +674,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     for (const k of keys) lut[k.toLowerCase().trim()] = attrs[k];
     return String(s || '').replace(/\{\{\s*([\w .\-/()]+?)\s*\}\}/g, (m, key) => {
       const lk = String(key).toLowerCase().trim();
-      return Object.prototype.hasOwnProperty.call(lut, lk) ? String(lut[lk] ?? '') : m;
+      if (!Object.prototype.hasOwnProperty.call(lut, lk)) return m;
+      const v = String(lut[lk] ?? '');
+      return xform ? xform(v) : v;
     });
   }
+  const htmlEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   function renderFor(action, recipient, step, stepIndex = 0) {
     const cfg = action.config;
@@ -732,25 +722,37 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // link (?promo=CODE); a 'discount' code is entered manually at checkout.
     const promo = promoForRecipient(action, recipient.email);
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const baseClick = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : ''; // /e = email channel, then step index
+    // Real sends route the CTA through the tracked /c/ redirect (/e = email, then step
+    // index; journey nodes may carry their own link). Preview/test link STRAIGHT to
+    // the destination — the token isn't tied to a saved campaign, so /c/ would be dead.
+    const rawCta = step?.ctaUrl || cfg.ctaUrl;
+    const baseClick = !rawCta ? '' : realSend ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}` : rawCta;
     const ctaUrl = baseClick && appendPromo ? `${baseClick}${baseClick.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : baseClick;
     const unsubUrl = `${mailer.baseUrl()}/u/${rtok}`;
-    const tok = (s) => fillAttrs(String(s || '')
-      .replace(/\{\{\s*name\s*\}\}/gi, firstName || 'there')
-      .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, ticket || 'your tickets')
-      .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, ctaUrl || '#')
-      .replace(/\{\{\s*promo_benefit\s*\}\}/gi, promo?.benefit || '')
-      .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, promo?.code || '')
-      .replace(/\{\{\s*unsubscribe\s*\}\}/gi, unsubUrl), recipient);
+    // Function replacers throughout: recipient data may contain `$&`-style
+    // patterns String.replace would otherwise expand. `escVals` HTML-escapes the
+    // substituted values for html/blocks targets (template mode escapes
+    // downstream in mailer.campaignEmail); URLs are ours, never recipient data.
+    const tok = (s, escVals = false) => {
+      const E = escVals ? htmlEsc : (v) => v;
+      return fillAttrs(String(s || '')
+        .replace(/\{\{\s*name\s*\}\}/gi, () => E(firstName || 'there'))
+        .replace(/\{\{\s*(ticket_?type|ticket)\s*\}\}/gi, () => E(ticket || 'your tickets'))
+        .replace(/\{\{\s*cta(_url)?\s*\}\}/gi, () => ctaUrl || '#')
+        .replace(/\{\{\s*promo_benefit\s*\}\}/gi, () => E(promo?.benefit || ''))
+        .replace(/\{\{\s*promo(_?code)?\s*\}\}/gi, () => E(promo?.code || ''))
+        .replace(/\{\{\s*unsubscribe\s*\}\}/gi, () => unsubUrl), recipient, escVals ? htmlEsc : null);
+    };
     const subject = tok(useSubject);
 
     if ((useContentMode === 'html' || useContentMode === 'blocks') && useHtml.trim()) {
-      let html = tok(useHtml);
+      let html = tok(useHtml, true);
       // Track + tag EVERY external link in custom HTML (full multi-link attribution):
       // route each external <a href> through the /c/ click redirect with the original
       // URL stored server-side (?k=code — looked up, never a user-suppliable open
       // redirect; /c/ then appends UTMs). Own links and mailto/tel/# are left alone.
-      if (cfg.clickToken) {
+      // Real sends only — preview/test keep the author's original (working) links.
+      if (realSend && cfg.clickToken) {
         const ownBase = mailer.baseUrl();
         html = html.replace(/(<a\b[^>]*?\shref=)(["'])(https?:\/\/[^"'\s]+)\2/gi, (m, pre, q, url) => {
           if (url.startsWith(ownBase)) return m; // our own links — don't re-track
@@ -759,13 +761,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
           return `${pre}${q}${ownBase}/c/${cfg.clickToken}/${rtok}/e/${stepIndex}?k=${code}${q}`;
         });
       }
-      // Guarantee an unsubscribe link (compliance) if the author didn't include one.
-      if (!/unsubscrib/i.test(html)) {
+      // Guarantee a WORKING unsubscribe link (compliance): the check is for the
+      // recipient's actual /u/ URL, not the word "unsubscribe" — copy that merely
+      // says "you can unsubscribe anytime" (no link) must still get the footer.
+      if (!html.includes(unsubUrl)) {
         const footer = `<div style="font-size:11px;color:#888;text-align:center;padding:18px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">Sent via Howler : Pulse · <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></div>`;
         html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${footer}</body>`) : html + footer;
       }
       const text = `${tok(useHtml).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000)}\n\nUnsubscribe: ${unsubUrl}`;
-      return { html: withPixel(html, rtok), text, subject };
+      return { html: withPixel(html, rtok), text, subject, unsubUrl };
     }
 
     // Hero image: hosted by action id (+ step index) for real sends (email clients
@@ -780,7 +784,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     // logo URL resolves the event's logo.
     const evSuite = action.config?.eventSuiteId || '';
     const { html, text } = mailer.campaignEmail({ entityId: action.entityId, assetScope: evSuite || action.entityId, branding: mailer.resolveBranding(action.entityId, evSuite), subject, bodyText: tok(useBody), ctaText: useCta || 'View event', ctaUrl, unsubUrl, heroImage, promo });
-    return { html: withPixel(html, rtok), text, subject };
+    return { html: withPixel(html, rtok), text, subject, unsubUrl };
   }
 
   // Render an SMS for a recipient: plain text with tokens, a tracked short link
@@ -796,7 +800,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const rtok = unsubToken(action.entityId, recipient.email || recipient.phone || '');
     const promo = promoForRecipient(action, recipient.email || '');
     const appendPromo = promo && promo.type === 'promo' && promo.appendToLink && promo.code;
-    const base = cfg.ctaUrl ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index
+    const base = (step?.ctaUrl || cfg.ctaUrl) ? `${mailer.baseUrl()}/c/${cfg.clickToken}/${rtok}/s/${stepIndex}` : ''; // /s = sms channel, then step index (journey nodes may carry their own link)
     const fullLink = base && appendPromo ? `${base}${base.includes('?') ? '&' : '?'}promo=${encodeURIComponent(promo.code)}` : base;
     const link = shortLink(fullLink); // SMS: long tracked URL → tiny /k/ redirect
     const tok = (s) => fillAttrs(String(s || '')
@@ -814,7 +818,17 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
 
   // Execute: send to every recipient in the snapshot. Runs detached; the UI
   // polls status. Mailer failures are counted, never crash the loop.
+  // activeRuns: in-process re-entrancy guard — the boot-resume sweep (or any
+  // second caller) must never start a parallel loop over a campaign this
+  // process is already sending; two loops share one ledger read and would
+  // double-send everyone not yet ledgered.
+  const activeRuns = new Set();
   async function runCampaign(actionId) {
+    if (activeRuns.has(actionId)) return;
+    activeRuns.add(actionId);
+    try { await runCampaignInner(actionId); } finally { activeRuns.delete(actionId); }
+  }
+  async function runCampaignInner(actionId) {
     const a = getAction(actionId);
     if (!a || a.status !== 'running') return;
     const branding = mailer.resolveBranding(a.entityId, a.config?.eventSuiteId || '');
@@ -860,8 +874,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // sets both true at resolution, so this stays a simple per-channel check.
         if (wantsEmail && recipient.email && recipient.emailOk !== false && !emailDone) {
           attempted = true;
-          const { html, text, subject } = renderFor(a, recipient);
-          const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
+          const { html, text, subject, unsubUrl } = renderFor(a, recipient);
+          const r = await mailer.send({ to: recipient.email, subject: subject || a.title || 'An update from your event', html, text, unsubUrl, fromName: branding.senderName, kind: 'campaign', entity: a.entityId });
           if (r.ok) { ok = true; results.emailSent += 1; markSent.run(a.id, emailKey, 'email', now()); } else lastErr = r.error || r.reason || 'email failed';
         }
         if (wantsSms && recipient.phone && recipient.smsOk !== false && !smsDone && results.smsSent < smsCap) {
@@ -878,6 +892,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     saveResults(a.id, results);
     setStatus(a.id, results.sent > 0 || a.audience.length === 0 ? 'done' : 'failed');
     console.log(`[actions] campaign ${a.id} finished: ${results.sent} sent, ${results.failed} failed`);
+    // A blast that quietly lost a big slice of its audience must page a human —
+    // "done" with 30% failures is an incident, not a success.
+    const attemptedTotal = results.sent + results.failed;
+    if (results.failed >= 5 && results.failed / Math.max(attemptedTotal, 1) >= 0.2) {
+      try { require('./ops').alert('campaign', `Campaign "${a.title || a.id}" (${a.entityId}) finished with ${results.failed}/${attemptedTotal} failures — last error: ${results.lastError || 'unknown'}`); } catch { /* alerting must never break the loop */ }
+    }
   }
 
   // ── routes ──
@@ -1041,6 +1061,10 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft' && a.status !== 'auto') return res.status(400).json({ error: 'Only drafts can be edited' });
+    // Governance: an APPROVED live automation is what the approver signed off.
+    // For approval-required clients, editing it in place would bypass the gate —
+    // pause it back to draft and resubmit instead.
+    if (a.status === 'auto' && requireApprovalFor(a.entityId)) return res.status(400).json({ error: 'This automation was approved as-is — pause it to draft, edit, then resubmit for approval.' });
     const cfg = { ...cleanConfig(req.body || {}), clickToken: a.config.clickToken };
     const rec = ((req.body || {}).recurring || cfg.campaignMode === 'sequence') && cfg.audience.mode === 'tile' ? 1 : 0;
     sql.prepare('UPDATE actions SET title=?, config=?, recurring=?, updated_at=? WHERE id=?')
@@ -1140,49 +1164,8 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // Email preview (sample recipient) + test-send to self.
-  app.post('/api/actions/:entityId/preview-email', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
-    if (!guard(req, res, req.params.entityId)) return;
-    const cfg = cleanConfig(req.body || {});
-    const fake = { id: 'preview', entityId: req.params.entityId, config: cfg };
-    // Use a real sample recipient (from the audience preview) when the client sends
-    // one, so merge fields ({{Ticket Type}}, {{City}}…) render with actual values.
-    const s = (req.body || {}).sample || {};
-    const recipient = { email: s.email || 'sam@example.com', name: s.name || 'Sam', ticket: s.ticket || 'General Admission', phone: s.phone || '+27820000000', attributes: s.attributes || {} };
-    // The client sends the active step's copy in cfg.body, so render from that
-    // (step=null) — works for once-off and per-step sequence previews alike.
-    // Return whichever channel(s) apply: email html, SMS text, or both.
-    const out = {};
-    if (cfg.channel !== 'sms') out.html = renderFor(fake, recipient).html;
-    if (cfg.channel !== 'email') out.sms = renderSmsFor(fake, recipient, null);
-    res.json(out);
-  });
-  app.post('/api/actions/:entityId/test-send', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
-    if (!guard(req, res, req.params.entityId)) return;
-    const cfg = cleanConfig(req.body || {});
-    const fake = { id: 'test', entityId: req.params.entityId, config: cfg };
-    // SMS test goes to a phone you enter; email test goes to your own address.
-    // For 'both', send whichever the test data supports and report each.
-    const wantsEmail = cfg.channel !== 'sms';
-    const wantsSms = cfg.channel !== 'email';
-    const done = [];
-    if (wantsSms) {
-      const to = String((req.body || {}).testPhone || '').trim();
-      if (!to) return res.status(400).json({ error: 'Enter a mobile number to test the SMS' });
-      const text = renderSmsFor(fake, { email: req.user.email, name: 'Sam', ticket: 'General Admission', phone: to });
-      const r = await messaging.sendSms({ to, text: `[TEST] ${text}` });
-      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'SMS not configured' });
-      done.push(to);
-    }
-    if (wantsEmail) {
-      const { html, text, subject } = renderFor(fake, { email: req.user.email, name: '', ticket: 'General Admission' });
-      const branding = mailer.resolveBranding(req.params.entityId, fake.config?.eventSuiteId || '');
-      const r = await mailer.send({ to: req.user.email, subject: `[TEST] ${subject || 'Campaign'}`, html, text, fromName: branding.senderName, kind: 'test', entity: req.params.entityId });
-      if (!r.ok) return res.status(400).json({ error: r.error || r.reason || 'email not configured' });
-      done.push(req.user.email);
-    }
-    res.json({ ok: true, to: done.join(' & ') });
-  });
+  // Preview + test-send routes live in their own module (keeps this file under budget).
+  require('./actionPreview')(app, { auth, guard, cleanConfig, renderFor, renderSmsFor, audienceFor, mailer, messaging });
 
   // APPROVE & SEND — the human gate. Snapshots the audience at this moment and
   // kicks off the send. Both Howler admins and the client's own users may approve.
@@ -1190,6 +1173,12 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+
+    // Validate content UP FRONT — before any sign-off is recorded or the sender is
+    // told it's approved. Otherwise the final approval notifies "approved", then
+    // fails this check, stranding the campaign while everyone thinks it sent.
+    const cErr = contentError(a.config);
+    if (cErr) return res.status(400).json({ error: cErr });
 
     // PENDING: record this user's sign-off against their approver slot. Only
     // when ALL required approvers are in does it fall through and actually send.
@@ -1204,10 +1193,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       for (const k of myKeys) ins.run(a.id, k, req.user.email, now());
       const summ = approvalSummary(getAction(a.id));
       if (!summ.complete) return res.json({ ok: true, pending: true, remaining: summ.pending });
-      // All approvals in → tell the sender, then flip to draft and continue
-      // into the send logic below.
+      // All sign-offs in. A one-off must NOT auto-send on the final approval —
+      // hand it back to the SENDER (status 'approved' + a "ready to send" notice);
+      // they send it themselves. A sequence/automation is approved once then runs
+      // hands-off, so let it fall through to activate below.
+      if (a.config.campaignMode !== 'sequence' && !a.recurring) {
+        const claim = sql.prepare("UPDATE actions SET status='approved', approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='pending'").run(req.user.email, now(), now(), a.id);
+        if (claim.changes !== 1) return res.status(409).json({ error: 'Already handled — another approval got there first' });
+        notifySender(a, { approved: true, by: req.user.email, readyToSend: true });
+        return res.json({ ok: true, approved: true });
+      }
       notifySender(a, { approved: true, by: req.user.email });
-      sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=?").run(now(), a.id);
+      sql.prepare("UPDATE actions SET status='draft', updated_at=? WHERE id=? AND status='pending'").run(now(), a.id);
+    } else if (a.status === 'approved') {
+      // Already cleared approval — only the SENDER (creator) may pull the trigger;
+      // approvers sign off. Falls through to the send logic below.
+      if ((a.createdBy || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+        return res.status(403).json({ error: 'Only the campaign’s sender can send it — it’s approved and waiting for them.' });
+      }
     } else if (a.status !== 'draft') {
       return res.status(400).json({ error: `Cannot approve a ${a.status} campaign` });
     } else if (requireApprovalFor(a.entityId)) {
@@ -1215,15 +1218,15 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       return res.status(400).json({ error: 'This client requires approval — use “Send for approval”.' });
     }
     const isSequence = a.config.campaignMode === 'sequence';
-    const cErr = contentError(a.config);
-    if (cErr) return res.status(400).json({ error: cErr });
 
     // A sequence (drip) or recurring template ACTIVATES on approval and then runs
     // fully automatically — no per-send approval. The check enrolls new
     // abandoners (sequence) or queues child drafts (recurring single-send).
     if (isSequence || a.recurring) {
-      sql.prepare('UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
+      // Atomic activation: only one concurrent approve may flip draft → auto.
+      const claim = sql.prepare("UPDATE actions SET status=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status='draft'")
         .run('auto', req.user.email, now(), now(), a.id);
+      if (claim.changes !== 1) return res.status(409).json({ error: 'Already activated — another approval got there first' });
       if (isSequence) enrollSequence(getAction(a.id)).catch((e) => console.error('[actions] initial enroll failed', a.id, e.message));
       return res.json({ ok: true, activated: true });
     }
@@ -1234,13 +1237,30 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let list;
       if (a.config.audience.mode === 'snapshot') {
         const sup = suppressed(a.entityId);
-        list = a.audience.filter((r) => !sup.has(r.email));
+        list = a.audience.filter((r) => !isSuppressed(sup, r));
       } else {
         ({ list } = await audienceFor(a.entityId, a.config, req.user));
       }
       if (!list.length) return res.status(400).json({ error: 'Audience is empty — nothing to send' });
-      sql.prepare('UPDATE actions SET status=?, audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=?')
-        .run('running', JSON.stringify(list), req.user.email, now(), now(), a.id);
+      // Dry-render the FIRST real recipient before committing: a typo'd merge
+      // tag ({{Frist Name}}) survives substitution untouched and would ship
+      // literally to the whole list. Known-but-empty attributes render '' and
+      // {{name}} falls back to "there" — those pass; only unresolvable tags block.
+      try {
+        const probe = a.config.channel === 'sms'
+          ? renderSmsFor(a, list[0])
+          : (({ subject: ps, html: ph }) => `${ps}\n${ph}`)(renderFor(a, list[0]));
+        const leftover = String(probe).match(/\{\{\s*[\w .\-/()]+?\s*\}\}/);
+        if (leftover) return res.status(400).json({ error: `Unresolved merge tag ${leftover[0].trim()} — fix the copy (or map that audience column) before sending` });
+      } catch (probeErr) { console.warn('[actions] dry-render probe failed (send continues):', probeErr.message); }
+      // Atomically CLAIM the send: audience resolution above is slow (a live Looker
+      // pull), so two overlapping approvals could both reach this point — status +
+      // audience are written in ONE conditional statement and only the winner
+      // (changes === 1) may start runCampaign. The loser gets a 409, never a
+      // second blast (mirrors runScheduledSend's claim).
+      const claim = sql.prepare("UPDATE actions SET status='running', audience=?, approved_by=?, approved_at=?, updated_at=? WHERE id=? AND status IN ('draft','approved')")
+        .run(JSON.stringify(list), req.user.email, now(), now(), a.id);
+      if (claim.changes !== 1) return res.status(409).json({ error: 'Already sending — another approval got there first' });
       // Remember who this campaign family has reached, for recurring dedupe.
       const rootId = a.parentId || a.id;
       const ins = sql.prepare('INSERT OR IGNORE INTO action_sent (root_id, email, at) VALUES (?,?,?)');
@@ -1284,7 +1304,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     const claim = sql.prepare("UPDATE actions SET status='running', updated_at=? WHERE id=? AND status='scheduled'").run(now(), a.id);
     if (claim.changes !== 1) return;
     let list;
-    if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !sup.has(r.email)); }
+    if (a.config.audience.mode === 'snapshot') { const sup = suppressed(a.entityId); list = a.audience.filter((r) => !isSuppressed(sup, r)); }
     else { ({ list } = await audienceFor(a.entityId, a.config, { id: 'scheduler', email: 'scheduler@pulse', role: 'admin', entityIds: [] })); }
     if (!list.length) { saveResults(a.id, { ...a.results, lastError: 'Audience was empty at the scheduled time' }); setStatus(a.id, 'failed'); return; }
     sql.prepare("UPDATE actions SET audience=?, updated_at=? WHERE id=?").run(JSON.stringify(list), now(), a.id);
@@ -1325,148 +1345,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // The Howler admins who "own" a client = those linked to it (entityIds). They
   // get the 'Howler' approval pings — not every global admin. If somehow none
   // are linked, fall back to all admins so an approval is never a dead-end.
-  function howlerAdminsFor(entityId) {
-    const admins = db.listUsers().filter((u) => u.role === 'admin');
-    const linked = admins.filter((u) => (u.entityIds || []).includes(entityId));
-    return linked.length ? linked : admins;
-  }
-  // Pending campaigns where THIS user is an outstanding approver (hasn't signed
-  // off yet) — drives the "needs your approval" banner. { count, first }.
-  function awaitingApprovalFor(user, entityId) {
-    if (!user) return { count: 0, first: '' };
-    const rows = sql.prepare("SELECT * FROM actions WHERE entity_id=? AND status='pending'").all(entityId).map(rowToAction);
-    const canHowler = user.role === 'admin' && howlerAdminsFor(entityId).some((u) => u.id === user.id);
-    const myKeys = [`user:${user.id}`, ...(canHowler ? ['howler'] : [])];
-    let count = 0; let first = '';
-    for (const a of rows) {
-      const mine = approvalSummary(a).approvers.filter((x) => myKeys.includes(x.key) && !x.approved);
-      if (mine.length) { count += 1; if (!first) first = a.id; }
-    }
-    return { count, first };
-  }
-
-  // Approval outcomes the signed-in user (the campaign creator) hasn't seen yet
-  // — drives a guaranteed "your campaign was approved / sent back" banner.
-  function unseenOutcomesFor(user, entityId) {
-    if (!user?.email) return [];
-    return sql.prepare("SELECT id, title, config, outcome, outcome_by, outcome_note FROM actions WHERE entity_id=? AND outcome!='' AND outcome_seen=0 AND lower(created_by)=lower(?) ORDER BY outcome_at DESC")
-      .all(entityId, user.email)
-      .map((r) => ({ id: r.id, title: r.title || JSON.parse(r.config || '{}').subject || 'Your campaign', outcome: r.outcome, by: r.outcome_by || '', note: r.outcome_note || '' }));
-  }
-  // A short, human summary of a campaign's key settings — for the approval
-  // inbox message + email so approvers know what they're signing off.
-  function campaignSummaryLines(a) {
-    const c = a.config;
-    const isSeq = c.campaignMode === 'sequence';
-    const lines = [];
-    lines.push(`Channel: ${c.channel === 'both' ? 'Email + SMS' : c.channel === 'sms' ? 'SMS' : 'Email'}`);
-    lines.push(`Type: ${isSeq ? `Drip sequence — ${(c.steps || []).length} step${(c.steps || []).length === 1 ? '' : 's'}` : a.recurring ? 'Automated (daily check)' : 'One-off send'}`);
-    if (!isSeq && c.subject) lines.push(`Subject: ${c.subject}`);
-    const audSrc = c.audience?.mode === 'paste' ? 'Pasted list'
-      : c.audience?.mode === 'snapshot' ? 'Queued by automation'
-      : c.audience?.mode === 'segment' ? `Segment — ${segmentName(a.entityId, c.audience.segmentId) || 'saved'}`
-      : 'Dashboard tile';
-    lines.push(`Audience: ${audSrc}`);
-    if (c.master) lines.push(`Master: ${c.master}`);
-    if (c.promo?.source && c.promo.source !== 'none') lines.push(`Offer: ${c.promo.code || c.promo.type}`);
-    lines.push(`Approvers: ${approvalSummary(a).approvers.map((x) => x.label).join(', ') || '—'}`);
-    return lines;
-  }
-  // The actual campaign copy, for the approval message + email so approvers can
-  // see what they're signing off without opening the app. Returns plain text
-  // (inbox) and an HTML card that approximates the email (notification email).
-  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const fmtDelay = (h) => (h % 24 === 0 && h >= 24 ? `+${h / 24}d` : `+${h}h`);
-  function campaignContentPreview(a) {
-    const c = a.config;
-    const isSeq = c.campaignMode === 'sequence';
-    const isEmail = c.channel !== 'sms';
-    const card = (subject, bodyText, hero) => `
-      <div style="border:1px solid #e6e6e6;border-radius:10px;padding:14px;margin:8px 0;background:#fff;">
-        ${hero ? `<img src="${esc(hero)}" alt="" style="max-width:100%;border-radius:6px;margin-bottom:10px;display:block;" />` : ''}
-        ${isEmail && subject ? `<div style="font-weight:700;font-size:15px;margin-bottom:6px;">${esc(subject)}</div>` : ''}
-        <div style="font-size:13px;line-height:1.5;color:#333;white-space:pre-wrap;">${esc(bodyText)}</div>
-      </div>`;
-    if (isSeq) {
-      const steps = c.steps || [];
-      const text = steps.map((s, i) => `— Step ${i + 1} (${fmtDelay(s.delayHours)}) —\n${isEmail && s.subject ? `Subject: ${s.subject}\n` : ''}${s.body || ''}`).join('\n\n');
-      const html = steps.map((s, i) => `<div style="font-size:11px;font-weight:700;color:#7c3aed;margin-top:10px;">Step ${i + 1} · ${fmtDelay(s.delayHours)}</div>${card(s.subject, s.body, i === 0 ? c.heroImage : '')}`).join('');
-      return { text, html };
-    }
-    const text = `${isEmail && c.subject ? `Subject: ${c.subject}\n` : ''}${c.body || ''}`;
-    return { text, html: card(c.subject, c.body, isEmail ? c.heroImage : '') };
-  }
-  function notifyApprovers(a, opts = {}) {
-    const note = String(opts.message || '').trim();
-    const path = `/actions?action=${a.id}`;
-    const link = `${mailer.baseUrl()}${path}`;
-    const title = 'Campaign approval needed';
-    const name = a.title || a.config.subject || 'A campaign';
-    const lines = campaignSummaryLines(a);
-    const content = campaignContentPreview(a);
-    const noteBlock = note ? `“${opts.fromName || 'The sender'}” says:\n${note}\n\n` : '';
-    const body = `${noteBlock}“${name}” is waiting for your approval.\n\n${lines.map((l) => `• ${l}`).join('\n')}\n\n— Content —\n${content.text}\n\nReview, preview & approve (or send back to draft):\n${link}`;
-    const wantsHowler = (a.config.approvers || []).some((x) => x.type === 'howler');
-    const howler = wantsHowler ? howlerAdminsFor(a.entityId) : [];
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
-    if (push?.isEnabled?.()) {
-      const pushBody = note ? `${note.slice(0, 90)} — “${name}” needs approval.` : `“${name}” is waiting for your approval.`;
-      for (const ap of a.config.approvers || []) {
-        if (ap.type === 'user' && ap.userId) push.sendToUser(ap.userId, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
-      }
-      for (const u of howler) push.sendToUser(u.id, { title, body: pushBody, url: path, tag: `approve-${a.id}`, requireInteraction: true }).catch(() => {});
-    }
-    // Email each approver too — a named person's address, or the Howler admins
-    // linked to this client.
-    if (mailer?.isConfigured?.()) {
-      const emails = new Set();
-      for (const ap of a.config.approvers || []) {
-        if (ap.type !== 'howler' && ap.email) emails.add(ap.email);
-      }
-      for (const u of howler) emails.add(u.email);
-      if (emails.size) {
-        const summaryHtml = lines.map((l) => { const [k, ...v] = l.split(':'); return `<b>${k}:</b>${v.join(':')}`; }).join('<br>');
-        const noteHtml = note ? `<div style="border-left:3px solid var(--brand,#ff385c);padding:6px 0 6px 12px;margin-bottom:14px;"><b>${esc(opts.fromName || 'The sender')}</b> says:<br>${esc(note)}</div>` : '';
-        const html = mailer.notificationEmail({
-          title, body: `${noteHtml}“${esc(name)}” is waiting for your approval.<br><br>${summaryHtml}<br><br><b>Preview${a.config.channel === 'sms' ? ' (SMS)' : ''}:</b>${content.html}Open it to approve, or send it back to draft.`,
-          ctaText: 'Review & approve', ctaPath: path, preheader: `Approval needed: ${name}`, entityId: a.entityId,
-        });
-        mailer.send({ to: [...emails], subject: `Approval needed: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
-      }
-    }
-  }
-
-  // Tell the campaign's creator the outcome — approved (sending) or sent back to
-  // draft (with the reviewer's comment). Inbox + push + email, skipping the
-  // reviewer if they're also the sender.
-  function notifySender(a, { approved, note = '', by = '' }) {
-    const sender = (db.listUsers() || []).find((u) => u.email && a.createdBy && u.email.toLowerCase() === a.createdBy.toLowerCase());
-    if (!sender || sender.email.toLowerCase() === (by || '').toLowerCase()) return;
-    // Record the unseen outcome on the campaign — this drives a banner that
-    // ALWAYS shows to the creator next time they load Pulse, independent of
-    // whether push/email reached them.
-    sql.prepare("UPDATE actions SET outcome=?, outcome_by=?, outcome_note=?, outcome_at=?, outcome_seen=0 WHERE id=?")
-      .run(approved ? 'approved' : 'rejected', by || '', String(note || '').slice(0, 500), now(), a.id);
-    const name = a.title || a.config.subject || 'Your campaign';
-    const path = `/actions?action=${a.id}`;
-    const link = `${mailer.baseUrl()}${path}`;
-    const title = approved ? 'Campaign approved' : 'Campaign sent back to draft';
-    const body = approved
-      ? `“${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-      : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `\n\nComment: ${note}` : ''}\n\nOpen it to make changes and resubmit:\n${link}`;
-    try { os?.announce?.({ entityId: a.entityId, title, body, priority: approved ? 'fyi' : 'needs_reply', createdBy: 'campaigns@pulse', authorType: 'system', subjectType: 'campaign', subjectId: a.id }); } catch { /* os optional */ }
-    if (push?.isEnabled?.()) push.sendToUser(sender.id, { title, body: approved ? `“${name}” was approved.` : `“${name}” was sent back to draft.`, url: path, tag: `outcome-${a.id}` }).catch(() => {});
-    if (mailer?.isConfigured?.()) {
-      const html = mailer.notificationEmail({
-        title,
-        body: approved
-          ? `Good news — “${name}” was approved${by ? ` by ${by}` : ''} and is now sending.`
-          : `“${name}” was sent back to draft${by ? ` by ${by}` : ''}.${note ? `<br><br><b>Comment:</b> ${note}` : ''}<br><br>Open it to make changes and resubmit.`,
-        ctaText: 'Open campaign', ctaPath: path, preheader: title, entityId: a.entityId,
-      });
-      mailer.send({ to: sender.email, subject: `${title}: ${name}`, html, kind: 'campaign-approval', entity: a.entityId }).catch(() => {});
-    }
-  }
+  // Approval summaries + approver/creator notifications — extracted to
+  // actionApprovals.js (the summary is what approvers sign off on: it carries
+  // the resolved reach and a loud consent-bypass warning).
+  const { howlerAdminsFor, awaitingApprovalFor, unseenOutcomesFor, campaignSummaryLines, notifyApprovers, notifySender } =
+    require('./actionApprovals')({ db, sql, mailer, push, os, now, approvalSummary, segmentName, rowToAction });
 
   // The campaign's comms/approval conversation — so anyone viewing the campaign
   // sees the full log (who submitted, approvals, rejections, comments).
@@ -1483,18 +1366,32 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   });
 
   // Submit a draft for approval → status 'pending', notify the named approvers.
-  app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), (req, res) => {
+  app.post('/api/actions/:entityId/:id/submit', auth.requireAuth, auth.requirePermission('campaigns.approve'), async (req, res) => {
     if (!guard(req, res, req.params.entityId)) return;
     const a = getAction(req.params.id);
     if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     if (a.status !== 'draft') return res.status(400).json({ error: `Can't submit a ${a.status} campaign` });
+    // Don't route an incomplete campaign for sign-off — the sender fixes it now,
+    // rather than approvers discovering the gap when approval fails.
+    const submitErr = contentError(a.config);
+    if (submitErr) return res.status(400).json({ error: submitErr });
     const approvers = Array.isArray(req.body?.approvers) ? req.body.approvers : (a.config.approvers || []);
     if (!approvers.length) return res.status(400).json({ error: 'Add at least one approver' });
+    // Four-eyes means FOUR eyes: a submitter can't be their own only approver —
+    // that defeats the whole approval_required governance gate.
+    if (!approvers.some((x) => x.type === 'howler' || (x.type === 'user' && String(x.userId || '') !== String(req.user.id)))) {
+      return res.status(400).json({ error: 'Choose at least one approver other than yourself' });
+    }
     const cfg = { ...a.config, approvers: cleanConfig({ ...req.body, approvers }).approvers };
     sql.prepare('DELETE FROM action_approvals WHERE action_id=?').run(a.id);
     sql.prepare('UPDATE actions SET status=?, config=?, updated_at=? WHERE id=?').run('pending', JSON.stringify(cfg), now(), a.id);
-    notifyApprovers(getAction(a.id), { message: String(req.body?.message || '').slice(0, 2000), fromName: req.user.email });
-    res.json({ ok: true, pending: true });
+    // Resolve the audience now so approvers sign off on a NUMBER, not a source
+    // name (it re-resolves at send; the summary says so). Never block a submit
+    // on a resolver hiccup — the reach line is just omitted.
+    let reach = null;
+    try { ({ reach } = await audienceFor(a.entityId, a.config, req.user)); } catch { reach = null; }
+    notifyApprovers(getAction(a.id), { message: String(req.body?.message || '').slice(0, 2000), fromName: req.user.email, reach });
+    res.json({ ok: true, pending: true, reach });
   });
 
   // Reject a pending campaign → back to draft (clears approvals), notify creator.
@@ -1598,6 +1495,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       openRate: emailChannel && sent > 0 ? Math.min(100, Math.round((uniqueOpeners / sent) * 100)) : 0,
       converted: a.results.converted || 0,
       convRate: sent > 0 ? Math.round(((a.results.converted || 0) / sent) * 100) : 0,
+      convTracking: convMode(a), // 'dropout' (left the abandoned list) | 'list' (in an orders list) | null → report shows it even at 0
       clickers,
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
       attributed: clickers.length > 0 || tableAnon > 0,
@@ -1620,69 +1518,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
     });
   });
 
-  // ── Recurring automations: the daily check ──────────────────────────────────
-  // Every active automation ('auto') re-runs its audience tile roughly daily;
-  // anyone NEW (never reached by this campaign family, not suppressed) is
-  // queued as a child DRAFT for explicit human approval — automation proposes,
-  // a person approves. The synthetic admin user scopes exactly like a real one.
-  async function autoCheck() {
-    if (!enabled()) return;
-    const due = sql.prepare("SELECT id FROM actions WHERE status='auto' AND (last_check='' OR last_check < ?)")
-      .all(new Date(Date.now() - 20 * 3600e3).toISOString());
-    for (const { id } of due) {
-      const a = getAction(id);
-      if (!a) continue;
-      sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
-      // Drip sequences enroll new abandoners instead of queuing child drafts.
-      if (a.config.campaignMode === 'sequence') { try { await enrollSequence(a); } catch (e) { console.error('[actions] enroll failed', a.id, e.message); } continue; }
-      try {
-        const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
-        const { list } = await audienceFor(a.entityId, a.config, sysUser);
-        const already = new Set(sql.prepare('SELECT email FROM action_sent WHERE root_id=?').all(a.id).map((r) => r.email));
-        const fresh = list.filter((r) => !already.has(r.email));
-        if (!fresh.length) continue;
-        const childId = uuid();
-        const cfg = { ...a.config, audience: { ...a.config.audience, mode: 'snapshot' }, clickToken: crypto.randomBytes(6).toString('base64url') };
-        const day = new Date().toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' });
-        sql.prepare('INSERT INTO actions (id, entity_id, type, status, title, config, audience, parent_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-          .run(childId, a.entityId, 'email_campaign', 'draft', `${a.title || 'Campaign'} — ${day} (${fresh.length} new)`.slice(0, 120),
-            JSON.stringify(cfg), JSON.stringify(fresh), a.id, 'automation', now(), now());
-        console.log(`[actions] automation "${a.title}" queued ${fresh.length} new recipient(s) for approval`);
-        // Nudge the client's team: a campaign is waiting for a human to approve.
-        // Action buttons (Approve/Review) where supported; tap always deep-links
-        // to the campaign. requireInteraction — it's a decision, not an FYI.
-        if (push?.isEnabled?.()) {
-          push.sendToEntity(a.entityId, {
-            title: 'Campaign ready for approval',
-            body: `${a.title || 'A campaign'} — ${fresh.length} new recipient${fresh.length === 1 ? '' : 's'} waiting for your go-ahead.`,
-            url: `/actions?action=${childId}`,
-            tag: `action-${childId}`,
-            requireInteraction: true,
-            actions: [{ action: `approve:${a.entityId}:${childId}`, title: 'Approve' }, { action: 'review', title: 'Review' }],
-          }, 'alerts').catch(() => {});
-        }
-      } catch (e) { console.error('[actions] auto-check failed', a.id, e.message); }
-    }
-  }
-  const autoTimer = setInterval(() => autoCheck().catch(() => {}), 10 * 60000);
-  if (autoTimer.unref) autoTimer.unref();
-  setTimeout(() => autoCheck().catch(() => {}), 20000);
+  // ── Recurring automations (daily new-audience check + conversion tracking) ──
+  // Extracted to actionAutomations.js; the drip loop below shares its
+  // conversion-source resolver. The synthetic admin user scopes exactly like a
+  // real one; enrollSequence passed lazily (defined below, hoisted at call time).
+  const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
+  const { convertedEmails, convMode } = require('./actionAutomations')({ app, auth, guard, sql, now, uuid, enabled, getAction, audienceFor, saveResults, push, enrollSequence: (a) => enrollSequence(a), sysUser });
 
   // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
-  const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
-  // In 'list' conversion mode, resolve the separate conversion source (attendance /
-  // completed-orders) → lowercased set of emails that have converted. Null for the
-  // default 'dropout' model (callers keep prior behaviour); consent ignored (we only
-  // need the emails); failures fall back to null so a broken source can't flag everyone.
-  async function convertedEmails(action) {
-    const conv = action.config && action.config.conversion;
-    if (!conv || conv.mode !== 'list' || !conv.source) return null;
-    try {
-      const subCfg = { ...action.config, audience: conv.source, ignoreConsent: true, channel: 'email' };
-      const { list } = await audienceFor(action.entityId, subCfg, sysUser);
-      return new Set(list.map((r) => String(r.email || '').toLowerCase()).filter(Boolean));
-    } catch (e) { console.error('[actions] conversion source failed', action.id, e.message); return null; }
-  }
   const parseAnchor = (raw) => { const t = raw ? Date.parse(String(raw)) : NaN; return Number.isFinite(t) ? new Date(t) : null; };
   const stepDue = (anchorMs, delayHours) => new Date(anchorMs + (delayHours || 0) * 3600e3).toISOString();
 
@@ -1742,10 +1585,11 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       let reachable = new Map(); // email -> { emailOk, smsOk } (re-evaluated live, so consent changes apply mid-journey)
       try { const { list } = await audienceFor(a.entityId, a.config, sysUser); for (const r of list) reachable.set(r.email, r); }
       catch (e) { console.error('[actions] sequence audience re-check failed', a.id, e.message); continue; }
-      // 'list' conversion mode: confirm conversions against a separate attendance/
-      // orders source (null = the default 'left the audience' model).
+      // 'list' conversion mode: separate attendance/orders source (null = default 'left the audience' model).
       const convSet = await convertedEmails(a);
       const sup = suppressed(a.entityId);
+      // Branching journeys (staging-gated): the tree engine walks decision nodes; classic linear drips continue below.
+      if (a.config.journey?.nodes?.length && require('./journeys').engineOn(sql)) { try { await require('./journeys').processAction(a, { sql, now, reachable, convSet, sup, renderFor, renderSmsFor, mailer, messaging, branding, saveResults, audienceFor, sysUser }); } catch (err) { console.error('[journeys] tick failed', a.id, err.message); } continue; }
       const due = sql.prepare("SELECT * FROM action_enrollments WHERE action_id=? AND status='active' AND next_at <= ?").all(a.id, now());
       let sent = 0; let converted = 0; let emailSent = 0; let smsSent = 0;
       let n2 = 0;
@@ -1754,16 +1598,24 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
         // (re-checked every 20) rather than draining the whole due list.
         if (n2 > 0 && n2 % 20 === 0 && getAction(a.id)?.status !== 'auto') break;
         n2 += 1;
-        if (sup.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
-        // Conversion / drop-out. 'list' mode: converted = in the conversion source;
-        // left-the-audience-but-not-in-list just ends ('done'). Default mode:
-        // converted = gone from the abandoned audience (bought or expired).
+        if (isSuppressed(sup, e)) { sql.prepare("UPDATE action_enrollments SET status='unsubscribed', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        // Conversion/drop-out. 'list' mode: converted = in the source; left-audience-but-not-in-list ends ('done'). Default: converted = gone from the audience.
         if (convSet) {
           if (convSet.has(String(e.email || '').toLowerCase())) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
           if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
         } else if (!reachable.has(e.email)) { sql.prepare("UPDATE action_enrollments SET status='converted', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); converted += 1; continue; }
         const step = steps[e.step_index];
         if (!step) { sql.prepare("UPDATE action_enrollments SET status='done', updated_at=? WHERE action_id=? AND email=?").run(now(), a.id, e.email); continue; }
+        // CLAIM the step BEFORE sending — the same trade the digest scheduler
+        // makes: a deploy/crash mid-batch now means a MISSED step for the
+        // in-flight recipient, never a duplicate (the old send-then-advance
+        // order re-sent the step on restart). Conditional on the enrollment
+        // still sitting at this exact step so nothing can double-claim.
+        const nextIdx = e.step_index + 1;
+        const claim = nextIdx >= steps.length
+          ? sql.prepare("UPDATE action_enrollments SET status='done', step_index=?, updated_at=? WHERE action_id=? AND email=? AND step_index=? AND status='active'").run(nextIdx, now(), a.id, e.email, e.step_index)
+          : sql.prepare("UPDATE action_enrollments SET step_index=?, next_at=?, updated_at=? WHERE action_id=? AND email=? AND step_index=? AND status='active'").run(nextIdx, stepDue(Date.parse(e.anchor_at), steps[nextIdx].delayHours), now(), a.id, e.email, e.step_index);
+        if (claim.changes !== 1) continue; // another runner (or an edit) got there first
         try {
           const consent = reachable.get(e.email) || {};
           // Merge fields resolve live from the re-checked audience row's attributes.
@@ -1771,14 +1623,14 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
           const wantsEmail = a.config.channel !== 'sms';
           const wantsSms = a.config.channel !== 'email';
           let ok = false;
-          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject } = renderFor(a, rcpt, step, e.step_index); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
-          if (wantsSms && e.phone && consent.smsOk !== false) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step, e.step_index) }); if (r.ok) { ok = true; smsSent += 1; } }
+          if (wantsEmail && e.email && consent.emailOk !== false) { const { html, text, subject, unsubUrl } = renderFor(a, rcpt, step, e.step_index); const r = await mailer.send({ to: e.email, subject: subject || a.title || 'A reminder from your event', html, text, unsubUrl, fromName: branding.senderName, kind: 'campaign', entity: a.entityId }); if (r.ok) { ok = true; emailSent += 1; } }
+          // SMS sub-cap: the same per-campaign ceiling one-off blasts enforce —
+          // a `both`-channel sequence over a big audience must not fire an
+          // uncapped (costly) SMS per step. Counts the campaign's LIFETIME
+          // smsSent; 0 blocks SMS entirely. Email above still goes out.
+          if (wantsSms && e.phone && consent.smsOk !== false && (a.results?.smsSent || 0) + smsSent < smsCapFor(a.entityId)) { const r = await messaging.sendSms({ to: e.phone, text: renderSmsFor(a, rcpt, step, e.step_index) }); if (r.ok) { ok = true; smsSent += 1; } }
           if (ok) sent += 1;
         } catch (err) { console.error('[actions] sequence send failed', a.id, e.email, err.message); }
-        // Advance to the next step (or finish).
-        const nextIdx = e.step_index + 1;
-        if (nextIdx >= steps.length) sql.prepare("UPDATE action_enrollments SET status='done', step_index=?, updated_at=? WHERE action_id=? AND email=?").run(nextIdx, now(), a.id, e.email);
-        else sql.prepare('UPDATE action_enrollments SET step_index=?, next_at=?, updated_at=? WHERE action_id=? AND email=?').run(nextIdx, stepDue(Date.parse(e.anchor_at), steps[nextIdx].delayHours), now(), a.id, e.email);
         await new Promise((r) => setTimeout(r, 120)); // gentle rate
       }
       if (sent || converted) {
@@ -1794,43 +1646,6 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   if (dripTimer.unref) dripTimer.unref();
   setTimeout(() => processSequences().catch(() => {}), 30000);
 
-  // ── Conversion tracking for ONCE-OFF campaigns ──────────────────────────────
-  // Sequences track conversions inline (drop-out = bought). For sent once-off
-  // campaigns with a re-runnable tile audience, periodically re-run the abandoned
-  // audience: anyone we emailed who's no longer in it has bought (or expired).
-  // Recompute (idempotent), update results.converted. Bounded to recent sends.
-  async function checkConversions() {
-    if (!enabled()) return;
-    const cutoff = new Date(Date.now() - 14 * 86400e3).toISOString(); // track for 14 days post-send
-    const recheck = new Date(Date.now() - 6 * 3600e3).toISOString();  // at most every 6h per campaign
-    const due = sql.prepare("SELECT id FROM actions WHERE status='done' AND approved_at > ? AND (last_check='' OR last_check < ?)").all(cutoff, recheck);
-    for (const { id } of due) {
-      const a = getAction(id);
-      if (!a || a.config.campaignMode === 'sequence') continue;
-      const listMode = a.config.conversion?.mode === 'list' && a.config.conversion?.source;
-      // Dropout mode needs a re-runnable tile audience; list mode matches the
-      // snapshot against a separate source, so any audience type works.
-      if (!listMode && a.config.audience?.mode !== 'tile') continue;
-      sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
-      try {
-        let converted;
-        if (listMode) {
-          const conv = await convertedEmails(a);
-          if (!conv) continue; // source failed — leave the count as-is
-          converted = (a.audience || []).filter((r) => conv.has(String(r.email || '').toLowerCase())).length;
-        } else {
-          const { list } = await audienceFor(a.entityId, a.config, sysUser);
-          const stillAbandoning = new Set(list.map((r) => r.email));
-          converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
-        }
-        if (converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted });
-      } catch (e) { console.error('[actions] conversion check failed', a.id, e.message); }
-    }
-  }
-  const convTimer = setInterval(() => checkConversions().catch(() => {}), 30 * 60000);
-  if (convTimer.unref) convTimer.unref();
-  setTimeout(() => checkConversions().catch(() => {}), 45000);
-
   // Crash recovery: a deploy mid-blast leaves campaigns stuck 'running'. Resume
   // after boot — the action_sends ledger means nobody is ever emailed twice.
   setTimeout(() => {
@@ -1845,7 +1660,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // Open pixel /o, tracked click /c, SMS short link /k, unsubscribe /u — the
   // burst-hot paths a blast generates. Extracted to actionTracking.js: indexed
   // token lookup, never parses the audience blob.
-  require('./actionTracking').mount(app, { sql, now, saveResults, parseUnsubToken });
+  require('./actionTracking').mount(app, { sql, now, saveResults, parseUnsubToken, canonicalContact });
 
   console.log('[actions] action engine mounted', enabled() ? '(enabled)' : '(disabled — set actions_enabled=1)');
   // Campaigns for a client, newest first, WITHOUT the (PII-heavy) audience snapshot —

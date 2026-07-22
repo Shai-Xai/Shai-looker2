@@ -84,4 +84,24 @@ function resolveAudience(t, dashboards) {
   return { ready: false };
 }
 
-module.exports = { TEMPLATES, get, list, resolveAudience };
+// Scope + order a dashboard catalogue for a deep-linked suggestion before
+// resolving its audience. `prefer` ({ dashboardId, suiteId }) targets ONE event:
+// we HARD-restrict to that event's dashboards (explicit suite, else the suite
+// that owns the pointed dashboard) so resolveAudience's first-match-wins can never
+// fall through to a DIFFERENT event's abandoned-cart tile (which would target the
+// wrong crowd). The pointed dashboard is ordered first within its event so its own
+// tile wins when it has one. With no prefer, returns the full catalogue unchanged.
+function scopeDashboards(dashboards, prefer = {}) {
+  let out = dashboards || [];
+  const { dashboardId } = prefer;
+  let suiteId = prefer.suiteId || '';
+  if (!suiteId && dashboardId) suiteId = out.find((d) => d.dashboardId === dashboardId)?.suiteId || '';
+  if (suiteId) out = out.filter((d) => d.suiteId === suiteId);
+  if (dashboardId) {
+    const isPref = (d) => d.dashboardId === dashboardId;
+    out = [...out.filter(isPref), ...out.filter((d) => !isPref(d))];
+  }
+  return out;
+}
+
+module.exports = { TEMPLATES, get, list, resolveAudience, scopeDashboards };

@@ -504,6 +504,113 @@ test('deviceTimeline: probes the explore catalogue for a real count measure', as
   assert.ok(bodies[0].fields.includes('scans.transaction_count'));
 });
 
+test('deviceTimeline: check-in monitors probe the attendance counter', async () => {
+  // The check-ins family has no transaction_count — its per-scan counter is
+  // Attendance_Check_Ins, and the plain .count is another zero-only row-counter.
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.count' }, { name: 'scans.Attendance_Check_Ins' }] }) } });
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.Attendance_Check_Ins')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.Attendance_Check_Ins': 87 }];
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 0 }];
+    throw new Error('unexpected read');
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countField, 'scans.Attendance_Check_Ins');
+  assert.equal(t.grandTotal, 87);
+});
+
+test('deviceTimeline: an EMPTY result from a counting mode falls through to the next', async () => {
+  // A broken join can return zero rows for one measure while another works —
+  // empty is as suspect as all-zeros for every mode except plain presence.
+  const h = mountHealth({ looker: { listModels: async () => [], getExploreFields: async () => ({ dimensions: [], measures: [{ name: 'scans.Attendance_Check_Ins' }] }) } });
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const hourStr = () => new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.Attendance_Check_Ins')) return []; // dead join — no rows at all
+    if (b.fields.includes('scans.count')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(), 'scans.count': 12 }];
+    throw new Error('unexpected read');
+  });
+  const t = await h.mod.deviceTimeline(m, 12);
+  assert.equal(t.countField, 'scans.count');
+  assert.equal(t.grandTotal, 12);
+});
+
+test('deviceTimeline: buckets by the RAW timeframe when minuteN is unknown', async () => {
+  // The check-ins family has no created_at_minute10, and the picked _time
+  // timeframe silently drops rows on this LookML — _raw is the working shape.
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_minute10')) throw new Error('Unknown field "scans.scanned_at_minute10"');
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 7 }];
+    return []; // the _time bucket shape returns nothing — must never be accepted over raw
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.devices.length, 1);
+  assert.equal(t.grandTotal, 7);
+});
+
+test('deviceTimeline: an hour bucket that reads empty falls through to raw', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const rawStr = new Date(Math.floor(Date.now() / 3600000) * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_hour')) return []; // hour shape drops every row
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-9', 'scans.scanned_at_raw': rawStr, 'scans.count': 4 }];
+    return [];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 60);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.grandTotal, 4);
+});
+
+test('deviceTimeline: a bucket dim that returns BLANK values falls through to raw', async () => {
+  // Looker can accept a minuteN timeframe without a 400 yet return null for
+  // it on every row (created_at_minute10 on the check-ins family) — the
+  // bucket shape is broken, not the measure: the read must move to raw.
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_minute10')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': '', 'scans.count': 9 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': null, 'scans.count': 8 },
+      ];
+    }
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 9 }];
+    return [];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.devices.length, 1);
+  assert.equal(t.grandTotal, 9);
+});
+
+test('deviceTimeline: a memoized bucket that turns blank self-heals to raw', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id' });
+  const min10 = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  const rawStr = new Date(Math.floor(Date.now() / 600000) * 600000).toISOString().replace('T', ' ').slice(0, 19);
+  // First read: minute10 healthy → remembered as this monitor's 10-min bucket.
+  h.setRowsFn(async (b) => (b.fields.includes('scans.scanned_at_minute10')
+    ? [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10, 'scans.count': 3 }] : []));
+  assert.equal((await h.mod.deviceTimeline(m, 12, 10)).bucketField, 'scans.scanned_at_minute10');
+  // The shape degrades: minute10 now comes back blank — the read must fall
+  // through to raw instead of dying on the memoized single candidate.
+  h.setRowsFn(async (b) => {
+    if (b.fields.includes('scans.scanned_at_minute10')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': '', 'scans.count': 3 }];
+    if (b.fields.includes('scans.scanned_at_raw')) return [{ 'scans.device_id': 'D-1', 'scans.scanned_at_raw': rawStr, 'scans.count': 6 }];
+    return [];
+  });
+  const t = await h.mod.deviceTimeline(m, 12, 10);
+  assert.equal(t.bucketField, 'scans.scanned_at_raw');
+  assert.equal(t.grandTotal, 6);
+});
+
 test('deviceTimeline: count_distinct falls back from _raw to the picked timeframe', async () => {
   const h = mountHealth();
   const m = makeMonitor(h, { rosterField: 'scans.device_id' });
@@ -555,10 +662,11 @@ test('deviceTimeline: per-device hour buckets over the window', async () => {
   const hourStr = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 3600000) * 3600000).toISOString().slice(0, 13).replace('T', ' ');
   h.setRowsFn(async (b) => {
     body = b;
+    const bf = b.fields[1]; // Looker echoes whichever bucket dim was requested
     return [
-      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(0), 'scans.count': 42 },   // this hour
-      { 'scans.device_id': 'D-1', 'scans.scanned_at_hour': hourStr(180), 'scans.count': 7 },  // 3 hours back
-      { 'scans.device_id': 'D-2', 'scans.scanned_at_hour': hourStr(600), 'scans.count': 3 },  // 10 hours back
+      { 'scans.device_id': 'D-1', [bf]: hourStr(0), 'scans.count': 42 },   // this hour
+      { 'scans.device_id': 'D-1', [bf]: hourStr(180), 'scans.count': 7 },  // 3 hours back
+      { 'scans.device_id': 'D-2', [bf]: hourStr(600), 'scans.count': 3 },  // 10 hours back
     ];
   });
   const t = await h.mod.deviceTimeline(m, 24);
@@ -591,13 +699,15 @@ test('deviceTimeline: sub-hour blocks read the raw time dim and bucket by interv
   // Raw time dims render "YYYY-MM-DD HH:MM:SS" (query_timezone UTC).
   const tsStr = (minAgo) => new Date(Date.now() - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
   h.setRowsFn(async (b) => {
-    // No minuteN timeframes in this LookML — the aggregate-bucket probe 400s
-    // and the raw time dim takes over.
-    if (b.fields.some((f) => f.includes('_minute'))) throw new Error('Unknown field "scans.scanned_at_minute10"');
+    // No minuteN (or _raw) timeframes in this LookML — the aggregate-bucket
+    // probes 400 and the picked time dim takes over.
+    const bad = b.fields.find((f) => f.includes('_minute') || f.endsWith('_raw'));
+    if (bad) throw new Error(`Unknown field "${bad}"`);
     body = b;
+    const bf = b.fields[1]; // Looker echoes whichever bucket dim was requested
     return [
-      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(0), 'scans.count': 2 },  // current 10-min block
-      { 'scans.device_id': 'D-1', 'scans.scanned_at': tsStr(95), 'scans.count': 5 }, // ~9 blocks back
+      { 'scans.device_id': 'D-1', [bf]: tsStr(0), 'scans.count': 2 },  // current 10-min block
+      { 'scans.device_id': 'D-1', [bf]: tsStr(95), 'scans.count': 5 }, // ~9 blocks back
     ];
   });
   const t = await h.mod.deviceTimeline(m, 12, 10);
@@ -795,6 +905,72 @@ test('check() stores the whole-feed day total with station narrowing dropped', a
   assert.equal(feedBody.filters['scans.station_category'], undefined); // narrowing dropped
   assert.equal(feedBody.filters['scans.station_name'], undefined);
   assert.equal(feedBody.filters['ev.name'], 'KFF 26'); // event scope kept
+});
+
+test('check() stores a per-station roll-up for the signal board', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.length === 1) return [{ 'scans.count': 12 }];                       // whole-feed total
+    if (b.fields.includes('data_health_latest')) return [feedRow('Gate B', 2)];      // stream read
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', data_health_last: minsAgo(2) },
+        { 'scans.device_id': 'D-2', data_health_last: minsAgo(120) },
+      ];
+    }
+    if (b.fields.includes('scans.station_name') && b.fields.includes('scans.device_id')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.station_name': 'Bar One' },
+        { 'scans.device_id': 'D-2', 'scans.station_name': 'Bar Two' },
+      ];
+    }
+    if (b.fields.includes('scans.count')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 5 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': min10(120), 'scans.count': 7 }, // quiet 2h → off
+      ];
+    }
+    return [feedRow('Gate B', 2)];
+  });
+  await h.mod.check(m);
+  const st = h.mod.monitorById(m.id).rosterSnapshot.stations;
+  assert.ok(Array.isArray(st));
+  const one = st.find((x) => x.station === 'Bar One');
+  const two = st.find((x) => x.station === 'Bar Two');
+  assert.equal(one.on, 1); assert.equal(one.off, 0); assert.equal(one.txnH, 5);
+  assert.equal(two.on, 0); assert.equal(two.off, 1);
+  assert.equal(one.spark.length, 6);
+});
+
+test('check() rolls a station-less monitor into one board entry', async () => {
+  const h = mountHealth();
+  const m = makeMonitor(h, { stationField: '', rosterField: 'scans.device_id', rosterOnlineMin: 30 });
+  const min10 = (minAgo) => new Date(Math.floor((Date.now() - minAgo * 60000) / 600000) * 600000).toISOString().slice(0, 16).replace('T', ' ');
+  h.setRowsFn(async (b) => {
+    if (b.fields.length === 1) return [{ 'scans.count': 9 }];                        // whole-feed total
+    if (b.fields.includes('data_health_latest')) return [{ data_health_latest: minsAgo(2) }];
+    if (b.fields.includes('data_health_last')) {
+      return [
+        { 'scans.device_id': 'D-1', data_health_last: minsAgo(2) },
+        { 'scans.device_id': 'D-2', data_health_last: minsAgo(120) },
+      ];
+    }
+    if (b.fields.includes('scans.count')) {
+      return [
+        { 'scans.device_id': 'D-1', 'scans.scanned_at_minute10': min10(0), 'scans.count': 4 },
+        { 'scans.device_id': 'D-2', 'scans.scanned_at_minute10': min10(120), 'scans.count': 3 },
+      ];
+    }
+    return [{ data_health_latest: minsAgo(2) }];
+  });
+  await h.mod.check(m);
+  const st = h.mod.monitorById(m.id).rosterSnapshot.stations;
+  assert.ok(Array.isArray(st));
+  assert.equal(st.length, 1);
+  assert.equal(st[0].station, '');
+  assert.equal(st[0].on, 1); assert.equal(st[0].off, 1); assert.equal(st[0].txnH, 4);
 });
 
 test('clean() bounds thresholds and drops junk filters', () => {

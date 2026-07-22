@@ -13,7 +13,9 @@
 Once Howler does a **one-time platform app registration** per platform (0a/0b),
 clients never see keys or tokens again — the cards in Settings → Integrations
 show **"Connect with Google"** and **"Continue with Facebook"** buttons. The
-manual paths in §1–2 below still work and remain the fallback.
+manual paths in §1–2 below still work and remain the fallback. For Meta,
+**§0c (agency path: house token + partner share) is the recommended default** —
+it needs no per-client OAuth, no app review and no client-side technical steps.
 
 ### 0a. One-time platform setup — Google (≈10 min, no verification ordeal)
 1. In the Google Cloud project (https://console.cloud.google.com):
@@ -50,6 +52,44 @@ manual paths in §1–2 below still work and remain the fallback.
    days) and Standard Access limits who can connect (users with a role on the
    app/business). Kick off verification once; after approval the same button
    mints durable tokens for any client, no code change.
+
+### 0c. The AGENCY path — house token + partner share (RECOMMENDED, shipped 2026-07-18)
+
+The lowest-friction route of all, and the one to lead with: **clients never
+touch tokens, apps or system users** — they approve ONE partner share, and
+Howler's own credentials do the rest.
+
+**Howler side, once ever (~15 min):**
+1. In HOWLER's Business portfolio (https://business.facebook.com/settings):
+   make sure an app exists (Accounts → Apps; create a Business-type app at
+   https://developers.facebook.com/apps if empty), then create system user
+   `pulse` (Users → System users, role Admin) and generate a **never-expiring**
+   token with `ads_read` + `ads_management` + `business_management`.
+2. Paste it in Pulse → Admin → Integrations → **◇ Meta — house connection
+   (agency)**, together with Howler's Business ID (Business settings →
+   Business info). The Business ID is shown to clients inside their
+   partner-share guide.
+
+**Per client (~2 min their side, ~2 min ours):**
+1. Client: Business settings → Users → **Partners** → Add → *Give a partner
+   access to your assets* → enter Howler's Business ID → pick their ad account
+   → enable **Manage campaigns**. (The client Meta card's first guide walks
+   them through it, with Copy/Share buttons to forward to whoever runs their
+   ads. Flipped variant: we *request* access to their ad account ID from our
+   Business settings and they just approve.)
+2. Howler: assign the newly shared ad account to the `pulse` system user
+   (system user → Add assets → Ad accounts → Manage campaigns), then set the
+   client's **Ad account ID** on their entity — leave their token field
+   BLANK. Blank token = inherits the house token automatically (their own
+   token, when set, always wins).
+3. Verify on the connection, and remind the client to accept the Custom
+   Audience ToS once (https://business.facebook.com/ads/manage/customaudiences/tos)
+   if audience sync is in play.
+
+Caveats: partner sharing needs the client's ad account to live in a Business
+portfolio (for personal ad accounts, have them add a Howler user by email to
+the ad account and use the OAuth path instead). The house token is ads-scoped —
+organic social metrics (Page/IG) still need the client's own token/IDs.
 
 ---
 
@@ -108,7 +148,13 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
   https://business.facebook.com
 - One Meta **app** of type Business linked to that business:
   https://developers.facebook.com/apps (no app review needed — you only
-  access your own assets).
+  access your own assets). **This is the #1 blocker for new businesses** —
+  without an app in the portfolio, Meta greys out **Generate token** with
+  *"an app must be part of this business portfolio. Please add an app."*
+  To fix: https://developers.facebook.com/apps → **Create app** → type
+  **Business** → name it (e.g. "Pulse") → link it to the business portfolio
+  when prompted. If the app already exists but isn't linked: Business
+  settings → **Accounts → Apps** → Add → Connect an app ID.
 
 ### 2b. Create the system user + token
 1. Business settings: https://business.facebook.com/settings → Users →
@@ -128,6 +174,7 @@ Integrations): `metaAccessToken` + `metaAdAccountId`. The reliable token is a
 ### 2c. Common blockers (in order of likelihood)
 | Symptom | Cause → fix |
 |---|---|
+| **Generate token** greyed out — "an app must be part of this business portfolio" | No Business app linked to the portfolio → create/link one (2a) |
 | Worked, then 401/"session expired" after a few hours | Graph Explorer token → use the system-user token (2b) |
 | "Unsupported get request" / permission error | Ad account not assigned to the system user (2b step 2) |
 | Insights sync fails | Missing `ads_read` on the token |

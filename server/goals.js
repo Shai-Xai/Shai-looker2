@@ -17,6 +17,7 @@
 // injected by index.js (built on the shared query engine, server/query.js) so a
 // tile-sourced goal reads the very number the dashboard shows.
 
+const { asyncHandler } = require('./http'); // a rejected async handler must reach errorMiddleware, not hang the request
 const crypto = require('crypto');
 const fc = require('./forecast');
 
@@ -711,7 +712,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   }
 
   // ── Routes (one guarded set serves admin + client self-service, keyed by suite) ──
-  app.get('/api/goals/suites/:suiteId', auth.requireAuth, async (req, res) => {
+  app.get('/api/goals/suites/:suiteId', auth.requireAuth, asyncHandler(async (req, res) => {
     const su = db.getSuite(req.params.suiteId);
     if (!su) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
@@ -723,7 +724,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       Promise.all(listPersonalGoals(req.params.suiteId, req.user).map((g) => attachProgress(g, req.user, caches))),
     ]);
     res.json({ goals, personalGoals, canManage: canManage(req.user, req.params.suiteId), me: req.user.email });
-  });
+  }));
 
   app.post('/api/goals/suites/:suiteId', auth.requireAuth, (req, res) => {
     const su = db.getSuite(req.params.suiteId);
@@ -848,7 +849,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // Live preview of a tile's current number for the editor — so when you pick a
   // tile to track, you see the actual figure before saving the target. Read-only
   // (suite membership); scope is still enforced inside resolveTileValue.
-  app.post('/api/goals/suites/:suiteId/tile-value', auth.requireAuth, async (req, res) => {
+  app.post('/api/goals/suites/:suiteId/tile-value', auth.requireAuth, asyncHandler(async (req, res) => {
     if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const { dashboardId, tileId } = req.body || {};
@@ -857,13 +858,13 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       const value = await resolveTileValue({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ value: value == null ? null : Number(value) });
     } catch (e) { res.json({ value: null, error: e.message }); }
-  });
+  }));
 
   // Time-series for a tile under an event's scope — "last time's curve". Powers the
   // checkpoint suggester in the editor: link a chart/table tile that carries the
   // sell-by-now shape, read its [{ t, v }] rows under a comparable past event, and
   // suggest checkpoint targets from that shape (scaled to this goal's target).
-  app.post('/api/goals/suites/:suiteId/tile-series', auth.requireAuth, async (req, res) => {
+  app.post('/api/goals/suites/:suiteId/tile-series', auth.requireAuth, asyncHandler(async (req, res) => {
     if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const { dashboardId, tileId } = req.body || {};
@@ -872,7 +873,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       const series = await resolveTileSeries({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ series });
     } catch (e) { res.json({ series: [], error: e.message }); }
-  });
+  }));
 
   // Server-computed checkpoint suggestions for the editor. Uses the SAME days-before
   // alignment as the live pace engine (fc.fractionAtNow against the event-day anchor:
@@ -880,7 +881,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   // run on identical math. Returns last time's shape (for the sparkline) + per-checkpoint
   // FRACTIONS of last time's total (target-independent — the client multiplies by the
   // live target, so typing a target doesn't re-query) plus last time's value at each.
-  app.post('/api/goals/suites/:suiteId/checkpoint-suggestions', auth.requireAuth, async (req, res) => {
+  app.post('/api/goals/suites/:suiteId/checkpoint-suggestions', auth.requireAuth, asyncHandler(async (req, res) => {
     const suiteId = req.params.suiteId;
     if (!db.getSuite(suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
@@ -925,12 +926,12 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       }
     }
     res.json({ series, pointsRead: series.length, eventDate, checkpoints, years, allKeys, compareKey: usedCompareKey, thisKey: usedThisKey });
-  });
+  }));
 
   // Forecast chart data for a goal — last time's full curve, this year's actual to date,
   // and the projected finish — so the detail can draw "last year · this year · forecast"
   // with a "you are here" marker. Cumulative, axis-preserved (days-before or date).
-  app.get('/api/goals/suites/:suiteId/forecast-chart', auth.requireAuth, async (req, res) => {
+  app.get('/api/goals/suites/:suiteId/forecast-chart', auth.requireAuth, asyncHandler(async (req, res) => {
     if (!db.getSuite(req.params.suiteId)) return res.status(404).json({ error: 'Event not found' });
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     const g = req.query.goalId ? goalById(req.query.goalId) : null;
@@ -970,7 +971,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
         daysLeft: prog.daysLeft, projected,
       }),
     });
-  });
+  }));
 
   // ── Forecast probe (read-only diagnostic) ──
   // Validate the forecast model on a LIVE tile before we build any UI. Reads every
@@ -980,7 +981,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
   //   GET /api/goals/suites/:suiteId/forecast-probe
   //     ?dashboardId=&tileId=&target=&start=YYYY-MM-DD&end=YYYY-MM-DD
   //     [&recentDays=30&lastKey=&thisKey=&currentValue=]
-  app.get('/api/goals/suites/:suiteId/forecast-probe', auth.requireAuth, async (req, res) => {
+  app.get('/api/goals/suites/:suiteId/forecast-probe', auth.requireAuth, asyncHandler(async (req, res) => {
     if (typeof resolveTileSeriesAll !== 'function') return res.status(400).json({ error: 'series resolver unavailable' });
     // Convenience: ?goalId=… defaults the tile, dates, target + current value off the goal.
     const g = req.query.goalId ? goalById(req.query.goalId) : null;
@@ -1063,7 +1064,7 @@ function mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTile
       forecast: result,
       sample: { lastYearTail: (lastCol?.series || []).slice(-6), thisYearTail: (thisCol?.series || []).slice(-6) },
     });
-  });
+  }));
 
   console.log('[goals] Results pillar mounted');
   // Exposed so the briefing/digest can lead with the North Star (resolved values).

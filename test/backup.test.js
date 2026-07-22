@@ -32,10 +32,25 @@ test('runBackup produces a valid, gzipped, openable snapshot of the live DB', as
 test('backup run is recorded and reported by status()', () => {
   const s = backup.status();
   assert.equal(s.offBoxConfigured, false);
+  assert.equal(s.atRisk, true); // no S3 env → the status itself must flag the risk
+  assert.match(s.warning, /SAME disk/);
   assert.ok(s.lastSuccessAt);
   assert.ok(s.local.length >= 1);
   assert.equal(s.runs[0].status, 'ok');
   assert.match(s.runs[0].detail, /local snapshot only/);
+});
+
+test('an automatic local-only run raises an ops alert; a manual one stays quiet', async () => {
+  const alerts = [];
+  backup.init({ db, notifyOps: (m) => alerts.push(m) });
+  const r = await backup.runBackup('nightly');
+  assert.equal(r.ok, true);
+  assert.equal(r.uploaded, false);
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /LOCAL-ONLY/);
+  await backup.runBackup('manual');
+  assert.equal(alerts.length, 1); // manual test runs don't spam ops
+  backup.init({ db, notifyOps: () => {} });
 });
 
 test('rotation keeps only BACKUP_KEEP snapshots (oldest deleted first)', async () => {

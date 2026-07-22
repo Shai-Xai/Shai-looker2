@@ -16,6 +16,8 @@
 // This is OUTBOUND only. Inbound (replies from Slack landing back in the Pulse
 // inbox) is a separate, larger piece — see docs and the os.js inbound webhook.
 
+const { HttpError } = require('./http');
+
 let db = null;
 let mailer = null;
 function init(deps) {
@@ -37,6 +39,19 @@ function init(deps) {
 }
 
 const mask = (s) => { const v = String(s || ''); return v ? `••••${v.slice(-4)}` : ''; };
+
+// SSRF guard: a webhook URL is client-configurable (self-service), so we NEVER
+// POST to an arbitrary host. Slack incoming webhooks are always
+// https://hooks.slack.com/… — pin to exactly that. Anything else (an internal
+// address like http://169.254.169.254/… , another Render service, a raw IP) is
+// rejected at write time AND re-checked at send time so a legacy/bad stored URL
+// can't reach out either.
+function isAllowedWebhook(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return u.protocol === 'https:' && u.hostname === 'hooks.slack.com';
+  } catch { return false; }
+}
 
 function connection(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
@@ -85,6 +100,7 @@ async function send({ entityId, text, blocks, username, iconUrl, kind = 'other' 
     } else {
       // Incoming webhooks DO honour a per-message name + avatar, so we brand them
       // with the client's sender name + logo when we have a public (https) logo.
+      if (!isAllowedWebhook(c.webhookUrl)) { log(entityId, 'skipped', 'webhook host not allowed', kind); return { skipped: true, reason: 'bad_webhook_host' }; }
       const payload = { text, blocks };
       if (username) payload.username = username;
       if (iconUrl) payload.icon_url = iconUrl;
@@ -181,7 +197,11 @@ async function verify(entityId) {
 // from the shared applyIntegrationsPatch; `set(key, value)` writes one field.
 function applyPatch(body, set) {
   const s = (body || {}).slack || {};
-  if (s.webhookUrl) set('slackWebhookUrl', String(s.webhookUrl).trim());
+  if (s.webhookUrl) {
+    const url = String(s.webhookUrl).trim();
+    if (!isAllowedWebhook(url)) throw new HttpError(400, 'Slack webhook must be a https://hooks.slack.com/… URL.');
+    set('slackWebhookUrl', url);
+  }
   if (s.clearWebhookUrl) set('slackWebhookUrl', '');
   if (s.botToken) set('slackBotToken', String(s.botToken).trim());
   if (s.clearBotToken) set('slackBotToken', '');

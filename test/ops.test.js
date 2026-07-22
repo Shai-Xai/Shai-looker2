@@ -18,6 +18,21 @@ test('webhook config is read from the setting when no env var is set', () => {
   assert.equal(ops.isConfigured(), false);
 });
 
+test('sendTest reports honestly: unconfigured vs unreachable webhook, never throws', async () => {
+  const unconfigured = await ops.sendTest();
+  assert.equal(unconfigured.configured, false);
+  assert.equal(unconfigured.sent, false);
+  assert.match(unconfigured.error, /OPS_SLACK_WEBHOOK_URL/);
+
+  db.setSetting('ops_slack_webhook', 'http://127.0.0.1:1/hook'); // nothing listens here
+  try {
+    const unreachable = await ops.sendTest();
+    assert.equal(unreachable.configured, true);
+    assert.equal(unreachable.sent, false);
+    assert.match(unreachable.error, /Could not reach Slack/);
+  } finally { db.setSetting('ops_slack_webhook', ''); }
+});
+
 test('same-kind alerts inside the window are suppressed and counted', () => {
   db.setSetting('ops_slack_webhook', 'http://127.0.0.1:1/hook');
   try {

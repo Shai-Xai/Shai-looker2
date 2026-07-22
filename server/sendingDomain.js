@@ -80,7 +80,21 @@ function mount(app, { db, auth, mailer }) {
       return view(eid);
     }
     if (existing?.resend_id) { try { await resend('DELETE', `/domains/${existing.resend_id}`); } catch { /* being replaced anyway */ } }
-    const d = await resend('POST', '/domains', { name: domain });
+    let d;
+    try {
+      d = await resend('POST', '/domains', { name: domain });
+    } catch (e) {
+      // Resend domains are ACCOUNT-global (shared across our environments on one
+      // Resend key). "registered already" = a prior attempt or the other
+      // environment claimed it — ADOPT the existing one so its DNS records still
+      // surface and the client can be given them, instead of a dead-end error.
+      if (!/registered already/i.test(e.message || '')) throw e;
+      const list = await resend('GET', '/domains');
+      const arr = Array.isArray(list?.data) ? list.data : (Array.isArray(list) ? list : []);
+      const match = arr.find((x) => String(x.name || '').toLowerCase() === domain);
+      if (!match?.id) throw new HttpError(400, `${domain} is already registered in Resend but I couldn’t read its DNS records back — check the Resend dashboard.`);
+      d = await resend('GET', `/domains/${match.id}`);
+    }
     sql.prepare(`INSERT INTO sending_domains (entity_id, domain, resend_id, status, records, from_local, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(entity_id) DO UPDATE SET domain=excluded.domain, resend_id=excluded.resend_id, status=excluded.status, records=excluded.records, from_local=excluded.from_local, updated_at=excluded.updated_at`)
       .run(eid, domain, d.id || '', d.status || 'pending', JSON.stringify(mapRecords(d)), fromLocal, now(), now());

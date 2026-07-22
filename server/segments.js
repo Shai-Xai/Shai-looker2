@@ -75,7 +75,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
   // Light shaping of a segment definition (the audience config). We don't trust
   // the client shape blindly, but we keep it source-agnostic — only known keys.
   const cleanDef = (d = {}, depth = 0) => {
-    const mode = ['paste', 'gsheet', 'segment', 'query'].includes(d.mode) ? d.mode : 'tile';
+    const mode = ['paste', 'gsheet', 'segment', 'query', 'appmatch'].includes(d.mode) ? d.mode : 'tile';
     const out = {
       mode,
       // Event (suite) the cohort is SCOPED to — baked into the definition so live
@@ -113,6 +113,11 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
       attrTileId: String(d.attrTileId || ''),
       attrEmailField: String(d.attrEmailField || ''),
       pasted: String(d.pasted || '').slice(0, 200000),
+      // when mode='appmatch' (a LIVE App-analytics group) — the app↔ticketing
+      // join re-computed server-side at every resolve; only names cross the wire.
+      group: String(d.group || ''),
+      appEvent: String(d.appEvent || '').slice(0, 64),
+      appSize: Math.min(Math.max(Number(d.appSize) || 0, 0), 500),
       filters: Array.isArray(d.filters) ? d.filters.slice(0, 8).map((f) => ({
         field: String(f.field || ''), op: f.op === 'between' ? 'between' : 'in',
         values: Array.isArray(f.values) ? f.values.map(String).slice(0, 100) : [],
@@ -176,7 +181,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!guard(req, res, req.params.entityId)) return;
     const name = String(req.body?.name || '').trim().slice(0, 120) || 'Untitled segment';
     const definition = cleanDef(req.body?.definition || {});
-    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query', 'appmatch'].includes(definition.mode) ? definition.mode : 'tile');
     // The event link doubles as the resolution scope — validate it and mirror it into
     // the definition so every downstream resolve (reach, campaign) honours it.
     const suiteId = cleanSuite(req.params.entityId, req.body?.suiteId ?? definition.suiteId);
@@ -211,7 +216,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     if (!seg || seg.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
     const name = req.body?.name !== undefined ? String(req.body.name).trim().slice(0, 120) || seg.name : seg.name;
     const definition = req.body?.definition !== undefined ? cleanDef(req.body.definition) : JSON.parse(seg.definition || '{}');
-    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(definition.mode) ? definition.mode : 'tile');
+    const source = definition.sources && definition.sources.length ? 'mix' : (['paste', 'gsheet', 'query', 'appmatch'].includes(definition.mode) ? definition.mode : 'tile');
     // Event link + folder — only touched when supplied (so a content-only edit keeps them).
     // The event link is also the resolution scope, mirrored into the definition.
     const suiteId = req.body?.suiteId !== undefined ? cleanSuite(req.params.entityId, req.body.suiteId) : (definition.suiteId ? cleanSuite(req.params.entityId, definition.suiteId) : (seg.suite_id || ''));
@@ -362,7 +367,7 @@ function mount(app, { db, auth, resolveAudience, resolveRecipe, meta, tiktok }) 
     }
     const def = cleanDef(definition || {});
     const nm = String(name || '').trim().slice(0, 120) || 'Untitled segment';
-    const source = def.sources && def.sources.length ? 'mix' : (['paste', 'gsheet', 'query'].includes(def.mode) ? def.mode : 'tile');
+    const source = def.sources && def.sources.length ? 'mix' : (['paste', 'gsheet', 'query', 'appmatch'].includes(def.mode) ? def.mode : 'tile');
     // Scope the cohort to the supplied event and bake it into the definition, so an
     // Owl/API-made segment re-resolves scoped exactly like a hand-made one.
     const sid = cleanSuite(entityId, suiteId ?? def.suiteId);

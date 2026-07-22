@@ -98,7 +98,7 @@ export default function NotificationPrefs({ compact = false }) {
       );
 
   const cardStyle = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', maxWidth: 520 };
-  const TYPE_ICON = { digest: '🗞️', goals: '🎯', alerts: '🚨', messages: '💬' };
+  const TYPE_ICON = { digest: '🗞️', goals: '🎯', alerts: '🚨', messages: '💬', reports: '🐞' };
 
   return (
     <>

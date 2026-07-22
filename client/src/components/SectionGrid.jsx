@@ -11,7 +11,7 @@ const ROW_HEIGHT = 30;
 // sibling of Carousel, sharing the same container handlers. The inner grid
 // stops mousedown propagation so dragging a tile here doesn't also drag the
 // whole section in the outer dashboard grid.
-export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
+export default function SectionGrid({ carousel, filterValues, editable, onEditTile, onApplyTileQuery, onRemoveTile, onDuplicateTile, onToggleHide, onAddTile, onChangeTitle, onChangeAlign, onRemove, onDropTile, onMoveTileOut, onTileLayout }) {
   const align = carousel.titleAlign || 'left';
   const [dragOver, setDragOver] = useState(false);
   // Measure our own width so the nested grid lays out across the real columns
@@ -107,6 +107,7 @@ export default function SectionGrid({ carousel, filterValues, editable, onEditTi
                   filterValues={filterValues}
                   editable={editable}
                   onEdit={() => onEditTile?.(t.id)}
+                  onApplyQuery={onApplyTileQuery ? (query) => onApplyTileQuery(t.id, query) : undefined}
                   onDuplicate={() => onDuplicateTile?.(t.id)}
                   onRemove={() => onRemoveTile?.(t.id)}
                   onToggleHide={onToggleHide ? () => onToggleHide(t.id) : undefined}

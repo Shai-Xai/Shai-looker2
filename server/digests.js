@@ -6,6 +6,7 @@
 // helpers + the injected content builder and role lenses). Remove the mount()
 // line in index.js + this file (and server/scheduler.js) to uninstall. Lifted
 // VERBATIM out of index.js — collaborators arrive as injected deps.
+const { asyncHandler, allowInlineScripts } = require('./http'); // a rejected async handler must reach errorMiddleware, not hang the request
 const crypto = require('crypto');
 
 module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps }) {
@@ -70,6 +71,7 @@ module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging,
   </script></body></html>`;
   }
   app.get('/df/:token', (req, res) => {
+    allowInlineScripts(res); // the feedback page carries its own inline submit script
     const t = parseDigestToken(req.params.token);
     if (!t || !t.d) return res.status(400).type('html').send(digestFbPage('That feedback link looks invalid or expired.', req.params.token, null));
     const d = db.getDigestHistory(t.d);
@@ -123,10 +125,10 @@ module.exports.mount = function mountDigests(app, { db, auth, mailer, messaging,
   app.get('/api/admin/entities/:id/digest-feedback', auth.requireAdmin, (req, res) => {
     res.json({ feedback: db.listDigestFeedback(req.params.id, { limit: 200 }), prefs: db.getDigestPrefs(req.params.id) });
   });
-  app.post('/api/admin/entities/:id/digest-learn', auth.requireAdmin, async (req, res) => {
+  app.post('/api/admin/entities/:id/digest-learn', auth.requireAdmin, asyncHandler(async (req, res) => {
     await learnDigestPrefs(req.params.id);
     res.json({ prefs: db.getDigestPrefs(req.params.id) });
-  });
+  }));
   app.put('/api/admin/entities/:id/digest-prefs', auth.requireAdmin, (req, res) => {
     db.setDigestPrefs(req.params.id, { note: String((req.body || {}).note || ''), fromCount: db.getDigestPrefs(req.params.id).fromCount || 0 });
     res.json({ prefs: db.getDigestPrefs(req.params.id) });

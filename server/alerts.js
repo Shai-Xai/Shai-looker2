@@ -20,6 +20,7 @@
 //   • per-event scope — every evaluation runs as a synthetic user locked to the
 //     alert's entity, so the background job is scoped exactly like a client request.
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 
 const DEFAULT_TZ = 'Africa/Johannesburg'; // GMT+2
@@ -490,7 +491,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (!a) return res.status(404).json({ error: 'Alert not found' });
     if (!canManage(req.user, a.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     try { const r = await evaluate(a, { manual: true }); res.json({ ok: true, value: r.value, message: r.message, channels: r.channels }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   // Live value of a chosen tile (for the editor preview) — read-only, scope enforced
@@ -504,7 +505,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     try {
       const value = await resolveTileValue({ dashboardId, tileId, user: req.user, suiteId: req.params.suiteId });
       res.json({ value: value == null ? null : Number(value) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { serverError(res, e); }
   });
 
   // ── Custom-metric source (alert on a raw measure + dimension filter, no tile) ──
@@ -518,7 +519,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (!canView(req.user, req.params.suiteId)) return res.status(403).json({ error: 'Not allowed' });
     if (typeof metricCatalog !== 'function') return res.json({ explores: [] });
     try { res.json(await metricCatalog(su.entityId)); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   // Live value of a built metric (for the editor preview), scope enforced server-side.
@@ -531,7 +532,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     try {
       const value = await resolveCustomMetric({ model, view, measure, filters: filters || {}, user: req.user, suiteId: req.params.suiteId });
       res.json({ value: value == null ? null : Number(value) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { serverError(res, e); }
   });
 
   // Distinct values of a dimension (e.g. the Ticket Type values for this event),
@@ -544,7 +545,7 @@ function mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCat
     if (!model || !view || !field) return res.status(400).json({ error: 'model, view and field required' });
     if (typeof metricFilterValues !== 'function') return res.json({ values: [] });
     try { res.json({ values: await metricFilterValues({ model, view, field, user: req.user, suiteId: req.params.suiteId, entityScope: !!(req.body && req.body.allEvents) }) }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { serverError(res, e); }
   });
 
   // ── Reusable templates (a client's own + Howler's global ones) ───────────────
