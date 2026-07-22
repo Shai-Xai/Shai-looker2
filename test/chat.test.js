@@ -224,6 +224,26 @@ test('delete, report, pin, organiser broadcast with push flag', async () => {
   assert.equal(db.db.prepare('SELECT push FROM social_chat_messages WHERE id=?').get(bcMsg.id).push, 1);
 });
 
+test('portal reply: organiser message quotes a fan message via parentId', async () => {
+  const fan = await call('POST /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.main.id }, body: { text: 'Where do I collect my band?' } });
+  const reply = await call('POST /api/admin/entities/:entityId/social/chat/channels/:id/messages', {
+    user: admin, params: { entityId: entity.id, id: state.main.id },
+    body: { text: 'Box office, Gate A — bring your ID', parentId: fan.body.id },
+  });
+  assert.equal(reply.code, 200);
+  assert.equal(reply.body.authorType, 'organiser');
+  assert.equal(reply.body.parentId, fan.body.id);
+  // The app's channel view carries the thread link for the quoted bubble.
+  const feed = await call('GET /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: state.main.id } });
+  assert.equal(feed.body.messages.find((m) => m.id === reply.body.id).parentId, fan.body.id);
+  // A parentId from another channel is refused.
+  const wrong = await call('POST /api/admin/entities/:entityId/social/chat/channels/:id/messages', {
+    user: admin, params: { entityId: entity.id, id: state.lineup.id },
+    body: { text: 'nope', parentId: fan.body.id },
+  });
+  assert.equal(wrong.code, 400);
+});
+
 test('flag off / kill switch hide everything', async () => {
   setFlag(entity.id, 'community.chat', 'off');
   const list = await call('GET /api/app/social/chat/channels', { token: 'tok-661779', query: { eventId: EVENT } });

@@ -657,9 +657,17 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const text = String(body.text || '').trim().slice(0, MAX_TEXT);
     if (!text) throw new HttpError(400, 'Write something first');
     const cta = validCta(body);
+    // Reply from the portal: parentId quotes a fan's message, same threading
+    // shape the app's fan replies use (the app renders the quoted bubble).
+    let parentId = '';
+    if (body.parentId) {
+      const parent = sql.prepare('SELECT * FROM social_chat_messages WHERE id=? AND channel_id=?').get(String(body.parentId), channelId);
+      if (!parent) throw new HttpError(400, 'That message isn’t in this channel');
+      parentId = parent.id;
+    }
     const id = `msg_${uuid().slice(0, 12)}`;
-    sql.prepare("INSERT INTO social_chat_messages (id, channel_id, entity_id, author_type, author_name, body, pinned, push, cta_label, cta_destination, created_at) VALUES (?,?,?, 'organiser', ?,?,?,?,?,?,?)")
-      .run(id, channelId, entityId, authorName, text, body.pin ? 1 : 0, body.push ? 1 : 0, cta.cta_label, cta.cta_destination, now());
+    sql.prepare("INSERT INTO social_chat_messages (id, channel_id, entity_id, author_type, author_name, body, parent_id, pinned, push, cta_label, cta_destination, created_at) VALUES (?,?,?, 'organiser', ?,?,?,?,?,?,?,?)")
+      .run(id, channelId, entityId, authorName, text, parentId, body.pin ? 1 : 0, body.push ? 1 : 0, cta.cta_label, cta.cta_destination, now());
     return messageRow(sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(id));
   }
   // Broadcast: one organiser message into every ACTIVE OFFICIAL channel of the
