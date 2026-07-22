@@ -4226,7 +4226,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       <Section tour="suite-locks" title="Locked filters (the event, cashless events…)" defaultOpen>
-        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} entityId={entityId} />
       </Section>
       {includedDashboards.length > 0 && (
         <Section title="Per-dashboard locked filters (override the suite locks for one dashboard)">
@@ -4244,7 +4244,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
                   </div>
                   {open && (
                     <div style={{ marginTop: 8 }}>
-                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} entityId={entityId} />
                     </div>
                   )}
                 </div>
@@ -4311,7 +4311,7 @@ const organiserValsFromLocks = (locks) => Object.entries(locks || {})
   .filter(([k]) => k.toLowerCase() === 'organiser name' || ORG_NAME_RE.test(k))
   .flatMap(([, v]) => splitVals(v));
 
-function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null, clientOrganiser = [] }) {
+function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null, clientOrganiser = [], entityId = null }) {
   // restrictTo limits the offered filters (e.g. the organiser-level editor only
   // exposes Organiser Name — scope is set once per client there).
   const PRESETS = restrictTo ? LOCK_PRESETS.filter((p) => restrictTo.includes(p.title)) : LOCK_PRESETS;
@@ -4525,7 +4525,7 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
                 {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
                 {orgScope && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ showing only {orgVals.join(', ')} events</span>}
               </div>
-              <ValuePicker meta={meta} value={r.vals} extraFilters={orgScope} onChange={(v) => setRow(i, { vals: v })} />
+              <ValuePicker meta={meta} value={r.vals} extraFilters={orgScope} entityId={entityId} onChange={(v) => setRow(i, { vals: v })} />
               <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
             </div>
           );
@@ -4541,7 +4541,7 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
 
 // Value picker for a locked filter: selected values shown as chips, plus a
 // search box that queries Looker server-side (works with thousands of values).
-function ValuePicker({ meta, value, onChange, extraFilters = null }) {
+function ValuePicker({ meta, value, onChange, extraFilters = null, entityId = null }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState([]);
@@ -4555,12 +4555,12 @@ function ValuePicker({ meta, value, onChange, extraFilters = null }) {
     let alive = true;
     setLoading(true);
     const t = setTimeout(async () => {
-      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true, filters: extraFilters || undefined }); if (alive) setResults(d.suggestions || []); }
+      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true, filters: extraFilters || undefined, entityId: entityId || undefined }); if (alive) setResults(d.suggestions || []); }
       catch { if (alive) setResults([]); }
       finally { if (alive) setLoading(false); }
     }, 300);
     return () => { alive = false; clearTimeout(t); };
-  }, [q, open, canSuggest, meta, JSON.stringify(extraFilters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, open, canSuggest, meta, JSON.stringify(extraFilters), entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = (s) => { if (s && !selected.includes(s)) onChange([...selected, s].join(',')); };
   const remove = (s) => onChange(selected.filter((x) => x !== s).join(','));
