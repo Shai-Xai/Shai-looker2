@@ -332,6 +332,20 @@ export default function ClientLayout() {
                   ) : (
                     sets.map((set) => {
                       const setOpen = searching || !!openSets[set.id];
+                      // Suite-level (loose) dashboards render with no set header,
+                      // one indent shallower than set dashboards.
+                      const dashBtn = (d, loose) => {
+                        const tabs = d.children?.length || 0;
+                        const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
+                        return (
+                          <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, padding: loose ? '6px 12px 6px 34px' : '6px 12px 6px 50px', fontSize: 13, fontWeight: active ? 600 : 450 }}>
+                            <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
+                            <span style={ellip}>{d.title}</span>
+                            {tabs > 0 && <span style={tabChip} title={`${tabs + 1} tabs inside`}>{tabs + 1}</span>}
+                          </button>
+                        );
+                      };
+                      if (set.direct) return <div key={set.id}>{set.dashboards.map((d) => dashBtn(d, true))}</div>;
                       return (
                         <div key={set.id}>
                           <button className="nav-row" style={{ ...rowBtn, padding: '7px 12px 7px 28px', fontWeight: 500, fontSize: 13, color: 'var(--muted-2)' }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
@@ -341,17 +355,7 @@ export default function ClientLayout() {
                           </button>
                           <div className={`collapsey${setOpen ? ' open' : ''}`}>
                             <div className="collapsey-inner">
-                              {set.dashboards.map((d) => {
-                                const tabs = d.children?.length || 0;
-                                const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
-                                return (
-                                  <button key={d.id} ref={active ? activeRef : null} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...rowBtn, padding: '6px 12px 6px 50px', fontSize: 13, fontWeight: active ? 600 : 450 }}>
-                                    <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(0,0,0,0.18)' }} />
-                                    <span style={ellip}>{d.title}</span>
-                                    {tabs > 0 && <span style={tabChip} title={`${tabs + 1} tabs inside`}>{tabs + 1}</span>}
-                                  </button>
-                                );
-                              })}
+                              {set.dashboards.map((d) => dashBtn(d, false))}
                               {set.dashboards.length === 0 && <div style={{ ...subRow, paddingLeft: 50, color: 'var(--muted)' }}>No dashboards</div>}
                             </div>
                           </div>
@@ -552,6 +556,18 @@ export default function ClientLayout() {
                       ) : (
                         (sets || []).map((set) => {
                           const setOpen = searching || !!openSets[set.id];
+                          const dashBtn = (d, loose) => {
+                            const tabs = d.children?.length || 0;
+                            const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
+                            return (
+                              <button key={d.id} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...mRowDash, paddingLeft: loose ? (single ? 20 : 34) : (single ? 34 : 48), fontWeight: active ? 700 : 450 }}>
+                                <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(128,128,128,0.35)' }} />
+                                <span style={ellip}>{d.title}</span>
+                                {tabs > 0 && <span style={tabChip}>{tabs + 1}</span>}
+                              </button>
+                            );
+                          };
+                          if (set.direct) return <div key={set.id}>{set.dashboards.map((d) => dashBtn(d, true))}</div>;
                           return (
                             <div key={set.id}>
                               <button className="nav-row" style={{ ...mRowSet, paddingLeft: single ? 12 : 26 }} onClick={() => setOpenSets((p) => ({ ...p, [set.id]: !p[set.id] }))}>
@@ -559,17 +575,7 @@ export default function ClientLayout() {
                                 <Ico v={set.icon} size={17} />
                                 <span style={ellip}>{set.name}</span>
                               </button>
-                              {setOpen && set.dashboards.map((d) => {
-                                const tabs = d.children?.length || 0;
-                                const active = (d.id === id || (d.children || []).some((c) => c.id === id)) && su.id === suiteId;
-                                return (
-                                  <button key={d.id} onClick={() => go(su.id, d.id)} className={`nav-row${active ? ' active' : ''}`} style={{ ...mRowDash, paddingLeft: single ? 34 : 48, fontWeight: active ? 700 : 450 }}>
-                                    <span style={{ ...dot, background: active ? 'var(--brand)' : 'rgba(128,128,128,0.35)' }} />
-                                    <span style={ellip}>{d.title}</span>
-                                    {tabs > 0 && <span style={tabChip}>{tabs + 1}</span>}
-                                  </button>
-                                );
-                              })}
+                              {setOpen && set.dashboards.map((d) => dashBtn(d, false))}
                             </div>
                           );
                         })

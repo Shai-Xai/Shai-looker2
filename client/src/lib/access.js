@@ -25,6 +25,7 @@ export function useAccess() {
 // Permission keys — mirror server/roles.js so callers don't pass raw strings.
 export const PERMS = {
   DASHBOARDS_VIEW: 'dashboards.view',
+  CONTENT_MANAGE: 'content.manage',
   CAMPAIGNS_VIEW: 'campaigns.view',
   CAMPAIGNS_APPROVE: 'campaigns.approve',
   DIGESTS_MANAGE: 'digests.manage',

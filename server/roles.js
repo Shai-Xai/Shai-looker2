@@ -13,6 +13,7 @@
 // Atomic permissions. Group by area for readability; the strings are the gates.
 const PERMISSIONS = {
   DASHBOARDS_VIEW: 'dashboards.view',        // see dashboards at all (scoped further by visibility)
+  CONTENT_MANAGE: 'content.manage',          // arrange a suite's own content (e.g. attach dashboards directly)
   CAMPAIGNS_VIEW: 'campaigns.view',          // see the Actions area + campaign reports
   CAMPAIGNS_APPROVE: 'campaigns.approve',    // create/approve/send campaigns
   GOALS_MANAGE: 'goals.manage',              // set/edit event goals + targets (Results)
@@ -39,7 +40,7 @@ const ROLES = [
   {
     key: 'manager', label: 'Manager', lens: 'exec',
     description: 'All dashboards, digests and campaigns. No branding, integrations or team management.',
-    permissions: [P.DASHBOARDS_VIEW, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
+    permissions: [P.DASHBOARDS_VIEW, P.CONTENT_MANAGE, P.CAMPAIGNS_VIEW, P.CAMPAIGNS_APPROVE, P.GOALS_MANAGE, P.ALERTS_MANAGE, P.DIGESTS_MANAGE, P.SETTLEMENTS_VIEW, P.EVENTOPS_MANAGE],
   },
   {
     key: 'marketing', label: 'Marketing', lens: 'marketing',

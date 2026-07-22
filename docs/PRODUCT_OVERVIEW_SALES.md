@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Loose dashboards: attach a dashboard directly to a suite — no set needed — managed by Howler and by clients themselves) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -81,6 +81,10 @@ longer they use Pulse, the better it gets."
   feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
   make a given briefing.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
+- **Loose dashboards on a suite** ✅ — attach a one-off dashboard straight to an
+  event without first building a set to hold it. Loose dashboards show **first**,
+  before the sets. Howler manages it in the suite editor, and the client can too
+  under **Settings → Dashboards** (owners & managers).
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
   staff can "Save as new" from that client's view to spin off a **client-owned
@@ -472,8 +476,9 @@ spend, the return, and ask the Owl which campaign is worth more budget."
 - Manage **clients**, their **dashboards/sets/suites**, the **tile library**, **AI
   instructions**, **integrations**, **settlements**, **logins/roles**, backups.
 - **Per-client suite control** — pick which **sets** (grouped by folder) and which
-  **individual dashboards** a client gets, and **lock filters per dashboard** for that
-  client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
+  **individual dashboards** a client gets, **attach loose dashboards straight to a
+  suite** (no set needed — they show first), and **lock filters per dashboard** for
+  that client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
 - **Preview as a client** to see exactly what they see.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
@@ -769,6 +774,11 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-22** — **Loose dashboards on a suite** ✅: you can now attach a
+  dashboard **directly to a suite** without first creating a set to hold it —
+  handy for a one-off dashboard. Loose dashboards render **first**, before the
+  sets. Managed by Howler in the suite editor (Admin → client → Suites) **and**
+  by the client themselves under **Settings → Dashboards** (owners & managers).
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and

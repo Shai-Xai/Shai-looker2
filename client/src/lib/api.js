@@ -334,6 +334,10 @@ export const api = {
   adminCreateSuite: (s) => fetch('/api/admin/suites', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminUpdateSuite: (id, s) => fetch(`/api/admin/suites/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then(json),
   adminDeleteSuite: (id) => fetch(`/api/admin/suites/${id}`, { method: 'DELETE' }),
+  // Suite-level dashboards (dual-surface: admin + client self-service). `scope`
+  // 'admin' hits /api/admin/suites, 'my' hits /api/my/suites.
+  suiteDashboardPool: (suiteId, scope = 'admin') => fetch(`/api/${scope === 'my' ? 'my' : 'admin'}/suites/${suiteId}/dashboard${scope === 'my' ? 's' : '-pool'}`).then(json),
+  saveSuiteDashboards: (suiteId, dashboards, scope = 'admin') => fetch(`/api/${scope === 'my' ? 'my' : 'admin'}/suites/${suiteId}/dashboards`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dashboards }) }).then(json),
   adminFilterFields: () => fetch('/api/admin/filter-fields').then(json),
   filterSuggest: (body) => fetch('/api/filter-suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json),
 

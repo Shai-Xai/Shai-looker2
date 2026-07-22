@@ -75,6 +75,25 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
     res.json(enrichSuite(su));
   });
   app.delete('/api/admin/suites/:id', auth.requireAdmin, (req, res) => { db.deleteSuite(req.params.id); res.status(204).end(); });
+  // The dashboards attachable directly to a suite (shared + this client's bespoke),
+  // plus what's already attached — powers the "Add dashboard" picker on both surfaces.
+  const suiteDashboardOptions = (su) => ({ pool: db.dashboardPoolFor(su.entityId), directDashboards: su.directDashboards || [] });
+  app.get('/api/admin/suites/:id/dashboard-pool', auth.requireAdmin, (req, res) => {
+    const su = db.getSuite(req.params.id);
+    if (!su) return res.status(404).json({ error: 'Suite not found' });
+    res.json(suiteDashboardOptions(su));
+  });
+  // Save just the suite's direct dashboards (admin). Only ids from this client's
+  // pool are kept, so a picker can never attach another client's bespoke dashboard.
+  app.put('/api/admin/suites/:id/dashboards', auth.requireAdmin, (req, res) => {
+    const cur = db.getSuite(req.params.id);
+    if (!cur) return res.status(404).json({ error: 'Suite not found' });
+    const allowed = new Set(db.dashboardPoolFor(cur.entityId).map((d) => d.id));
+    const entries = (Array.isArray(req.body?.dashboards) ? req.body.dashboards : [])
+      .map((x) => (typeof x === 'string' ? { id: x } : x)).filter((x) => x && allowed.has(x.id));
+    const su = db.updateSuite(cur.id, { directDashboards: entries });
+    res.json({ ok: true, directDashboards: su.directDashboards });
+  });
 
   // Distinct filter fields across all dashboards (for the locked-filter editor).
   app.get('/api/admin/filter-fields', auth.requireAdmin, (_req, res) => {
@@ -161,23 +180,31 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
     // Dashboards an admin removed from THIS suite (a subset of a shared set). Hidden
     // for everyone — including admin preview — so it matches what the client sees.
     const excluded = new Set(su.excludedDashboards || []);
-    const sets = su.setIds.map((sid) => {
-      const set = db.getSet(sid);
-      if (!set) return null;
-      // One-level tree: top-level dashboards carry their sub-dashboards (tabs)
-      // in `children`. An orphaned parent reference renders top-level.
-      const nodes = (set.dashboards || []).map(({ id, parentId, displayName }) => {
+    // Build the visible nav dashboards for a group of membership entries. One-level
+    // tree: top-level dashboards carry their sub-dashboards (tabs) in `children`;
+    // an orphaned parent reference renders top-level. `setId` scopes role visibility
+    // (null for suite-level direct dashboards, which key visibility on the dashboard).
+    const buildNodes = (entries, setId) => {
+      const nodes = (entries || []).map(({ id, parentId, displayName }) => {
         const d = store.get(id);
-        // Per-Set display-name override wins in the nav (sidebar/top-nav); blank falls back to the native title.
-        return d && !excluded.has(id) && visible(set.id, id) && { id: d.id, title: (displayName || '').trim() || d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
+        // Per-membership display-name override wins in the nav; blank falls back to the native title.
+        return d && !excluded.has(id) && visible(setId, id) && { id: d.id, title: (displayName || '').trim() || d.title, description: d.description || '', tileCount: (d.tiles || []).length, parentId };
       }).filter(Boolean);
       const valid = new Set(nodes.map((n) => n.id));
-      const dashboards = nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
+      return nodes.filter((n) => !n.parentId || !valid.has(n.parentId)).map(({ parentId, ...top }) => ({
         ...top,
         children: nodes.filter((c) => c.parentId === top.id).map(({ parentId: _p, ...rest }) => rest),
       }));
-      return { id: set.id, name: set.name, icon: set.icon || '', dashboards };
+    };
+    const sets = su.setIds.map((sid) => {
+      const set = db.getSet(sid);
+      if (!set) return null;
+      return { id: set.id, name: set.name, icon: set.icon || '', dashboards: buildNodes(set.dashboards, set.id) };
     }).filter((s) => s && (isAdmin || s.dashboards.length)); // drop sets fully hidden for this role
+    // Dashboards attached directly to the suite (no set) render FIRST, as a loose
+    // group with no set header (client keys off `direct: true`).
+    const directDashboards = buildNodes(su.directDashboards, null);
+    if (directDashboards.length) sets.unshift({ id: `__direct__:${su.id}`, name: '', icon: '', direct: true, dashboards: directDashboards });
     const ent = db.getEntity(su.entityId);
     // Per-dashboard lock overrides, expanded the same way as the suite-wide locks
     // so ViewPage can layer them on top for the matching dashboard.
@@ -191,6 +218,30 @@ module.exports.mount = function mountClientModel(app, { db, auth, store, looker,
       entityName: ent?.name || '', entityLogo: ent?.logo || '',
       lockedFilters: expandLockMap(auth.lockedFiltersForSuite(su.id)), dashboardLocks, tileLocks: su.tileLocks || {}, sets,
     });
+  });
+
+  // ── Suite-level dashboards (dual-surface) ────────────────────────────────────
+  // Attach dashboards DIRECTLY to a suite (no set needed). Admin manages it via
+  // the suite editor (PUT /api/admin/suites/:id carries directDashboards); this is
+  // the client self-service equivalent, scoped to a suite the user can manage.
+  const requireSuiteContent = (req, res, next) => {
+    const su = db.getSuite(req.params.id);
+    if (!su) return res.status(404).json({ error: 'Suite not found' });
+    if (!auth.canAccessSuite(req.user, su.id)) return res.status(403).json({ error: 'Not allowed' });
+    if (req.user.role !== 'admin' && !auth.hasPermission(req.user, su.entityId, 'content.manage')) return res.status(403).json({ error: 'You don’t have access to this.' });
+    req._suite = su;
+    next();
+  };
+  app.get('/api/my/suites/:id/dashboards', auth.requireAuth, requireSuiteContent, (req, res) => {
+    res.json(suiteDashboardOptions(req._suite));
+  });
+  app.put('/api/my/suites/:id/dashboards', auth.requireAuth, requireSuiteContent, (req, res) => {
+    // Only dashboards this client is allowed to see (shared + their own bespoke).
+    const allowed = new Set(db.dashboardPoolFor(req._suite.entityId).map((d) => d.id));
+    const entries = (Array.isArray(req.body?.dashboards) ? req.body.dashboards : [])
+      .map((x) => (typeof x === 'string' ? { id: x } : x)).filter((x) => x && allowed.has(x.id));
+    const su = db.updateSuite(req._suite.id, { directDashboards: entries });
+    res.json({ ok: true, directDashboards: su.directDashboards });
   });
 
   // ── Saved dashboard filter views (dual-surface) ──────────────────────────────

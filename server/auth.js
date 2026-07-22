@@ -292,6 +292,8 @@ function canAccessDashboard(user, dashboard) {
       for (const sid of db.suiteSetIds(su.id)) {
         if (db.dashboardsInSet(sid).includes(dashboard.id) && db.dashboardVisibleToRole(m.entityId, sid, dashboard.id, role)) return true;
       }
+      // Dashboards attached directly to the suite (no set → visibility keys on the dashboard).
+      if ((su.directDashboards || []).some((e) => e.id === dashboard.id) && db.dashboardVisibleToRole(m.entityId, null, dashboard.id, role)) return true;
     }
   }
   return false;

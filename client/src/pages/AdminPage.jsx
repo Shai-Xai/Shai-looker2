@@ -23,6 +23,7 @@ import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
+import SuiteDashboardsEditor from '../components/SuiteDashboardsEditor.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
@@ -1350,6 +1351,7 @@ const SUITES_TOUR = [
   { tour: 'suite-name', icon: '🏷️', title: 'Name the suite', body: 'Give the suite a name — usually the event itself (e.g. “Bushfire 2026”). It’s the heading the client sees for this event.' },
   { tour: 'suite-icon', icon: '🎨', title: 'Give the suite an icon', body: 'Pick an emoji (or upload a small image). It’s how this event shows up in the client’s sidebar.' },
   { tour: 'suite-sets', icon: '🗂️', title: 'Choose the dashboard sets', body: 'Tick the sets this event should include — e.g. Ticketing, Cashless. Expand a set to include or leave out individual dashboards.' },
+  { tour: 'suite-dashboards', icon: '📊', title: 'Attach loose dashboards (optional)', body: 'Add a one-off dashboard straight to this suite without wrapping it in a set. These show first, before the sets. The client can manage these themselves too, under Settings → Dashboards.' },
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
   { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
   { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
@@ -3714,6 +3716,9 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
             </div>
           ))}
         </div>
+      </Section>
+      <Section tour="suite-dashboards" title="Dashboards attached directly (no set)">
+        <SuiteDashboardsEditor suiteId={suite.id} scope="admin" onChange={onChange} />
       </Section>
       {setIds.length > 1 && (
         <Section title="Order in this suite (drag to reorder)">
