@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import crashReport from '../lib/crashReport.js';
 
 // Whole-app safety net for two distinct cases:
 //
@@ -70,6 +71,10 @@ export default class RootErrorBoundary extends Component {
         sessionStorage.setItem('howler_deploy_retries', String(tries + 1));
         setTimeout(() => window.location.reload(), 4000);
       }
+    } else {
+      // A GENUINE crash (not a deploy hiccup) — tell the server so the team
+      // sees it without waiting for a user to complain.
+      crashReport(this.state.error, this.state.info);
     }
   }
   render() {

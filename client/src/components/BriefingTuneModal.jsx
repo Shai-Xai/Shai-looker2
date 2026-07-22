@@ -117,6 +117,21 @@ export function BriefingConfigForm({ entityId, onSaved, showTune = true }) {
                 </div>
                 <TilePicker catalogue={cat} load={loadTiles} selected={tiles} onChange={setTiles} phases={cfg?.phases || []} />
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.45 }}>Each pick can be scoped to a <b>lifecycle phase</b> — e.g. lead with a launch board during Launch, the gates board on Event Day. "All phases" feeds the briefing all the time.</div>
+                {/* Picks can go stale when a dashboard is removed/replaced (a fork
+                    changes its id) — they're invisible in the picker above but still
+                    saved, and can never feed the briefing. Offer a one-tap cleanup. */}
+                {(() => {
+                  if (!cat) return null;
+                  const known = new Set((cat.dashboards || []).flatMap((d) => [`${d.dashboardId}|*`, ...d.tiles.map((t) => `${d.dashboardId}|${t.tileId}`)]));
+                  const stale = tiles.filter((t) => !known.has(`${t.dashboardId}|${t.tileId}`));
+                  if (!stale.length) return null;
+                  return (
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10, fontSize: 11.5, lineHeight: 1.5, color: '#b45309', background: 'rgba(180,83,9,0.08)', border: '1px solid rgba(180,83,9,0.25)', borderRadius: 8, padding: '7px 10px' }}>
+                      <span style={{ flex: 1 }}>⚠ {stale.length} earlier pick{stale.length === 1 ? ' points' : 's point'} at a dashboard/tile that no longer exists for this client (removed or replaced) — {stale.length === 1 ? 'it' : 'they'} can never feed the briefing.</span>
+                      <button type="button" onClick={() => setTiles(tiles.filter((t) => known.has(`${t.dashboardId}|${t.tileId}`)))} style={{ flexShrink: 0, border: '1px solid rgba(180,83,9,0.4)', background: 'transparent', color: '#b45309', borderRadius: 980, padding: '4px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>Remove stale picks</button>
+                    </div>
+                  );
+                })()}
                 {/* Phase-scoped picks only activate when the event's phase is known
                     (from its dates or a manual phase). Warn here instead of letting
                     the pick silently never match. */}

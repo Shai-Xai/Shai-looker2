@@ -439,8 +439,8 @@ function mount(app, { db, auth, rateLimit, apiKeys, clientCatalogue, resolveTile
   // Data health — is the venue's data pipe flowing? (device ids/operators are
   // operational row-level data → same read_rows scope as Event Ops).
   app.get('/api/v1/data-health', apiKeys.bearerAuth, apiKeys.auditware('rest'), perKey(120, 'apiv1'), apiKeys.requireScope('read_rows'), heavy, asyncHandler(async (req, res) => {
-    const { suiteId, query, monitor, hours, intervalMin, limit } = req.query;
-    res.json(await dataHealth(req.user, { suiteId, query, monitor, hours, intervalMin, limit }));
+    const { suiteId, query, monitor, hours, intervalMin, station, zone, limit } = req.query;
+    res.json(await dataHealth(req.user, { suiteId, query, monitor, hours, intervalMin, station, zone, limit }));
   }));
   // Row-level tile data — requires the `read_rows` scope (explicit opt-in per
   // key; rows can carry customer/ticketing personal data).

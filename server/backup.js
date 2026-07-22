@@ -185,6 +185,12 @@ async function runBackup(trigger = 'manual') {
       detail = `uploaded s3://${c.s3.bucket}/${key}`;
     } else {
       detail = 'no off-box storage configured — local snapshot only';
+      // The snapshot lives on the SAME disk as the database, so it does not
+      // survive disk loss. Say so loudly on every automatic run — this state
+      // must never sit quietly reporting "ok" (production-readiness F1).
+      if (trigger !== 'manual') {
+        notifyOps('Nightly backup ran LOCAL-ONLY — off-box storage (BACKUP_S3_*) is not configured, so disk loss is still total data loss. See docs/BACKUP_SETUP_RUNBOOK.md.');
+      }
     }
     recordRun({ status: 'ok', trigger, file: path.basename(gz), bytes, uploaded, detail });
     return { ok: true, file: path.basename(gz), bytes, uploaded };
@@ -222,6 +228,8 @@ function status() {
     hourUtc: c.hourUtc,
     keep: c.keep,
     offBoxConfigured: s3Configured(c),
+    atRisk: !s3Configured(c),
+    warning: s3Configured(c) ? '' : 'Snapshots are stored on the SAME disk as the database — disk loss is total data loss. Set the BACKUP_S3_* env vars in Render (docs/BACKUP_SETUP_RUNBOOK.md).',
     lastSuccessAt: lastSuccess(),
     local: listLocal(),
     runs: db.db.prepare('SELECT at, status, trigger, file, bytes, uploaded, detail FROM backup_runs ORDER BY id DESC LIMIT 20').all(),
@@ -233,13 +241,16 @@ function mount(app, deps) {
   const { asyncHandler } = require('./http');
   init(deps);
 
+  // Backup status is viewable by any Howler admin; taking one and downloading a
+  // snapshot (a full copy of the DB — same trust level as /api/admin/export) is
+  // Super-Admin-only.
   app.get('/api/admin/backups', auth.requireAdmin, (_req, res) => res.json(status()));
-  app.post('/api/admin/backups/run', auth.requireAdmin, asyncHandler(async (_req, res) => {
+  app.post('/api/admin/backups/run', auth.requireSuperAdmin, asyncHandler(async (_req, res) => {
     res.json(await runBackup('manual'));
   }));
   // Manual off-box copy: stream the newest snapshot to the admin's machine.
   // (Contains everything the DB contains — same trust level as /api/admin/export.)
-  app.get('/api/admin/backups/download', auth.requireAdmin, (_req, res) => {
+  app.get('/api/admin/backups/download', auth.requireSuperAdmin, (_req, res) => {
     const [latest] = listLocal();
     if (!latest) return res.status(404).json({ error: 'No backup taken yet — run one first' });
     res.setHeader('Content-Type', 'application/gzip');

@@ -1,0 +1,41 @@
+# Keep the staging branch current with main.
+#
+# The two-environment deploy (see CLAUDE.md "Git") assumes staging = main + the
+# tickets currently being verified there. Work also lands on main directly
+# (interactive sessions, production-targeted tickets), so without this sync
+# staging drifts behind — and a ticket built on stale staging can't see recent
+# features (it'll rebuild things that already exist). This workflow merges main
+# into staging on every push to main.
+#
+# On a merge conflict it FAILS LOUDLY (red run in Actions) instead of guessing —
+# resolve by merging main into staging manually, then pushes resume syncing.
+name: Sync staging with main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-staging
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+      - name: Merge main into staging
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge origin/main --no-edit -m "Sync staging with main (auto)" || {
+            echo "::error::Merge conflict syncing main into staging — resolve manually: git checkout staging && git merge main"
+            exit 1
+          }
+          git push origin staging

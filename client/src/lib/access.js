@@ -35,4 +35,5 @@ export const PERMS = {
   INTEGRATIONS_MANAGE: 'integrations.manage',
   TEAM_MANAGE: 'team.manage',
   EVENTOPS_MANAGE: 'eventops.manage',
+  MAP_MANAGE: 'map.manage',
 };

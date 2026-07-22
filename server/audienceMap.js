@@ -8,6 +8,8 @@
 // cellVal copes with both. `member` shape: { email, name, ticket, phone, anchorRaw,
 // emailOk, smsOk, attributes }.
 
+const { normaliseMsisdn } = require('./messaging'); // pure helper — needs no init()
+
 const MAX_AUDIENCE = 25000;      // DEFAULT safety cap per campaign (per-client override via the audience_cap:<entityId> setting)
 const MAX_AUDIENCE_HARD = 500000; // absolute ceiling an admin can set a per-client cap to (Looker fetch limits scale to the cap)
 const MAX_SMS_DEFAULT = 5000;    // DEFAULT per-campaign SMS sub-cap (per-client override via sms_cap:<entityId>; 0 blocks SMS)
@@ -17,6 +19,15 @@ const clampSmsCap = (raw) => { if (raw === '' || raw == null) return MAX_SMS_DEF
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const cellVal = (cell) => String((cell && (cell.value ?? cell)) || '').trim();
 const isYes = (v) => ['yes', 'y', 'true', '1', 'consented', 'opted in', 'opt in'].includes(String(v).trim().toLowerCase());
+// Best-effort name column when a campaign didn't explicitly map one, so {{name}}
+// still personalises on real sends. Prefers first/full/customer-name columns;
+// ignores user/company/event/file-name lookalikes and bare last-name/surname.
+const NAME_RE = /(first|full|customer|attendee|given)[\s._-]?name|(^|[\s._-])name([\s._-]|$)/i;
+const NAME_ANTI_RE = /user|compan|organi|event|file|venue|display|screen|nick|last[\s._-]?name|surname/i;
+const detectNameField = (fields = []) => {
+  const f = fields.find((fl) => { const s = `${fl.name} ${fl.label || ''}`; return NAME_RE.test(s) && !NAME_ANTI_RE.test(s); });
+  return f ? f.name : '';
+};
 
 // rows → shaped recipients (with per-channel consent tagged). Mirrors the tile branch
 // of audienceFor verbatim. `opts`: { emailField, nameField, phoneField, ticketField,
@@ -31,6 +42,9 @@ function buildRows(rows, opts = {}) {
   const raw = [];
   let filteredOut = 0;
   if (!emailField) return { raw, filteredOut };
+  // Fall back to an auto-detected name column so {{name}} personalises even when
+  // the campaign never mapped one (the name field is optional in the editor).
+  const nf = nameField || detectNameField([...fields, ...attrFields]);
   for (const row of rows || []) {
     const email = cellVal(row[emailField]).toLowerCase();
     if (!EMAIL_RE.test(email)) continue;
@@ -46,13 +60,29 @@ function buildRows(rows, opts = {}) {
     // Every column as a merge-field attribute (by field label AND name).
     const attributes = {};
     for (const fl of [...fields, ...attrFields]) { const v = cellVal(merged[fl.name]); attributes[fl.name] = v; if (fl.label) attributes[fl.label] = v; }
-    raw.push({ email, name: nameField ? cellVal(row[nameField]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
+    raw.push({ email, name: nf ? cellVal(merged[nf]) : '', ticket: ticketField ? cellVal(row[ticketField]) : '', phone, anchorRaw: anchorField ? cellVal(row[anchorField]) : '', emailOk, smsOk, attributes });
   }
   return { raw, filteredOut };
 }
 
+// Canonical identity key for a recipient: lowercased email, else the normalised
+// msisdn (so '+27 82…' and '082…' collapse to one person), else the raw phone.
+const contactKey = (r) => String(r?.email || '').toLowerCase() || normaliseMsisdn(r?.phone) || String(r?.phone || '').trim();
+
+// Is this recipient on the suppression set? Suppressions are keyed by whatever
+// contact the unsubscribe token carried — an email OR a phone (phone-only SMS
+// recipients have no email) — so check BOTH identities, with the phone tested
+// raw and normalised (rows written before phones were normalised at /u time).
+function isSuppressed(sup, r) {
+  if (!sup || !sup.size || !r) return false;
+  const email = String(r.email || '').toLowerCase();
+  if (email && sup.has(email)) return true;
+  const phone = String(r.phone || '').trim();
+  return !!phone && (sup.has(phone.toLowerCase()) || sup.has(normaliseMsisdn(phone)));
+}
+
 // Dedupe (by email-or-phone) + suppression + per-channel reach. `suppressed` is a Set
-// of suppressed emails. Mirrors the shared tail of audienceFor verbatim.
+// of suppressed contacts (emails and/or phones). Mirrors the shared tail of audienceFor verbatim.
 function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   const sup = suppressed || new Set();
   const lim = Number.isFinite(cap) && cap > 0 ? Math.min(cap, MAX_AUDIENCE_HARD) : MAX_AUDIENCE;
@@ -60,10 +90,10 @@ function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   const list = [];
   let excluded = 0;
   for (const r of raw || []) {
-    const key = r.email || r.phone; // phone-only recipients have no email
+    const key = contactKey(r);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    if (r.email && sup.has(r.email)) { excluded += 1; continue; }
+    if (isSuppressed(sup, r)) { excluded += 1; continue; }
     list.push(r);
     if (list.length >= lim) break;
   }
@@ -78,4 +108,4 @@ function finalizeAudience(raw, suppressed, cap = MAX_AUDIENCE) {
   return { list, excluded, noConsent, reach };
 }
 
-module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience };
+module.exports = { MAX_AUDIENCE, MAX_AUDIENCE_HARD, MAX_SMS_DEFAULT, clampSmsCap, EMAIL_RE, cellVal, isYes, buildRows, finalizeAudience, contactKey, isSuppressed };

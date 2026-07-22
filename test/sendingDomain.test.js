@@ -84,3 +84,23 @@ test('client self-service guard: only own entity passes', async () => {
   myGuard({ params: { entityId: 'e1' }, user: { role: 'member', entityIds: ['e1'] } }, res, () => { passed += 1; });
   assert.equal(passed, 1);
 });
+
+test('adopts an already-registered Resend domain instead of dead-ending', async () => {
+  // POST /domains → "registered already"; the module should list, match by name,
+  // GET the existing domain and store its records so setup still completes.
+  let phase = 'post';
+  global.fetch = async (url, opts = {}) => {
+    const u = String(url); const m = opts.method || 'GET';
+    if (m === 'POST' && u.endsWith('/domains')) return { ok: false, status: 422, json: async () => ({ message: 'The kff.it domain has been registered already.' }) };
+    if (m === 'GET' && u.endsWith('/domains')) return { ok: true, json: async () => ({ data: [{ id: 'dom_existing', name: 'kff.it', status: 'pending' }] }) };
+    if (m === 'GET' && u.includes('/domains/dom_existing')) return { ok: true, json: async () => ({ id: 'dom_existing', name: 'kff.it', status: 'pending', records: [{ record: 'DKIM', type: 'TXT', name: 'resend._domainkey', value: 'p=xyz', status: 'not_started' }] }) };
+    return { ok: true, json: async () => ({}) };
+  };
+  const { call } = build();
+  const ent = { id: 'e-kff' };
+  // seed entity lookup used by view()/guards isn't needed for admin setDomain route
+  const r = await call('put /api/admin/entities/:entityId/sending-domain', { params: { entityId: ent.id }, body: { domain: 'kff.it', fromLocal: 'info' } });
+  assert.equal(r.code, 200, 'setup succeeds by adopting the existing domain');
+  assert.equal(r.out.domain, 'kff.it');
+  assert.ok((r.out.records || []).some((x) => x.type === 'TXT'), 'the existing domain’s DNS records are surfaced for the client');
+});

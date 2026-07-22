@@ -53,6 +53,20 @@ enforce entity ownership; the admin equivalents live under
 When a setting layers (platform default → client override), blank client fields
 should inherit the tier below, and the UI should show what's inherited.
 
+## Feature flags — every new feature registers one (non-negotiable)
+Admin → Product → Flags (`server/flags.js`) is the ONE control panel for what
+each client sees. **Whenever you ship a new client-facing feature or surface, in
+the SAME change:**
+- add its flag to the `REGISTRY` in `server/flags.js` (as a `kids` entry of the
+  area it belongs to, e.g. `engage.journeys`; new/risky features default
+  `def: false, beta: true` and get flipped on per client from the matrix);
+- add its client API route prefix(es) to `GATES` so the server enforces the flag
+  (UI hiding is cosmetic — the route gate is the real boundary);
+- if it ships an Owl act-tool, map the tool in `OWL_TOOL_FLAGS` (flag off = the
+  tool is simply never offered to the model);
+- hide its UI (nav entry / tab) via `useMyFlags` + `flagOn`.
+A feature that can't be turned off per client from the matrix is not done.
+
 ## Architecture notes
 - Disposable modules: self-contained features own their tables + routes and mount
   with one line (e.g. `server/os.js`, `server/mailer.js`). Easy to remove.
@@ -113,9 +127,20 @@ Remember the wizard reuses the real editors (`ClientSuites`, `EntityLogins`,
 wizard automatically; the tour copy is the part that still needs a manual update.
 
 ## Git
-- **`main` is the single source of truth** — Render deploys from it, and ALL
-  work ships there. Develop on the assigned `claude/*` branch; push to it AND
-  to `main` (`git push -u origin <branch> && git push origin <branch>:main`).
-  If `main` has moved, fetch + rebase onto `origin/main` before pushing.
-- No other branch needs syncing. (The old rule about mirroring to the Ecstatic
-  session's branch is retired — that session ships to `main` like everyone else.)
+- **`main` is production's source of truth** — the production Render service
+  deploys from it, and interactive session work ships there. Develop on the
+  assigned `claude/*` branch; push to it AND to `main`
+  (`git push -u origin <branch> && git push origin <branch>:main`). If `main`
+  has moved, fetch + rebase onto `origin/main` before pushing.
+- **Two-environment deploy (product board tickets).** A `staging` branch feeds
+  a separate staging Render service; `main` feeds production. When a product-board
+  ticket is dispatched to Claude for **staging**, its build brief tells you to open
+  the PR against `staging` (NOT main) — follow the brief; the ticket's target wins
+  over the "always main" default above. Merging that PR lands the ticket "on
+  staging", where the REPORTER is asked to test and approve it; **Promote to
+  production** (a release PR merging `staging` → `main`; a release train — it ships
+  everything on staging at once) is blocked until every staged ticket is
+  reporter-approved. Tickets dispatched to **production** still PR straight to `main`.
+  The GitHub webhook + ticket DB live on **production Pulse only** (staging is just
+  where code gets tested), so point the repo webhook at the production URL.
+- No other branch needs syncing.

@@ -8,7 +8,10 @@ import ShareMenu from './ShareMenu.jsx';
 
 // Whole-dashboard AI summary. Streams an executive summary built from every
 // tile's data (scoped + filtered exactly like the live view).
-export default function DashboardInsightModal({ dashboardId, title, filterValues, suiteId, onClose }) {
+// Also reusable for other page summaries (e.g. the App analytics Owl summary):
+// pass `endpoint` + `payload` to override the dashboard call, and `kindLabel`
+// for the header eyebrow.
+export default function DashboardInsightModal({ dashboardId, title, filterValues, suiteId, onClose, endpoint, payload, kindLabel = 'Dashboard summary' }) {
   const isMobile = useIsMobile();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -33,10 +36,10 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
     setText(''); setLoading(true); setError(null);
     (async () => {
       try {
-        const res = await fetch('/api/dashboard-insight', {
+        const res = await fetch(endpoint || '/api/dashboard-insight', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dashboardId, filterValues, suiteId }),
+          body: JSON.stringify(payload || { dashboardId, filterValues, suiteId }),
           signal: controller.signal,
         });
         if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `Request failed (${res.status})`); }
@@ -62,7 +65,7 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
     run();
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardId, JSON.stringify(filterValues), suiteId]);
+  }, [dashboardId, JSON.stringify(filterValues), suiteId, endpoint, JSON.stringify(payload)]);
 
   const drag = useSheetDrag(onClose);
   const panelStyle = isMobile ? { ...panel, width: '100%', maxHeight: '92dvh', borderRadius: '18px 18px 0 0' } : panel;
@@ -80,14 +83,14 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
         <div style={header}>
           <AiMark size={28} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Dashboard summary</div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{kindLabel}</div>
             <div style={{ fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title || 'This dashboard'}</div>
           </div>
           {text.trim() && !loading && (
             <ShareMenu
               variant="header"
               isMobile={isMobile}
-              heading={`Dashboard summary · ${title || 'This dashboard'}`}
+              heading={`${kindLabel} · ${title || 'This dashboard'}`}
               text={text}
             />
           )}
@@ -117,7 +120,7 @@ export default function DashboardInsightModal({ dashboardId, title, filterValues
             <ShareMenu
               variant="footer"
               isMobile={isMobile}
-              heading={`Dashboard summary · ${title || 'This dashboard'}`}
+              heading={`${kindLabel} · ${title || 'This dashboard'}`}
               text={text}
               label="Share this summary"
             />
