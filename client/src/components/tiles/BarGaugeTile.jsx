@@ -12,9 +12,13 @@ export default function BarGaugeTile({ data, visConfig = {}, label }) {
   const hidden = new Set(visConfig.hidden_fields || []);
   const measures = [...(fields.measures || []), ...(fields.table_calculations || [])].filter((f) => !hidden.has(f.name));
   const measure = measures[0];
-  if (!rows.length || !measure) return <Empty />;
+  if (!measure) return <Empty />;
 
-  const cell = rows[0][measure.name];
+  // An empty measure result is a ZERO aggregate (a count/sum over no matching
+  // rows is 0), which Looker shows as 0 — not "No data". Synthesise a 0 cell so
+  // the gauge + its label still render instead of collapsing to "No data".
+  const hasRow = rows.length > 0;
+  const cell = hasRow ? rows[0][measure.name] : { value: 0, rendered: formatNumber(0, measure.value_format) };
   const value = Number(cell?.value);
   const fmt = measure.value_format;
 
