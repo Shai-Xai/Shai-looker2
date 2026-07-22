@@ -201,14 +201,15 @@ addColumn('suites', 'briefing', "TEXT NOT NULL DEFAULT '{}'");
 addColumn('suites', 'mail_branding', "TEXT NOT NULL DEFAULT '{}'"); // per-event branding override (logo/colour/sender/wording); blank inherits the client
 addColumn('suites', 'event_url', "TEXT NOT NULL DEFAULT ''"); addColumn('suites', 'howler_event_id', "TEXT NOT NULL DEFAULT ''"); // ticket/checkout link (default campaign CTA) + the event's howler.co.za id (deep links; manual until the Howler integration fills it)
 // Per-suite dashboard tweaks layered over the bundled sets:
-//   excluded_dashboards — dashboard ids hidden from THIS suite even though their
-//     set includes them (so an admin can pick a subset of a set per client).
-//   dashboard_locks — { dashboardId: { field: "v1,v2" } } locked-filter overrides
-//     applied to one dashboard within this suite, on top of the suite-wide locks.
+//   excluded_dashboards — dashboard ids hidden from THIS suite (subset of a set).
+//   dashboard_locks — { dashboardId: { field: "v1,v2" } } per-dashboard lock overrides.
 addColumn('suites', 'excluded_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'dashboard_locks', "TEXT NOT NULL DEFAULT '{}'");
 // Per-tile lock overrides for THIS suite: { tileId: { filterName: value } } forces one tile's filter, atop the dashboard/suite locks.
 addColumn('suites', 'tile_locks', "TEXT NOT NULL DEFAULT '{}'");
+// direct_dashboards — dashboards attached DIRECTLY to a suite (alongside its
+// sets); [{ id, parentId, displayName }] like set_dashboards, rendered first.
+addColumn('suites', 'direct_dashboards', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('suites', 'live_dashboard_id', "TEXT NOT NULL DEFAULT ''"); // sidebar LIVE button → live-ticketing dashboard
 // settlements.notes/.kind added after the table shipped, so migrate existing DBs.
 if (tableExists('settlements')) {
@@ -1228,8 +1229,7 @@ function suiteSetIds(suiteId) {
   return db.prepare('SELECT set_id FROM suite_sets WHERE suite_id=? ORDER BY position').all(suiteId).map((r) => r.set_id);
 }
 // Batch the set-ids for many suites in ONE query (avoids the N+1 where every
-// rowToSuite ran its own suiteSetIds — list functions run on basically every
-// page load via the nav). Returns { suiteId: [setId, …] } in position order.
+// rowToSuite ran its own suiteSetIds). Returns { suiteId: [setId, …] } ordered.
 function setIdsForSuites(suiteIds) {
   if (!suiteIds.length) return {};
   const ph = suiteIds.map(() => '?').join(',');
@@ -1239,7 +1239,7 @@ function setIdsForSuites(suiteIds) {
   return map;
 }
 function rowToSuite(r, setIds) {
-  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', howlerEventId: r.howler_event_id || '', liveDashboardId: r.live_dashboard_id || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
+  return r && { id: r.id, entityId: r.entity_id, name: r.name, icon: r.icon || '', eventUrl: r.event_url || '', howlerEventId: r.howler_event_id || '', liveDashboardId: r.live_dashboard_id || '', lockedFilters: J(r.locked_filters, {}), dashboardLocks: J(r.dashboard_locks, {}), tileLocks: J(r.tile_locks, {}), excludedDashboards: J(r.excluded_dashboards, []), directDashboards: J(r.direct_dashboards, []), briefing: J(r.briefing, {}), setIds: setIds || suiteSetIds(r.id), position: r.position, createdAt: r.created_at };
 }
 function listSuites() {
   const rows = db.prepare('SELECT * FROM suites ORDER BY position, name').all();
@@ -1252,6 +1252,8 @@ function listSuitesForEntity(entityId) {
   return rows.map((r) => rowToSuite(r, m[r.id] || []));
 }
 function getSuite(id) { return rowToSuite(db.prepare('SELECT * FROM suites WHERE id=?').get(id)); }
+// Normalise dashboard-membership entries ({id,parentId,displayName}).
+const cleanDashEntries = (items) =>(items || []).map((x) => (typeof x === 'string' ? { id: x, parentId: null, displayName: '' } : { id: x?.id, parentId: x?.parentId || null, displayName: String(x?.displayName || '').trim() })).filter((x) => x.id);
 const setSuiteSets = db.transaction((suiteId, setIds) => {
   db.prepare('DELETE FROM suite_sets WHERE suite_id=?').run(suiteId);
   const ins = db.prepare('INSERT OR IGNORE INTO suite_sets (suite_id, set_id, position) VALUES (?,?,?)');
@@ -1278,8 +1280,9 @@ function updateSuite(id, patch) {
   const excluded = patch.excludedDashboards !== undefined ? JSON.stringify(patch.excludedDashboards || []) : (cur.excluded_dashboards || '[]');
   const dashLocks = patch.dashboardLocks !== undefined ? JSON.stringify(patch.dashboardLocks || {}) : (cur.dashboard_locks || '{}');
   const tileLocks = patch.tileLocks !== undefined ? JSON.stringify(patch.tileLocks || {}) : (cur.tile_locks || '{}');
+  const directDash = patch.directDashboards !== undefined ? JSON.stringify(cleanDashEntries(patch.directDashboards)) : (cur.direct_dashboards || '[]');
   const liveDash = patch.liveDashboardId !== undefined ? String(patch.liveDashboardId || '') : (cur.live_dashboard_id || ''); // sidebar LIVE button target
-  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, howler_event_id=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=?, live_dashboard_id=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, howlerId, excluded, dashLocks, tileLocks, liveDash, id);
+  db.prepare('UPDATE suites SET name=?, icon=?, entity_id=?, locked_filters=?, briefing=?, position=?, event_url=?, howler_event_id=?, excluded_dashboards=?, dashboard_locks=?, tile_locks=?, direct_dashboards=?, live_dashboard_id=? WHERE id=?').run(name, icon, ent, lf, brief, pos, eventUrl, howlerId, excluded, dashLocks, tileLocks, directDash, liveDash, id);
   if (patch.setIds !== undefined) setSuiteSets(id, patch.setIds);
   return getSuite(id);
 }
@@ -1309,12 +1312,12 @@ function setSuiteDashboardLocks(suiteId, dashboardId, locks) {
 function dashboardsInSuite(suiteId) {
   const out = new Set();
   for (const sid of suiteSetIds(suiteId)) for (const did of setDashboardIds(sid)) out.add(did);
+  for (const e of (getSuite(suiteId)?.directDashboards || [])) if (e?.id) out.add(e.id);
   return [...out];
 }
 // Merged locked filters for a suite = entity locks (organiser) + suite locks
-// (event/cashless) + (when a dashboardId is given) that dashboard's per-suite
-// lock overrides. The map forced onto the user's Looker queries — most specific
-// wins, so a per-dashboard lock beats the suite-wide one.
+// (event/cashless) + (given a dashboardId) that dashboard's per-suite overrides.
+// Forced onto the user's Looker queries — most specific wins.
 function lockedFiltersForSuite(suiteId, dashboardId) {
   const s = getSuite(suiteId);
   if (!s) return {};
@@ -1324,10 +1327,8 @@ function lockedFiltersForSuite(suiteId, dashboardId) {
 }
 
 // Fork a (shared) dashboard into a CLIENT-OWNED copy for this suite's entity and
-// wire it into the suite so the client sees their own version. The template is
-// untouched and keeps serving every other client. `def` is the (edited) source
-// definition to copy; `opts` lets the admin choose where it lands:
-//   { title, folder, setId, newSetName }
+// wire it into the suite so the client sees their own version (template untouched).
+// `def` is the edited source; `opts` = { title, folder, setId, newSetName }:
 //   - setId      → add the fork to that client-owned set (must belong to entity)
 //   - newSetName → create a new client set, add the fork, bundle it into the suite
 //   - neither    → replace the template in-place within the suite's set, cloning

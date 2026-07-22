@@ -17,6 +17,7 @@ import NotificationPrefs from '../components/NotificationPrefs.jsx';
 import TwoFactorCard from '../components/TwoFactorCard.jsx';
 import TeamManager from '../components/TeamManager.jsx';
 import RateCard from '../components/RateCard.jsx';
+import SuiteDashboardsEditor from '../components/SuiteDashboardsEditor.jsx';
 import { useIsMobile } from '../lib/useIsMobile.js';
 import { useMyFlags, flagOn } from '../lib/flags.js';
 import { useProfile } from '../lib/profile.jsx';
@@ -31,6 +32,7 @@ import { fanOwlSettingsEnabled } from '../lib/features.js';
 // personal so it's always available.
 const SECTIONS = [
   ['team', 'Team', '👥', PERMS.TEAM_MANAGE],
+  ['dashboards', 'Dashboards', '📊', PERMS.CONTENT_MANAGE],
   ['integrations', 'Integrations', '🔌', PERMS.INTEGRATIONS_MANAGE],
   ['notifications', 'Notifications', '🔔', null],
   ['security', 'Security', '🔐', null],
@@ -151,6 +153,13 @@ export default function ClientIntegrationsPage() {
             </div>
           )}
 
+          {section === 'dashboards' && (
+            <div style={{ maxWidth: 760 }}>
+              <p style={hint}>Attach a dashboard directly to one of your events — no set required. It appears first in that event's sidebar, before the sets.</p>
+              <SuiteDashboards entityId={activeItem.entityId} />
+            </div>
+          )}
+
           {section === 'fanowl' && (
             <div style={{ maxWidth: 760 }}>
               <FanOwlAdmin scope="my" entityId={activeItem.entityId} />
@@ -260,6 +269,33 @@ function EventBranding({ entityId }) {
         })}
       </select>
       {picked && <div style={{ marginTop: 16 }}><MailTemplateEditor key={picked} scope="my-suite" entityId={entityId} suiteId={picked} /></div>}
+    </div>
+  );
+}
+
+// Suite-level dashboards self-service: pick one of this client's events, then
+// attach/detach dashboards directly to it (mirrors the admin suite editor).
+function SuiteDashboards({ entityId }) {
+  const [suites, setSuites] = useState(null);
+  const [picked, setPicked] = useState('');
+  useEffect(() => {
+    api.mySuites().then((all) => setSuites((all || []).filter((s) => s.entityId === entityId))).catch(() => setSuites([]));
+  }, [entityId]);
+
+  if (!suites) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading your events…</p>;
+  if (!suites.length) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>No events yet — once Howler sets up an event for you, you can add dashboards here.</p>;
+
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Event</label>
+      <select value={picked} onChange={(e) => setPicked(e.target.value)} style={selectBox}>
+        <option value="">Choose an event…</option>
+        {suites.map((s) => {
+          const icon = s.icon && !s.icon.startsWith('data:') ? `${s.icon} ` : '';
+          return <option key={s.id} value={s.id}>{icon}{s.name}</option>;
+        })}
+      </select>
+      {picked && <div style={{ marginTop: 16 }}><SuiteDashboardsEditor key={picked} suiteId={picked} scope="my" /></div>}
     </div>
   );
 }

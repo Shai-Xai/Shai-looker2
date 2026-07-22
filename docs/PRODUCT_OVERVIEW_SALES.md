@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-22 (📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Loose dashboards: attach a dashboard directly to a suite — no set needed — managed by Howler and by clients themselves · 📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -103,6 +103,10 @@ longer they use Pulse, the better it gets."
   feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
   make a given briefing.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
+- **Loose dashboards on a suite** ✅ — attach a one-off dashboard straight to an
+  event without first building a set to hold it. Loose dashboards show **first**,
+  before the sets. Howler manages it in the suite editor, and the client can too
+  under **Settings → Dashboards** (owners & managers).
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
   staff can "Save as new" from that client's view to spin off a **client-owned
@@ -732,8 +736,9 @@ actually are."
 - Manage **clients**, their **dashboards/sets/suites**, the **tile library**, **AI
   instructions**, **integrations**, **settlements**, **logins/roles**, backups.
 - **Per-client suite control** — pick which **sets** (grouped by folder) and which
-  **individual dashboards** a client gets, and **lock filters per dashboard** for that
-  client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
+  **individual dashboards** a client gets, **attach loose dashboards straight to a
+  suite** (no set needed — they show first), and **lock filters per dashboard** for
+  that client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
 - **Preview as a client** to see exactly what they see.
 - **🎓 Training (internal)** — practical exams taken inside Pulse: trainees do real
   work (segments, campaigns, goals, dashboards…) in a sandbox client under a
@@ -1239,6 +1244,11 @@ see "The continuous comms loop" above.)*
   exactly once (the inbox thread no longer double-emails). Self-service: a new **Report
   updates** toggle under **Settings → Notifications** lets anyone opt out of the emails or
   pushes independently.
+- **2026-07-22** — **Loose dashboards on a suite** ✅: you can now attach a
+  dashboard **directly to a suite** without first creating a set to hold it —
+  handy for a one-off dashboard. Loose dashboards render **first**, before the
+  sets. Managed by Howler in the suite editor (Admin → client → Suites) **and**
+  by the client themselves under **Settings → Dashboards** (owners & managers).
 - **2026-07-20** — **🛡 Social moderation phase 1 (server side)** 🧪: banned
   words/phrases/emoji (platform list + per-client additions) enforced at write
   time on every fan surface — posts, comments, chat messages, emoji reactions,
