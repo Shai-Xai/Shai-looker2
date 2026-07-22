@@ -580,12 +580,26 @@ const actionIco = { flexShrink: 0, width: 20, textAlign: 'center', fontSize: 15 
 function SubTabs({ tabs, activeId, onSelect, isMobile }) {
   const wrapRef = useRef(null);
   const [u, setU] = useState({ left: 0, width: 0, show: false });
+  // Reposition the sliding underline whenever the active tab (or the tab set)
+  // changes. Pure geometry read → state; it never scrolls anything.
   useLayoutEffect(() => {
     const el = wrapRef.current?.querySelector('[data-active="1"]');
     if (!el) { setU((s) => ({ ...s, show: false })); return; }
     setU({ left: el.offsetLeft + 10, width: Math.max(0, el.offsetWidth - 20), show: true });
-    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeId, tabs]);
+  // Centre the active tab within the (horizontally scrollable) strip on a real
+  // tab change — scrolling the strip itself, NOT any ancestor. The old
+  // el.scrollIntoView() also drove the nearest *vertical* scroller, and because
+  // `tabs` is a fresh array on every render (a 20s inbox poll + soft refreshes
+  // re-render this page), it kept yanking the whole dashboard back to the top
+  // mid-scroll. Depending only on activeId means it fires on genuine switches.
+  useLayoutEffect(() => {
+    const strip = wrapRef.current;
+    const el = strip?.querySelector('[data-active="1"]');
+    if (!strip || !el) return;
+    const left = el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+  }, [activeId]);
   return (
     <div className="subtabs" ref={wrapRef} style={{ padding: isMobile ? '0 8px' : '0 14px' }}>
       {tabs.map((t) => (
