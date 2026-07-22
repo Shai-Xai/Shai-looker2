@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -80,6 +80,10 @@ longer they use Pulse, the better it gets."
   needs the event's key dates set so Pulse knows the phase); picked tiles always
   feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
   make a given briefing.
+- **Editable tile sorting** ✅ — when editing a tile, set **multiple sort fields**,
+  each **ascending or descending**, reorder their priority, and remove any of them.
+  Sorting by a primary field (e.g. **event start year**) groups every row that shares
+  that value together — and the choice is **saved to the tile**, not just the current view.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
@@ -769,6 +773,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-22** — **Editable tile sorting** ✅ (improved): the tile editor's "Sort by"
+  control now supports **multiple sort fields** (add/remove), each **asc/desc**, with
+  **drag-free ▲/▼ priority reordering**. The primary sort groups same-value rows together
+  (e.g. sort by **event start year** to group every event in that year), and the sort is
+  **persisted to the tile config** (`query.sorts`) — on both the admin and client dashboard
+  editors. Replaces the old single-field, first-sort-only control.
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
