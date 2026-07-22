@@ -886,6 +886,7 @@ export const api = {
   actionTestSend: (entityId, b) => fetch(`/api/actions/${entityId}/test-send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
   listCampaignEvents: (entityId) => fetch(`/api/actions/${entityId}/events`).then(json),
   actionReport: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/report`).then(json),
+  recheckConversions: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/recheck-conversions`, { method: 'POST' }).then(json),
   getActionsSummary: (entityId) => fetch(`/api/actions-summary/${entityId}`).then(json),
   ackCampaignOutcome: (entityId, id) => fetch(`/api/actions/${entityId}/${id}/ack-outcome`, { method: 'POST' }).then(json),
   getNotificationSettings: () => fetch('/api/admin/notification-settings').then(json),

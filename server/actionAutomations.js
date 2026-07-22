@@ -13,7 +13,7 @@
 
 const crypto = require('crypto');
 
-module.exports = function actionAutomations({ sql, now, uuid, enabled, getAction, audienceFor, saveResults, push, enrollSequence, sysUser }) {
+module.exports = function actionAutomations({ app, auth, guard, sql, now, uuid, enabled, getAction, audienceFor, saveResults, push, enrollSequence, sysUser }) {
   // In 'list' conversion mode, resolve the separate conversion source (attendance /
   // completed-orders) → lowercased set of emails that have converted. Null for the
   // default 'dropout' model (callers keep prior behaviour); consent ignored (we only
@@ -68,13 +68,40 @@ module.exports = function actionAutomations({ sql, now, uuid, enabled, getAction
   }
   const autoTimer = setInterval(() => autoCheck().catch(() => {}), 10 * 60000);
   if (autoTimer.unref) autoTimer.unref();
-  setTimeout(() => autoCheck().catch(() => {}), 20000);
+  setTimeout(() => autoCheck().catch(() => {}), 20000).unref?.();
 
   // ── Conversion tracking for ONCE-OFF campaigns ──────────────────────────────
   // Sequences track conversions inline (drop-out = bought). For sent once-off
   // campaigns with a re-runnable tile audience, periodically re-run the abandoned
   // audience: anyone we emailed who's no longer in it has bought (or expired).
   // Recompute (idempotent), update results.converted. Bounded to recent sends.
+  const lc = (s) => String(s || '').toLowerCase();
+  // Is dropout/list conversion tracking even applicable to this campaign? (once-off,
+  // and either a re-runnable tile audience for dropout, or a configured list source.)
+  function convMode(a) {
+    if (!a || a.config.campaignMode === 'sequence') return null;
+    if (a.config.conversion?.mode === 'list' && a.config.conversion?.source) return 'list';
+    if (a.config.audience?.mode === 'tile') return 'dropout';
+    return null;
+  }
+  // Recompute conversions for ONE campaign now. Dropout: anyone we emailed who's no
+  // longer in the abandoned audience has bought (or expired). List: anyone in the
+  // separate orders/attendance source. Returns { converted, mode, audience } or null
+  // when tracking doesn't apply / the source failed (so callers leave the count as-is).
+  async function recomputeConversion(a) {
+    const mode = convMode(a);
+    if (!mode) return null;
+    const audience = (a.audience || []);
+    if (mode === 'list') {
+      const conv = await convertedEmails(a);
+      if (!conv) return null;
+      return { mode, audience: audience.length, converted: audience.filter((r) => conv.has(lc(r.email))).length };
+    }
+    const { list } = await audienceFor(a.entityId, a.config, sysUser);
+    const stillAbandoning = new Set(list.map((r) => lc(r.email))); // case-insensitive so casing drift ≠ false conversions
+    return { mode, audience: audience.length, converted: audience.filter((r) => !stillAbandoning.has(lc(r.email))).length };
+  }
+
   async function checkConversions() {
     if (!enabled()) return;
     const cutoff = new Date(Date.now() - 14 * 86400e3).toISOString(); // track for 14 days post-send
@@ -82,30 +109,36 @@ module.exports = function actionAutomations({ sql, now, uuid, enabled, getAction
     const due = sql.prepare("SELECT id FROM actions WHERE status='done' AND approved_at > ? AND (last_check='' OR last_check < ?)").all(cutoff, recheck);
     for (const { id } of due) {
       const a = getAction(id);
-      if (!a || a.config.campaignMode === 'sequence') continue;
-      const listMode = a.config.conversion?.mode === 'list' && a.config.conversion?.source;
-      // Dropout mode needs a re-runnable tile audience; list mode matches the
-      // snapshot against a separate source, so any audience type works.
-      if (!listMode && a.config.audience?.mode !== 'tile') continue;
+      if (!a || !convMode(a)) continue;
       sql.prepare('UPDATE actions SET last_check=? WHERE id=?').run(now(), a.id);
       try {
-        let converted;
-        if (listMode) {
-          const conv = await convertedEmails(a);
-          if (!conv) continue; // source failed — leave the count as-is
-          converted = (a.audience || []).filter((r) => conv.has(String(r.email || '').toLowerCase())).length;
-        } else {
-          const { list } = await audienceFor(a.entityId, a.config, sysUser);
-          const stillAbandoning = new Set(list.map((r) => r.email));
-          converted = (a.audience || []).filter((r) => !stillAbandoning.has(r.email)).length;
-        }
-        if (converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted });
+        const out = await recomputeConversion(a);
+        if (out && out.converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted: out.converted });
       } catch (e) { console.error('[actions] conversion check failed', a.id, e.message); }
     }
   }
   const convTimer = setInterval(() => checkConversions().catch(() => {}), 30 * 60000);
   if (convTimer.unref) convTimer.unref();
-  setTimeout(() => checkConversions().catch(() => {}), 45000);
+  setTimeout(() => checkConversions().catch(() => {}), 45000).unref?.();
 
-  return { convertedEmails };
+  // Manual "re-check now" — force a conversion recompute without waiting for the
+  // 6-hourly sweep, then return the fresh count. (Mounted here since the compute
+  // lives here; keeps actions.js under its line budget.)
+  if (app && auth && guard) {
+    app.post('/api/actions/:entityId/:id/recheck-conversions', auth.requireAuth, auth.requirePermission('campaigns.view'), async (req, res) => {
+      if (!guard(req, res, req.params.entityId)) return;
+      const a = getAction(req.params.id);
+      if (!a || a.entityId !== req.params.entityId) return res.status(404).json({ error: 'Not found' });
+      if (!convMode(a)) return res.status(400).json({ error: 'Conversion tracking does not apply to this campaign.' });
+      try {
+        const out = await recomputeConversion(a);
+        if (!out) return res.status(502).json({ error: 'Could not read the conversion source right now — try again shortly.' });
+        if (out.converted !== (a.results.converted || 0)) saveResults(a.id, { ...a.results, converted: out.converted });
+        const sent = a.results.sent || 0;
+        res.json({ converted: out.converted, mode: out.mode, audience: out.audience, convRate: sent > 0 ? Math.round((out.converted / sent) * 100) : 0 });
+      } catch (e) { console.error('[actions] manual conversion recheck failed', a.id, e.message); res.status(500).json({ error: 'Re-check failed.' }); }
+    });
+  }
+
+  return { convertedEmails, convMode, recomputeConversion };
 };
