@@ -1598,7 +1598,16 @@ function CampaignReport({ entityId, action, onClose }) {
   const isMobile = useIsMobile();
   const [r, setR] = useState(null);
   const [previews, setPreviews] = useState(null); // [{ label, html, sms }] — one per step (or one for once-off)
+  const [rechecking, setRechecking] = useState(false);
   useEffect(() => { api.actionReport(entityId, action.id).then(setR).catch(() => setR({ error: true })); }, [entityId, action.id]);
+  // Force a conversion re-check now (don't wait for the 6-hourly sweep), then merge the fresh count in.
+  async function recheckConversions() {
+    if (rechecking) return;
+    setRechecking(true);
+    try { const out = await api.recheckConversions(entityId, action.id); setR((cur) => ({ ...cur, converted: out.converted, convRate: out.convRate })); }
+    catch (e) { alert('Could not re-check conversions: ' + (e.message || e)); }
+    finally { setRechecking(false); }
+  }
   useEffect(() => {
     // Sequences render every step (so the whole journey can be reviewed); a
     // once-off renders just its single message.
@@ -1635,10 +1644,25 @@ function CampaignReport({ entityId, action, onClose }) {
         {stat('Total clicks', r.totalClicks)}
         {stat('Unique clickers', r.uniqueClickers)}
         {stat('CTR', `${r.ctr}%`, 'var(--brand)')}
-        {(r.converted > 0) && stat('Converted', r.converted, 'var(--success,#10b981)')}
-        {(r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
+        {/* Conversions: shown whenever tracking applies (even at 0) so it's clear the
+            campaign IS being measured. Falls back to the old >0 rule for older campaigns. */}
+        {(r.convTracking || r.converted > 0) && stat(r.convTracking === 'dropout' ? 'Recovered' : 'Converted', r.converted, 'var(--success,#10b981)')}
+        {(r.convTracking || r.converted > 0) && stat('Conv. rate', `${r.convRate}%`, 'var(--success,#10b981)')}
         {r.cost && r.cost.total > 0 && stat('Cost', money(r.cost.currency, r.cost.total))}
       </div>
+
+      {/* How conversions are measured + a way to refresh the count on demand. */}
+      {r.convTracking && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: -8, marginBottom: 18, fontSize: 12, color: 'var(--muted)' }}>
+          <span>
+            {r.convTracking === 'dropout'
+              ? 'Conversions = recipients who’ve since left the abandoned-cart list (they bought). Re-checked automatically for 14 days after sending.'
+              : 'Conversions = recipients who now appear in your orders/attendance list. Re-checked automatically for 14 days after sending.'}
+            {r.approvedAt && Date.parse(r.approvedAt) < Date.now() - 14 * 86400e3 && ' · past the 14-day tracking window.'}
+          </span>
+          <button style={{ ...mini, padding: '3px 9px' }} onClick={recheckConversions} disabled={rechecking}>{rechecking ? 'Re-checking…' : '↻ Re-check now'}</button>
+        </div>
+      )}
 
       {/* Per-channel split — only meaningful when a campaign used both channels. */}
       {r.details?.channel === 'both' && r.perChannel && (

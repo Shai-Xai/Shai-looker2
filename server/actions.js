@@ -1495,6 +1495,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
       openRate: emailChannel && sent > 0 ? Math.min(100, Math.round((uniqueOpeners / sent) * 100)) : 0,
       converted: a.results.converted || 0,
       convRate: sent > 0 ? Math.round(((a.results.converted || 0) / sent) * 100) : 0,
+      convTracking: convMode(a), // 'dropout' (left the abandoned list) | 'list' (in an orders list) | null → report shows it even at 0
       clickers,
       nonClickers: a.audience.filter((r) => !clickers.some((c) => c.email === r.email)).length,
       attributed: clickers.length > 0 || tableAnon > 0,
@@ -1522,7 +1523,7 @@ function mount(app, { db, auth, mailer, push, messaging, os, billing, resolveAud
   // conversion-source resolver. The synthetic admin user scopes exactly like a
   // real one; enrollSequence passed lazily (defined below, hoisted at call time).
   const sysUser = { id: 'auto-check', email: 'auto@pulse', role: 'admin', entityIds: [] };
-  const { convertedEmails } = require('./actionAutomations')({ sql, now, uuid, enabled, getAction, audienceFor, saveResults, push, enrollSequence: (a) => enrollSequence(a), sysUser });
+  const { convertedEmails, convMode } = require('./actionAutomations')({ app, auth, guard, sql, now, uuid, enabled, getAction, audienceFor, saveResults, push, enrollSequence: (a) => enrollSequence(a), sysUser });
 
   // ── Drip sequences: enrollment + the per-recipient send tick ─────────────────
   const parseAnchor = (raw) => { const t = raw ? Date.parse(String(raw)) : NaN; return Number.isFinite(t) ? new Date(t) : null; };
