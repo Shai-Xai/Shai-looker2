@@ -126,8 +126,7 @@ require('./mailWebhooks').mount(app, { db, auth, mailer, notifyOps: (m) => ops.a
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
-const meta = require('./meta');
-meta.init({ db });
+const meta = require('./meta'); meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
 tiktok.init({ db }); const pixel = require('./pixel'); // Pulse Pixel — tag container + retargeting audience packs (mounted below)
@@ -483,6 +482,7 @@ require('./dashboards').mount(app, {
 // (which event) apply exactly as a dashboard view would; the tile readers live in server/tileValues.js.
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 require('./skills').mount(app, { db, auth, insights, getOwlTools, getGoalsApi: () => goalsApi, anthropicKeyForSuite, aiInstructionsFor, resolveEventDate }); // Skills: autonomous specialists (SKILLS_BRIEF P1) — the Owl's scheduled "push" door (advise-only, backtest + AM feedback); disposable → server/skills.js
+require('./training').mount(app, { db, auth }); // Training: practical exams taken inside Pulse — auto-graded against real system state (Admin → 🎓 Training); disposable → server/training.js
 
 // ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
 // A self-contained module that watches a number (a dashboard tile via the SAME

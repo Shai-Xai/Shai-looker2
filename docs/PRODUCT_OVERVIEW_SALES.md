@@ -735,6 +735,10 @@ actually are."
   **individual dashboards** a client gets, and **lock filters per dashboard** for that
   client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
 - **Preview as a client** to see exactly what they see.
+- **🎓 Training (internal)** — practical exams taken inside Pulse: trainees do real
+  work (segments, campaigns, goals, dashboards…) in a sandbox client under a
+  personal exam code, and the system auto-grades by checking what actually got
+  created. Course pack: `docs/TRAINING_SALES_CS.md`.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
 - **Product collateral you control** ✅ — Admin → Product holds the living **feature

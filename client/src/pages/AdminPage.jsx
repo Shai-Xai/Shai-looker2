@@ -42,6 +42,7 @@ import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import SkillsAdmin, { SkillDefaultsEditor } from '../components/SkillsAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
+import TrainingAdmin from '../components/TrainingAdmin.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { languageList } from '../lib/language.js';
@@ -162,6 +163,7 @@ const ADMIN_NAV = [
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['datahealth', 'Data health', '📡'],
+  ['training', 'Training', '🎓'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
@@ -197,6 +199,7 @@ export default function AdminPage() {
       {safeTab === 'email' && <MailLog />}
       {safeTab === 'status' && <StatusNoticesAdmin />}
       {safeTab === 'datahealth' && <DataHealthAdmin />}
+      {safeTab === 'training' && <TrainingAdmin />}
       {safeTab === 'product' && <Product />}
       {safeTab === 'backup' && <BackupRestore />}
     </>
