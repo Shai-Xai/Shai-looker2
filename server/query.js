@@ -100,8 +100,8 @@ module.exports = function createQueryEngine({ looker, auth }) {
   // (so GA4 etc. don't get core_organisers.name injected, which Looker rejects).
   // A suite context (client view or admin preview) scopes to that suite's
   // organiser; no suite + admin is unscoped. Returns false to deny (fail closed).
-  async function applyScope(query, user, suiteId) {
-    const scope = await auth.scopeForQuery(query, user, suiteId);
+  async function applyScope(query, user, suiteId, entityId) {
+    const scope = await auth.scopeForQuery(query, user, suiteId, entityId);
     if (scope === false) return false; // fail closed
     query.filters = { ...(query.filters || {}) };
     // The forced organiser scope is a CEILING, not an override. If the dashboard

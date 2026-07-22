@@ -455,11 +455,21 @@ function lookerOrganiserField(model, view) {
 // `{ filters }` (the org filter to inject; `{}` = admin, unscoped) or
 // `{ block, reason }` to deny (fail closed). The `reason` is for admin
 // diagnostics/logging — never shown to clients.
-async function resolveScope(query, user, suiteId) {
+async function resolveScope(query, user, suiteId, entityId) {
   let entityIds;
   if (suiteId) {
     if (!canAccessSuite(user, suiteId)) return { block: true, reason: 'no access to this suite' };
     const su = db.getSuite(suiteId); entityIds = su ? [su.entityId] : [];
+  } else if (entityId) {
+    // Scope to ONE client that has no suite yet — e.g. the event picker while a
+    // new suite is being created (its locked filters are still being chosen, so
+    // there is no suiteId to resolve). Verify access first: an admin may scope to
+    // any client, a client user only to entities they belong to — so this can't
+    // be used to browse another tenant's organiser/events. Fails closed below if
+    // that client has no organiser configured, exactly like a real query.
+    const canAccess = user.role === 'admin' || (user.entityIds || []).includes(entityId);
+    if (!canAccess) return { block: true, reason: 'no access to this client' };
+    entityIds = [entityId];
   } else {
     if (user.role === 'admin') return { filters: {} };
     entityIds = user.entityIds || [];
@@ -496,8 +506,8 @@ async function resolveScope(query, user, suiteId) {
 // Forced organiser scope for ONE query. Returns a filters object, {} (admin, no
 // suite), or false to block (fail closed). Logs the reason when blocking so
 // "No data access" failures are traceable in the server logs.
-async function scopeForQuery(query, user, suiteId) {
-  const r = await resolveScope(query, user, suiteId);
+async function scopeForQuery(query, user, suiteId, entityId) {
+  const r = await resolveScope(query, user, suiteId, entityId);
   if (r.block) { console.warn(`[scope] blocked ${query?.model}::${query?.view} for ${user?.email || user?.id} — ${r.reason}`); return false; }
   return r.filters;
 }
