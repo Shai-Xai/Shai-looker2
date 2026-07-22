@@ -1,7 +1,16 @@
 // The report form modal (bug / improvement / idea + attachments). Shared by the
 // app-wide floating ReportWidget and the "+ New report" button in the Product
 // section, so there's one form and one submit path. Controlled via `open`.
-import { useState, useEffect } from 'react';
+//
+// Because the form is a full-screen overlay, it used to hide the very screen the
+// user wants to record. Two escapes make capturing a recording possible without
+// losing the half-filled form:
+//   • Minimize — collapse to a small floating pill so the screen underneath is
+//     visible/recordable (works everywhere, incl. mobile → OS screen recorder),
+//     then tap the pill to restore with all state intact.
+//   • Record the screen — one tap uses the browser's screen-capture API to record
+//     directly, auto-minimizing while it runs, then attaches the video for you.
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
 
@@ -13,6 +22,12 @@ const TYPES = [
 const URGENCIES = [['low', 'Low'], ['normal', 'Normal'], ['high', 'High'], ['urgent', 'Urgent']];
 const MAX_FILES = 4, MAX_MB = 30;
 
+// Can this browser record the screen itself? (Desktop Chromium/Firefox yes; iOS
+// Safari no — those users minimize + use the OS recorder instead.)
+const canRecordScreen = () =>
+  typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia &&
+  typeof window !== 'undefined' && typeof window.MediaRecorder !== 'undefined';
+
 export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   const isMobile = useIsMobile();
   const [type, setType] = useState('bug');
@@ -23,13 +38,32 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [minimized, setMinimized] = useState(false); // collapsed to a pill so the screen shows
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // recording seconds, for the timer
+
+  // Live recording plumbing (refs so callbacks/cleanup always see the latest).
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const chunksRef = useRef([]);
+  const timerRef = useRef(null);
 
   // Fresh form each time it opens.
   useEffect(() => { if (open) reset(); }, [open]);
+  // Always tear down any live capture when the host unmounts.
+  useEffect(() => () => stopTracks(), []);
 
   function reset() {
     setType('bug'); setTitle(''); setBody(''); setUrgency('normal'); setFiles([]);
     setBusy(false); setDone(false); setError('');
+    setMinimized(false); stopRecording();
+  }
+
+  // Stop the underlying screen-capture stream + timer (does not attach anything).
+  function stopTracks() {
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* noop */ }
+    streamRef.current = null;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }
 
   async function addFiles(e) {
@@ -51,6 +85,72 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   }
   const removeFile = (i) => setFiles((prev) => prev.filter((_, j) => j !== i));
 
+  // --- Screen recording -----------------------------------------------------
+  async function startRecording() {
+    if (files.length >= MAX_FILES) { setError(`Up to ${MAX_FILES} files.`); return; }
+    if (!canRecordScreen()) {
+      setError('This browser can\'t record the screen. Tap Minimize, capture with your device\'s recorder, then attach it here.');
+      return;
+    }
+    setError('');
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 12 }, audio: false });
+    } catch {
+      setError('Screen recording was cancelled or blocked.');
+      return;
+    }
+    streamRef.current = stream;
+    chunksRef.current = [];
+    const mimeType = pickVideoMime();
+    let rec;
+    try {
+      rec = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 2_500_000 });
+    } catch {
+      stopTracks(); setError('Could not start recording on this browser.'); return;
+    }
+    recorderRef.current = rec;
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunksRef.current.push(ev.data); };
+    rec.onstop = () => finishRecording(rec.mimeType || mimeType || 'video/webm');
+    // If the user ends sharing via the browser's own "Stop sharing" control, wrap up.
+    stream.getVideoTracks().forEach((t) => { t.onended = () => stopRecording(); });
+    rec.start(1000);
+    setRecording(true);
+    setElapsed(0);
+    setMinimized(true); // get out of the way so the screen is recordable
+    timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+  }
+
+  // Ask the recorder to stop; the actual attach happens in onstop → finishRecording.
+  function stopRecording() {
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch { /* noop */ } }
+    else { stopTracks(); setRecording(false); }
+  }
+
+  async function finishRecording(mimeType) {
+    stopTracks();
+    setRecording(false);
+    const chunks = chunksRef.current; chunksRef.current = [];
+    recorderRef.current = null;
+    if (!chunks.length) return;
+    const blob = new Blob(chunks, { type: mimeType });
+    setMinimized(false); // bring the form back so they can see it attached
+    if (blob.size > MAX_MB * 1024 * 1024) {
+      setError(`That recording is over ${MAX_MB}MB — keep it shorter, or attach a trimmed clip.`);
+      return;
+    }
+    try {
+      const data = await readAsDataURL(blob);
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      setFiles((prev) => prev.length < MAX_FILES
+        ? [...prev, { name: `screen-recording.${ext}`, mime: mimeType, data, isImage: false }]
+        : prev);
+    } catch { setError('Could not save that recording.'); }
+  }
+
+  function handleClose() { stopRecording(); onClose?.(); }
+
   async function submit() {
     if (!body.trim() && !title.trim()) { setError('Add a title or a description.'); return; }
     setBusy(true); setError('');
@@ -65,13 +165,40 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
 
   if (!open) return null;
 
+  // Collapsed: a small floating pill so the underlying screen is visible/recordable.
+  if (minimized) {
+    return (
+      <div style={{
+        position: 'fixed', zIndex: 200, bottom: 'calc(16px + env(safe-area-inset-bottom))',
+        left: isMobile ? 12 : 'auto', right: isMobile ? 12 : 20,
+        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+        borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
+      }}>
+        {recording ? (
+          <>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#e5484d', flexShrink: 0, animation: 'pulse-rec 1s ease-in-out infinite' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>Recording {fmt(elapsed)}</span>
+            <button onClick={stopRecording} style={{ ...btnPrimary, padding: '7px 12px', fontSize: 13 }}>⏹ Stop &amp; attach</button>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>📝 Report paused</span>
+            <button onClick={() => setMinimized(false)} style={{ ...btnPrimary, padding: '7px 12px', fontSize: 13 }}>Resume</button>
+          </>
+        )}
+        <style>{'@keyframes pulse-rec{0%,100%{opacity:1}50%{opacity:.35}}'}</style>
+      </div>
+    );
+  }
+
   const bodyLabel = type === 'bug'
     ? 'What went wrong? What did you expect instead?'
     : "What's the objective? What outcome do you want?";
 
   return (
     <div
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.45)',
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
@@ -99,14 +226,19 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
               </p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                 <button onClick={reset} style={btnGhost}>Report another</button>
-                <button onClick={onClose} style={btnPrimary}>Done</button>
+                <button onClick={handleClose} style={btnPrimary}>Done</button>
               </div>
             </div>
           ) : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 700 }}>Report</h3>
-                <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <button onClick={() => setMinimized(true)} aria-label="Minimize to see the screen"
+                    title="Minimize to see/record the screen"
+                    style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>—</button>
+                  <button onClick={handleClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+                </div>
               </div>
               <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
                 On <strong style={{ color: 'var(--text)' }}>{screen}</strong>. Tell us what's up — a person and the AI will pick it up.
@@ -131,7 +263,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
 
               {/* Attachments: screenshot / image / video */}
               <label style={lbl}>Screenshot, image or video <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span></label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                 {files.map((f, i) => (
                   <div key={i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--hairline)', background: 'rgba(128,128,128,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {f.isImage ? <img src={f.data} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 24 }}>🎬</span>}
@@ -145,6 +277,23 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
                   </label>
                 )}
               </div>
+
+              {/* Capture a recording of the buggy screen without losing this form. */}
+              {files.length < MAX_FILES && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {canRecordScreen() && (
+                    <button onClick={startRecording} style={{ ...btnGhost, padding: '8px 12px', fontSize: 13 }}>🎥 Record the screen</button>
+                  )}
+                  <button onClick={() => setMinimized(true)} style={{ ...btnGhost, padding: '8px 12px', fontSize: 13 }}>
+                    — Minimize to record
+                  </button>
+                </div>
+              )}
+              <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: -2, marginBottom: 12 }}>
+                {canRecordScreen()
+                  ? 'Record the screen attaches a clip automatically. Or minimize to capture with your own recorder, then attach it.'
+                  : 'Minimize the form to record the screen with your device, then reopen and attach the clip.'}
+              </p>
 
               {type === 'bug' && (
                 <>
@@ -170,7 +319,20 @@ export default function ReportForm({ open, onClose, screen, onSubmitted }) {
   );
 }
 
-// Read a file straight to a data-URL (used for video, kept as-is).
+// mm:ss for the recording timer.
+function fmt(secs) {
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Pick a video container/codec the browser can actually record.
+function pickVideoMime() {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  return candidates.find((t) => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+// Read a file/blob straight to a data-URL (used for video, kept as-is).
 function readAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

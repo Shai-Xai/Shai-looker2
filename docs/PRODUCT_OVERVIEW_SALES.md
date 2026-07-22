@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Report a bug: record the screen — or minimize the form — without losing what you've typed) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -769,6 +769,12 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-22** — **Report a bug: capture a screen recording without losing your report** ✅:
+  the in-app **Report** form no longer blocks the very screen you're trying to record. Two ways
+  to capture now: **🎥 Record the screen** (desktop) records with one tap — the form auto-tucks
+  aside while it runs, then attaches the clip for you; or **Minimize** collapses the form to a
+  small floating pill (works on mobile too) so you can record with your device, then tap **Resume**
+  to reopen with everything you'd typed still there. Better bug reports, less back-and-forth.
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
