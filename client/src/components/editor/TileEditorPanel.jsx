@@ -47,14 +47,6 @@ export default function TileEditorPanel({ tile, dashboardFilters, filterValues =
   }
 
   const selectedFields = tile.query?.fields || [];
-  const sort = (tile.query?.sorts || [])[0] || '';
-  const sortField = sort.split(' ')[0] || '';
-  const sortDir = sort.includes(' desc') ? 'desc' : 'asc';
-
-  function setSort(field, dir) {
-    if (!field) return patchQuery({ sorts: null });
-    patchQuery({ sorts: [`${field} ${dir}`] });
-  }
 
   return (
     <div style={panel}>
@@ -102,18 +94,7 @@ export default function TileEditorPanel({ tile, dashboardFilters, filterValues =
 
             {selectedFields.length > 0 && (
               <>
-                <div style={divider} />
-                <Label>Sort by</Label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <select style={{ ...input, flex: 1 }} value={sortField} onChange={(e) => setSort(e.target.value, sortDir)}>
-                    <option value="">No sort</option>
-                    {selectedFields.map((f) => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <select style={{ ...input, width: 100 }} value={sortDir} onChange={(e) => setSort(sortField, e.target.value)} disabled={!sortField}>
-                    <option value="desc">Desc</option>
-                    <option value="asc">Asc</option>
-                  </select>
-                </div>
+                <SortEditor query={tile.query} fields={selectedFields} onChange={patchQuery} />
 
                 <Label>Row limit</Label>
                 <input style={input} type="number" min="1" value={tile.query?.limit || '500'} onChange={(e) => patchQuery({ limit: String(e.target.value) })} />
@@ -159,6 +140,99 @@ export default function TileEditorPanel({ tile, dashboardFilters, filterValues =
         )}
       </div>
     </div>
+  );
+}
+
+// Parse a Looker sort string ("view.field desc") into { field, dir }. Field
+// names never contain spaces, so a trailing " asc"/" desc" is the direction;
+// anything else defaults to ascending (Looker's implicit default).
+function parseSort(s) {
+  const str = String(s).trim();
+  const m = str.match(/\s+(asc|desc)$/i);
+  return m ? { field: str.slice(0, m.index).trim(), dir: m[1].toLowerCase() } : { field: str, dir: 'asc' };
+}
+
+// Multi-field sort editor for a tile. Sorts live on the query as an array of
+// Looker sort strings in PRIORITY order — the first is the primary sort, so e.g.
+// putting "start year" first groups every event in the same year together before
+// a secondary sort orders within each group. Users can add fields, flip
+// asc/desc, reorder priority, and remove any sort. It reuses the tile's existing
+// query.sorts schema, so a saved sort matches any other tile edit and round-trips
+// to Looker unchanged. (Replaces the old single-sort control that only exposed
+// sorts[0] and dropped the rest — the read-only-sort problem this fixes.)
+function SortEditor({ query, fields, onChange }) {
+  // Only surface sorts whose field is still selected (a pruned field can leave a
+  // stale sort string behind); those are ignored here and cleaned on next commit.
+  const sorts = (query?.sorts || []).map(parseSort).filter((s) => fields.includes(s.field));
+  const used = new Set(sorts.map((s) => s.field));
+  const available = fields.filter((f) => !used.has(f));
+
+  const commit = (next) => onChange({ sorts: next.length ? next.map((s) => `${s.field} ${s.dir}`) : null });
+  const setField = (i, field) => commit(sorts.map((s, j) => (j === i ? { ...s, field } : s)));
+  const setDir = (i, dir) => commit(sorts.map((s, j) => (j === i ? { ...s, dir } : s)));
+  const remove = (i) => commit(sorts.filter((_, j) => j !== i));
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= sorts.length) return;
+    const n = sorts.slice();
+    [n[i], n[j]] = [n[j], n[i]];
+    commit(n);
+  };
+  const add = () => { if (available.length) commit([...sorts, { field: available[0], dir: 'asc' }]); };
+
+  return (
+    <>
+      <div style={divider} />
+      <Label>Sort by</Label>
+      {sorts.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>No sort — rows come back in the query's default order.</div>
+      )}
+      {sorts.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+          {sorts.length > 1 && (
+            <span
+              title={i === 0 ? 'Primary sort — groups rows by this field first' : `Sort priority ${i + 1}`}
+              style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', minWidth: 14, textAlign: 'center' }}
+            >{i + 1}</span>
+          )}
+          <select style={{ ...input, flex: 1, minWidth: 120 }} value={s.field} onChange={(e) => setField(i, e.target.value)}>
+            {/* this row's field, plus any not already used on another row */}
+            {[s.field, ...available].map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <select style={{ ...input, width: 88 }} value={s.dir} onChange={(e) => setDir(i, e.target.value)}>
+            <option value="asc">Asc</option>
+            <option value="desc">Desc</option>
+          </select>
+          {sorts.length > 1 && (
+            <>
+              <SortIconBtn title="Move up (higher priority)" disabled={i === 0} onClick={() => move(i, -1)}>▲</SortIconBtn>
+              <SortIconBtn title="Move down (lower priority)" disabled={i === sorts.length - 1} onClick={() => move(i, 1)}>▼</SortIconBtn>
+            </>
+          )}
+          <SortIconBtn title="Remove this sort field" onClick={() => remove(i)} danger>✕</SortIconBtn>
+        </div>
+      ))}
+      {available.length > 0 && (
+        <button type="button" onClick={add} style={addSortBtn}>＋ Add sort field</button>
+      )}
+    </>
+  );
+}
+
+function SortIconBtn({ children, onClick, title, disabled, danger }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        border: '1px solid var(--hairline)', background: 'var(--card)',
+        cursor: disabled ? 'default' : 'pointer',
+        color: disabled ? 'var(--hairline)' : danger ? 'var(--error)' : 'var(--muted)',
+        borderRadius: 6, minWidth: 34, height: 34, fontSize: 12, lineHeight: 1, padding: 0, flexShrink: 0,
+      }}
+    >{children}</button>
   );
 }
 
@@ -298,4 +372,5 @@ const resCard = { width: 'min(900px, 96vw)', maxHeight: '85vh', display: 'flex',
 const resTh = { textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid var(--hairline)', fontWeight: 700, whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--card)' };
 const resTd = { padding: '7px 12px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
 const input = { width: '100%', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 6, fontSize: 13, outline: 'none', boxSizing: 'border-box' };
+const addSortBtn = { marginTop: 2, border: '1px dashed var(--hairline)', background: 'transparent', color: 'var(--brand)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, borderRadius: 6, padding: '8px 12px' };
 const divider = { borderTop: '1px solid var(--hairline)', margin: '16px 0 0' };

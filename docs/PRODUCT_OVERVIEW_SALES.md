@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-21 (🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -102,6 +102,10 @@ longer they use Pulse, the better it gets."
   needs the event's key dates set so Pulse knows the phase); picked tiles always
   feed the briefing, and admins can **Diagnose** exactly why a pick did or didn't
   make a given briefing.
+- **Editable tile sorting** ✅ — when editing a tile, set **multiple sort fields**,
+  each **ascending or descending**, reorder their priority, and remove any of them.
+  Sorting by a primary field (e.g. **event start year**) groups every row that shares
+  that value together — and the choice is **saved to the tile**, not just the current view.
 - **Mobile-first + installable** ✅ — works great on a phone, installs as an app.
 - **Shared templates + per-client versions** ✅ — most dashboards are shared
   templates we maintain once for everyone. When a client needs something bespoke,
@@ -1246,6 +1250,12 @@ see "The continuous comms loop" above.)*
   the audit trail. Wire contract in docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-22** — **Editable tile sorting** ✅ (improved): the tile editor's "Sort by"
+  control now supports **multiple sort fields** (add/remove), each **asc/desc**, with
+  **drag-free ▲/▼ priority reordering**. The primary sort groups same-value rows together
+  (e.g. sort by **event start year** to group every event in that year), and the sort is
+  **persisted to the tile config** (`query.sorts`) — on both the admin and client dashboard
+  editors. Replaces the old single-field, first-sort-only control.
 - **2026-07-21** — **🗺️ Map Studio** 🧪 (new): build & publish the event map
   self-service — pins with logos/descriptions/CTA buttons, filter categories, style
   + camera control, one-click import of Event Ops stations, anonymous tap analytics.
