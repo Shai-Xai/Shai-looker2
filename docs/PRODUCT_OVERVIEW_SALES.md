@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-22 (Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -68,11 +68,33 @@ longer they use Pulse, the better it gets."
 - **Live dashboards** — KPIs, tables and charts built on the client's real
   ticketing/GA4 data. Howler builds the metrics; Pulse owns the whole interface
   (no clunky Looker embeds). Drill-through into detail.
+- **One-tap LIVE button** ✅ — set any dashboard as an event's "live" report and a
+  red **LIVE** button appears right on that event's sidebar row, jumping straight
+  to live ticket sales with no drill-down. Great for event day. Configured per
+  event in Admin → the client's Suites (also in the setup wizard).
+- **Double-tap a chart to full-screen it** ✅ (mobile) — and carousels give charts
+  a proper full-width, readable card on phones.
 - **Per-tile AI insight** ✅ — tap any tile and the Owl explains what the numbers
   mean in plain English, and answers follow-up questions, grounded in that data.
 - **Share an insight or a tile** ✅ — a Share button on any tile and on the Owl's
   insight/summary panels hands the finding off to **email, WhatsApp or Slack** in
   one tap, with room to add a personal note and a link back to the view.
+- **Inspect query** ✅ (dashboard editors) — in **edit mode**, a 🔍 in any queryable
+  tile's controls opens a read-only, Looker-Explore-style view of exactly what
+  drives the number: the **fields in use** (dimensions/measures, grouped by view),
+  the **filters** in effect as condition + value chips (tile-baked vs dashboard,
+  tagged by source), a **bar visualization** of the first measure, and the **result
+  grid** behind the tile. If a figure looks off, the logic can be audited in-app
+  instead of "checking Looker"; staff also get the raw internals (model/explore,
+  field names, sorts, row limit).
+- **Download as branded PDF** ✅ — the dashboard's ⋯ menu has a **Download PDF** that
+  produces a clean, shareable report for stakeholders who aren't on Pulse. It opens
+  with the client's own **logo + brand colours**, the dashboard title and the
+  **exact filters/date range** currently applied, then the charts and tiles — so
+  the file explains itself. Works from a phone, and only ever exports the tenant's
+  own data. The **App page** (Analytics / Audience / Community) has its own
+  **⤓ PDF** button next to the date controls — same branded cover, on both the
+  client page and Admin → App analytics.
 - **Personalised home briefing** ✅ — each client lands on an AI-written summary of
   what matters right now (leads with ticketing/revenue), tailored to what they
   follow and view. **Tune** lets a reader point the Owl at exact dashboards/tiles,
@@ -192,6 +214,49 @@ ticket like a well-informed friend who's already going.
 - **Knows the page the fan is on** — on an artist page it leads with the ticket
   that gets you to that artist; on the tickets page, the best options; plus a
   no-AI "ribbon" teaser (offer + live availability tag) on every page.
+- **Navigates the site with the fan** — the chat shows which page the fan is on
+  ("📍 tickets page") and the Owl can walk them around the website: ask for the
+  lineup or accommodation and it offers a **"Take me there"** button that opens
+  that page and continues the chat in its context.
+- **Offer cards with real photos** — upload images per ticket/add-on straight from
+  the editor (or paste URLs); fans swipe through them on the offer card.
+- **Every Owl is the client's own** — per site, the client uploads its face,
+  names it, writes its personality ("cheeky, proudly local"), sets house dos &
+  don'ts, and adds 💡 insider tips the Owl volunteers when they help
+  ("the east gate has no queue after 6pm"). Personality is style-only: the hard
+  rules (real prices, nothing invented, no fake urgency) always win.
+- **Reads the ticket shop for you** — point the Owl at the event's ticket page
+  and it drafts the whole catalogue (names, prices, buy links, images) as
+  suggestions to review and save. Interim until the direct Howler catalogue feed.
+- **Three desktop chat views** — main (wide & centred), side panel (floats over
+  the page) and **docked** (a true right-hand panel that shifts the page over so
+  the assistant never covers content). Header toggles switch live; the fan's
+  choice is remembered per visit. The bar itself wears the site's chosen nav
+  style too (icons, pills above/below the input, or the ＋ menu).
+- **Half-drawer suggestions** — tap the bar's input and a drawer rises with THIS
+  page's suggested topics + its lead offer; start typing and it live-filters
+  every starter, FAQ and page ("glamp" → the glamping questions + the Stay page).
+  Tap to ask — the drawer grows into the chat. Instant and deterministic, no AI
+  cost until the fan actually asks.
+- **Homepage hero chat** — a per-site toggle: fans landing on the home page get
+  the ask box centred like a welcome mat — the Owl's face, greeting, the site's
+  nav buttons and the question box. Folds into the bar/launcher on scroll or
+  dismiss, once per visit.
+- **Persistent ask bar** — a per-site widget style: instead of the floating
+  launcher, a slim always-on bar docks to the bottom of every page — ＋ nav menu,
+  a page-aware ask box ("Ask about the line-up…") and one tap from question to
+  conversation. Typing opens the chat with the question already sent.
+- **Quick-nav buttons, four modes** — the chat grows navigation buttons (one per
+  mapped page: home, tickets, line-up, venue…) so the Owl doubles as the site's
+  wayfinder. Each site picks where they live: icon strip under the header, a ＋
+  menu by the message box, centred labelled pills above it, or off.
+- **Dresses in the client's colours** — the widget adopts the client's Pulse
+  brand colour automatically, with a per-site override when that clashes with the
+  website, plus a light/dark/auto chat theme that can follow the fan's device.
+- **Speaks the fan's language** — the Owl opens in the fan's own phone/browser
+  language (and always answers in whatever language the fan writes); the widget's
+  buttons and prompts localise too (EN·AF·IT·ES·FR·DE·PT·NL), with a per-site
+  default language as the fallback.
 - **Answers like the organiser would** — FAQs, refund policy, what's included:
   answered ONLY from the knowledge base the promoter writes (never invented), with
   prices only ever from the configured catalogue. Urgency only from real
@@ -206,6 +271,11 @@ ticket like a well-informed friend who's already going.
 - **Self-service** — clients manage everything themselves under **Settings → Fan
   Owl** (sites, catalogue, knowledge, page mappings); Howler can do it for them in
   Admin → client → Fan Owl.
+- **Howler super-app ready** 🔜 — the plumbing for the same Owl inside the Howler
+  app is live (a per-site **"Allow in Howler app"** switch + an app mode of the
+  chat that hands buy links to the app for native checkout); the in-app screen
+  itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
 - **Status 🧪:** beta. Deep-link checkout (in-widget checkout is on the roadmap);
   catalogue and links are entered manually for now. Pilots: Retreat Yourself,
   then Kappa Futur Festival (`docs/specs/FAN_OWL_SPEC.md`).
@@ -253,6 +323,31 @@ shoulder when it's worth your time."
 
 **Pitch:** "A sharp, role-specific briefing in their inbox on schedule — they stay
 on top of the event without logging in."
+
+## 2b. Ask the Owl about Pulse itself (product help)  🧪
+- The **same Owl chat** now also answers questions about **Pulse itself** — *how
+  do I do this*, *what's new*, *what can I do with my access* — alongside its
+  usual data answers. One door for everything; the Owl routes the question.
+- **Only released features, ever:** answers are grounded strictly in Howler's
+  curated help knowledge plus **published release notes** — drafts and unshipped
+  work can never surface. If it isn't published, the Owl doesn't know it.
+- **Tailored to the user:** answers respect their **role** (won't walk a Viewer
+  through something only an Owner can do), their **tenant setup** and their
+  **current event** — e.g. it won't pitch cashless features to a non-cashless
+  event.
+- **"What's new"** pulls the latest, correctly-dated published release notes; a
+  ✨ starter pill on the Owl chat asks it in one tap.
+- **Deep-links** the user straight to the right screen ("open Engage →
+  Campaigns"), and **declines gracefully** when the answer isn't in its knowledge
+  — it never invents behaviour.
+- **Curated & versioned:** Howler staff maintain the knowledge in **Admin →
+  Product → 💬 Help knowledge** (add/edit/publish articles, tag them by role +
+  required feature, set deep-links, toggle product help on/off) — **no deploy
+  needed**. The Owl chat itself is the client's self-service surface.
+
+**Pitch:** "Ask the Owl anything — your numbers or the product. It already knows
+who you are and what your account can do, and it only ever describes features
+that have actually shipped."
 
 ## 3. Messaging inbox (client ↔ Howler)  ✅
 - A two-way **inbox** anchored to the client: threads, read/unread, attachments,
@@ -367,8 +462,12 @@ where people open, click and convert."
   size / availability** read back from the platform, last-sync detail, and a link
   straight into Meta/TikTok. (The same roll-up exists for Howler staff in Admin →
   connector health.)
-- Requires connecting the client's ad account (access token + ad account) in
-  Integrations. *TikTok push verified end-to-end against a live ad account; Meta
+- Requires connecting the client's ad account in Integrations. **Easiest for
+  Meta: the agency path** — the client approves one **partner-share** of their ad
+  account to Howler's Business portfolio (2 minutes, no tokens), and Howler's
+  house connection does the rest; the in-card guide has shareable steps. Token
+  paste and Continue-with-Facebook remain for clients who prefer their own
+  connection. *TikTok push verified end-to-end against a live ad account; Meta
   push pending the same live check.*
 
 **Pitch:** "Turn a Pulse audience into a Meta/TikTok ad audience in a click — keep
@@ -396,6 +495,32 @@ each platform without leaving Pulse."
 followers, reach and the posts that landed — next to their ticketing numbers, all
 in one place that updates itself."
 
+### 5e-bis. Social+ — in-app community analytics  🟡 (needs setup) · 🧪
+- Pulls the client's **Social+** (social.plus, formerly Amity) **in-app community
+  analytics into Pulse** — the fan communities and chats living inside the Howler
+  app, next to their app engagement and ticketing numbers.
+- **What you see** (📲 App page → **Community** tab, next to the PostHog
+  Analytics tab): total **members, communities, posts, comments, reactions and
+  chat messages**; a **30-day trend** with a metric switcher; the biggest
+  **communities**, the **busiest chats** and **top posts** ranked by reactions —
+  each with comments, impressions and reach.
+- **Chat coverage:** every channel (announcements, line-up, FAQ, event chat) with
+  member and message counts — spot which event conversations are alive.
+- **Linked per client:** Howler's ONE Social+ network holds every organiser's
+  communities, so an admin **links the right communities & event chats to each
+  client** (Admin → client → Integrations → Social+ card) — a client only ever
+  syncs and sees their own. Linking (and the full network directory behind it)
+  is strictly admin-only; the client just sees what's ticked for them.
+- **Setup 🟡:** platform key in Admin → Integrations (once), then tick the
+  client's communities and save — the save re-syncs immediately; daily
+  auto-refresh after that. Read-only: Pulse never posts or moderates. Gated by
+  the `App analytics → Community (Social+)` feature flag.
+- 🔜 **Next:** feed community engagement into the Owl/digests and dashboard tiles.
+
+**Pitch:** "Your app community isn't a black box any more — see which event
+communities are growing, which chats are buzzing, and which posts land, right next
+to the ticket sales they drive."
+
 ### 5f. Paid ads performance — Meta  🟡 (needs connection)
 Your Meta (Facebook/Instagram) **ad spend and results, inside Pulse** — pulled
 daily from the same ad account you already connected for audience sync (nothing
@@ -413,6 +538,141 @@ new to set up).
 
 **Pitch:** "Your ad account and your ticket data finally in one place — see the
 spend, the return, and ask the Owl which campaign is worth more budget."
+
+### 5g. Deep links into the Howler app  🟡 (needs connection)
+Short, branded **`howler.chottu.link` URLs** that open the right place in the
+Howler app (tickets, lineup, map, chat…) — created **from Pulse** instead of
+one-by-one in the ChottuLink dashboard.
+- **Engage → Links** — clients create and manage their own links: name it, pick
+  the event, paste the destination, done. Each link is **tied to a Pulse event**
+  and shows its **click counts** (total / 7 / 30 days).
+- **Grouped by category** ✅ — the Links landing shows **category tiles** (link +
+  click counts per tile); tap one to drill into just that category's links, with a
+  clear **← All categories** back link. Every link starts in the **App** category
+  (they open the Howler app); file links under your own categories ("Socials",
+  "Website"…) from the link editor. Mobile-first: big tap targets, stacking tiles.
+- **UTM tags & app behaviour** built in — every link can carry campaign tags and
+  choose app-vs-browser opening per platform.
+- **Import (pick & choose)** — the import screen lists everything on the
+  ChottuLink account, flagged new / already in Pulse / previously deleted; tick
+  the ones to bring in and optionally attach them to an event in the same step.
+- **Delete** — removing a link takes it out of Pulse *and* switches it off in
+  ChottuLink (their API has no true delete), so the short URL stops redirecting;
+  re-imports won't resurrect it unless you pick it on purpose.
+- **Admin surface** — same tools per client under Admin → client → 🔗 Deep links;
+  the connection (API key + domain) layers platform-default → per-client override.
+- **⚡ Templates — every link in one click** ✅ — pick a template, pick the event,
+  paste the event page URL, done: the whole standard set (main + ticket wallet +
+  lineup + map + event feed + chat) is created in one go, named and tagged per
+  event automatically. Preview first (untick / tweak paths inline, collisions
+  flagged); anything that fails can be retried individually. A Howler-managed
+  starter template ships built in; clients can save their own sets too.
+- **📈 Click trends & source split** ✅ — Pulse snapshots every link's clicks
+  nightly and charts **clicks per day** per event, plus a **by-source** split
+  (instagram vs whatsapp vs email…) from the links' UTM tags — history
+  ChottuLink's own API doesn't offer. Tap 📈 on any event's link card.
+- **🦉 Owl does links too** ✅ — ask the Owl "make me a tickets link for the
+  Instagram bio" or "set up the standard links for this event"; it drafts the
+  link(s) with tags + preview and you confirm with one tap. Draft-only, same
+  permissions as doing it by hand.
+- **✨ AI autofill** ✅ — one tap fills a link's UTM tags and social share
+  preview from its name, destination and event, matching the client's existing
+  tag conventions.
+- **Status 🟡:** needs the ChottuLink API key + domain (Howler's platform account
+  covers all clients by default).
+
+**Pitch:** "Every link your event needs — created in one click from Pulse, tracked
+per event, and ready to drop into posts, bios, emails and QR codes."
+### 5h. Pulse Pixel — website retargeting  🧪 (new)
+- **One snippet, all pixels.** Install a single Pulse script tag on the client's
+  website or ticket shop and it loads their **Meta Pixel, Google tag and TikTok
+  Pixel** for them — configured (and changeable later) entirely inside Pulse, so
+  the site never needs touching again.
+- **Remarketing lists build automatically** in each ad platform from its own
+  pixel: all visitors, ticket-page viewers, checkout abandoners, purchasers.
+- **One-click standard audiences** — Pulse creates the standard retargeting
+  audience pack (visitors 180d/30d · viewed tickets 30d · checkout abandoners 14d
+  · purchasers 180d) directly in the client's **Meta** and **TikTok** ad accounts
+  via their connected APIs. (Google's audience definitions are a guided one-time
+  manual step — no self-serve API — the tag itself is fully automatic.)
+- **Install check built in** — every event also beacons back to Pulse, so admin
+  and the client can see "✓ receiving events" the moment the snippet is live
+  (and Pulse builds a first-party behaviour log for future segments).
+- **Consent-aware** — a GDPR mode holds all pixels off until the site's cookie
+  banner grants consent.
+- Dual-surface: Howler configures it in Admin → client → Integrations; clients
+  self-serve in Settings → Integrations. *Meta/TikTok audience-pack API calls not
+  yet exercised against live ad accounts (same caveat as audience sync).*
+
+**Pitch:** "Add one line to your website and your retargeting is done — every ad
+pixel managed from Pulse, and the standard remarketing audiences created in your
+Meta and TikTok accounts in one click. Change pixels any time without a developer."
+
+### 5i. Queue-it — live waiting-room stats  🟡 (needs connection) · 🧪 (new)
+- **The on-sale queue, live in Pulse.** For clients whose big on-sales run behind
+  a **Queue-it** waiting room, Pulse pulls the queue's numbers straight from
+  Queue-it's API: **people waiting right now**, redirects per minute, total
+  queued, passed through, left the queue — refreshed every minute during the sale.
+- **Trend charts** — inflow, passed-through, in-queue and cancellations over the
+  last hour / 24h / 7d / 30d, so the shape of the on-sale (and any stall) is
+  visible at a glance, on a phone.
+- **Read-only and safe** — Pulse only reads statistics; it can never pause,
+  speed up or end a queue.
+- **Scoped like everything else** — on Howler's shared Queue-it account an admin
+  assigns exactly which waiting rooms a client sees (never anyone else's); a
+  client with their **own** Queue-it account can paste their own customer ID +
+  API key and self-serve.
+- Dual-surface: Howler connects it in Admin → the client → Integrations (or
+  platform-wide in Admin → Integrations); clients self-serve in Settings →
+  Integrations, where the live stats card lives. *Not yet exercised against a
+  live Queue-it account — verify with real credentials before pitching hard.*
+
+**Pitch:** "Your on-sale queue, live inside Pulse — how many are waiting, how fast
+they're getting through, and the whole curve of the sale — next to the sales
+numbers they're about to become."
+
+### 5j. App analytics — the Howler app, live from PostHog  🟡 (needs setup) · 🧪 (new)
+- **How your events perform inside the Howler consumer app** — straight from
+  PostHog (the app's analytics platform), no warehouse detour: views, unique
+  viewers, interactions, **CTA taps** and **in-app purchases** per event, with
+  **live "today so far"** numbers and daily trends (7/28/90 days).
+- **A client sees only their own events** — every app event carries the Howler
+  event ID, and Pulse forces the client's event scope server-side (fail-closed,
+  same guarantee as dashboards). Zero per-client setup: once the platform
+  connection is in, every client's 📲 App page lights up automatically (behind
+  the `App analytics` feature flag, default off while in beta).
+- **App users, by name** — the actual people in the app (email, first name,
+  surname, mobile from PostHog profiles), searchable, pageable, orderable by
+  most-recent or most-active (🏆 Super fans), and exportable to CSV — per client
+  (only people who touched THEIR events) or app-wide for Howler.
+- **"What's driving it" breakdowns** — the busiest values behind the numbers
+  (interaction type, CTA label, surface — configurable), as a ranked table AND
+  per-value daily trend lines with a click-to-filter legend.
+- **🎯 CTA clicks by label** — which buttons people actually press
+  (`view_tickets`, `buy_tickets`, `pay_now`, …) as a ranked bar chart, live,
+  window-filtered and scoped per client — the Looker CTA tile, now self-serve
+  inside Pulse.
+- **🛒 Checkout funnel** — ticket browsing → checkout → payment tap → order
+  confirmed, with step-over-step conversion % and the end-to-end rate, live
+  and per client. Shows exactly where fans drop out of buying in the app
+  (stages configurable in the event mapping).
+- **Ask the Owl** — "how is my event doing in the Howler app?" is a native Owl
+  question (`getAppAnalytics`): live + windowed engagement, per event, with
+  breakdowns — scoped exactly like the client's App page.
+- **Management view** (Admin → 📲 App analytics): the whole app across every
+  client — active users today (live), weekly/monthly actives, new users,
+  sessions, top events by in-app attention, with a per-client lens — plus the
+  event-mapping editor (which PostHog events count as screens / CTAs /
+  purchases / notifications, with a live catalog of what the app sends).
+- **One platform connection** (Admin → Integrations → PostHog): host, project
+  ID and a write-only personal API key. Nightly rollup + short-cached live
+  queries, so a briefly unreachable PostHog degrades to yesterday's data —
+  never a broken page. Anything that joins app data to ticketing/revenue stays
+  on the Looker path.
+
+**Pitch:** "Not just how many tickets sold — how your event is performing inside
+the Howler app right now: who's looking, what they tap, and who those fans
+actually are."
 
 ## 6. White-label branding & integrations  ✅ / 🟡
 - **Per-client branding** ✅ — logo, colours, email sender display name and
@@ -479,6 +739,10 @@ spend, the return, and ask the Owl which campaign is worth more budget."
   **individual dashboards** a client gets, and **lock filters per dashboard** for that
   client (e.g. pin one dashboard to a specific event) on top of the suite-wide locks.
 - **Preview as a client** to see exactly what they see.
+- **🎓 Training (internal)** — practical exams taken inside Pulse: trainees do real
+  work (segments, campaigns, goals, dashboards…) in a sandbox client under a
+  personal exam code, and the system auto-grades by checking what actually got
+  created. Course pack: `docs/TRAINING_SALES_CS.md`.
 - **AI audit** — every system prompt the AI is given is viewable ("Everything the
   AI is told").
 - **Product collateral you control** ✅ — Admin → Product holds the living **feature
@@ -487,6 +751,13 @@ spend, the return, and ask the Owl which campaign is worth more budget."
   **Shown / Hidden toggle**, so anything still in the works (or not ready for
   internal announcement) stays off the public pages until it's ready — admins
   always see the full picture, dimmed.
+- **✨ What's in Pulse (client-facing feature matrix)** ✅ — the same catalogue,
+  rendered for clients: in the app under **Product → ✨ What's in Pulse** as a
+  tap-through grid of section tiles (each feature explained in plain language,
+  with "Ask us to switch it on / Interested?" CTAs that file a request on the
+  Product board), and on the public **`/sales/features`** page as expandable
+  rows with a "ask about this in your demo" prompt. One source, every surface —
+  the Shown/Hidden toggles govern all of it.
 
 ## 8. Trust, security & scope  ✅
 - **Multi-tenant, server-side scoping** — every data query is force-filtered to
@@ -608,7 +879,10 @@ client's* numbers.
   the gates with the **+change since the last update** and the **pace per hour**, bar
   revenue, a **top-3 bars/vendors** list read off any breakdown tile, and (for Event
   Ops clients) **device health** (deployed devices + open issues). A block can also
-  show **"% of last year"** against a chosen past event. Press **Go live** when doors
+  show **"% of last year — by this point"**: a true **like-for-like** comparison that
+  cuts the past event to the **same day of the event at the same clock time** (fair
+  whether the event is one day or five; a "final number" mode is there too). Press
+  **Go live** when doors
   open (or set a start/end window and it runs itself); it lands in the **inbox** (the
   whole night in one thread) plus **app push, email, SMS** and **WhatsApp** — WhatsApp
   reaches anyone who's messaged the Owl in the last 24h (WhatsApp's own service-window
@@ -670,6 +944,13 @@ WhatsApp thread with one phone-first console.
 - **Liaison checks & issues** 🧪 — scan a device, log an issue from a quick list
   (damaged, battery, connectivity…) and record **how it was resolved**. Open issues
   surface on the live overview.
+- **Device support calls** 🧪 — the person at a bar/booth taps **one button on the
+  device's saved link** (Stock · Manager · Help · Security · Medical) and it lands with
+  dispatch as a live **call** — pre-tagged with **which station and which device**, so
+  they never pick where they are. No app to install; the link works from any phone, so a
+  frozen device never blocks a call for help. Dispatch **acknowledges (with an ETA)** and
+  **resolves** from the Hive → **Calls** queue. Ships in test mode (calls reach your test
+  inbox only) until you go live.
 - **Live overview** 🧪 — device counts by state, per-station counts, open issues and a
   recent-activity feed — the "where is everything right now" board.
 - **Dual-surface + per-client pilot** — Howler staff run it in **Admin → a client →
@@ -707,7 +988,31 @@ and you'll have the evidence report if it was the network."
 
 ---
 
-## 13. Pulse API & AI-agent access (MCP)  🧪
+## 13. Map Studio — build the event map yourself  🧪
+No more outsourcing the event map to a designer. An AM or the client builds it in
+Pulse — drop pins for stages, bars, gates, food, medical; upload **sponsor logos as
+pins**; write descriptions; add a **button on every pin** (order a drink, view the
+line-up, any link) — then hits **Publish**. The map becomes a fast mobile web page
+hosted by Pulse, and the Howler app's existing per-event map link points at it: **no
+app update, no app-store release**. Edit mid-event ("the bar moved") and it's live on
+attendees' phones on the next open.
+- **Build it in minutes** 🧪 — tap the map to drop a pin, drag to move it; categories
+  become the attendee filter chips (Bars, Stages, Entrances…); pick dark/satellite/
+  streets styling and save the exact camera view you framed.
+- **One set of places with Event Ops** 🧪 — one click imports the event's Event Ops
+  stations (bars/gates/booths) as map places, linked by id — the foundation for the
+  upcoming **live busyness layer** (quiet/busy/packed from real scan & till activity).
+- **Measurable** 🧪 — map opens, pin taps and button clicks are counted (anonymously),
+  so "3,400 people tapped the sponsor's bar pin" becomes a sellable number.
+- **Self-service both sides** 🧪 — Admin → client → **Map Studio** for Howler; the
+  client team does the same at **Event Map** (permission: `map.manage`).
+- Needs a one-time **Mapbox public token** (set once by Howler; free tier covers
+  typical volumes). Desktop browsers get a full layout of the same URL — embeddable
+  on the event's website.
+- Per-client switch: **Admin → Product → Flags → Map Studio** (off by default while
+  in beta; off also stops serving that client's published maps).
+
+## 14. Pulse API & AI-agent access (MCP)  🧪
 **The pitch:** "Your Pulse data isn't locked in — read it from your own tools,
 or point an AI agent (like Claude) at it and ask questions in plain language."
 
@@ -735,6 +1040,164 @@ or point an AI agent (like Claude) at it and ask questions in plain language."
   (a living page rendered from `docs/CLIENT_API_GUIDE.md`).
 - Writes (draft a segment/campaign via the API) are on the roadmap and will ride
   the existing approval + consent gates — nothing will ever send without a human.
+
+---
+
+## 15. Client onboarding journey — layered, guided activation  🧪
+**The pitch:** "New clients don't get dumped into a tool — Pulse walks them (and
+your account team) through it in layers, from first login to full automation,
+and celebrates each milestone on the way."
+
+- **Five phases, one journey.** The "Getting started" card on the client's home
+  page is a layered path: **1 · The fundamentals** (dashboards, the installed
+  app, notifications, the weekly digest, branding, team) → **2 · Meet the Owl**
+  (ask questions, tile insights, Owl-built audiences & Owl-drafted campaigns —
+  drafts only — and filing feedback) → **3 · Goals & first sends** (goals,
+  alerts, a first audience, a first simple email) → **4 · The Owl everywhere**
+  (WhatsApp, Claude & ChatGPT connectors) → **5 · Automate & amplify**
+  (journeys, Meta/TikTok ad accounts, the Pulse Pixel). The current phase is
+  open and actionable; what's next stays visible.
+- **Gamified** 🧪: every step is worth **Pulse Points ⚡** (earned by the whole
+  team, from verified usage — nothing can be farmed), each finished phase awards
+  a collectible **sticker** (Pathfinder 🧭 → Automation Architect ⚙️), and
+  **activity badges** reward real outcomes — 10 Owl questions, a win-back that
+  converted, a goal hit, weekly streaks, a bug report we shipped a fix for. The
+  client's **Your journey** shelf shows it all; a reward catalogue to spend
+  points on is planned (business call pending).
+- **The AM cockpit** 🧪 (Admin → Onboarding): every client's journey on one
+  screen — journey bar, current phase, idle-days **stalled flags**, last
+  milestone, and a one-tap **Nudge** that emails/inboxes exactly the steps still
+  open. Plus an **AM scorecard**: per-AM activation score, medals and a team
+  leaderboard (recognition only — time-in-app deliberately not counted).
+- **Progress ticks itself.** Almost every step auto-detects from real usage —
+  a dashboard opened, the app installed, a question asked, a connector used, a
+  journey drafted — so the journey reflects reality, not homework.
+- **A branded welcome pack email** goes out automatically when the client's
+  first login exists (in their branding, introducing Phase 1), and a
+  **"phase complete — here's what's next" email + inbox message** lands as each
+  layer finishes. The **account team gets a heads-up on every milestone**, so
+  the AM knows exactly when to start the next conversation.
+- **Every step has a "Show me how"** walkthrough, written for a phone screen.
+- **Dual-surface:** the AM sees the same journey per client (Admin → client →
+  Setup checklist → **Client onboarding journey**) with live progress, can tick
+  manual steps on the client's behalf, re-send the welcome pack, or opt a
+  client out of the emails. Wording is editable in Admin → Onboarding →
+  **Journey emails**.
+
+---
+
+## 16. Fan surveys — post-event feedback in the Howler app  🧪
+
+**What it is:** design a short post-event survey in Pulse (star ratings,
+pick-one, pick-many, free text — max ~2 minutes for a fan) and it appears in
+the **Howler app** for that event's ticket holders; answers flow straight back
+into Pulse with results per question (average rating, option counts, comment
+list) and CSV export. One response per fan — resubmitting simply updates it.
+Per-survey **layout choice** (single form vs one-question-per-card) so
+organisers can A/B test presentation.
+
+**Targeting & trust built in:** a survey can go to **everyone** or only to
+specific **ticket types** (picked from the event's real ticket types — a VIP
+survey VIPs see and nobody else does), and a survey can only be **published
+for an event that actually exists in the Howler app** (checked live at
+publish). Results slice by ticket type and by day, with tap-to-drill-down
+into who said what.
+
+**Status honestly:** 🧪 live end-to-end — the **survey builder is in Engage →
+Surveys** (dual-surface: clients self-serve, admins can drive it for them),
+with a live phone preview while you build. The app side ships behind a flag;
+per-client rollout via the **engage.surveys** feature flag (default OFF).
+Live surveys are locked (close & duplicate to change) so results always match
+what fans saw.
+
+**Beyond the app — email & web** 🧪: every live survey can also go out **by
+email** (paste/import recipients → each fan gets a private, personalised link
+to a **branded hosted survey page** that greets them by name and ticket type)
+and via one **public share link** for QR codes, socials or WhatsApp. Answers
+from every channel land in the SAME results with an app / email / web split.
+Email sends ride the platform mail engine (suppression lists + one-click
+unsubscribe respected).
+
+**The pitch:** "Know what fans actually thought — in the same place you watched
+the tickets sell." Feedback lands next to the sales data, ready for the Owl and
+next year's planning.
+
+---
+
+## 17. Community feed — your own social layer in the Howler app  🧪
+
+Organisers post updates, photos and videos from Pulse straight into the Howler
+app — an organiser community for the brand, event communities ring-fenced to
+ticket holders and joiners, and a Howler-wide global feed for reach. Managed in
+**Engage → App** — its own section with four tabs (📰 Posts · 💬 Channels ·
+👥 Communities · 📣 Share links), no longer a single tab inside Campaigns
+(both surfaces: Howler admin per client, and client self-service), flag-gated
+per client (`community`, default off). On mobile, creating a post mirrors the
+app's own ＋ composer flow. The read-side analytics page in the sidebar is now
+called **App Analytics** to keep the two apart.
+
+- **Communities** — organiser-level and per-event (event communities nest under
+  the organiser's), public or members-only.
+- **Posts** — text + image/video media, draft → publish, optional "also show on
+  the Howler global feed" syndication. Fans can like posts in the app (verified
+  identity); like counts show on each post in the composer.
+- **In the app** — served to the Howler app over a public read API
+  (docs/specs/SOCIAL_CONTRACT.md); fans join event communities explicitly today,
+  ticket-holder auto-membership is next.
+- **Event chat channels** 🧪 — a mini WhatsApp per event, run from Pulse:
+  organiser channels (public / ticket-segment-gated / manual, open-chat or
+  broadcast mode), fan-made groups with shareable invite links, reactions,
+  replies, pins, reports, organiser CTA buttons in messages, and one-click
+  broadcast to every channel with per-message push flags (delivery activates
+  with the Firebase key).
+- **Pins everywhere** 🧪 — organisers pin/unpin posts (float to the top of the
+  feed for everyone) and chat messages; fans pin privately for themselves
+  (posts + messages), and in their own groups pins are shared WhatsApp-style.
+- **Post from the app** 🧪 — authorised "app posters" (managed per client in
+  Community → App posters) publish for the brand straight from their phone —
+  text + photos, optional Howler-wide feed, live instantly, no Pulse login.
+  Instagram-style composer UI in design; fan/UGC posting rides the same rails
+  later.
+- **Story rail** 🧪 — Instagram-style circles across the top of the app's
+  feed: the fan's joined communities and ticketed events first (amber ring =
+  new posts), one tap into any organiser or event feed. Discovery built into
+  the landing page.
+- **Personalised Howler feed** 🧪 — the app's landing feed shows Howler's
+  own announcements to everyone, plus posts from organisers the fan follows
+  or holds tickets for — relevant by construction, not a firehose.
+- **Feed roll-up** 🧪 — event posts can also surface on the organiser's
+  community feed (per-post toggle, like the Howler-wide one) — the brand feed
+  becomes the best-of across its events.
+- **Targeted posts** 🧪 — event posts aimed at 🎟 any ticket holder or 🎯
+  specific ticket types ("VIP, Weekend Pass"); fans who don't match simply
+  never see the post (enforced on Howler's servers, not hidden in the app).
+  Full segment-based audiences are the next step on the same rails.
+- **Instagram import** 🟡 — content already on the client's Instagram reposts
+  to the community feed in one click (Community → 📸 Instagram): recent-posts
+  grid, caption prefilled, carousels come across whole, media re-hosted on
+  Howler's infrastructure. Needs the Meta connection + IG account id set under
+  Integrations.
+- **Moderation** 🧪 — banned words/phrases/emoji enforced on Howler's servers
+  the moment a fan posts, comments, chats, reacts or names a group: exact hits
+  are rejected outright, near-miss/obfuscated attempts are **held for review**
+  (visible only to their author) until a moderator approves or declines.
+  Platform-wide list (Howler-managed) + each client's own additions; fan
+  reports (now on posts too) land in the same review queue. Managed in
+  **Engage → App → 🛡️ Moderation** (banned list with a "would this be
+  caught?" test box, review queue, audit trail — client self-service behind
+  the `community.moderation` flag, Howler admins on behalf regardless);
+  Howler's platform-wide list + cross-client queue live in Admin → Product →
+  🛡️ Moderation. AI classification ("catches what lists can't") is the next
+  phase (docs/specs/MODERATION_CONTRACT.md).
+
+**Status honestly:** 🧪 working spike (the Social+ replacement, phase 1 of
+docs/SOCIAL_PLATFORM_INVESTIGATION.md) — feed + communities live end-to-end
+behind the flag; reactions/comments, push-on-post, Instagram/TikTok import and
+event chat channels are the next phases. Don't sell it yet; show it.
+
+**The pitch (when live):** "Your event's own feed and community, inside the
+app your ticket holders already have — no per-user SaaS bill, managed from the
+same place as your campaigns."
 
 ---
 
@@ -771,6 +1234,20 @@ see "The continuous comms loop" above.)*
 ---
 
 ## Changelog (newest first)
+
+- **2026-07-20** — **🛡 Social moderation phase 1 (server side)** 🧪: banned
+  words/phrases/emoji (platform list + per-client additions) enforced at write
+  time on every fan surface — posts, comments, chat messages, emoji reactions,
+  fan-group names. Exact hits blocked (never published), fuzzy/obfuscated hits
+  held for moderator review (author-only until approved), declines show the
+  author a "Removed by moderators" state. Fan reports (including the new
+  post-level report) feed the same review queue. New `moderator` client role +
+  `moderation.manage` permission, Howler `platform_moderator` designation,
+  flag `community.moderation` (console self-service; platform-rule enforcement
+  is always on). Console UI shipped the same day: Engage → App → 🛡️ Moderation
+  (client + admin-on-behalf) and Admin → Product → 🛡️ Moderation (platform
+  list + cross-client queue), with a live "would this be caught?" test box and
+  the audit trail. Wire contract in docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
 - **2026-07-22** — **Editable tile sorting** ✅ (improved): the tile editor's "Sort by"
@@ -779,6 +1256,390 @@ see "The continuous comms loop" above.)*
   (e.g. sort by **event start year** to group every event in that year), and the sort is
   **persisted to the tile config** (`query.sorts`) — on both the admin and client dashboard
   editors. Replaces the old single-field, first-sort-only control.
+- **2026-07-21** — **🗺️ Map Studio** 🧪 (new): build & publish the event map
+  self-service — pins with logos/descriptions/CTA buttons, filter categories, style
+  + camera control, one-click import of Event Ops stations, anonymous tap analytics.
+  Published as a fast mobile page at `/maps/<event>` that the Howler app's existing
+  per-event map WebView loads — no app release; republish updates it live mid-event.
+  Admin surface: Admin → client → Map Studio; client surface: Event Map
+  (`map.manage`). Spec: `docs/MAP_STUDIO_SPEC.md`.
+- **2026-07-20** — **👆 CTA click tracking → segments**: every tap on a post's
+  (or chat broadcast's) CTA button in the app is now counted — total taps AND
+  who tapped (signed-in fans, with verified email). The 👆 counter on a Pulse
+  post expands to the clicker list, with one-tap **Create segment from
+  clickers** so that audience can get an email/SMS/push follow-up from Engage.
+- **2026-07-20** — **📲 Engage → App**: the Community suite moved out of the
+  Engage/Campaigns tab row into its own section with four tabs (Posts ·
+  Channels · Communities · Share links); Channels now leads with a message
+  composer (one channel or broadcast-to-all); the analytics page is renamed
+  **App Analytics**; organiser **comment replies can carry a CTA button**
+  (native app screen or external link — the same vocabulary posts and chat
+  messages already had); mobile posting uses an app-style ＋ full-screen
+  composer.
+- **2026-07-19** — **⭕ Story rail**: community circles on the app's feed
+  (joined + ticketed first, unseen rings, one-tap into organiser/event
+  feeds) served by a new rail endpoint with per-viewer state.
+- **2026-07-19** — **🏠 Personalised global feed**: Howler house posts reach
+  everyone; organiser posts on the global feed now only reach followers and
+  ticket holders of that organiser (server-side, via joins + verified ticket
+  holdings). Platform admin designates the house entity.
+- **2026-07-19** — **⬆ Event → organiser feed roll-up** 🧪: event posts can
+  opt onto the parent organiser community's feed (per-post toggle, same
+  mechanic as the Howler-wide one); ticket-targeted posts stay ticket-checked
+  wherever they surface.
+- **2026-07-19** — **🎯 Targeted posts (ticket types)** 🧪: event-community
+  posts can target any-ticket-holders or specific ticket types; enforcement is
+  server-side against the fan's verified ticket holdings (via the same Howler
+  JWT introspection that powers identity), so non-matching fans never receive
+  the post. Composer gains a "Who sees it" selector.
+- **2026-07-19** — **📸 Instagram import** 🟡: one-click repost of existing
+  Instagram content into the community feed (recent-posts grid in Community,
+  media re-hosted, captions prefilled, carousels intact). Uses the existing
+  Meta connection + IG account id from Integrations.
+- **2026-07-19** — **📲 Post from the app (backend)** 🧪: per-client "App
+  posters" registry (Community tab, both surfaces) + a JWT-verified app
+  endpoint that lets authorised Howler accounts publish brand posts with
+  photos straight from the phone. Instagram-style in-app composer is in
+  design review.
+- **2026-07-19** — **📌 Pins across feed + chat** 🧪: organisers pin/unpin posts
+  (feed shows a pinned strip for everyone) and chat messages from Pulse; fans
+  get personal pins on posts and messages (visible only to them), and pins in
+  fan-made groups are shared WhatsApp-style. Also: chat history paging in the
+  app ("Load earlier messages").
+- **2026-07-18** — **💬 Event chat channels (Social+ replacement phase 2)** 🧪: per-event
+  chat run from Pulse (Engage → Community → Channels) — organiser channels with
+  public / segment(ticket)-gated / manual access and broadcast mode, fan-made groups
+  joined via invite links (ring-fenced: a link joins that group only), WhatsApp-style
+  reactions/replies/pins/reports, organiser CTA buttons in messages, broadcast-to-all
+  with per-message push flags. Fan side live in the app's Event Chat (Demo) screen.
+- **2026-07-18** — **📰 Community feed (Social+ replacement spike)** 🧪: Howler-native
+  communities + feed posts, managed from Engage → Community in Pulse (dual-surface)
+  and served to the Howler app over a new public API (docs/specs/SOCIAL_CONTRACT.md).
+  Organiser + event communities (event nests under organiser, public or members-only),
+  text/image/video posts with draft→publish, global-feed syndication, explicit joins,
+  media on disk now with presigned direct-to-R2 ready. Per-client flag `community`
+  (default off, beta); kill switch `social_feed_enabled`. Phase 1 of
+  docs/SOCIAL_PLATFORM_INVESTIGATION.md — reactions, push-on-post, IG/TikTok import
+  and event chat channels follow.
+- **2026-07-18** — **🦉📱 Fan Owl: Howler super-app groundwork** 🔜: the plumbing
+  for the same booking guide inside the Howler app — a per-site **"Allow in
+  Howler app"** switch (Fan Owl settings, both surfaces) that lets the app open
+  that site's Owl, and an app mode of the chat that hides the web chrome and
+  hands buy links to the app so checkout can complete natively in-app. The
+  in-app screen itself ships with an upcoming app release
+  (`docs/specs/FAN_OWL_SUPER_APP_INTEGRATION.md`).
+
+- **2026-07-18** — **◇ Meta agency path (house connection)** 🟡: clients can now
+  connect Meta by approving one **partner-share** of their ad account to Howler's
+  Business portfolio — no tokens, apps or developer steps on their side. Howler
+  sets a platform-level **house system-user token** once (Admin → Integrations →
+  Meta — house connection); any client whose own token is blank inherits it
+  automatically (their own token always wins). The client Meta card leads with a
+  shareable 2-minute partner-share guide, and every integration guide now has
+  **Copy steps / Share** buttons for forwarding requirements to whoever manages
+  the account. 🟡 needs the one-time Howler-side setup + per-client share.
+
+- **2026-07-17** — **📋 Fan surveys: channels, channel results & event rollup** 🧪:
+  every survey now has **channel switches** (📱 in-app · ✉️ email · 🔗 web link —
+  e.g. an app-only VIP survey), results show and **filter by channel** alongside
+  ticket type, and a new **📊 Event results** view rolls up ALL of one event's
+  surveys (combined responses-by-day, ticket-type/channel splits, per-survey
+  summary cards, one long-format combined CSV). Survey list groups by event with
+  audience-overlap warnings at publish.
+
+- **2026-07-17** — **📋 Fan surveys — email & web channel** 🧪: surveys now reach
+  fans OUTSIDE the app too. A live survey gets an **Email & links** panel: paste
+  recipients (email, name, ticket type) → each gets a **private personalised
+  link** to a branded, mobile-first **hosted survey page** (greets them by name
+  and ticket type — no login, no app needed), sent via the platform mail engine
+  (suppression + unsubscribe respected). Plus a **public share link** for QR /
+  socials / WhatsApp (anonymous answers). All channels land in the same results
+  with an **app / email / web split**, per-link open + response tracking, and
+  email + channel columns in the CSV. (`server/surveyWeb.js`.)
+- **2026-07-17** — **📋 Fan surveys — builder UI, targeting & deep results** 🧪:
+  the **Engage → Surveys** builder is live (dual-surface, live phone preview,
+  form/cards layout picker). Surveys can **target specific ticket types** (picked
+  from the event's real ticket types via a live Howler lookup) or everyone;
+  **publish is blocked unless the event is listed in the Howler app**. Results
+  gained **responses-by-day**, a **by-ticket-type breakdown**, a whole-report
+  **ticket-type filter** (CSV included) and **tap-to-drill-down** to the
+  individual responses behind any bar. Contract v1.2 (ticketType on responses) +
+  v1.3 (targeting) — additive, app builds catch up behind a flag.
+- **2026-07-17** — **📋 Fan surveys (post-event feedback)** 🧪 (new): surveys built
+  in Pulse are answered by fans **inside the Howler app** and results (avg rating,
+  option counts, comments, CSV) land back in Pulse. Four question types, per-survey
+  form/cards layout for A/B testing, one response per fan (resubmit updates), live
+  surveys immutable (close & duplicate to edit). API + results engine live
+  (`server/surveys.js`, contract `docs/specs/SURVEY_CONTRACT.md`).
+- **2026-07-16** — **Campaigns — test send fix** ✅: "Send test to me" now sends
+  the exact content shown in the preview pane. Previously, for a **drip sequence**
+  (e.g. Abandoned Cart Recovery) the test email could arrive with an empty body
+  when the HTML lived in a step — the test-send used the top-level copy while the
+  preview rendered the active step. Both now render the same step, so a test send
+  faithfully validates what recipients will get.
+- **2026-07-16** — **Inspect query goes live-editable** ✅ (Dashboards): the
+  Explore-style inspect panel's controls now work — edit filter values (or add /
+  remove filters), add / remove fields from the explore's catalogue, change the
+  row limit, and hit **▶ Run** to re-query and watch the bars + grid update. A
+  sandbox: only the preview re-runs (server tenant-scoping still applies); the
+  tile keeps its saved query, and **Reset** returns to it. When the sandbox
+  looks right, **✓ Apply to tile** writes the query onto the tile in the editor
+  (the dashboard's Save publishes it) — dashboard-driven filter values that rode
+  in unchanged stay live-wired rather than being baked in.
+- **2026-07-16** — **Branded PDF reaches the App pages** ✅ (App): the App page's
+  Analytics, Audience and Community tabs (and Admin → App analytics) now carry
+  their own **⤓ PDF** button with the same branded cover — the original export
+  only lived on the shared dashboard viewer, so the bespoke App surfaces from
+  ticket #45 didn't actually have it.
+- **2026-07-16** — **Super Admins visible & owner locked in** ✅ (Admin): the
+  Users directory now badges every **★ SUPER** holder, and the platform owner
+  is always re-granted Super Admin on boot so the global controls can never be
+  locked away from them.
+- **2026-07-16** — **Inspect query → Explore-style, edit-mode only** ✅ (Dashboards):
+  the 🔍 now lives with a tile's EDIT-mode controls (viewers no longer see it), and
+  the panel is rebuilt to read like Looker's Explore: a **fields-in-use rail**
+  (grouped by view, measures tinted, filtered fields marked), the **filters** as
+  condition + value chips with an AND rail, a **bar visualization** of the first
+  measure, and the **results grid** with warm measure columns and a row-limit
+  banner — all read-only, straight from the tile's own query + last result.
+- **2026-07-15** — **Inspect query panel** ✅ (Dashboards): every queryable tile now
+  carries a 🔍 that opens a read-only side panel (bottom sheet on mobile) listing the
+  **dimensions, measures and filters** driving the number — including the dashboard
+  filters currently in effect, tagged by source. Clients get a plain labelled summary;
+  Howler staff get the raw query internals (model/explore, field names, filter
+  expressions, sorts, row limit) for troubleshooting. Lets discrepancies be audited
+  in-app rather than "checking Looker". Pulse owns the interface, so the metadata comes
+  straight from the tile's own Looker query + the last result — no logic duplicated.
+- **2026-07-15** — **Download as branded PDF** ✅ (new): every dashboard's ⋯ menu now
+  produces a shareable PDF that opens with the client's **logo + brand colours**, the
+  title and the **filters/date range currently applied**, then the charts and tiles —
+  a self-explanatory report for people who aren't on Pulse. Mobile-friendly and scoped
+  to the tenant's own data. Covers **App Analytics** and **App Community** (and every
+  other dashboard, since it rides on the shared dashboard viewer).
+- **2026-07-15** — **Fan Owl: side/docked views survive navigation** 🧪: hopping
+  pages from inside a side-panel or docked chat now keeps the chat open in the
+  same view on the new page (with that page's context) — browsing WITH the
+  assistant, as docking intends. Mobile and main view still close so the page
+  stays visible.
+- **2026-07-15** — **Fan Owl: docked side panel** 🧪: a third desktop view — ◨
+  docks the chat as a true right-hand panel (full height) and SHIFTS THE PAGE
+  LEFT (animated margin) so the assistant never covers the site; ❏/⇥ floats it
+  back over, ⤢ returns to main view. Works on both widget styles; the page gets
+  its space back on close; the choice is remembered per visit.
+- **2026-07-15** — **Fan Owl: desktop main view ↔ side panel + the bar wears the
+  nav style** 🧪: on desktop, bar-mode chats now open in a wide centred MAIN view
+  (continuous with the drawer — no jump to the corner); a header ⇥/⤢ toggle
+  switches to the classic side panel and back, remembered for the visit. Fixed:
+  the persistent bar now honours the site's nav-style setting (inline icons,
+  labelled pills above/below the input, ＋ menu, or off) — previously only the
+  chat did, so the setting looked dead on bar-mode sites.
+- **2026-07-15** — **Fan Owl: half-drawer suggestions on the ask bar** 🧪: one
+  input, three altitudes — focusing the persistent bar raises a drawer with the
+  page's suggested topics and lead offer; typing switches to live-filtered
+  matches across all starters, FAQs and pages (current page ranked first, match
+  highlighted, "open page →" rows for matching pages); send or tap grows it into
+  the full chat. Deterministic and instant. Verified end-to-end (6/6 checks).
+- **2026-07-15** — **Fan Owl: homepage hero chat** 🧪: a per-site toggle (next to
+  Widget style) opens the ask box centred when fans land on the home page —
+  avatar, localised greeting ("where should we begin?"), the nav buttons in the
+  site's chosen style, and the ask box; typing starts the chat with the question
+  sent. Folds into the bar/launcher on scroll/dismiss and stays folded for the
+  session. Verified end-to-end with a scripted browser run (8/8 checks).
+- **2026-07-15** — **Fan Owl: persistent ask bar** 🧪: a new per-site widget style
+  (🪄 Personality → Widget style) replaces the floating launcher with an always-on
+  bar at the bottom of every page — outline ＋ opens the nav menu (navigates
+  directly), the brand-ringed input carries the page-aware placeholder, and
+  submitting opens the chat with the question already sent. Theme- and
+  brand-aware; the launcher stays the default. Verified end-to-end with a
+  scripted browser run (8/8 checks).
+
+- **2026-07-14** — **Fan Owl: menu suggestions + nav analytics** 🧪: "🔮 Suggest
+  from website menu" reads the real tabs off the client's site (from its
+  <nav>/<header> — deterministic, no AI) and loads them as an editable custom
+  button list, matched to existing page mappings where possible. Reports gains a
+  **Nav taps** tile and a per-destination breakdown of where fans navigate.
+- **2026-07-14** — **Fan Owl: full nav-button editor** 🧪: the Navigation section
+  under 🪄 Personality now matches the design concept — Auto (buttons derive from
+  your mapped pages) or **Custom**: toggle buttons on/off, rename them, give them
+  an emoji icon, reorder, and add custom links to any path on the site. Up to 8
+  show in whichever placement style the site picked.
+- **2026-07-14** — **Fan Owl: nav fixes + desktop expand** 🧪: tapping a nav
+  button now reliably lands with the NEW page's context (welcome note, that
+  page's pitch/offer and starter pills — a URL-encoding bug ate the page match),
+  and the chat gains a ⤢ expand button on desktop (380px panel ↔ 760px wide
+  view). Verified end-to-end with a scripted browser run.
+- **2026-07-13** — **Fan Owl: quick-nav button modes** 🧪: the widget gains
+  site-navigation buttons derived automatically from the page mappings, in five
+  switchable per-site styles (top icon strip · ＋ menu · centred pills above or
+  below the message box · off) so teams can trial which reads best. Tapping one
+  uses the same take-me-there flow: opens the page, reopens the chat with that
+  page's context.
+- **2026-07-13** — **Fan Owl: widget theming** 🧪: the widget's colours now layer
+  like the rest of Pulse — blank site colour adopts the client's Pulse brand
+  colour, an explicit per-site colour overrides it when it clashes with the
+  website, and a new widget theme (auto/light/dark) restyles the whole chat
+  surface (auto follows the fan's device). Set under Fan Owl → 🪄 Personality.
+- **2026-07-13** — **Fan Owl: ticket-site reader** 🧪: "Read the ticket site" on
+  the Catalogue tab crawls the event's ticket shop and drafts catalogue items —
+  labels, prices, currencies, availability, real buy links and item images — as
+  suggestions the promoter reviews and saves (existing items never touched).
+  Interim until the Howler catalogue API feeds this directly.
+- **2026-07-13** — **Fan Owl: fan-language auto-switch + default language** 🧪:
+  the Owl now detects the fan's device language and opens in it — chat replies,
+  greeting and the widget's own buttons/prompts (EN·AF·IT·ES·FR·DE·PT·NL) — and
+  always mirrors whatever language the fan writes. Each site sets a default
+  language as the fallback (Fan Owl → Personality).
+- **2026-07-13** — **Fan Owl: per-site personality** 🧪: each site's Owl is now
+  personalisable by the client — uploaded face (avatar), name, intro line, voice
+  brief, house dos & don'ts, and 💡 insider-tip knowledge entries the Owl
+  volunteers when relevant. Style-only by design (the no-invented-facts /
+  no-fake-urgency rules always outrank the persona); surfaced in the Admin → AI
+  audit. New 🪄 Personality tab on both the admin and client Fan Owl editors.
+
+- **2026-07-13** — **Fan Owl: site navigation + image uploads** 🧪: the chat now
+  shows the page the fan is on and the Owl can take them to any mapped page of the
+  website ("show me the lineup" → a **Take me there** button that opens the page
+  and reopens the chat in its context). Reopening the chat on a different page
+  re-surfaces that page's pitch, offer and suggested questions (which now always
+  show, per page) instead of just resuming the old thread. Catalogue images can
+  now be **uploaded** in the editor (auto-resized, hosted by Pulse) instead of
+  pasting URLs — both in Admin → client → Fan Owl and client Settings → Fan Owl.
+- **2026-07-11** — **🎯 App-audience groups → LIVE Engage segments** 🧪 (new):
+  **tap any tile** on the App-audience card (app users, holders/buyers on or
+  off the app, never-ticketed fans, group-buy upgraders) to save that group as
+  a **live Engage segment** — members re-compute from PostHog + ticketing at
+  every count and send, per event or across the client's Pulse. The card also
+  gains a **headline insight banner** ("5,142 engaged · 38% of holders are app
+  users · 3,981 never got a ticket") with an **📣 Engage them** button that
+  saves the segment and opens a pre-filled campaign; a **🎫 tickets-in-app-hands**
+  summary (share of all tickets sold held by app users, by ticket type); and
+  the **🏆 Super fans** leaderboard gets a Top 10–250 range + save-as-live-segment.
+  Emails stay server-side; requires campaign-approve permission.
+- **2026-07-11** — **🎟 App audience ↔ buyers (email join)** 🧪 (new): the App
+  page's Analytics tab gains an **"App audience vs your buyers"** card — the
+  client's app users (PostHog) matched by email against their ticket buyers
+  (Looker, hard-scoped): who converts, the **"not bought yet"** warm audience,
+  and buyers who skip the app. The **App-users table** gains a 🎟 **Tickets**
+  column (which events each app user holds tickets for) incl. CSV export.
+  Counts stay server-side; only emails already on screen are enriched.
+- **2026-07-11** — **🛒 Checkout funnel + in-app order tracking** on App
+  analytics 🧪: Purchases now counts real order confirmations (the app's
+  order-success screen), and a live funnel card shows tickets viewed →
+  checkout → payment tapped → order confirmed with conversion % per step —
+  per client, any date window.
+- **2026-07-11** — **🎯 CTA clicks by label** on App analytics 🧪: the Looker
+  "CTA clicks by label" tile recreated inside Pulse — live ranked bar chart of
+  which buttons people press in the app (`view_tickets`, `buy_tickets`, …),
+  window-filtered, scoped per client, on both the client App page and the
+  admin management view; label property configurable in the event mapping.
+- **2026-07-10** — **👥 Social+ in-app community analytics** 🧪 (new): direct
+  integration with **Social+** (social.plus) — Pulse pulls a client's app
+  **communities, chat channels, posts, comments & reactions** in daily (or on-tap
+  sync) and shows them on the **📲 App page → Community tab**: totals, a 30-day
+  trend, biggest communities, busiest chats and top posts. One platform key
+  (Admin → Integrations) covers the whole Howler network; admins **link each
+  client's communities & event chats** to them so clients only ever see their
+  own. Read-only; flag `appanalytics.socialplus`.
+- **2026-07-10** — **📲 App analytics (PostHog) ships in beta** — direct PostHog
+  integration for Howler-app engagement: per-event views/uniques/CTA
+  taps/purchases with live today-so-far numbers, an app-user directory
+  (email/name/mobile, CSV export), a management view of the whole app with a
+  per-client lens + event-mapping editor, and a client 📲 App page scoped
+  server-side to their events (feature flag `App analytics`, default off).
+  Looker keeps powering all cross-domain (app × ticketing) reporting.
+- **2026-07-09** — **🌐 Sales site v2 is live** — /sales now serves the new
+  story page (interactive light-mode product demo that tours real screens, the
+  Owl with real channel logos, See/Ask/Act rows with a medium carousel and an
+  animated journey tree, marketer pipeline + ad-sync animation, “Finger on the
+  Pulse”, animated Event Ops site plan) and /sales/features serves the new
+  feature index: benefit-led collapsible sections grouped by See it / Ask it /
+  Act on it / Run the event / Yours-and-trusted, plus a Coming Soon roadmap
+  (Fan Owl, Budgeting, Owl Event Builder, Owl Skills). “In motion” is renamed
+  “In flow” across the site. The v1 pages remain in docs/ as instant rollback.
+- **2026-07-09** — **🎬 “See it in motion”** (sales site): the public sales page
+  gains a nav link + hero button to an animated concept gallery at
+  `/sales/experience` — switchable motion pages telling the Pulse story (data
+  streams → the Owl acts → every surface) plus the Event Ops live site-map
+  concept. Pure marketing surface; figures are illustrative.
+- **2026-07-09** — **Campaign approval + custom-HTML fixes**: (1) approving now
+  validates content **first** (a missing subject can't slip through and wrongly say
+  "approved & sending"); (2) only the **named approvers** are pinged to approve, not
+  the whole team; (3) a fully-approved one-off **no longer auto-sends** — it becomes
+  **Approved — ready to send** and only the **sender** sends it, with a deliberate
+  click; (4) **test sends** go to teammates or any external address (not just
+  yourself); (5) `{{name}}` and other merge fields **personalise reliably** — the
+  name column auto-detects, and custom-HTML test links stay clickable; (6) the
+  **custom-HTML editor is syntax-highlighted** (tags/attributes/values/comments +
+  `{{merge fields}}` each in colour).
+- **2026-07-09** — **Queue-it: live waiting-room stats** 🟡🧪 (new): Pulse pulls a
+  client's Queue-it queue numbers in live — people waiting now, redirects/min,
+  passed through — plus inflow/outflow trend charts (1h→30d). Read-only.
+  Dual-surface: platform account in Admin → Integrations with per-client
+  waiting-room assignment (clients never see another client's rooms), or a
+  client's own customer ID + API key in Settings → Integrations, where the live
+  stats card lives. (§5i)
+- **2026-07-08** — **Nav: your own event categories** 🧪 (new, flag `navcategories`):
+  a client can create their own named categories in the sidebar ("Festivals",
+  "Club nights", "2025 archive") and **drag events into them** — categories take
+  precedence, and anything unfiled still falls under the automatic Upcoming/Past.
+  All editing happens in the nav's "arrange" mode (double-click **Suites**);
+  dual-surface (client self-service + an admin API per client). Beta, off by
+  default — flip it on per client from Admin → Product → Flags.
+- **2026-07-08** — **Nav: reorder suites + Upcoming/Past grouping** ✅ (new): the
+  event list in the sidebar now **drag-to-reorder** (a grip handle on each suite;
+  the chosen order is saved for the client), and suites **auto-group into
+  "Upcoming" and "Past"** using the **live event date from Looker**
+  (`core_events.start_date`, cached) — so a client with a long history sees live
+  events first and finished ones tucked below, with no manual date upkeep. The new
+  **⧉ Duplicate suite** action (Admin → client → Suites) stands up a new event
+  just like an existing one.
+- **2026-07-08** — **"Make it happen" now builds the right campaign** ✅: turning a
+  **Worth a look** suggestion into a campaign no longer forces every idea into the
+  abandoned-cart recipe. Where the AI Owl builder is enabled, "Make it happen" hands
+  the suggestion to the Owl, which reads the idea (e.g. "email past buyers over 35")
+  and drafts the campaign **with the matching audience** for review; otherwise it
+  opens the campaign editor pre-filled with the goal and a blank audience to pick.
+  Also fixed a routing bug where a multi-event client's suggestion could open another
+  event's audience — resolution is now hard-scoped to the suggestion's own event.
+- **2026-07-08** — **✨ What's in Pulse (client-facing feature matrix)** ✅ (new):
+  the client app's **Product** section gains two tabs — **✨ What's in Pulse**, an
+  app-launcher grid of Pulse's areas where every feature opens a plain-language
+  "what it does for you" explanation (statuses in client wording: ✓ Live · Ask us
+  · Early access · On the way), with one-tap CTAs that pre-fill a request on the
+  Product board — and **💬 Your requests** (the existing reports view). The public
+  **`/sales/features`** index gains the same explanations as tap-to-expand rows
+  with a "ask about this in your demo" link. All fed by the one curated catalogue
+  (now with a per-feature description), still governed by the admin Shown/Hidden
+  toggles.
+- **2026-07-08** — **🎖️ Onboarding level 2: gamification + the AM cockpit** 🧪
+  (staging): the journey grows to **five phases** with a dedicated **Meet the
+  Owl** layer (Owl-built audiences/campaign drafts and feedback are auto-detected
+  via provenance + tickets). New **badges & Pulse Points** engine (stickers per
+  phase, outcome-driven activity badges, per-client points; earning only — the
+  reward catalogue is a pending business decision) with a client **Your journey**
+  shelf, points on the Getting-started card and unlock toasts. New **AM cockpit**
+  (journey bars, stalled flags, one-tap nudge) and **AM scorecard/leaderboard**
+  in Admin → Onboarding.
+- **2026-07-08** — **🚀 Client onboarding journey** 🧪 (new): the "Getting started"
+  checklist became a **four-phase layered journey** (fundamentals → goals & first
+  sends → the Owl everywhere → automate & amplify) with almost every step
+  **auto-detected from real usage** (dashboard opened, app installed, Owl asked,
+  WhatsApp linked, Claude/ChatGPT connector used, journey built…). A **branded
+  welcome pack email** sends automatically when the client's first login exists,
+  and each completed phase triggers a **congratulations + "here's what's next"
+  email & inbox message**, with a factual milestone heads-up to the account team.
+  Dual-surface: AMs see the same journey per client (Setup checklist → Client
+  onboarding journey), can tick manual steps, re-send the welcome pack, or opt a
+  client out; wording is editable in Admin → Onboarding → Journey emails.
+- **2026-07-07** — **🎯 Pulse Pixel — website retargeting** 🧪 (new): one snippet on
+  the client's website/ticket shop loads their **Meta / Google / TikTok pixels**
+  (managed from Pulse — changeable without touching the site), fires the standard
+  events, and beacons to Pulse for a built-in "✓ receiving events" install check.
+  **One click creates the standard retargeting audience pack** (visitors 180/30d,
+  viewed tickets 30d, checkout abandoners 14d, purchasers 180d) in the connected
+  Meta + TikTok ad accounts; Google audiences are a guided one-time manual step.
+  GDPR consent mode included. Dual-surface (Admin → Integrations + client
+  self-service); platform API calls not yet verified against live ad accounts.
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and
@@ -789,12 +1650,150 @@ see "The continuous comms loop" above.)*
   can set one up from chat** with a confirm card. Dual-surface, same `alerts.manage`
   permission as Alerts.
 - **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
+- **2026-07-07** — **🔗 Links grouped into categories** ✅ (Engage → Links): the Links
+  landing now opens on **category tiles** — tap one (e.g. **App**, home of every
+  Chotulink/Howler-app link) to see just that category's links, with a clear
+  **← All categories** back link. File links under your own categories from the
+  link editor (existing list or type a new one). Mobile-first; dual-surface (same
+  grouping in Admin → client → 🔗 Deep links).
+- **2026-07-07** — **Test-first releases on the product board** ✅: reports you send us
+  can now be built to a **staging** environment first, checked there, then **promoted to
+  production** — so changes are verified before they hit the live app. In your **My reports**
+  view a new **Testing** step appears in the journey (Building → Testing → Ready for you).
+  **You're the tester**: when your request lands on staging you get a link to try it and an
+  **Approve / Send back** choice — nothing goes live until you (and every other reporter with
+  work on staging) approve it, and you're notified the moment it's in production.
+- **2026-07-07 (night)** — **🦉 Ask the Owl about Pulse itself** 🧪 (new): the Owl now
+  answers product questions — *how do I…*, *what's new*, *what can I do* — right in
+  Owl chat, grounded in a curated, **versioned knowledge base** (editable with no
+  deploy) plus **published release notes only** (nothing unreleased can surface),
+  and **tailored to the user's role, tenant and event** (e.g. omits cashless help
+  for non-cashless events). Deep-links to the right screen and **declines** rather
+  than inventing. Dual-surface: Howler curates + publishes the knowledge in
+  **Admin → Product → 💬 Help knowledge**; the Owl chat (with a ✨ What's-new starter
+  pill) is the client's self-service surface.
+- **2026-07-07 (evening)** — **Deep links: click trends, Owl link tools & ✨ autofill** ✅:
+  nightly click snapshots now power a per-event **clicks-per-day chart + by-source
+  split** (📈 on the Links tab); the **Owl** drafts single links or the whole
+  template set from chat (confirm-button, draft-only); and **✨ Autofill with AI**
+  fills a link's UTM tags + social share preview (rich link previews now editable
+  in Pulse, with a live share-card preview). Completes Phase 3 of the ChottuLink
+  integration.
+- **2026-07-07 (later)** — **Deep links: pick-and-choose import + delete** ✅: the
+  import screen now lists the whole ChottuLink account (new / in Pulse / previously
+  deleted) so you tick exactly what comes in, optionally attached to an event in the
+  same step; links can be deleted (removed from Pulse + switched off in ChottuLink,
+  tombstoned so re-imports don't resurrect them).
+- **2026-07-07 (late)** — **Deep-link templates: every link in one click** ✅: apply a
+  template to an event and Pulse creates the whole link set (main + ticket wallet +
+  lineup + map + feed + chat) against ChottuLink in one go — placeholders fill the
+  event's name/slug into names, paths and UTMs; preview with per-link tick/tweak and
+  collision warnings; per-link retry on failure. Howler starter template built in;
+  clients can save their own sets (Engage → Links → ⚡ Templates).
+- **2026-07-07** — **Deep links into the Howler app (ChottuLink)** 🟡: short branded
+  `howler.chottu.link` URLs created **from Pulse** (Engage → Links + Admin → 🔗 Deep
+  links) instead of one-by-one in the ChottuLink dashboard — tied to events, with UTM
+  tags, app-vs-browser behaviour, click counts and one-tap import of existing links.
+  Needs the ChottuLink API key + domain (platform default, per-client override).
+  Templates (one click = the whole standard link set for an event) are next.
+- **2026-07-05 (late)** — **Flow board: 🔥 transaction heatmap** 🧪: a new 🔥 Heat mode on
+  the venue map turns each station into a heat bloom sized by how much it's *transacting*,
+  colour-coded by category so **bars and gates read at the same time**. A **▶ play-the-day**
+  scrubber time-lapses the night — watch check-ins blaze at the gates at doors, then the heat
+  migrate to the bars at peak and the food court flare late. Toggle **Absolute** (each area vs
+  its own busiest all day) or **Relative** (vs right now), and the **window** (5 / 10 / 20 / 30
+  min / 1 hour) — the number on each station is the transactions in that window. Reads the
+  per-station transaction line we already fetch (no new Looker load); works on light or dark
+  maps. Also: the seven Flow-board views now live BOTH as an expanding pill in the header and
+  as a left-nav dropdown.
+- **2026-07-05 (eve)** — **Signal board: 📅 Day picker · 🛰️ satellite maps · past-event
+  ghost guard** 🧪: multi-day events can now flip Stations/Rhythm (and every deep-dive)
+  between festival days — a day runs daily-start → +24h so the after-midnight tail stays
+  with its party. The venue map can fetch **real aerial imagery** (Esri, licence-safe)
+  for typed coordinates as an alternative to uploading a site plan, fits the screen
+  without scrolling, and Operator mode now lays devices out in tidy rows. Monitors
+  ignore stations silent >30 days, so recycled station names from LAST YEAR's edition
+  can never appear as live streams. The Owl/API can read one festival day too
+  (hours="day:YYYY-MM-DD").
+- **2026-07-05 (pm)** — **Signal board: 🕸️ Network view + one-button view switcher** 🧪:
+  the Network view draws the whole event as a river delta — every OPERATOR pours into
+  their station, stations merge into their type (bars/vendors/gates), types merge into
+  Pulse, with live sparks travelling the full chain and dark operators flashing at the
+  exact tier the blockage lives in. The board's six views now sit behind ONE control
+  that opens a slide-in drawer (Apple-style). Also: the Map gained a Stations/Operators
+  toggle (every device fanned around its station's pin), and the device support-call
+  page now offers the event's device issue categories as tap-to-send reasons.
+- **2026-07-05** — **Signal board: 🗺️ Venue map + 🌊 Flow river** 🧪: upload the event's
+  site plan and drag each station's pin onto it once — the map then goes LIVE: healthy
+  pins ripple green, a dark station's pin flashes red, and when several stations in the
+  same corner degrade together a red **"⚠ AREA" halo** blooms over that part of the venue
+  (network failures are usually by area — now you see WHERE, instantly). Tap a pin for
+  that station's devices & operators. The 🌊 River view shows transactions as moving
+  sparks streaming into Pulse — a choking station's stream stutters red. Both self-service
+  (clients manage their own map) and admin-managed.
+- **2026-07-04 (night)** — **Signal board: Stations view + provider report** 🧪: a new
+  📶 Stations view puts every station's online/offline-through-the-day strip on one
+  screen, grouped by zone, with an average-transactions line overlaid (see throughput
+  track connectivity per station), closed stations greyed, and Online/Offline/Txns/Closed
+  layer toggles + a station filter. Plus a **shareable device-health report** — a
+  print-to-PDF page (📤 on the board) you can send to your **network / operations
+  provider**, and an **ops digest** that emails them the headline numbers + the link on a
+  schedule *and* the moment signal drops below target. Signal flow (all / per category /
+  per station) and device online/offline are also blocks you can add to a Live update.
+- **2026-07-04 (night)** — **One-tap LIVE button** ✅: pick an event's live-ticketing
+  dashboard in Admin → Suites (or the setup wizard) and a red **LIVE** pill shows
+  on that event's sidebar row — clients jump straight to live sales, no drill-down.
+  Also: **double-tap a chart to full-screen** it on mobile, carousels give charts a
+  readable full-width card on phones, and setting up a **live update** now shows the
+  actual numbers each block pulls (+ a "send to me" phone preview) before you go live.
+- **2026-07-04 (night)** — **Device support calls** 🧪 (Event Ops §12): the person at a
+  bar/booth taps one button on the device's saved link (Stock · Manager · Help · Security
+  · Medical) and it reaches dispatch as a live call, **pre-tagged with the station and
+  device** so nothing is filled in but the reason (+ their name, an optional note, and
+  what they've already tried). No app install; the link works from any phone, so a frozen
+  device never blocks a call. Dispatch acknowledges (ETA) + resolves from the new Hive →
+  **Calls** queue. Test mode until go-live (calls reach the test inbox only).
+- **2026-07-04 (night)** — **Alerts reach the person on the ground** 🧪: staff can
+  now opt their own phone into station alerts straight from the public staff
+  portal (🔔 Alerts — web push, no app install, no account), and once an event is
+  live a dark station pushes the assigned crew directly, not just the manager.
+  Hive → Alerts shows a 🔔 next to reachable staff, a **Pause alerts** switch per
+  event, a settable dark **threshold**, status/name **filters**, and a storm
+  guard that folds a site-wide pipe wobble into one note. (WhatsApp session
+  channel + Ops Owl are the next phase.)
+- **2026-07-04 (evening)** — **The board learns to time-travel — and to call for help** 🧪:
+  📶 Signal flow meter with a settable per-event target (default 95% of devices
+  online; green/amber/red); dragging the Event pulse replays the WHOLE board at
+  that moment (tiles, zones, dials); a 30-min status journal (who came back, who
+  went dark, window by window); the last-60-min verdict now follows the dark
+  count (150→51 dark reads "Big improvement"); station on/off follows the device
+  roster's lag truth so a data-pipe stall can no longer paint a trading site
+  black; and 🚨 **staff alerts phase 1**: Hive → Alerts bridges board stations to
+  Event Ops stations (auto name-match + manual mapping) and, when half a
+  station's devices go dark, alerts the staff assigned to it — 🧪 test-mode only
+  (emails the test address with the would-be recipients; staff aren't contacted
+  until Go live). Push/SMS/WhatsApp escalation is the next phase.
+- **2026-07-04 (later)** — **Event Signal grows up in a day** 🧪: station family
+  filter chips (Bars / Vendors / Check-in); tap a station for a centred pop-up
+  deep dive — per-device day timeline with the 🚦 three-colour robot view
+  (online+data / offline-but-synced-later / offline+no data) and a stacked
+  online-vs-offline day graph; 🦉 Owl summary and ↗ Share on both the board and
+  the client Data health tab; gates now count real check-in scans; Event Ops nav
+  tidied into a 🐝 Hive drawer (Live, Devices, Stations, Map, Staff, Checks,
+  Issues, Activity) with Data health and the Signal board alongside.
+- **2026-07-04** — **🎛️ Event Signal — the event as a live site board** 🧪: a map-style
+  view of the whole event in Event Ops: stations grouped into their real venue
+  zones, every device a countable tick (green = sending, red = dark), this hour's
+  scans/transactions per station with a mini trend. Runs off the Data health
+  checks already in place — no extra load — and admins get the same board per
+  event on the Data health page. Floorplan overlay and day-replay are next.- **2026-07-03** — **Briefing focus tiles made dependable** ✅: tiles picked in
   Tune now always feed the briefing — a phase-scoped pick (e.g. "gates board on
   Event Day") whose event has **no dates/phase set** feeds anyway instead of
   silently vanishing, and the Tune modal warns to set the key dates. A
   whole-dashboard pick no longer crowds out the reader's other picks, and admins
   get a **🔍 Diagnose focus tiles** panel on the home briefing showing why each
   pick did or didn't make that briefing.
+
 - **2026-07-03** — **📶 Data health: per-station drill-down & truer metrics** 🧪: the
   live day timeline now filters to one station (or groups all stations under
   headers), every device row is labelled with its station + operator, and clicking
@@ -802,6 +1801,13 @@ see "The continuous comms loop" above.)*
   monitors report **transactions** and check-in monitors **scans** — separate
   metrics, never summed — and closed stations keep their day totals. Roster and
   count reads are aggregation-backed so busy sales days no longer under-count.
+- **2026-07-03** — **Pinpoint the tile + record your screen when reporting** 🧪: filing a
+  bug from a dashboard now lets you say **exactly which tile** is affected (a "which tile
+  is this about?" picker listing that dashboard's tiles) — the tile flows into the ticket,
+  the AI draft, the Copy-for-Claude brief and the triage board, so nobody has to guess.
+  You can also **record your screen** (desktop) as an alternative to a screenshot — perfect
+  for intermittent or interaction bugs — alongside the existing screenshot/video upload
+  (on a phone, attach a video recorded with your camera). Mobile-first, self-service.
 - **2026-07-03** — **📶 Data health goes client-facing + AI** 🧪: live stream health
   per station now has a read-only client tab in Event Ops (streams, device roster,
   day timeline), a 🩺 one-tap AI station diagnose, an AI-drafted **event-level Data

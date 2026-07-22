@@ -64,9 +64,12 @@ function StackedGrid({ tiles = [], carousels = [], filterValues }) {
               </div>
             );
           }
-          // A scrolling carousel: a compact capped swipe band.
+          // A scrolling carousel: a compact capped swipe band — unless it holds
+          // charts/tables (which get full-width cards on mobile and need real
+          // height to be readable, like a standalone mobile chart).
+          const hasBigCards = (c.tiles || []).some((t) => !t.hidden && !isKpiCard(t));
           return (
-            <div key={c.id} style={{ height: Math.min(230, Math.max(150, g.it.h * 16)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+            <div key={c.id} style={{ height: hasBigCards ? 320 : Math.min(230, Math.max(150, g.it.h * 16)), background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
               <Carousel carousel={c} filterValues={filterValues} editable={false} />
             </div>
           );
@@ -107,6 +110,13 @@ function isMetricTile(tile) {
   return vt === 'single_value' || vt === 'single_value_period_over_period';
 }
 
+// "KPI-shaped" carousel card (number/gauge/text) — happy in a slim band.
+// Mirrors Carousel.jsx's isKpiTile; anything else gets a full-width card there.
+function isKpiCard(tile) {
+  const vt = tile.vis?.type || '';
+  return tile.type === 'text' || isMetricTile(tile) || vt.includes('bar_gauge');
+}
+
 // Full-width tiles in the mobile stack don't need their tall desktop heights.
 // Pick a compact height per tile type so metrics stay slim and charts/tables
 // keep just enough room to read.
@@ -124,7 +134,7 @@ function mobileTileHeight(tile) {
 }
 
 
-function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onDuplicateTile, onRemoveTile, onHideTile, carouselHandlers }) {
+function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLayoutChange, onEditTile, onApplyTileQuery, onDuplicateTile, onRemoveTile, onHideTile, carouselHandlers }) {
   // Viewers don't see hidden tiles (or carousels left with nothing visible).
   const visTiles = editable ? tiles : tiles.filter((t) => !t.hidden);
   const visCarousels = editable ? carousels : carousels.filter((c) => (c.tiles || []).some((t) => !t.hidden));
@@ -170,6 +180,7 @@ function DesktopGrid({ tiles = [], carousels = [], filterValues, editable, onLay
             filterValues={filterValues}
             editable={editable}
             onEdit={() => onEditTile?.(tile.id)}
+            onApplyQuery={onApplyTileQuery ? (query) => onApplyTileQuery(tile.id, query) : undefined}
             onDuplicate={() => onDuplicateTile?.(tile.id)}
             onRemove={() => onRemoveTile?.(tile.id)}
             onToggleHide={onHideTile ? () => onHideTile(tile.id) : undefined}

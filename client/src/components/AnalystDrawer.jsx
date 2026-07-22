@@ -106,8 +106,11 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
 
   // Docked: a flex item that pushes the page content aside (no backdrop). The inner
   // panel keeps a fixed width while the wrapper animates 0 → width to slide it in.
+  // Inventive renders a full desktop-width layout (wide analytical tables), so a
+  // narrow drawer CLIPS its right side — give it real room (still leaves the dashboard
+  // usable behind it); the ⛶ full-screen / Overlay handle the very widest content.
   if (docked) {
-    const w = 'min(560px, 44vw)';
+    const w = 'min(880px, 60vw)';
     return (
       <div style={{ position: 'relative', flexShrink: 0, height: '100%', width: open ? w : 0, transition: 'width .28s var(--ease-spring, ease)', overflow: 'hidden' }} aria-hidden={!open}>
         <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: w }}>{panel}</div>
@@ -116,7 +119,7 @@ export default function AnalystDrawer({ open, prewarm = false, onClose, previewE
   }
 
   // Overlay: slides in over the page with a dimmed backdrop.
-  const w = (expanded || isMobile) ? '100%' : 'min(560px, 94vw)';
+  const w = (expanded || isMobile) ? '100%' : 'min(880px, 96vw)';
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80, pointerEvents: open ? 'auto' : 'none' }} aria-hidden={!open}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.42)', opacity: open ? 1 : 0, transition: 'opacity .26s ease', backdropFilter: open ? 'blur(2px)' : 'none', WebkitBackdropFilter: open ? 'blur(2px)' : 'none' }} />

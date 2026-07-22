@@ -51,13 +51,26 @@ Either way, then:
 
 1. **Create the `staging` branch** (once): from `main`, `git push origin main:staging`.
 2. **Set staging secrets** in the Render dashboard for the staging service:
-   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — a staging-only login.
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — a staging-only login. **This is the ONLY
+     way into staging**: password-reset emails can't send (the outbound brake),
+     so "Forgot password" is a dead end there — log in with these seeded
+     credentials.
+   - `APP_URL` — set to the staging URL (e.g.
+     `https://howler-pulse-staging.onrender.com`). It defaults to PRODUCTION's
+     URL, so without it any link staging renders (reset links, email previews,
+     MCP/connector URLs) silently points at prod — the classic "I thought I was
+     on staging" trap.
    - `LOOKER_*` — ideally a **read-only** Looker connection (staging only reads
      data; it never writes to Looker anyway).
    - `ANTHROPIC_API_KEY` — a separate or spend-capped key is wise.
    - Leave `BACKUP_S3_*` and `OPS_SLACK_WEBHOOK_URL` unset (a throwaway env needs
      neither).
    - `SESSION_SECRET` and `MASTER_KEY` are auto-generated per service — leave them.
+   - `FAN_OTP_TEST_CODE` (optional, 6 digits, e.g. `424242`) — the Fan Owl's
+     loyalty verification normally emails a one-time code, which the outbound
+     brake blocks on staging. Set this and that shared code verifies any fan
+     WITHOUT sending. Only honoured while `OUTBOUND_DISABLED=1` is also set, so
+     it can never weaken production.
 3. **Custom domain (optional):** point e.g. `staging.pulse.howler.co.za` at the
    staging service so it's easy to reach. Otherwise use the
    `howler-pulse-staging.onrender.com` URL Render gives you.

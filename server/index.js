@@ -15,13 +15,15 @@ const { convertDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
-const { asyncHandler, errorMiddleware } = require('./http'); const mailer = require('./mailer');
+const { asyncHandler, errorMiddleware, serverError, allowInlineScripts, securityHeaders } = require('./http'); const mailer = require('./mailer');
 const currency = require('./currency'); const language = require('./language'); const messaging = require('./messaging');
 const rateLimit = require('./ratelimit');
+const roles = require('./roles'); // role catalog — required early so early mounts (team.js) can use it
 // Query & scope engine (shared library): the single place Looker queries run and
 // the per-client organiser scope is enforced. Lifted out of this file; behaviour
 // unchanged. See server/query.js.
-const query = require('./query')({ looker, auth });
+const folderDaysSync = require('./folderDaysSync')(db); // folder-level Days-to-go sync (live cascade) → server/folderDaysSync.js
+const query = require('./query')({ looker, auth, folderDaysSync });
 const {
   runLookerQuery, applyScope, stripAnyValue, ANY_VALUE, currentFirstEventSort,
   cleanFilterMap, expandLockMap, effectiveFilterValues, tileQueryBody, daysBeforeOverlayFor,
@@ -37,7 +39,7 @@ const { resolveTileValue, resolveTileRows, resolveTileSeries, resolveTileSeriesA
 const {
   PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults,
   clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority,
-  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles,
+  BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel,
 } = require('./briefing')({ db, store, query });
 
 const app = express();
@@ -56,16 +58,13 @@ process.on('unhandledRejection', (reason) => {
 // Behind a reverse proxy (Caddy/Nginx) in production so Secure cookies + the
 // real client IP/protocol are honoured.
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
-// Security headers (dependency-free, helmet essentials): frame-ancestors 'self' — cross-origin framing (clickjacking) stays blocked,
-// SELF-framing allowed for the admin /split view's two same-origin panes. Plus nosniff, Referrer-Policy, HSTS in prod. Full CSP deferred.
-app.use((req, res, next) => {
-  res.set('X-Content-Type-Options', 'nosniff');
-  res.set('X-Frame-Options', 'SAMEORIGIN');
-  res.set('Content-Security-Policy', "frame-ancestors 'self'");
-  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  if (process.env.NODE_ENV === 'production') res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  next();
-});
+// Request ids + structured access log (JSON lines) + browser-crash intake —
+// the diagnosability spine -> server/reqlog.js. First so every request
+// (even one that fails in a later middleware) carries an id.
+const reqlog = require('./reqlog');
+app.use(reqlog.requestId);
+app.use(reqlog.accessLog);
+app.use(securityHeaders); // dependency-free helmet essentials -> server/http.js
 // Global JSON parser at a modest limit, EXCEPT routes that take large bodies
 // (backup import, settlement PDF uploads) — those parse themselves with a
 // higher limit.
@@ -75,7 +74,9 @@ const parsesOwnBody = (p) => p === '/api/admin/import' || p.startsWith('/api/adm
   || /^\/api\/os\/threads\/[^/]+\/messages$/.test(p) || p === '/api/os/admin/announce'
   // Inbound email may carry attachment PDFs (base64) — os.js parses it with a bigger limit.
   // Bug reports can carry a screenshot/image/video (base64) — tickets.js parses that too.
-  || p === '/api/inbound/email' || p === '/api/my/tickets' || p === '/api/github/webhook';
+  || p === '/api/inbound/email' || p === '/api/my/tickets' || p === '/api/github/webhook'
+  // Resend delivery webhooks verify a svix signature over the RAW bytes — mailWebhooks.js reads the body itself.
+  || p === '/api/webhooks/resend';
 app.use((req, res, next) => (parsesOwnBody(req.path) ? next() : jsonParser(req, res, next)));
 // API responses are personal and live (suites, branding, icons…). Without an
 // explicit header some browsers (Safari especially) heuristically cache GETs,
@@ -90,7 +91,10 @@ app.use(auth.attachUser);
 require('./audit').mount(app, { db });
 // Internal ops alerts (Howler Slack) — background failures raise a human instead
 // of dying in the log stream. Disposable: remove these lines + server/ops.js.
-const ops = require('./ops'); ops.init({ db });
+const ops = require('./ops'); ops.init({ db }); ops.mount(app, { auth });
+reqlog.mount(app, { ops }); // POST /api/client-error -> structured log + throttled ops alert
+// POPIA/GDPR: contact forget/export + entity purge registry -> server/dsar.js.
+const dsar = require('./dsar').mount(app, { db, auth });
 // Nightly DB snapshots + off-box copy (R2/S3) — DR floor → server/backup.js.
 require('./backup').mount(app, { db, auth, notifyOps: (msg) => ops.alert('backup', msg) });
 
@@ -111,26 +115,28 @@ app.use(express.static(staticDir, {
 // Bring legacy JSON data into SQLite on first boot (idempotent), then ensure an
 // admin exists.
 migrate.run();
-auth.seedAdmin();
+auth.seedAdmin(); auth.ensureSuperAdmins(); // seed a login, then the initial Super Admin(s) — see auth.js
 // Apply any version-controlled release-notes seed (authored at source; prod has no
 // git history to summarise). Idempotent — each entry is applied exactly once.
 require('./releaseNotesSeed').applySeed(db);
 // Outbound email (Resend) — disposable module; senders no-op when unconfigured.
 mailer.init({ db, notifyOps: (m) => ops.alert('mailer', m) });
+// Resend bounce/complaint webhooks → global suppressions (protects the shared sending domain).
+require('./mailWebhooks').mount(app, { db, auth, mailer, notifyOps: (m) => ops.alert('mailer', m) });
 // SMS (Clickatell One API) — second channel; no-ops when unconfigured.
 messaging.init({ db });
 // Meta (FB/IG) audience-sync — push a segment to a Custom Audience; per-client.
-const meta = require('./meta');
-meta.init({ db });
+const meta = require('./meta'); meta.init({ db });
 // TikTok audience-sync — same pattern as Meta; per-client pasted token.
 const tiktok = require('./tiktok');
-tiktok.init({ db });
+tiktok.init({ db }); const pixel = require('./pixel'); // Pulse Pixel — tag container + retargeting audience packs (mounted below)
 const slack = require('./slack').mount(app, { db, auth, mailer }); // OUTBOUND — mirror inbox notifications into a client's Slack (+ test/share routes)
 // Social metrics INBOUND — pull organic FB/IG/TikTok stats into Pulse (the read
 // direction; reuses the meta/tiktok tokens + extra asset ids). Daily sync started
 // after the app is up (see startDailySync below).
 const socialMetrics = require('./socialMetrics');
 socialMetrics.init({ db }); const metaAds = require('./metaAds').mount(app, { db, auth, meta }); require('./metaConnect').mount(app, { db, auth }); // Meta PAID performance inbound (deep Meta P1) + "Continue with Facebook" OAuth connect (writes the same metaAccessToken/metaAdAccountId fields)
+require('./queueit').mount(app, { db, auth }); // Queue-it INBOUND — live waiting-room stats (read-only; platform creds with per-client override)
 // Web Push — installable-app notifications (disposable module, own table +
 // routes under /api/push, kill switch `push_enabled`). Mounted before os so the
 // comms spine can push alongside email.
@@ -143,17 +149,23 @@ push.mount(app, { db, auth }); require('./reportingTz').mount(app, { db, auth })
 const owlIngest = require('./owlIngest').mount({ db, insights, anthropicKeyForEntity });
 // Experience OS comms spine — self-contained module (own tables + routes under
 // /api/os). Remove this line + server/os.js to fully uninstall the feature.
-let osApi, waDigestFor; // waDigestFor set when digests mount (used lazily by the WhatsApp Owl scheduler)
+let osApi, waDigestFor, staffInboundFn = null; // waDigestFor set when digests mount; staffInboundFn set when staffAlerts mounts (lets the WhatsApp Owl intercept staff numbers before they reach it)
 const os = require('./os').mount(app, { db, auth, mailer, push, slack, onInbound: (p) => owlIngest.handle({ ...p, getAttachmentBuffer: osApi.getAttachmentBuffer }) });
 osApi = os;
-const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
-require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)) }); // agentic Owl (disposable; askData rides the scope gate)
+const owlUploads = require('./owlUploads').mount(app, { db, auth }); const driveApi = require('./googleDrive').mount(app, { db, auth, insights, anthropicKeyForEntity }); const owlCatalogue = require('./owlCatalogue'); owlCatalogue.mount(app, { db, auth, getExploreFields: (m, v) => getExploreFieldsCached(m, v), listModels: () => looker.listModels() }); const getOwlTools = owlCatalogue.provider(db, () => require('./owlTools')({ query, auth, db, getGoalsApi: () => goalsApi, getAlertsApi: () => alerts, getCampaignsApi: () => actionsApi, getUploadsApi: () => owlUploads, getDriveApi: () => driveApi, getMetaAdsApi: () => metaAds, getPosthogApi: () => posthogApi, resolveTileValue, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getFieldOverrides: () => require('./owlFields').build(db).read(), draftCampaignCopy: (a) => actionsApi.draftCopy(a), designEmailFn: (a) => require('./aiUsage').run({ entityId: a.entityId, kind: 'email_design' }, () => require('./emailDesign').designEmail({ ...a, apiKey: anthropicKeyForEntity(a.entityId), brandColor: mailer.resolveBranding(a.entityId, a.eventSuiteId || '').brandColor, instructions: aiInstructionsFor(a.eventSuiteId || null, a.entityId) })), getSegmentsApi: () => segmentsApi, getEventOpsApi: () => eventopsApi, getDataHealthApi: () => dataHealthApi, getSignalFlow: () => staffAlertsApi.signalFlow, getChottuApi: () => chottuApi, catalogue: owlCatalogue.effective(db) })); // Owl data: uploads + admin-editable catalogue (getOwlTools rebuilds live on field-selection change)
+require('./owlChat').mount(app, { db, auth, insights, uploads: owlUploads, getDriveApi: () => driveApi, messaging, getAlertsApi: () => alerts, getLivePulseApi: () => livepulseApi, getSegmentsApi: () => segmentsApi, getActionsApi: () => actionsApi, getTicketsApi: () => ticketsApi, getChottuApi: () => chottuApi, getExploreFields: (m, v) => getExploreFieldsCached(m, v), getOwlTools, anthropicKeyForSuite, anthropicKeyForEntity, currencyNote: (entityId, suiteId) => currency.aiNote(mailer.resolveBranding(entityId, suiteId).currency), languageNote: (entityId, suiteId) => language.aiNote(mailer.resolveBranding(entityId, suiteId).aiLanguage), whatsappDigestFor: (eid, em) => (waDigestFor ? waDigestFor(eid, em) : Promise.resolve(null)), getStaffInbound: () => staffInboundFn }); // agentic Owl (disposable; askData rides the scope gate)
 require('./owlEmbed').mount(app, { db, auth, rateLimit }); require('./fanOwl').mount(app, { db, auth, insights, rateLimit, anthropicKeyForEntity }); // Owl embeds: the organizer-portal Owl (docs/OWL_EMBED.md) + the fan-facing booking guide on promoters' public sites (docs/specs/FAN_OWL_SPEC.md)
 // ─── Health ───────────────────────────────────────────────────────────────────
-// Health touches SQLite so a wedged DB/disk fails the check (→ Render restarts).
+// Health touches SQLite so a wedged DB fails the check (→ Render restarts), and
+// consults the disk watchdog — a ≥95% disk fails health BEFORE writes start
+// throwing SQLITE_FULL, because reads alone stay green on a full disk.
+const diskGuard = require('./diskGuard');
+diskGuard.start({ dir: process.env.DATA_DIR || require('path').join(__dirname, 'data'), notifyOps: (m) => ops.alert('disk', m) });
 app.get('/health', (_req, res) => {
+  const disk = diskGuard.status();
+  if (disk.critical) return res.status(500).json({ status: 'disk_full', usedPct: Math.round(disk.usedPct * 100) });
   try { db.db.prepare('SELECT 1').get(); res.json({ status: 'ok' }); }
-  catch (e) { res.status(500).json({ status: 'db_error', error: e.message }); }
+  catch (e) { console.error('[health] db check failed:', e.message); res.status(500).json({ status: 'db_error' }); }
 });
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
@@ -173,7 +185,7 @@ function meUser(user) {
 }
 // Auth routes (login/logout/me/forgot/reset/magic + brute-force guard + 2FA
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
-require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser });
+require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, tickets: (eid, user) => appMatchApi.holdingsForScope(eid, user), ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); const appAudienceFor = async (eid) => { try { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(eid).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } }; // 📲 app-audience fact for briefing + digest (flag-gated, fail-soft) · 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
 // Per-user notification channel preferences (self-service).
 app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
@@ -197,76 +209,29 @@ app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
   res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id), matrix: db.getNotifyMatrix(req.user.id) });
 });
 
-// ─── Client self-service team management (team.manage) ─────────────────────────
-// A client Owner manages their own team's logins + roles, scoped to their
-// entity. Mirror of the admin Logins tab. Howler-staff logins are never exposed
-// or editable here; a client can only ever touch its own members.
-function teamMembers(entityId) {
-  return db.listUsers()
-    .filter((u) => u.role !== 'admin' && (u.entityIds || []).includes(entityId))
-    .map((u) => ({ id: u.id, email: u.email, fullName: u.fullName, firstName: u.firstName, lastName: u.lastName, mobile: u.mobile, role: (u.memberships || []).find((m) => m.entityId === entityId)?.role || 'owner', alsoOtherClients: (u.entityIds || []).length > 1 }));
-}
-const ownerCount = (entityId) => teamMembers(entityId).filter((m) => m.role === 'owner').length;
-
-// The client's Howler support contacts — the admins assigned to the account,
-// shown to the client as "Your Howler Support" with each one's job title + email.
-function howlerSupportFor(entityId) {
-  const ent = db.getEntity(entityId);
-  return (ent?.howlerSupportIds || [])
-    .map((id) => db.getUser(id))
-    .filter((u) => u && u.role === 'admin')
-    .map((u) => ({ id: u.id, name: u.fullName || u.email, email: u.email, mobile: u.mobile || '', roleLabel: roles.howlerRoleLabel(u.howlerRole) || 'Account Manager' }));
-}
-
-app.get('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  res.json({ members: teamMembers(req.params.entityId).map((m) => ({ ...m, isYou: m.id === req.user.id })), roles: roles.catalog(), support: howlerSupportFor(req.params.entityId) });
-});
-app.post('/api/my/team/:entityId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { email, password, role, firstName, lastName, mobile } = req.body || {};
-  if (!roles.ROLE_KEYS.includes(String(role || ''))) return res.status(400).json({ error: 'Unknown role' });
-  try {
-    const u = auth.createUser({ email, password, role: 'client', entityIds: [req.params.entityId], firstName, lastName, mobile });
-    db.setMembershipRole(u.id, req.params.entityId, role);
-    res.status(201).json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.put('/api/my/team/:entityId/:userId/role', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const role = String((req.body || {}).role || '');
-  if (!roles.ROLE_KEYS.includes(role)) return res.status(400).json({ error: 'Unknown role' });
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && role !== 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.setMembershipRole(userId, entityId, role);
-  res.json({ ok: true, role });
-});
-app.delete('/api/my/team/:entityId/:userId', auth.requireAuth, auth.requirePermission('team.manage'), (req, res) => {
-  const { entityId, userId } = req.params;
-  const target = teamMembers(entityId).find((m) => m.id === userId);
-  if (!target) return res.status(404).json({ error: 'Not a member of this client' });
-  if (target.role === 'owner' && ownerCount(entityId) <= 1) return res.status(400).json({ error: 'This is the last Owner — promote someone else first.' });
-  db.removeMembership(userId, entityId);
-  res.status(204).end();
-});
+// ─── Client self-service team management (team.manage) → server/team.js ────────
+// A client Owner manages their own team's logins + roles, scoped to their entity.
+// Also owns the first-time "set your password" invite email, reused below by the
+// admin add-user route. Disposable module; remove this line + server/team.js.
+const team = require('./team').mount(app, { auth, db, roles, mailer });
 
 // ─── Backup / restore (full data export & import) ──────────────────────────────
-app.get('/api/admin/export', auth.requireAdmin, (_req, res) => {
+app.get('/api/admin/export', auth.requireSuperAdmin, (_req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="pulse-backup-${new Date().toISOString().slice(0, 10)}.json"`);
   res.send(JSON.stringify(db.exportAll()));
 });
-// Large limit: a full export (with logo/icon data-URLs + dashboard defs) can be big.
-app.post('/api/admin/import', auth.requireAdmin, express.json({ limit: '256mb' }), (req, res) => {
+app.post('/api/admin/import', auth.requireSuperAdmin, express.json({ limit: '256mb' }), (req, res) => { // large limit: a full export (logos/defs) is big
   const data = req.body;
   if (!data || !Array.isArray(data.dashboards) || !Array.isArray(data.entities)) {
     return res.status(400).json({ error: 'That doesn\'t look like a Pulse backup file.' });
   }
   try {
     const counts = db.importAll(data);
+    try { db.recordAction({ userId: req.user.id, action: 'admin.import', label: `Imported backup (${Object.keys(counts).length} tables)`, method: 'POST', path: req.path }); } catch { /* audit best-effort: a full import can inject users/roles, so record WHO did it */ }
     res.json({ ok: true, counts });
   } catch (err) {
-    console.error('[POST /api/admin/import]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err, 'POST /api/admin/import'); // logs full detail + ops-pages; generic message to the browser
   }
 });
 
@@ -294,11 +259,17 @@ app.get('/api/admin/users', auth.requireAdmin, (_req, res) => {
     };
   }));
 });
-app.post('/api/admin/users', auth.requireAdmin, (req, res) => {
-  try { res.status(201).json(auth.createUser(req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+app.post('/api/admin/users', auth.requireAdmin, auth.guardSuperAdminTag, (req, res) => {
+  try {
+    const b = req.body || {};
+    // No password typed → email the new user a set-password link (email-invite).
+    const emailInvite = !(b.password && String(b.password).trim());
+    const u = auth.createUser({ ...b, password: emailInvite ? team.randomTempPassword() : b.password });
+    if (emailInvite) team.emailSetPasswordInvite(u, { invitedBy: req.user.firstName || 'Howler' });
+    res.status(201).json({ ...u, invited: emailInvite });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.put('/api/admin/users/:id', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/users/:id', auth.requireAdmin, auth.guardSuperAdminTag, (req, res) => {
   try {
     const u = auth.updateUser(req.params.id, req.body || {});
     if (!u) return res.status(404).json({ error: 'User not found' });
@@ -328,8 +299,7 @@ app.post('/api/admin/users/promote', auth.requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Role catalog (for the role pickers).
-const roles = require('./roles');
+// Role catalog (for the role pickers). `roles` is required up top so early mounts can use it.
 app.get('/api/admin/roles', auth.requireAdmin, (_req, res) => res.json({ roles: roles.catalog(), howlerRoles: roles.HOWLER_ROLES }));
 // Platform-wide user activity summary (active users, top users / dashboards /
 // features) for the admin Users console.
@@ -455,17 +425,18 @@ app.put('/api/admin/entities/:id', auth.requireAdmin, (req, res) => {
   if (!e) return res.status(404).json({ error: 'Entity not found' });
   res.json(e);
 });
-app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => { db.deleteEntity(req.params.id); res.status(204).end(); });
+// Offboarding must be COMPLETE — FK cascade reaches 4 tables; dsar sweeps the ~50 no-FK feature tables (audit F4).
+app.delete('/api/admin/entities/:id', auth.requireAdmin, (req, res) => res.json(dsar.offboardEntity(req.params.id, req.user.id)));
 
 // Reusable Inventive workspaces — create (name + reference), then link users to them.
 app.get('/api/admin/inventive-workspaces', auth.requireAdmin, (_req, res) => res.json(db.listInventiveWorkspaces()));
-app.post('/api/admin/inventive-workspaces', auth.requireAdmin, (req, res) => res.status(201).json(db.createInventiveWorkspace(req.body || {})));
-app.put('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => {
+app.post('/api/admin/inventive-workspaces', auth.requireSuperAdmin, (req, res) => res.status(201).json(db.createInventiveWorkspace(req.body || {})));
+app.put('/api/admin/inventive-workspaces/:id', auth.requireSuperAdmin, (req, res) => {
   const w = db.updateInventiveWorkspace(req.params.id, req.body || {});
   if (!w) return res.status(404).json({ error: 'Workspace not found' });
   res.json(w);
 });
-app.delete('/api/admin/inventive-workspaces/:id', auth.requireAdmin, (req, res) => { db.deleteInventiveWorkspace(req.params.id); res.status(204).end(); });
+app.delete('/api/admin/inventive-workspaces/:id', auth.requireSuperAdmin, (req, res) => { db.deleteInventiveWorkspace(req.params.id); res.status(204).end(); });
 
 // Sets = reusable dashboard collections (Ticketing, Cashless, …).
 app.get('/api/admin/sets', auth.requireAdmin, (_req, res) => res.json(db.listSets()));
@@ -478,17 +449,21 @@ app.put('/api/admin/sets/:id', auth.requireAdmin, (req, res) => {
 app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSet(req.params.id); res.status(204).end(); });
 
 // ─── Release notes (daily product changelog — Admin → Product) ───────────────
-// Disposable module: own routes + the daily auto-draft tick (kill switch:
-// settings key 'release_notes_auto'). Remove this line + server/releaseNotes.js.
-require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
+// Disposable module: own routes + the hourly auto-draft/refresh tick (kill switch:
+// settings key 'release_notes_auto'). Commits come from the GitHub API (the deploy
+// clone is shallow) via the issue bridge's token — getGithub is a thunk because the
+// bridge mounts a few lines down. Remove this line + server/releaseNotes.js.
+require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey, getGithub: () => github });
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
+require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); require('./supportOwl').mount(app, { db, auth, rateLimit }); // Product help knowledge (Owl's productHelp tool + admin curation; kill switches help_enabled / help_draft_auto) → server/helpBot.js · Support Owl P0a: the customer-support knowledge spine, HelpDocs sync + platform-tier curation (docs/specs/SUPPORT_OWL_SPEC.md; kill switch support_owl_enabled) → server/supportOwl.js
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
 // filter views + lock overrides. Remove this line + server/clientModel.js.
-require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
+require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, convertDashboard, expandLockMap, cleanFilterMap, resolvePhase, resolveEventDate, suiteHasGoals: (sid) => { try { return (goalsApi.listGoals(sid) || []).length > 0; } catch { return false; } } });
+require('./suiteCategories').mount(app, { db, auth }); // client-defined nav categories for grouping events (flag: navcategories) → server/suiteCategories.js
 
 // ─── Dashboards → server/dashboards.js ─────────────────────────────────────────
 // Extracted: dashboard CRUD, Looker import, folders, run-query and drill. The
@@ -497,7 +472,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 require('./dashboards').mount(app, {
   store, db, auth, looker,
   convertDashboard, fetchDashboard, parseDrillUrl,
-  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
+  runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache, folderDaysSync,
 });
 
 // ─── Goals (the Results pillar) → server/goals.js ──────────────────────────────
@@ -507,6 +482,7 @@ require('./dashboards').mount(app, {
 // (which event) apply exactly as a dashboard view would; the tile readers live in server/tileValues.js.
 const goalsApi = require('./goals').mount(app, { db, auth, resolveTileValue, resolveTileSeries, resolveTileSeriesAll, resolveEventDate });
 require('./skills').mount(app, { db, auth, insights, getOwlTools, getGoalsApi: () => goalsApi, anthropicKeyForSuite, aiInstructionsFor, resolveEventDate }); // Skills: autonomous specialists (SKILLS_BRIEF P1) — the Owl's scheduled "push" door (advise-only, backtest + AM feedback); disposable → server/skills.js
+require('./training').mount(app, { db, auth }); // Training: practical exams taken inside Pulse — auto-graded against real system state (Admin → 🎓 Training); disposable → server/training.js
 
 // ── Alerts: metric watchers → server/alerts.js ───────────────────────────────
 // A self-contained module that watches a number (a dashboard tile via the SAME
@@ -610,11 +586,11 @@ async function metricCatalog(entityId) {
 
 // Read a built metric's live number — one measure, the user's dimension filters,
 // scoped to THIS event + client exactly like the dashboards. Fail-closed.
-async function resolveCustomMetric({ model, view, measure, filters, user, suiteId }) {
+async function resolveCustomMetric({ model, view, measure, filters, user, suiteId, live = false }) {
   if (!model || !view || !measure) return null;
   const body = await scopedMetricBody({ model, view, fields: [measure], limit: 1, extraOverrides: filters || {}, user, suiteId });
   if (!body) return null;
-  const data = await runLookerQuery('/queries/run/json_detail', body);
+  const data = await runLookerQuery('/queries/run/json_detail', body, undefined, !!live); // live → bypass Pulse + Looker caches (live event alerts)
   return primaryTileValue(data, {});
 }
 
@@ -636,15 +612,15 @@ async function metricFilterValues({ model, view, field, user, suiteId, entitySco
 
 const alerts = require('./alerts').mount(app, { db, auth, resolveTileValue, resolveCustomMetric, metricCatalog, metricFilterValues, os, mailer, push, messaging, slack });
 
-// ── Status notices: human-authored platform incidents (vs alerts, which watch data) → server/notices.js
-require('./notices').mount(app, { db, auth, os, mailer, messaging });
+// ── Status notices: human-authored platform incidents → server/notices.js ────────
+// Howler staff post a platform issue, update it, resolve it (vs alerts, which watch data).
+require('./notices').mount(app, { db, auth, os, mailer, messaging }); require('./moderation').mount(app, { db, auth }); const socialApi = require('./social').mount(app, { db, auth, rateLimit }); require('./chat').mount(app, { db, auth, rateLimit }); // 🛡 social moderation: rule engine + banned lists + review queue on the social/chat write paths (docs/specs/MODERATION_CONTRACT.md; flag: community.moderation; roles: moderation.manage / platform_moderator) → server/moderation.js require('./instagramImport').mount(app, { db, auth, social: socialApi }); // 📰 Community feed + 💬 event chat channels — organiser/event communities, posts and per-event chat (channels, fan groups, broadcast) served to the Howler app (Social+ replacement, docs/specs/SOCIAL_CONTRACT.md; flags: community / community.chat, kill switches: social_feed_enabled / social_chat_enabled; segment→app-user sync resolver wires in via resolveSegmentMembers) → server/social.js, server/chat.js
 require('./vanity').mount(app, { db, auth, mailer }); // white-labelled /<slug> login per client → server/vanity.js
-const eventopsApi = require('./eventops').mount(app, { db, auth }); // pilot: device/station logistics, per-client opt-in → server/eventops.js
-const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, os, mailer, messaging, eventops: eventopsApi }); // Live Pulse: recurring event-day multi-metric updates (the Alerts page's "Live updates" tab) → server/livepulse.js
+const eventopsApi = require('./eventops').mount(app, { db, auth, push, messaging, mailer }); require('./mapstudio').mount(app, { db, auth, eventops: eventopsApi }); const staffAlertsApi = require('./staffAlerts').mount(app, { db, auth, mailer, push, messaging }) || {}; staffInboundFn = staffAlertsApi.staffInbound; const livepulseApi = require('./livepulse').mount(app, { db, auth, resolveTileValue, resolveTileRows, resolveCustomMetric, resolveEventDate, os, mailer, messaging, eventops: eventopsApi, push, signalFlow: staffAlertsApi.signalFlow }); const surveysApi = require('./surveys').mount(app, { db, auth, rateLimit, listEntityEventIds: (eid) => posthogApi.eventIdsForEntity(eid) }); require('./surveyWeb').mount(app, { db, auth, rateLimit, mailer, surveys: surveysApi, getSegmentsApi: () => segmentsApi }); // device/station logistics + Map Studio (self-service event maps published at /maps/:slug for the app WebView → server/mapstudio.js) + 🚨 staff alerts + Live Pulse recurring event-day updates (the Alerts page's "Live updates" tab) + post-event fan surveys (Pulse ⇄ Howler app, docs/specs/SURVEY_CONTRACT.md) → server/eventops.js, server/staffAlerts.js, server/livepulse.js, server/surveys.js
 
 // ── Pulse: the header "heartbeat" strip's merged feed (alert fires + live tile momentum) → server/pulse.js
 require('./pulse').mount(app, { db, auth, resolveTileValue, alertBeats: alerts.recentBeats });
-const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); // BigQuery→Looker stream monitor (Admin → 📡 Data health; client tab in Event Ops; Owl/MCP tool) → server/dataHealth.js
+const dataHealthApi = require('./dataHealth').mount(app, { db, auth, looker, runLookerQuery, applyScope, os, ops, ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (sid, eid) => aiInstructionsFor(sid || null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); require('./signalReport').mount(app, { db, auth, mailer, dataHealth: dataHealthApi, signalFlow: staffAlertsApi.signalFlow }); require('./venueMap').mount(app, { db, auth }); require('./lineup').mount(app, { db, auth }); // BigQuery→Looker stream monitor (Admin → 📡 Data health) + shareable print-to-PDF device-health report & scheduled/drop-alert ops digest to the network/ops provider → server/dataHealth.js, server/signalReport.js
 
 // ── Weekly goal nudge (push) ─────────────────────────────────────────────────
 // One calm "your goals this week" push per entity (not per-event): goals needing
@@ -717,7 +693,7 @@ app.post('/api/admin/goals/nudge-test', auth.requireAdmin, async (req, res) => {
       ? await push.sendToUser(req.user.id, { title: 'Your goals this week (test)', body: text, url: '/goals' })
       : 0;
     res.json({ sent, wouldSend: !!(attention.length || wins.length), body: text, wins: wins.length, attention: attention.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 setInterval(() => goalNudgeSweep(), 60 * 60 * 1000); // hourly; fires the first morning of each ISO week
 setTimeout(() => goalNudgeSweep(), 30000); // shortly after boot, in case it's the window
@@ -749,9 +725,8 @@ app.post('/api/goals/suites/:suiteId/brief', auth.requireAuth, rateLimit({ windo
     await aiUsage.run({ entityId: su.entityId, kind: 'goals' }, () => insights.streamGoalsBrief({ eventName: su.name, goals, instructions: aiInstructionsFor(suiteId), apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/goals/:suiteId/brief]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the briefing could not be completed]'); res.end(); console.error('[POST /api/goals/:suiteId/brief]', err.message); }
+    else serverError(res, err, 'POST /api/goals/:suiteId/brief');
   }
 });
 
@@ -778,7 +753,7 @@ app.post('/api/goals/:id/gap-plan', auth.requireAuth, rateLimit({ windowMs: 60_0
     res.json({ plan });
   } catch (err) {
     console.error('[POST /api/goals/:id/gap-plan]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -812,7 +787,7 @@ app.get('/api/admin/tile-filter-debug', auth.requireAdmin, async (req, res) => {
       suiteLocks: db.lockedFiltersForSuite(suiteId, dashboardId),
       tiles: out,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { serverError(res, e); }
 });
 
 // Format a Looker date value ("2026-05-29" / ISO) as "29 May 2026" for the
@@ -827,7 +802,7 @@ function fmtEventDate(v) {
 
 app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
   try {
-    const { model, explore, field, suiteId, q: term, pair, filters: extraFilters } = req.body;
+    const { model, explore, field, suiteId, entityId, q: term, pair, filters: extraFilters } = req.body;
     if (!model || !explore || !field) return res.json({ suggestions: [] });
     // Get distinct values by running an inline query for just this dimension.
     // A search term filters server-side (contains for text, exact for numeric
@@ -856,13 +831,13 @@ app.post('/api/filter-suggest', auth.requireAuth, async (req, res) => {
         q.filters = { [field]: variants.map((v) => `%${v}%`).join(',') };
       }
     }
-    // Optional companion scoping (e.g. Event Slug suggestions limited to the
-    // chosen Organiser). Merged before applyScope, so the client's own scope
-    // still wins and can't be widened from the browser.
+    // Optional companion scoping (e.g. Event Slug suggestions limited to the chosen
+    // Organiser). Merged before applyScope, so the client's own scope still wins.
     if (extraFilters && typeof extraFilters === 'object') {
       for (const [k, v] of Object.entries(extraFilters)) if (k && v != null && String(v).trim()) q.filters = { ...(q.filters || {}), [k]: String(v) };
     }
-    if (!(await applyScope(q, req.user, suiteId))) return res.json({ suggestions: [] });
+    // Organiser ceiling (server-side, fails closed); entityId scopes a not-yet-saved suite to its client.
+    if (!(await applyScope(q, req.user, suiteId, entityId))) return res.json({ suggestions: [] });
     let rows;
     try {
       rows = await runLookerQuery('/queries/run/json', q);
@@ -962,7 +937,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
 
   // Built-in (code) layers — read-only.
   const builtins = {
-    systemPrompts: insights.promptRegistry(), skillDefaults: require('./skills').defaultsAudit(db), // per-skill platform playbooks (override || built-in seed)
+    systemPrompts: insights.promptRegistry(),
     roleLenses: Object.entries(ROLE_LENSES).map(([key, v]) => ({ key, label: v.label, focus: v.focus })),
     phaseDefaults: PHASES.map((p) => ({ key: p.key, label: p.label, text: pd[p.key] || '', overridden: !!(savedPhase[p.key] || '').trim() })),
     timeDefaults: TIMES.map((t) => ({ key: t.key, label: t.label, text: td[t.key] || '', overridden: !!(savedTime[t.key] || '').trim() })),
@@ -993,7 +968,7 @@ app.get('/api/admin/ai-overview', auth.requireAdmin, (req, res) => {
       .filter((u) => (u.entityIds || []).includes(ent.id))
       .map((u) => ({ email: u.email, tune: (db.getUserPref(u.id, `briefing_tune:${ent.id}`) || '').trim() }))
       .filter((t) => t.tune);
-    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes, skills: skillsByEntity[ent.id] || [] };
+    return { id: ent.id, name: ent.name, aiContext: (ent.aiContext || '').trim(), owlGuidance: (db.getSetting(`owl_guidance:${ent.id}`, '') || '').trim(), owlMemory: require('./owlMemory').build(db).read('client', ent.id).map((m) => m.text), events, digests: jobsByEntity[ent.id] || [], readerTunes: tunes, skills: skillsByEntity[ent.id] || [], fanOwlPersonas: require('./fanOwl').personaLayers(db.db, ent.id) };
   });
 
   // Tiles & dashboards with custom AI context (count + list, capped).
@@ -1050,110 +1025,33 @@ app.get('/api/admin/ai-resolved-prompt', auth.requireAdmin, (req, res) => {
 });
 
 // ─── Integrations ──────────────────────────────────────────────────────────────
-// Admin sets the PRIMARY Looker + Anthropic accounts (override .env). Clients can
-// set their own, which take precedence for their data. Secrets are write-only:
-// responses only report whether a value is set, never the value itself.
-function applyIntegrationsPatch(body, set) {
-  // `set(key, value)` writes a field; called only for fields the caller changed.
-  const lk = body.looker || {};
-  if (lk.baseUrl !== undefined) set('lookerBaseUrl', String(lk.baseUrl || '').replace(/\/$/, ''));
-  if (lk.clientId !== undefined) set('lookerClientId', String(lk.clientId || ''));
-  if (lk.clientSecret) set('lookerClientSecret', String(lk.clientSecret));
-  if (lk.clearClientSecret) set('lookerClientSecret', '');
-  const an = body.anthropic || {};
-  if (an.apiKey) set('anthropicApiKey', String(an.apiKey));
-  if (an.clearApiKey) set('anthropicApiKey', '');
-  const mt = body.meta || {};
-  if (mt.accessToken) set('metaAccessToken', String(mt.accessToken));
-  if (mt.clearAccessToken) set('metaAccessToken', '');
-  if (mt.adAccountId !== undefined) set('metaAdAccountId', String(mt.adAccountId || ''));
-  if (mt.businessId !== undefined) set('metaBusinessId', String(mt.businessId || ''));
-  // Organic-insights assets (inbound social metrics) — non-secret ids.
-  if (mt.pageId !== undefined) set('metaPageId', String(mt.pageId || ''));
-  if (mt.igUserId !== undefined) set('metaIgUserId', String(mt.igUserId || ''));
-  const tt = body.tiktok || {};
-  if (tt.accessToken) set('tiktokAccessToken', String(tt.accessToken));
-  if (tt.clearAccessToken) set('tiktokAccessToken', '');
-  if (tt.advertiserId !== undefined) set('tiktokAdvertiserId', String(tt.advertiserId || '')); slack.applyPatch(body, set); // Slack: webhook / bot token / channel
-}
-function adminIntegrationsView() {
-  return {
-    looker: {
-      baseUrl: db.getSetting('looker_base_url') || '',
-      clientId: db.getSetting('looker_client_id') || '',
-      clientSecretSet: !!db.getSetting('looker_client_secret'),
-      envFallback: !db.getSetting('looker_base_url') && !!process.env.LOOKER_BASE_URL,
-      configured: looker.isConfigured(),
-    },
-    anthropic: {
-      keySet: !!db.getSetting('anthropic_api_key'),
-      keyHint: maskSecret(db.getSetting('anthropic_api_key')),
-      envFallback: !db.getSetting('anthropic_api_key') && !!process.env.ANTHROPIC_API_KEY,
-      configured: !!adminAnthropicKey(),
-    },
-    // Email (Resend) is platform-level only — it sends from Howler's domain.
-    resend: { ...mailer.status(), recent: mailer.recent() },
-    // Inventive embedded AI analyst (platform-level: one account, per-client workspaces).
-    inventive: {
-      keySet: !!db.getSetting('inventive_api_key'),
-      keyHint: maskSecret(db.getSetting('inventive_api_key')),
-      tokenSet: !!db.getSetting('inventive_embed_auth_token'),
-      tokenHint: maskSecret(db.getSetting('inventive_embed_auth_token')),
-      endpoint: db.getSetting('inventive_api_endpoint') || '',
-      envFallback: !db.getSetting('inventive_api_key') && !!process.env.INVENTIVE_API_KEY,
-      configured: !!((db.getSetting('inventive_api_key') || process.env.INVENTIVE_API_KEY) && (db.getSetting('inventive_embed_auth_token') || process.env.INVENTIVE_EMBED_AUTH_TOKEN)),
-    },
-    locks: getPlatformIntegrationLocks(), // { key: true } — frozen platform integrations
-  };
-}
-function entityIntegrationsView(entityId) {
-  const i = db.getEntityIntegrations(entityId);
-  return {
-    looker: { baseUrl: i.lookerBaseUrl || '', clientId: i.lookerClientId || '', clientSecretSet: !!i.lookerClientSecret },
-    anthropic: { keySet: !!i.anthropicApiKey, keyHint: maskSecret(i.anthropicApiKey) },
-    meta: { tokenSet: !!i.metaAccessToken, tokenHint: maskSecret(i.metaAccessToken), adAccountId: i.metaAdAccountId || '', businessId: i.metaBusinessId || '', pageId: i.metaPageId || '', igUserId: i.metaIgUserId || '' },
-    tiktok: { tokenSet: !!i.tiktokAccessToken, tokenHint: maskSecret(i.tiktokAccessToken), advertiserId: i.tiktokAdvertiserId || '' }, slack: slack.view(i),
-    locks: db.getEntityIntegrationLocks(entityId), // { key: true } — frozen integrations
-  };
-}
-// Per-entity integration keys that can be frozen. A frozen section's changes are
-// dropped server-side (defence in depth — the UI also disables it), so a freeze
-// can't be bypassed by a hand-crafted request.
-const ENTITY_INTEGRATION_KEYS = ['looker', 'anthropic', 'meta', 'tiktok', 'slack'];
-function dropFrozenSections(entityId, body) {
-  const locks = db.getEntityIntegrationLocks(entityId);
-  const b = { ...(body || {}) };
-  // Locked by default: a section is editable only when explicitly unlocked (false).
-  for (const k of ENTITY_INTEGRATION_KEYS) if (locks[k] !== false) delete b[k];
-  return b;
-}
-
-// Platform-level integration freeze locks — same idea as per-client, but for
-// Howler's own accounts, kept in a single setting. Frozen sections are dropped
-// from any save (defence in depth) so a freeze can't be bypassed.
-const PLATFORM_INTEGRATION_KEYS = ['looker', 'anthropic', 'resend', 'inventive'];
-function getPlatformIntegrationLocks() { try { return JSON.parse(db.getSetting('integration_locks') || '{}') || {}; } catch { return {}; } }
-function setPlatformIntegrationLock(key, locked) {
-  const cur = getPlatformIntegrationLocks();
-  cur[key] = !!locked; // store explicit state — absent reads as locked (default)
-  db.setSetting('integration_locks', JSON.stringify(cur));
-  return cur;
-}
+// Patch / masked views / freeze-locks for both tiers live in
+// server/integrationsConfig.js (factory library — secrets stay write-only).
+const {
+  applyIntegrationsPatch, applyMetaHousePatch, adminIntegrationsView, entityIntegrationsView,
+  dropFrozenSections, getPlatformIntegrationLocks, setPlatformIntegrationLock,
+  ENTITY_INTEGRATION_KEYS, PLATFORM_INTEGRATION_KEYS,
+} = require('./integrationsConfig').build({ db, looker, mailer, slack, adminAnthropicKey, maskSecret });
 
 // Admin: primary accounts.
 app.get('/api/admin/integrations', auth.requireAdmin, (_req, res) => res.json(adminIntegrationsView()));
-app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/integrations', auth.requireSuperAdmin, (req, res) => {
   const locks = getPlatformIntegrationLocks();
   const body = { ...(req.body || {}) };
   // Locked by default: a section is editable only when explicitly unlocked (false).
   if (locks.looker !== false) delete body.looker;
   if (locks.anthropic !== false) delete body.anthropic;
-  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key' };
-  applyIntegrationsPatch(body, (k, v) => db.setSetting(map[k], v));
+  if (locks.chottu !== false) delete body.chottu; if (locks.queueit !== false) delete body.queueit; if (locks.socialplus !== false) delete body.socialplus;
+  applyMetaHousePatch(req.body, locks); // Meta house token (agency model) — integrationsConfig.js
+  const map = { lookerBaseUrl: 'looker_base_url', lookerClientId: 'looker_client_id', lookerClientSecret: 'looker_client_secret', anthropicApiKey: 'anthropic_api_key', chottuApiKey: 'chottu_api_key', chottuDomain: 'chottu_domain', queueitCustomerId: 'queueit_customer_id', queueitApiKey: 'queueit_api_key', socialplusApiKey: 'socialplus_api_key', socialplusRegion: 'socialplus_region' };
+  applyIntegrationsPatch(body, (k, v) => { if (map[k]) db.setSetting(map[k], v); }); // unmapped fields are per-entity only — never settings
   // Resend (email) — admin-only, so handled here rather than in the shared patch.
   const re = (locks.resend !== false ? {} : (req.body || {}).resend) || {};
   if (re.apiKey) db.setSetting('resend_api_key', String(re.apiKey));
   if (re.clearApiKey) db.setSetting('resend_api_key', '');
+  // Webhook signing secret (bounce/complaint events → suppressions). Write-only.
+  if (re.webhookSecret) db.setSetting('resend_webhook_secret', String(re.webhookSecret).trim());
+  if (re.clearWebhookSecret) db.setSetting('resend_webhook_secret', '');
   if (re.from !== undefined) db.setSetting('mail_from', String(re.from || '').trim());
   // Global kill switch: '0' makes every outbound email a no-op (all clients).
   if (re.enabled !== undefined) db.setSetting('mail_enabled', re.enabled ? '1' : '0');
@@ -1167,7 +1065,7 @@ app.put('/api/admin/integrations', auth.requireAdmin, (req, res) => {
   res.json(adminIntegrationsView());
 });
 // Freeze / unfreeze a platform integration.
-app.put('/api/admin/integrations/lock', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/integrations/lock', auth.requireSuperAdmin, (req, res) => {
   const { key, locked } = req.body || {};
   if (!PLATFORM_INTEGRATION_KEYS.includes(key)) return res.status(400).json({ error: 'Unknown integration' });
   setPlatformIntegrationLock(key, !!locked);
@@ -1420,9 +1318,9 @@ app.put('/api/admin/entities/:id/integrations/lock', auth.requireAdmin, (req, re
 app.get('/api/admin/integrations/health', auth.requireAdmin, (_req, res) => {
   const clients = [];
   for (const e of db.listEntities()) {
-    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id);
-    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount)) continue;
-    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s } });
+    const m = meta.summary(e.id); const t = tiktok.summary(e.id); const s = socialMetrics.summary(e.id); const sp = socialplus.summary(e.id);
+    if (!(m.configured || t.configured || m.audienceCount || t.audienceCount || s.configured || s.accountCount || sp.configured)) continue;
+    clients.push({ entityId: e.id, name: e.name, channels: { meta: m, tiktok: t, social: s, socialplus: sp } });
   }
   // Most recently active (or failing) clients first.
   clients.sort((a, b) => String(b.channels.meta.lastAt || b.channels.tiktok.lastAt || '').localeCompare(String(a.channels.meta.lastAt || a.channels.tiktok.lastAt || '')));
@@ -1593,9 +1491,8 @@ app.post('/api/insight', auth.requireAuth, rateLimit({ windowMs: 60_000, max: 30
     await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamInsight({ title, visType, fields, rows, filters, userContext, history, instructions, apiKey }, (text) => res.write(text)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/insight]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the insight could not be completed]'); res.end(); console.error('[POST /api/insight]', err.message); }
+    else serverError(res, err, 'POST /api/insight');
   }
 });
 
@@ -1657,9 +1554,8 @@ app.post('/api/dashboard-insight', auth.requireAuth, rateLimit({ windowMs: 60_00
     await aiUsage.run({ entityId: db.getSuite(suiteId)?.entityId || '', kind: 'tile_insight' }, () => insights.streamDashboardInsight({ title: def.title, filters: filterValues, tiles, instructions, apiKey }, (t) => res.write(t)));
     res.end();
   } catch (err) {
-    console.error('[POST /api/dashboard-insight]', err.message);
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else { res.write(`\n\n[error: ${err.message}]`); res.end(); }
+    if (res.headersSent) { res.write('\n\n[error: the insight could not be completed]'); res.end(); console.error('[POST /api/dashboard-insight]', err.message); }
+    else serverError(res, err, 'POST /api/dashboard-insight');
   }
 });
 
@@ -1755,7 +1651,7 @@ const cacheGet = (map, key, ttl) => { const e = map.get(key); return e && Date.n
 const cachePut = (map, key, val) => { map.set(key, { at: Date.now(), val }); if (map.size > 500) map.delete(map.keys().next().value); };
 const briefStore = require('./briefingCache')({
   sql: db.db,
-  getUser: (id) => db.getUser(id),
+  getUser: (id) => db.getUser(id), currentSegment: () => timeSegment(Number(new Intl.DateTimeFormat('en-GB', { timeZone: process.env.REPORTING_TIMEZONE || 'Africa/Johannesburg', hour: 'numeric', hour12: false }).format(new Date()))),
   regenerate: async (user, entityId, segment) => {
     await generateBriefing(user, entityId, segment, { force: true });
     if (clientCatalogue(entityId).suites.length > 1) await generateEvents(user, entityId, segment, { force: true });
@@ -1775,7 +1671,7 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
     res.json(snap);
   } catch (err) {
     console.error('[GET /api/my/snapshot]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -1833,7 +1729,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey, app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1845,7 +1741,7 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     const out = {
       ...base,
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text),
+      bullets: (raw.bullets || []).slice(0, 5).map((b) => ({ text: clipWords(b.text, 400) })).filter((b) => b.text), /* 5th slot = the app-audience point */
       // Cross-event "Worth a look" suggestions (so the portfolio home keeps them).
       suggestions: (raw.suggestions || []).slice(0, 3)
         .map((s) => {
@@ -1880,7 +1776,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     return {
       diag: selected.map((id) => {
         const g = gById[id];
-        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), filters: t.filters || {} })) };
+        return { suiteId: id, suiteName: nameById[id] || '', tiles: (g ? g.tiles : []).slice(0, 12).map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), filters: t.filters || {} })) };
       }),
       dropped: (dropped || []).slice(0, 50),
     };
@@ -1949,7 +1845,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     // past event's cycle) wherever a dashboard has that sync configured — so the
     // briefing's comparisons match what the aligned dashboard shows.
     const tStart = Date.now();
-    const { tiles, catalogue, timing: factTiming, dropped = [], focusDiag = [] } = await buildFacts(user, entityId, force, true);
+    const { tiles, catalogue, timing: factTiming } = await buildFacts(user, entityId, force, true);
     const factsMs = Date.now() - tStart;
     if (!tiles.length) return { available: false };
     const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
@@ -1964,18 +1860,18 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
     const goals = await goalsP;
     const goalsWaitMs = Date.now() - tGoals;
     const tLlm = Date.now();
-    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHome({ tiles, profile: profileForAi, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), messages: msgs, capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     const _timing = { totalMs, factsMs, goalsWaitMs, llmMs, facts: factTiming };
     console.log(`[briefing-timing] single entity=${entityId} force=${!!force} total=${totalMs}ms facts=${factsMs}ms goalsWait=${goalsWaitMs}ms llm=${llmMs}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const msgIds = new Set(msgs.map((m) => m.id));
-    const out = { // _focus/_dropped: admin-only diagnose — why each focus pick did/didn't feed (see ClientHome)
-      available: true, ...(user.role === 'admin' ? { _focus: focusDiag, _dropped: dropped } : {}),
+    const out = {
+      available: true,
       generatedAt: new Date().toISOString(),
       headline: String(raw.headline || '').slice(0, 600),
-      bullets: (raw.bullets || []).slice(0, 4)
+      bullets: (raw.bullets || []).slice(0, 5) // 5th slot = the app-audience point when the flag is on
         .map((b) => ({ text: clipWords(b.text, 400), link: link(b.dashboardId), threadId: msgIds.has(b.threadId) ? b.threadId : null }))
         .filter((b) => b.text),
       suggestions: (raw.suggestions || []).slice(0, 3)
@@ -1998,7 +1894,7 @@ app.get('/api/my/briefing', auth.requireAuth, async (req, res) => {
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -2013,7 +1909,7 @@ app.get('/api/my/briefing/events', auth.requireAuth, async (req, res) => {
     res.json(out);
   } catch (err) {
     console.error('[GET /api/my/briefing/events]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -2203,7 +2099,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // The single-pass (flat) digest over all the facts — used for single-event
   // clients, and as the safety net if the multi-event pass can't be produced.
   const buildFlat = async () => {
-    const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel() }));
+    const digestApp = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'digest' }, () => insights.digestBrief({ tiles: factTilesAll, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: actionsSummaryFor(entityId), capabilities: ACTION_CAPABILITIES, goals, today: todayLabel(), app: digestApp }));
     // A single-event digest scopes all its links/actions to that one event; the
     // multi-event fallback (flat over several) has no single event to assert.
     const flatSuite = selSuiteIds.length === 1 ? selSuiteIds[0] : '';
@@ -2236,7 +2132,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
       for (const t of factTilesAll) { if (!bySuite.has(t.suiteId)) bySuite.set(t.suiteId, []); bySuite.get(t.suiteId).push(t); }
       const groups = selSuiteIds.map((id) => ({ suiteId: id, suiteName: nameById[id] || '', tiles: bySuite.get(id) || [] })).filter((g) => g.tiles.length);
       const today = todayLabel();
-      const acts = actionsSummaryFor(entityId);
+      const acts = actionsSummaryFor(entityId); const digestApp = await appAudienceFor(entityId); // 📲 one app-audience block for the portfolio overview
       // Followed-tile visuals, grouped into the event each tile belongs to.
       const visualsBySuite = {};
       if (followedVisual && followedFacts.length) {
@@ -2244,7 +2140,7 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
         for (const id of Object.keys(visualsBySuite)) visualsBySuite[id] = renderFollowed(visualsBySuite[id]);
       }
       const [ovRaw, evRaws] = await aiUsage.run({ entityId, kind: 'digest' }, () => Promise.all([
-        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today }),
+        insights.digestBriefMulti({ groups, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals, today, app: digestApp }),
         Promise.all(groups.map((g) => insights.digestBrief({ tiles: g.tiles, roleLabel: lens.label, roleFocus: effectiveFocus, catalogue, instructions, apiKey, actions: acts, capabilities: ACTION_CAPABILITIES, goals: [], today })
           .then((r) => ({ g, r }))
           .catch((e) => { console.error(`[digest] event section failed (${g.suiteName}):`, e.message); return { g, r: null }; }))),
@@ -2290,25 +2186,14 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   // EXCLUDED and why (scope blocked vs no rows vs error) — so a missing source
   // (e.g. GA4) isn't a black box. Only attached when explicitly requested.
   if (debug) {
-    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
+    out.facts = factTilesAll.map((t) => ({ dashTitle: t.dashTitle, setName: t.setName, title: t.title, value: factValueLabel(t), rows: (t.rows || []).length, span: factSpanLabel(t), suiteName: byId[t.dashboardId]?.suiteName || '', filters: t.filters || {} }));
     out.dropped = dropped;
   }
   return out;
 }
 
-// Best display value for a fact tile (first measure → table calc → dimension of
-// the first row), preferring Looker's rendered string. Used by the digest
-// facts inspector to show what each tile resolved to.
-function factValueLabel(t) {
-  const row = (t.rows || [])[0];
-  if (!row) return '—';
-  const fields = [...(t.fields?.measures || []), ...(t.fields?.table_calculations || []), ...(t.fields?.dimensions || [])];
-  for (const f of fields) {
-    const cell = row[f.name];
-    if (cell && (cell.rendered != null || cell.value != null)) return String(cell.rendered != null ? cell.rendered : cell.value);
-  }
-  return '—';
-}
+// factValueLabel / factSpanLabel (the digest facts-inspector helpers) live in
+// server/briefing.js with the rest of the fact-tile layer.
 
 // Selectable tiles per client, grouped by dashboard — drives the curated
 // digest picker. Only data tiles (with fields, not text) can be chosen.
@@ -2431,7 +2316,7 @@ app.get('/api/admin/sms-config', auth.requireAdmin, (_req, res) => {
   const key = db.getSetting('clickatell_api_key') || '';
   res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
 });
-app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/sms-config', auth.requireSuperAdmin, (req, res) => {
   const b = req.body || {};
   if (typeof b.apiKey === 'string' && b.apiKey.trim()) db.setSetting('clickatell_api_key', b.apiKey.trim()); // only overwrite when provided
   if ('sender' in b) db.setSetting('sms_sender', String(b.sender || '').slice(0, 40));
@@ -2440,7 +2325,7 @@ app.put('/api/admin/sms-config', auth.requireAdmin, (req, res) => {
   res.json({ configured: !!key, keyHint: maskSecret(key), sender: db.getSetting('sms_sender', ''), endpoint: db.getSetting('clickatell_endpoint', '') });
 });
 // Send a test SMS to a number (admin) — confirms the provider end to end.
-app.post('/api/admin/sms-test', auth.requireAdmin, asyncHandler(async (req, res) => {
+app.post('/api/admin/sms-test', auth.requireSuperAdmin, asyncHandler(async (req, res) => {
   const to = String((req.body || {}).to || '').trim();
   if (!to) return res.status(400).json({ error: 'A phone number is required' });
   const r = await messaging.sendSms({ to, text: 'Howler : Pulse — SMS is connected ✓' });
@@ -2451,7 +2336,7 @@ app.post('/api/admin/sms-test', auth.requireAdmin, asyncHandler(async (req, res)
 app.get('/api/admin/notification-settings', auth.requireAdmin, (_req, res) => {
   res.json({ ackReminderHours: Number(db.getSetting('ack_reminder_hours', '12')) || 12 });
 });
-app.put('/api/admin/notification-settings', auth.requireAdmin, (req, res) => {
+app.put('/api/admin/notification-settings', auth.requireSuperAdmin, (req, res) => {
   let h = Number((req.body || {}).ackReminderHours);
   if (!Number.isFinite(h)) h = 12;
   h = Math.min(168, Math.max(1, Math.round(h))); // clamp 1h..7d
@@ -2495,15 +2380,14 @@ function tileCatalogueWithFields(entityId) {
 }
 // The templates a client can run, each with its audience pre-resolved + presets.
 // `prefer` ({ dashboardId, suiteId }) — when a suggestion pointed at a specific
-// dashboard/event (e.g. "Worth a look" → abandoned carts), try that one FIRST so
-// the audience resolves to exactly that event for a multi-event client.
+// dashboard/event (e.g. "Worth a look" → abandoned carts), scope the audience to
+// THAT event. A deep-linked suggestion is about ONE event, so we HARD-restrict
+// resolution to its suite: otherwise resolveAudience (first-match wins) could fall
+// through to another event's abandoned-cart tile and target the wrong crowd (e.g.
+// a Golden Hour suggestion binding Palette Range's audience). If that event has no
+// matching tile we return ready:false so the user picks — never a different event.
 function resolveActionTemplates(entityId, prefer = {}) {
-  let dashboards = tileCatalogueWithFields(entityId);
-  const { dashboardId, suiteId } = prefer;
-  if (dashboardId) {
-    const isPref = (d) => d.dashboardId === dashboardId && (!suiteId || d.suiteId === suiteId);
-    dashboards = [...dashboards.filter(isPref), ...dashboards.filter((d) => !isPref(d))];
-  }
+  const dashboards = actionTemplates.scopeDashboards(tileCatalogueWithFields(entityId), prefer);
   return actionTemplates.list().map((meta) => {
     const t = actionTemplates.get(meta.key);
     const resolved = actionTemplates.resolveAudience(t, dashboards);
@@ -2555,19 +2439,36 @@ function recentMessages(entityId, userId, limit = 6) {
 // learning loop, and the scheduler mount (recurring digest delivery). Mounted
 // here, after its content builder (buildDigestContent) + role lenses exist.
 waDigestFor = (require('./digests').mount(app, { db, auth, mailer, messaging, push, insights, buildDigestContent, ROLE_LENSES, anthropicKeyForEntity, inboxView, notifyOps: (m) => ops.alert('digest', m) }) || {}).whatsappDigestFor;
+// Report Studio: block-based client reports (tiles + text + images + AI analysis) with share links, PDF export and recurring schedules → server/reports.js (spec: docs/specs/REPORT_STUDIO_SPEC.md)
+require('./reports').mount(app, { db, auth, mailer, insights, currency, buildFactsFromTiles, factValueLabel, anthropicKeyForEntity, aiInstructionsFor, notifyOps: (m) => ops.alert('report', m),
+  campaignsFor: (eid) => actionsApi.listForEntity(eid), // campaign blocks: same rows the Engage API reads
+  // app blocks: PostHog rollup, appanalytics-flag-gated + scoped to the client's events (fail closed)
+  appReportFor: async (eid, { days } = {}) => { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); return ids.length ? posthogApi.entityReport(eid, { days: days || 28 }, ids) : null; },
+  // goals blocks: same live-progress resolver the Goals page + digests use (goals-flag-gated, cap 8)
+  goalsFor: async (eid, user) => { if (!require('./flags').enabled(eid, 'goals')) return []; const caches = goalsApi.makeGoalCaches(); const out = []; for (const su of (db.listSuitesForEntity(eid) || [])) for (const g of goalsApi.listGoals(su.id)) { if (out.length >= 8) return out; out.push({ ...(await goalsApi.attachProgress(g, user, caches)), suiteName: su.name }); } return out; },
+  // social blocks: organic social rollup (social-flag-gated, fail closed to empty)
+  social: { accounts: (eid) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accounts(eid) : []), series: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.accountSeries(eid, o) : []), posts: (eid, o) => (require('./flags').enabled(eid, 'social') ? socialMetrics.topPosts(eid, o) : []) },
+  // live blocks: the newest sent Live Pulse run for the chosen event (livepulse-flag-gated; suite must belong to this client)
+  liveLatestFor: (eid, suiteId) => { if (!suiteId || !require('./flags').enabled(eid, 'alerts.livepulse')) return null; for (const p of livepulseApi.listForSuite(suiteId)) { if (p.entityId !== eid) continue; const r = livepulseApi.runsFor(p.id, 1).find((x) => x.status === 'sent'); if (r) return { pulseName: p.name || 'Live update', at: r.at, message: r.message }; } return null; } });
 
-// Onboarding checklist — light-touch "Getting started" guide (auto-detect + manual).
-require('./onboarding').mount(app, { db, auth });
+// Onboarding journey — the phased client onboarding pack (auto-detected steps,
+// welcome pack + phase-completion emails on both surfaces), plus the badges &
+// Pulse Points layer and the account team's cockpit + scorecard over it.
+const onboardingApi = require('./onboarding').mount(app, { db, auth, mailer, os });
+require('./gamify').mount(app, { db, auth, onboarding: onboardingApi });
+require('./onboardingCockpit').mount(app, { db, auth, onboarding: onboardingApi });
 
 // Client setup wizard config — lets AMs edit the back-end setup wizard (step
 // wording, order, and their own custom guidance steps) from the admin UI.
 require('./setupWizard').mount(app, { db, auth });
+const chottuApi = require('./chottuLink').mount(app, { db, auth, rateLimit, insights, anthropicKeyForEntity }); // ChottuLink deep links — event short links + click counts + ✨ autofill (docs/CHOTTULINK_INTEGRATION_SCOPE.md)
 
-// PWA install tracking — records when a user opens Pulse as an installed app.
-require('./installs').mount(app, { db, auth });
+require('./installs').mount(app, { db, auth }); // PWA install tracking — opens of Pulse as an installed app
+pixel.mount(app, { db, auth, rateLimit, meta, tiktok }); // Pulse Pixel — /px.js tag-container loader + /px event collect + retargeting audience packs
 
 // Onboarding & feature telemetry — usage signals to refine the wizard from real behaviour.
 require('./telemetry').mount(app, { db, auth, rateLimit });
+require('./retention').mount({ db, notifyOps: (m) => ops.alert('housekeeping', m) }); // daily prune of unbounded event tables + stuck-scheduled-job sweep
 
 // Campaign email templates — reusable email content, applied when building a campaign.
 require('./campaignTemplates').mount(app, { db, auth });
@@ -2581,7 +2482,7 @@ const billing = require('./billing').mount(app, { db, auth });
 // organiser scoping as the dashboards themselves. Remove this line + actions.js
 // to uninstall.
 const actionsApi = require('./actions').mount(app, {
-  db, auth, mailer, push, messaging, os, billing,
+  db, auth, mailer, push, messaging, os, billing, appAudience: () => appMatchApi, syncJourneyAudience: require('./journeyAudiences')({ db, meta, tiktok }), // journey sync-node → Meta/TikTok (no-op unless connected)
   // Run a tile's query (scoped + suite-locked) and return its rows + fields —
   // the campaign audience source.
   resolveAudience: async ({ entityId, dashboardId, tileId, user, filterOverrides = {}, suiteId = '', limit }) => {
@@ -2616,7 +2517,7 @@ const actionsApi = require('./actions').mount(app, {
   },
 });
 require('./emailBanner').mount(app, { auth, insights, anthropicKeyForEntity, aiInstructionsFor, resolveBranding: mailer.resolveBranding }); // AI email-banner designer (SVG → PNG)
-const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); // AI token metering (Admin → AI → Usage) + per-client custom sending domains
+const aiUsage = require('./aiUsage'); aiUsage.mount(app, { auth, db: db.db }); require('./sendingDomain').mount(app, { db, auth, mailer }); require('./journeys').mount(app, { auth, db, resolveContext: (entityId) => { const ent = db.getEntity(entityId); return { apiKey: anthropicKeyForEntity(entityId), clientName: ent?.name, clientContext: ent?.aiContext || '', instructions: aiInstructionsFor(null) }; } }); // AI usage metering + custom sending domains + Journeys Owl builder (disposable modules)
 // Materialise a built-in recipe (e.g. 'abandoned_cart') as a real audience source
 // by auto-resolving its tile from this client's data. Shared by segments + the
 // setup-nudge personalisation (the live abandoned-cart count).
@@ -2649,10 +2550,10 @@ require('./setupNudge').mount(app, { db, auth, mailer, os, insights, resolveReci
 // ─── Public platform surface → server/publicSurface.js ─────────────────────────
 // API keys + /api/v1 (read + drafts) + remote MCP server + OAuth connect flow —
 // thin adapters over the SAME service core; the app's scope gates apply.
-require('./publicSurface').mount(app, {
-  db, auth, rateLimit, mailer, currency, language, clientCatalogue,
-  resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
+const publicApi = require('./publicSurface').mount(app, {
+  db, auth, rateLimit, mailer, currency, language, clientCatalogue, resolveTileValue, resolveTileRows, segmentsApi, actionsApi, goalsApi, getOwlTools, owlCatalogue,
 });
+require('./peopleFlow').mount(app, { db, auth, queryData: publicApi.core.queryData }); // 🌊 crowd movement between touchpoints
 
 // ─── Briefing configuration ─────────────────────────────────────────────────────
 // Admin: global briefing rules + editable phase defaults.
@@ -2727,7 +2628,7 @@ app.post('/api/my/refine-text', auth.requireAuth, async (req, res) => {
   try {
     const refined = await aiUsage.run({ entityId, kind: 'refine' }, () => insights.refineText({ text, purpose: String(req.body?.purpose || '').slice(0, 120), instructions: aiInstructionsFor(null), apiKey }));
     res.json({ text: refined });
-  } catch (e) { console.error('[POST /api/my/refine-text]', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('[POST /api/my/refine-text]', e.message); serverError(res, e); }
 });
 app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   const entityId = homeEntityFor(req);
@@ -2754,33 +2655,7 @@ app.put('/api/my/briefing-tune', auth.requireAuth, (req, res) => {
   res.json({ tune: db.getUserPref(req.user.id, `briefing_tune:${entityId}`), tiles });
 });
 
-// ─── Share links ─────────────────────────────────────────────────────────────
-// Mint a short link to a dashboard + the sender's current filters. Never an
-// auth bypass: /s/:token just redirects; the dashboard route still requires
-// login and applies organiser scoping to the recipient.
-app.post('/api/share', auth.requireAuth, (req, res) => {
-  const { suiteId, dashboardId, filters } = req.body || {};
-  const def = store.get(dashboardId);
-  if (!def) return res.status(404).json({ error: 'Dashboard not found' });
-  if (!auth.canAccessDashboard(req.user, def)) return res.status(403).json({ error: 'Not allowed' });
-  if (suiteId && !auth.canAccessSuite(req.user, suiteId)) return res.status(403).json({ error: 'Not allowed' });
-  const clean = {};
-  for (const [k, v] of Object.entries(filters || {})) {
-    if (typeof v === 'string' && v.trim() !== '') clean[String(k).slice(0, 120)] = v.slice(0, 300);
-  }
-  const token = db.createShareLink({ suiteId: suiteId || '', dashboardId, filters: clean, createdBy: req.user.email });
-  res.status(201).json({ token, path: `/s/${token}` });
-});
-// Resolve a share token → redirect to the dashboard with filters in the URL.
-// No auth needed for the translation; if the visitor isn't logged in, the SPA
-// shows login and (URL preserved) lands them on the dashboard afterwards.
-app.get('/s/:token', (req, res) => {
-  const link = db.getShareLink(req.params.token);
-  if (!link) return res.redirect('/');
-  const qs = Object.keys(link.filters || {}).length ? `?f=${encodeURIComponent(JSON.stringify(link.filters))}` : '';
-  const target = link.suiteId ? `/suite/${link.suiteId}/d/${link.dashboardId}${qs}` : `/d/${link.dashboardId}${qs}`;
-  res.redirect(target);
-});
+require('./shareLinks').mount(app, { db, auth, store }); // dashboard share-by-link (/api/share + /s/:token) → server/shareLinks.js
 
 // ─── Briefing feedback ───────────────────────────────────────────────────────
 // like / dislike (+comment) / investigate (asks Howler to dig into the data).
@@ -2903,7 +2778,7 @@ app.post('/api/admin/library/:id/describe', auth.requireAdmin, async (req, res) 
     res.json(saved);
   } catch (err) {
     console.error('[POST /api/admin/library/:id/describe]', err.message);
-    res.status(500).json({ error: err.message });
+    serverError(res, err);
   }
 });
 
@@ -2916,7 +2791,7 @@ app.get('/api/looker-dashboard/:id', auth.requireAdmin, async (req, res) => {
       folder: data.dashboard.folder?.name || null,
       tileCount: data.elements.length, filterCount: data.filters.length,
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
@@ -2927,28 +2802,17 @@ app.post('/api/recreate', auth.requireAdmin, async (req, res) => {
   try {
     const source = await fetchDashboard(sourceDashboardId);
     res.json(await recreateDashboard(source, newTitle, targetFolderId));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { serverError(res, err); }
 });
 
 // ─── Living docs ──────────────────────────────────────────────────────────────
 // The sales product-overview page (+ admin-filtered markdown), the curated
 // feature matrix with admin include/exclude, and the public /sales site all
 // live in server/productSite.js.
+// (…including the client/developer API guide at /api-guide and the self-hosted
+// /vendor/md-lite.js renderer both living-doc pages use — all living-doc serving
+// now lives in productSite.js so it stays together and out of this root file.)
 require('./productSite').mount(app, { db, auth });
-
-// The client/developer API guide — same living-doc pattern, shareable at
-// /api-guide (editing docs/CLIENT_API_GUIDE.md updates the page).
-const API_GUIDE_HTML = path.join(__dirname, '../docs/client-api-guide.html');
-const API_GUIDE_MD = path.join(__dirname, '../docs/CLIENT_API_GUIDE.md');
-app.get(['/api-guide', '/client-api-guide', '/client-api-guide.html'], (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(API_GUIDE_HTML);
-});
-app.get('/client-api-guide.md', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.type('text/markdown; charset=utf-8');
-  res.sendFile(API_GUIDE_MD);
-});
 
 // The Experience OS pitch — a self-contained HTML deck. Served at a clean URL so
 // it's shareable. (Scoped to this one doc; the rest of docs/ stays internal.)
@@ -2973,25 +2837,23 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(staticDir, 'index.html'));
 });
 
-// Single error-handling middleware (mounted last). Catches sync throws from any
-// route + async rejections forwarded by asyncHandler; logs full 5xx server-side
-// and returns a sanitized message (never leaks internal error text). See http.js.
+// Single error-handling middleware (mounted last): sync throws + asyncHandler-
+// forwarded rejections → full 5xx logged server-side, sanitized message out. See http.js.
 app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3045;
 const server = app.listen(PORT, () => {
   console.log(`Howler Looker Tool running on http://localhost:${PORT}`);
   console.log(`Looker instance: ${looker.lookerBaseUrl() || '(not configured — set in Admin → Integrations)'}`);
-  // Pull organic social stats once a day for every connected client (best-effort).
-  socialMetrics.startDailySync({ listEntities: () => db.listEntities() });
+  // Pull organic social stats + Social+ community analytics once a day (best-effort).
+  socialMetrics.startDailySync({ listEntities: () => db.listEntities() }); socialplus.startDailySync({ listEntities: () => db.listEntities() });
 });
 
-// Graceful shutdown — Render sends SIGTERM on EVERY deploy. Stop accepting new
-// connections and give in-flight requests a moment to drain, then exit. Work
-// interrupted anyway is designed to survive the kill: campaign blasts resume
-// from the action_sends ledger on next boot, and digest/alert run-slots are
-// claimed before sending, so a killed send is missed (and visible), never
-// double-delivered.
+// Graceful shutdown — Render sends SIGTERM on EVERY deploy: stop accepting new
+// connections, drain in-flight requests, then exit. Interrupted work survives the
+// kill (campaign blasts resume from the action_sends ledger on next boot; digest/
+// alert run-slots are claimed before sending — a killed send is missed and
+// visible, never double-delivered).
 process.on('SIGTERM', () => {
   console.log('[shutdown] SIGTERM received — draining connections');
   server.close(() => process.exit(0));

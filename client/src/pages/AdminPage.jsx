@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId } from 'react';
+import { useState, useEffect, useRef, useMemo, useId, Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -14,16 +14,27 @@ import OwlAddressCard from '../components/OwlAddressCard.jsx';
 import ApiKeysCard from '../components/ApiKeysCard.jsx';
 import DriveSourcesCard from '../components/DriveSourcesCard.jsx';
 import MetaConnectCard from '../components/MetaConnectCard.jsx';
+import QueueItCard from '../components/QueueItCard.jsx';
+import SocialPlusPanel from '../components/SocialPlusPanel.jsx';
+import { PosthogSettingsCard, PosthogFeedCard, AppAnalyticsAdmin } from '../components/AppAnalytics.jsx';
 import DigestManager from '../components/DigestManager.jsx';
+import ReportStudio from '../components/ReportStudio.jsx';
 import CampaignManager from '../components/CampaignManager.jsx';
 import SegmentManager from '../components/SegmentManager.jsx';
+import ChottuLinks from '../components/ChottuLinks.jsx';
+import SurveyManager from '../components/SurveyManager.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
+import MapStudio from '../components/MapStudio.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
+import FlagsMatrix from '../components/FlagsMatrix.jsx';
+import ModerationManager from '../components/ModerationManager.jsx';
+import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
+import SupportOwlAdmin from '../components/SupportOwlAdmin.jsx';
 import { openReport } from '../components/ReportWidget.jsx';
 import OwlGuidanceEditor from '../components/OwlGuidanceEditor.jsx';
 import OwlFieldDictionary from '../components/OwlFieldDictionary.jsx';
@@ -33,6 +44,7 @@ import OwlEmbedAdmin from '../components/OwlEmbedAdmin.jsx';
 import FanOwlAdmin from '../components/FanOwlAdmin.jsx';
 import SkillsAdmin, { SkillDefaultsEditor } from '../components/SkillsAdmin.jsx';
 import OwlCatalogue from '../components/OwlCatalogue.jsx';
+import TrainingAdmin from '../components/TrainingAdmin.jsx';
 import UploadHint from '../components/UploadHint.jsx';
 import { currencyList } from '../lib/currency.js';
 import { languageList } from '../lib/language.js';
@@ -149,36 +161,49 @@ const ADMIN_NAV = [
   ['settlements', 'Settlements', '💰'],
   ['billing', 'Billing', '💳'],
   ['integrations', 'Integrations', '🔌'],
+  ['appanalytics', 'App analytics', '📲'],
   ['email', 'Email', '✉️'],
   ['status', 'Status', '🚨'],
   ['datahealth', 'Data health', '📡'],
+  ['training', 'Training', '🎓'],
   ['product', 'Product', '📦'],
   ['backup', 'Backup', '💾'],
 ];
+// Tabs that are entirely Super-Admin surfaces — hidden for generic Howler admins
+// (the server also 403s their write routes). Billing stays visible to all admins
+// (rollup + read-only master; client-level fees live under each client).
+const SUPER_ONLY_TABS = new Set(['integrations', 'status', 'backup']);
 
 export default function AdminPage() {
   const [tab, setTab] = useState('entities');
   const [fields, setFields] = useState([]);
   const isMobile = useIsMobile();
+  const { isSuperAdmin } = useAuth();
+  const nav = ADMIN_NAV.filter(([key]) => isSuperAdmin || !SUPER_ONLY_TABS.has(key));
   useEffect(() => { api.adminFilterFields().then(setFields).catch(() => setFields([])); }, []);
+  // Defence-in-depth: if state ever lands on a super-only tab without the role,
+  // fall back to the safe default instead of rendering the gated surface.
+  const safeTab = (!isSuperAdmin && SUPER_ONLY_TABS.has(tab)) ? 'entities' : tab;
 
   const content = (
     <>
-      {tab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
-      {tab === 'wizard' && <SetupWizard fields={fields} />}
-      {tab === 'users' && <UsersTab />}
-      {tab === 'sets' && <Sets />}
-      {tab === 'library' && <Library />}
-      {tab === 'ai' && <AISettings />}
-      {tab === 'onboarding' && <OnboardingInsights />}
-      {tab === 'settlements' && <Settlements />}
-      {tab === 'billing' && <Billing />}
-      {tab === 'integrations' && <AdminIntegrations />}
-      {tab === 'email' && <MailLog />}
-      {tab === 'status' && <StatusNoticesAdmin />}
-      {tab === 'datahealth' && <DataHealthAdmin />}
-      {tab === 'product' && <Product />}
-      {tab === 'backup' && <BackupRestore />}
+      {safeTab === 'entities' && <Entities fields={fields} onOpenWizard={() => setTab('wizard')} />}
+      {safeTab === 'wizard' && <SetupWizard fields={fields} />}
+      {safeTab === 'users' && <UsersTab />}
+      {safeTab === 'sets' && <Sets />}
+      {safeTab === 'library' && <Library />}
+      {safeTab === 'ai' && <AISettings />}
+      {safeTab === 'onboarding' && <OnboardingHub />}
+      {safeTab === 'settlements' && <Settlements />}
+      {safeTab === 'billing' && <Billing />}
+      {safeTab === 'integrations' && <AdminIntegrations />}
+      {safeTab === 'appanalytics' && <AppAnalyticsAdmin />}
+      {safeTab === 'email' && <MailLog />}
+      {safeTab === 'status' && <StatusNoticesAdmin />}
+      {safeTab === 'datahealth' && <DataHealthAdmin />}
+      {safeTab === 'training' && <TrainingAdmin />}
+      {safeTab === 'product' && <Product />}
+      {safeTab === 'backup' && <BackupRestore />}
     </>
   );
 
@@ -192,7 +217,7 @@ export default function AdminPage() {
           <Link to="/dashboards" style={dashAdminBtn}>📊 Dashboard admin</Link>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', paddingBottom: 4 }}>
-          {ADMIN_NAV.map(([key, label]) => <Tab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</Tab>)}
+          {nav.map(([key, label]) => <Tab key={key} active={safeTab === key} onClick={() => setTab(key)}>{label}</Tab>)}
           <Tab active={false} onClick={openReport}>💬 Report</Tab>
         </div>
         {content}
@@ -209,15 +234,15 @@ export default function AdminPage() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '188px minmax(0,1fr)', gap: 28, alignItems: 'start' }}>
         <nav className="glass" style={{ position: 'sticky', top: 12, display: 'flex', flexDirection: 'column', gap: 2, padding: 8, borderRadius: 14 }}>
-          {ADMIN_NAV.map(([key, label, icon]) => (
+          {nav.map(([key, label, icon]) => (
             <button key={key} onClick={() => setTab(key)} style={{
               display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer',
               padding: '9px 12px', borderRadius: 9, border: 'none', fontSize: 13.5,
-              fontWeight: tab === key ? 700 : 500,
-              background: tab === key ? 'var(--brand)' : 'transparent',
-              color: tab === key ? '#fff' : 'var(--text)',
+              fontWeight: safeTab === key ? 700 : 500,
+              background: safeTab === key ? 'var(--brand)' : 'transparent',
+              color: safeTab === key ? '#fff' : 'var(--text)',
             }}>
-              <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: tab === key ? 1 : 0.8 }}>{icon}</span>
+              <span style={{ fontSize: 15, width: 18, textAlign: 'center', opacity: safeTab === key ? 1 : 0.8 }}>{icon}</span>
               {label}
             </button>
           ))}
@@ -256,10 +281,10 @@ const FEATURE_LABELS = {
 // Global Reminders defaults — cadence + the editable client-nudge wording. Applies
 // to every client; each client can still override the timing in its own Reminders
 // panel. Lives in the onboarding tab next to the funnel insights.
-function NudgeGlobalSettings() {
+function NudgeGlobalSettings({ defaultOpen = false }) {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [testMsg, setTestMsg] = useState('');
   useEffect(() => { api.getSetupNudgeSettings().then(setS).catch(() => setS(null)); }, []);
   if (!s) return null;
@@ -336,17 +361,257 @@ function NudgeGlobalSettings() {
   );
 }
 
-function OnboardingInsights() {
+// Global onboarding-journey email settings — the welcome pack + phase-completion
+// emails every client gets as they move through the layered journey. Wording is
+// editable here; each client can be opted out in its own Onboarding journey panel.
+function OnboardingMailGlobalSettings({ defaultOpen = false }) {
+  const [s, setS] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const [testMsg, setTestMsg] = useState('');
+  useEffect(() => { api.getOnboardingMailSettings().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  const set = (k, v) => setS((c) => ({ ...c, [k]: v }));
+  const setCopy = (k, v) => setS((c) => ({ ...c, copy: { ...c.copy, [k]: v } }));
+  const persist = () => api.saveOnboardingMailSettings({ enabled: s.enabled, welcomeWindowDays: s.welcomeWindowDays, copy: s.copy });
+  const save = async () => { try { await persist(); flash(setSaved); } catch (e) { alert(e.message); } };
+  // Save first so the preview reflects what's on screen, then email the admin.
+  const test = async () => { setTestMsg('Sending…'); try { await persist(); const r = await api.testOnboardingMailSettings(); setTestMsg(`✓ Sent to ${r.to}`); } catch (e) { setTestMsg(`✗ ${e.message || 'Send failed'}`); } };
+  const fld = { ...input, minWidth: 0, width: '100%' };
+  const txt = (k, label) => (
+    <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <L>{label}</L>
+      <input value={s.copy[k]} onChange={(e) => setCopy(k, e.target.value)} placeholder={s.copyDefaults?.[k] || ''} style={fld} />
+    </label>
+  );
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🚀 Journey emails</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The welcome pack when a client’s first login exists, then a “phase complete — here’s what’s next” email as each onboarding layer finishes. Branded per client; each client can be opted out in its Onboarding journey panel.</span>
+        </span>
+        {!s.enabled && <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--error)', flexShrink: 0 }}>OFF</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!s.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+            <span style={{ fontWeight: 700, fontSize: 13.5 }}>Journey emails enabled</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>· global kill switch</span>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 220 }}>
+            <L>Welcome window (days)</L>
+            <input type="number" min="1" value={s.welcomeWindowDays} onChange={(e) => set('welcomeWindowDays', e.target.value)} style={fld} />
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Clients created longer ago than this never get a late welcome — they’re picked up silently.</span>
+          </label>
+          <div>
+            <L>Wording</L>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 }}>
+              {txt('welcomeSubject', 'Welcome email subject')}
+              {txt('welcomeIntro', 'Welcome opening line')}
+              {txt('phaseIntro', 'Phase-complete opening line')}
+              {txt('finaleIntro', 'All-phases-done line')}
+              {txt('button', 'Button label')}
+              {txt('signoff', 'Sign-off line')}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>The phase name, its steps and the “what’s next” list are added automatically. Clear a field to fall back to the default.</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button style={saveBtn} onClick={save}>Save</button>
+            {saved && <span style={{ color: 'var(--brand)', fontSize: 13, fontWeight: 600 }}>✓ Saved</span>}
+            <span style={{ flex: 1 }} />
+            <button style={miniBtnOutline} onClick={test}>Email me the welcome pack</button>
+            {testMsg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{testMsg}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── The AM scorecard — recognition for the account team ──────────────────────
+// Monthly activation score + medals per AM, with the team leaderboard. Every
+// number is computed from real journey/inbox data server-side; the top scorer
+// takes the Golden Owl. Recognition only — nothing here feeds comp.
+function AmScorecard({ defaultOpen = false }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => { api.getOnboardingScorecard().then(setData).catch(() => setData(null)); }, []);
+  if (!data || !(data.cards || []).length) return null;
+  const me = data.cards.find((c) => c.userId === data.me);
+  const medal = (i) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '');
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: 'var(--card)', overflow: 'hidden' }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 16, cursor: 'pointer', color: 'var(--text)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block', fontSize: 14.5, fontWeight: 800 }}>🏆 AM scorecard</span>
+          <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {me ? <>Your activation score: <b style={{ color: 'var(--text)' }}>{me.score}/100</b> · {me.activatedAll} activated all-time{me.stalled ? ` · ⚠ ${me.stalled} stalled` : ' · clean sheet'}</> : 'Team activation leaderboard — this month.'}
+          </span>
+        </span>
+        {data.cards[0] && <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0 }}>🏆 {data.cards[0].name}</span>}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr>{['', 'Account manager', 'Activated', 'Median days', 'Stalled', 'First reply', 'Owl book', 'Score'].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+              <tbody>
+                {data.cards.map((c, i) => (
+                  <tr key={c.userId} style={c.userId === data.me ? { background: 'rgba(var(--brand-rgb),0.05)' } : null}>
+                    <td style={scTd}>{medal(i)}</td>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{c.name}{c.userId === data.me ? ' · you' : ''}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>{(c.badges || []).join(' · ')}</div></td>
+                    <td style={scTd}>{c.activatedAll}{c.activated30 ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}> (+{c.activated30})</span> : ''}</td>
+                    <td style={scTd}>{c.medianActivationDays != null ? `${c.medianActivationDays}d` : '—'}</td>
+                    <td style={{ ...scTd, color: c.stalled ? 'var(--error)' : 'var(--muted)', fontWeight: c.stalled ? 800 : 400 }}>{c.stalled || '0'}</td>
+                    <td style={scTd}>{c.medianReplyHours != null ? `${c.medianReplyHours}h` : '—'}</td>
+                    <td style={scTd}>{c.owlAdoption}%</td>
+                    <td style={{ ...scTd, fontWeight: 800 }}>{c.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ ...hint, marginTop: 8, marginBottom: 0 }}>Score = activations this month ×30 + speed vs team median + zero-stalled bonus + reply time + Owl adoption. Resets monthly; medals are for bragging rights, not reviews. Time-in-app is deliberately not counted.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+const scTh = { textAlign: 'left', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', padding: '7px 8px', borderBottom: '1px solid var(--hairline)', whiteSpace: 'nowrap' };
+const scTd = { padding: '8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', verticalAlign: 'top' };
+
+// ── The AM cockpit — every client's journey, sorted by who needs a call ───────
+function OnboardingCockpit() {
+  const [data, setData] = useState(null);
+  const [filter, setFilter] = useState('attention');
+  const [openRow, setOpenRow] = useState(null);
+  const [nudged, setNudged] = useState({}); // entityId → status text
+  const load = () => api.getOnboardingCockpit().then(setData).catch(() => setData(null));
+  useEffect(() => { load(); }, []);
+  if (!data) return <div style={cardStyle}><Muted>Loading client journeys…</Muted></div>;
+  const rows = (data.rows || []).filter((r) => (
+    filter === 'attention' ? (r.warning || r.stalled) && !r.complete
+      : filter === 'active' ? !r.complete
+        : filter === 'activated' ? r.complete : true
+  ));
+  const nudge = async (id) => {
+    setNudged((n) => ({ ...n, [id]: '…' }));
+    try { const r = await api.nudgeOnboarding(id); setNudged((n) => ({ ...n, [id]: r.ok ? '✓ sent' : '—' })); }
+    catch { setNudged((n) => ({ ...n, [id]: '✗ failed' })); }
+  };
+  const fchip = (key, label, n) => (
+    <button key={key} onClick={() => setFilter(key)} style={{ ...folderChip, cursor: 'pointer', ...(filter === key ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff', fontWeight: 700 } : null) }}>{label}{n != null ? ` · ${n}` : ''}</button>
+  );
+  const s = data.stats || {};
+  const stat = (label, val, color) => (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '10px 14px', minWidth: 120, flex: 1 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{val}</div>
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        {stat('Onboarding now', s.onboarding ?? '—')}
+        {stat(`⚠ Stalled > ${data.stallDays}d`, s.stalled ?? '—', s.stalled ? 'var(--error)' : undefined)}
+        {stat('Fully activated', s.activated ?? '—', 'var(--brand)')}
+        {stat('Median to first send', s.medianFirstSendDays != null ? `${s.medianFirstSendDays}d` : '—')}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {fchip('attention', 'Needs attention', (data.rows || []).filter((r) => (r.warning || r.stalled) && !r.complete).length)}
+        {fchip('active', 'Onboarding', (data.rows || []).filter((r) => !r.complete).length)}
+        {fchip('activated', 'Activated', (data.rows || []).filter((r) => r.complete).length)}
+        {fchip('all', 'All', (data.rows || []).length)}
+      </div>
+      {rows.length === 0 ? <div style={cardStyle}><Muted>{filter === 'attention' ? 'Nobody needs attention — every journey is moving. 🎉' : 'No clients here.'}</Muted></div> : (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--hairline)', borderRadius: 14, background: 'var(--card)' }}>
+          <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr>{['Client', 'Journey', 'Current phase', 'Idle', 'Last milestone', 'AM', ''].map((h, i) => <th key={i} style={scTh}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td style={{ ...scTd, fontWeight: 700 }}>{r.name}{!r.hasLogins && <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)' }}>no logins yet</div>}</td>
+                    <td style={scTd}>
+                      <span style={{ display: 'inline-flex', gap: 2, width: 110 }}>
+                        {(r.phases || []).map((p) => (
+                          <i key={p.key} title={`${p.icon} ${p.done}/${p.total}`} style={{ height: 8, flex: 1, borderRadius: 99, display: 'inline-block', background: p.complete ? 'var(--brand)' : (r.currentPhase && r.currentPhase.key === p.key ? 'rgba(var(--brand-rgb),0.28)' : 'var(--hairline)'), boxShadow: r.currentPhase && r.currentPhase.key === p.key ? 'inset 0 0 0 1.5px var(--brand)' : 'none' }} />
+                        ))}
+                      </span>
+                    </td>
+                    <td style={scTd}>{r.complete ? <span style={{ color: 'var(--brand)', fontWeight: 700 }}>🏆 Fully activated</span> : (r.currentPhase ? `${r.currentPhase.icon} ${r.currentPhase.idx} · ${r.currentPhase.title}` : '—')}</td>
+                    <td style={{ ...scTd, fontWeight: r.stalled ? 800 : 400, color: r.stalled ? 'var(--error)' : (r.warning ? '#a36207' : 'var(--muted)') }}>{r.complete ? '—' : (r.daysInactive != null ? `${r.stalled ? '⚠ ' : ''}${r.daysInactive}d` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.lastMilestone ? `${r.lastMilestone.label} · ${new Date(r.lastMilestone.at).toLocaleDateString()}` : (r.welcomeSentAt && r.welcomeSentAt !== 'baseline' ? `✉️ Welcome · ${new Date(r.welcomeSentAt).toLocaleDateString()}` : '—')}</td>
+                    <td style={{ ...scTd, color: 'var(--muted)' }}>{r.am ? r.am.name : '—'}</td>
+                    <td style={{ ...scTd, textAlign: 'right' }}>
+                      {!r.complete && r.hasLogins && <button style={{ ...miniBtn, marginRight: 6 }} onClick={() => nudge(r.id)}>{nudged[r.id] || 'Nudge'}</button>}
+                      <button style={miniBtnOutline} onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>{openRow === r.id ? 'Close ▴' : 'Detail ▾'}</button>
+                    </td>
+                  </tr>
+                  {openRow === r.id && (
+                    <tr><td colSpan={7} style={{ padding: '4px 10px 12px', background: 'rgba(var(--brand-rgb),0.04)' }}>
+                      <ClientOnboardingJourney entity={{ id: r.id, name: r.name }} />
+                    </td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ ...hint, marginTop: 8 }}>Sorted by who needs attention. <b>Idle</b> = days since a journey step last completed (amber at {data.warnDays}d, red at {data.stallDays}d). <b>Nudge</b> sends a "here's what's still open" note to the client's inbox + email, listing exactly the open steps of their current phase.</p>
+    </div>
+  );
+}
+
+// The Onboarding hub — one tab, sub-tabbed by job: the live cockpit, the AM
+// scorecard, the two email programmes, and the two analytics reads. Each panel
+// is its own component; this is just the switchboard.
+const ONBOARDING_TABS = [
+  ['journeys', '🛩 Client journeys'],
+  ['scorecard', '🏆 AM scorecard'],
+  ['emails', '✉️ Journey emails'],
+  ['reminders', '🔔 Reminders'],
+  ['insights', '📊 Guide insights'],
+  ['features', '⚙️ Feature usage'],
+];
+function OnboardingHub() {
+  const [sub, setSub] = useState('journeys');
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16, overflowX: 'auto', paddingBottom: 2 }}>
+        {ONBOARDING_TABS.map(([key, label]) => (
+          <button key={key} onClick={() => setSub(key)} style={{ ...folderChip, cursor: 'pointer', whiteSpace: 'nowrap', ...(sub === key ? { background: 'var(--brand)', borderColor: 'var(--brand)', color: '#fff', fontWeight: 700 } : null) }}>{label}</button>
+        ))}
+      </div>
+      {sub === 'journeys' && <OnboardingCockpit />}
+      {sub === 'scorecard' && <AmScorecard defaultOpen />}
+      {sub === 'emails' && <div style={{ maxWidth: 720 }}><OnboardingMailGlobalSettings defaultOpen /></div>}
+      {sub === 'reminders' && <div style={{ maxWidth: 720 }}><NudgeGlobalSettings defaultOpen /></div>}
+      {sub === 'insights' && <GuideInsights />}
+      {sub === 'features' && <FeatureUsage />}
+    </div>
+  );
+}
+
+// Shared fetch for the telemetry-backed reads (guide funnel + feature usage).
+function useOnboardingStats() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(false);
   useEffect(() => { api.adminOnboardingStats().then(setStats).catch(() => setErr(true)); }, []);
+  return { stats, err };
+}
+const statsFallback = (err) => <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>;
 
-  if (err || !stats) return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
-      <NudgeGlobalSettings />
-      <p style={{ color: 'var(--muted)', fontSize: 13 }}>{err ? 'Couldn’t load usage stats.' : 'Loading…'}</p>
-    </div>
-  );
+// How clients move through the in-app guides: the funnel per walkthrough plus
+// plain-language recommendations. Measure → recommend → a human edits guides.js.
+function GuideInsights() {
+  const { stats, err } = useOnboardingStats();
+  if (err || !stats) return statsFallback(err);
 
   // Build an ordered funnel per guide using the real step order from guides.js.
   const guideIds = Object.keys(stats.guides || {}).filter((id) => GUIDES[id]).sort((a, b) => (stats.guides[b].opens || 0) - (stats.guides[a].opens || 0));
@@ -369,14 +634,11 @@ function OnboardingInsights() {
     const rate = g.opens ? Math.round((g.completes / g.opens) * 100) : 0;
     if (g.opens >= 5 && rate < 50) recs.push(`Only ${rate}% finish “${GUIDES[id].title}” (${g.completes}/${g.opens}). It may be too long — trim it.`);
   }
-  const features = stats.features || [];
-  const topFeature = features[0];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 720 }}>
-      <NudgeGlobalSettings />
       <div>
-        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Onboarding insights</h2>
+        <h2 style={{ fontSize: 17, fontWeight: 800 }}>Guide insights</h2>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3 }}>
           How clients use the welcome wizard and guides. Use this to refine the steps in <code>client/src/lib/guides.js</code>. {stats.total === 0 && 'No usage recorded yet — check back once clients have started using the wizards.'}
         </p>
@@ -422,7 +684,18 @@ function OnboardingInsights() {
           </div>
         );
       })}
+    </div>
+  );
+}
 
+// What clients actually do — the most-used features are the ones worth teaching.
+function FeatureUsage() {
+  const { stats, err } = useOnboardingStats();
+  if (err || !stats) return statsFallback(err);
+  const features = stats.features || [];
+  const topFeature = features[0];
+  return (
+    <div style={{ maxWidth: 720 }}>
       <div style={{ border: '1px solid var(--border)', borderRadius: 14, padding: 16, background: 'var(--card)' }}>
         <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 4 }}>Feature usage</div>
         <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0, marginBottom: 12 }}>What clients actually do — the most-used features are the ones worth teaching in the wizard.</p>
@@ -476,7 +749,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['moderation', '🛡️ Moderation'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge'], ['supportowl', '🛟 Support Owl']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -487,8 +760,12 @@ function Product() {
         ))}
       </div>
       {sub === 'tickets' && <TicketBoard />}
+      {sub === 'flags' && <FlagsMatrix />}
+      {sub === 'moderation' && <ModerationManager scope="platform" />}
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
+      {sub === 'helpbot' && <HelpBotAdmin />}
+      {sub === 'supportowl' && <SupportOwlAdmin />}
     </div>
   );
 }
@@ -648,7 +925,7 @@ function FeatureSection({ section, onToggle }) {
         const dim = dimSection || f.hidden;
         return (
           <tr key={f.id} style={dim ? { opacity: 0.55 } : undefined}>
-            <td style={{ ...td, width: '100%', textDecoration: f.hidden ? 'line-through' : 'none' }}>{f.label}</td>
+            <td style={{ ...td, width: '100%', textDecoration: f.hidden ? 'line-through' : 'none' }} title={f.desc || undefined}>{f.label}</td>
             <td style={{ ...td, textAlign: 'right' }}><StatusBadge status={f.status} /></td>
             <td style={{ ...td, textAlign: 'right' }}>
               <VisToggle hidden={f.hidden} onToggle={() => onToggle('feature', f.id, !f.hidden)} />
@@ -681,7 +958,8 @@ function ProductReleaseNotes() {
     try {
       const r = await api.adminGenerateReleaseNotes(14);
       await load();
-      setGen({ busy: false, msg: r.created ? `Added ${r.created} draft${r.created === 1 ? '' : 's'} from recent commits — review and publish below.` : (r.message || 'Nothing new to add.') });
+      const bits = [r.created && `added ${r.created} draft${r.created === 1 ? '' : 's'}`, r.refreshed && `refreshed ${r.refreshed}`].filter(Boolean);
+      setGen({ busy: false, msg: bits.length ? `From recent commits: ${bits.join(', ')} — review and publish below.` : (r.message || 'Nothing new to add.') });
     } catch (e) { setGen({ busy: false, msg: e.message }); }
   };
   const add = async () => {
@@ -784,6 +1062,7 @@ const codeChip = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 
 // ─── Billing (master rate card + spend rollup) ────────────────────────────────
 function Billing() {
+  const { isSuperAdmin } = useAuth();
   const [rollup, setRollup] = useState(null);
   useEffect(() => { api.getBillingRollup().then(setRollup).catch(() => setRollup({ clients: [], total: 0 })); }, []);
   const cur = rollup?.currency || 'ZAR';
@@ -791,8 +1070,10 @@ function Billing() {
   return (
     <div style={{ maxWidth: 720 }}>
       <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Campaign billing</h2>
-      <p style={{ ...hint }}>Set the platform master rates per channel. Each client inherits these unless you set a client-specific fee under <b>Clients → [client] → Fees</b>. Costs are per message sent.</p>
-      <RateCard scope="master" />
+      <p style={{ ...hint }}>{isSuperAdmin
+        ? <>Set the platform master rates per channel. Each client inherits these unless you set a client-specific fee under <b>Clients → [client] → Fees</b>. Costs are per message sent.</>
+        : <>Platform master rates per channel (only <b>Super Admins</b> can change these). Client-specific fees are editable under <b>Clients → [client] → Fees</b> for clients you administer. Costs are per message sent.</>}</p>
+      <RateCard scope="master" canEdit={isSuperAdmin} />
       <div style={{ borderTop: '1px solid var(--hairline)', margin: '24px 0 16px' }} />
       <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Spend rollup — all clients</h3>
       {!rollup ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p> : (
@@ -915,7 +1196,7 @@ const WIZARD_DEFAULTS = [
     blurb: 'A suite is one event/context for the client (e.g. “Bushfire 2026”). Inside it you choose which sets of dashboards they get, and lock it to that event. Add one suite per event. You can fine-tune which dashboards each set shows, and reorder them, right here.' },
   { kind: 'builtin', key: 'logins', icon: '🔑', title: 'Logins', short: 'Logins',
     req: 'at least one login', lock: 'Add (or link) at least one login to continue', does: 'Creates the people who can sign in.',
-    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Give them a temporary password — they’ll be prompted to change it. You can also link an existing login if someone works across several clients.' },
+    blurb: 'Create the people who can sign in for this client and set what each can see with a role. Leave the password blank and they’ll be emailed a link to set their own; or set a temporary one to share directly. You can also link an existing login if someone works across several clients. Heads-up: once the first login exists, the client’s branded welcome pack email goes out automatically (manage it in the client’s Setup checklist → Client onboarding journey).' },
   { kind: 'builtin', key: 'branding', icon: '🎨', title: 'Branding', short: 'Branding', optional: true, does: 'Opens the per-client branding editor (logo, colours, sender).',
     blurb: 'Optional, but it makes the account feel like the client’s own. Set their logo, brand colours and email sender name — these white-label the whole app (UI accents + charts) and every email Pulse sends for them. Anything left blank inherits the Howler default.' },
 ];
@@ -1221,7 +1502,7 @@ function SetupWizard({ fields }) {
             </div>
             {entity
               ? <><CurrencyField entityId={entity.id} /><LanguageField entityId={entity.id} /><SlugField entityId={entity.id} /><LoginBackgroundField entityId={entity.id} /><div data-tour="client-sending-domain" style={{ marginTop: 12 }}><L>Custom sending domain · optional</L><div style={{ marginTop: 6 }}><SendingDomainCard entityId={entity.id} scope="admin" /></div></div></>
-              : <div data-tour="client-currency" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b> and a <b>login background</b> can be set here once the client is created.</div>}
+              : <div data-tour="client-later" style={{ marginTop: 12, fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>}
             <Footer primary={saveClient} primaryLabel={entityId ? 'Save & continue' : 'Create client & continue'} />
           </>
         )}
@@ -1315,7 +1596,7 @@ function SetupWizard({ fields }) {
               <button style={previewBtn} onClick={previewAccount} title="Open the account as the client sees it">👁 Preview account</button>
               <button style={saveBtn} onClick={() => { setEntityId(null); go('start'); }}>Set up another client</button>
             </div>
-            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
+            <p style={{ ...hint, marginTop: 14, marginBottom: 0 }}>Need to go deeper (digests, campaigns, goals &amp; alerts, links, settlements, integrations, per-event briefing)? Find <b>{entity.name}</b> any time under the <b>Clients</b> tab for the full set of controls.</p>
           </>
         )}
 
@@ -1336,6 +1617,9 @@ const badgeBase = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSi
 const CLIENT_TOUR = [
   { tour: 'client-name', icon: '🏢', title: 'Name the client', body: 'Type the organiser or brand you’re onboarding — this is what everything else hangs off. It’s the only thing you must fill in here.' },
   { tour: 'client-logo', icon: '🖼️', title: 'Add their logo (optional)', body: 'Upload a logo if you have one — it shows as the client’s brand across the app. You can always add or change it later.' },
+  // Only rendered BEFORE the client exists (the fields below replace it after) —
+  // the tour skips whichever of the two states isn't on screen.
+  { tour: 'client-later', icon: '🔓', title: 'The rest unlocks once created', body: 'Reporting currency, AI copy language, a vanity login URL, a login background and a custom sending domain all live right here too — they appear the moment the client is created. Hit “Create client & continue”, and come back to this step any time to set them.' },
   { tour: 'client-currency', icon: '💱', title: 'Set their reporting currency', body: 'Pick the currency this client reports in (ZAR by default). It controls how money shows and how the Owl writes amounts — across insights, briefings, goals, alerts and digests. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-language', icon: '🗣', title: 'Set their AI copy language', body: 'Pick the language the AI writes in (English by default) — briefings, digests, insights, goal & alert reads, campaign copy and the Owl all speak it. It steers AI wording only; the app’s own buttons and labels stay in English. Available once the client is created; clients can’t change it themselves.' },
   { tour: 'client-slug', icon: '🔗', title: 'Give them a vanity login URL', body: 'Optionally give the client their own white-labelled sign-in page at /<slug> (e.g. /kunye) — their logo, colours and background, so it feels like their own product. Leave blank for the standard login.' },
@@ -1353,11 +1637,13 @@ const SUITES_TOUR = [
   { tour: 'suite-roles', icon: '👥', title: 'Who sees what (optional)', body: 'Restrict a set or dashboard to certain roles — e.g. finance-only views. Leave it alone to show everything to everyone.' },
   { tour: 'suite-locks', icon: '🔒', title: 'Lock it to the event', body: 'The important one — open this and pick the event (and cashless event, if used) so every dashboard here only shows THIS event’s numbers.' },
   { tour: 'suite-ticket', icon: '🔗', title: 'Add the ticket link', body: 'Paste the event’s buy / checkout URL. Campaigns for this event auto-fill it as their call-to-action.' },
+  { tour: 'suite-howler-id', icon: '🎟️', title: 'Add the Howler event ID', body: 'The event’s number on howler.co.za (e.g. 40848). Deep links and link templates auto-fill their destinations from it — no typing at link-creation time.' },
+  { tour: 'suite-live', icon: '🔴', title: 'Set the LIVE button', body: 'Pick the live-ticketing report. A red LIVE button appears on this event’s sidebar row so the client can jump to live sales in one tap.' },
   { tour: 'suite-save', icon: '💾', title: 'Save the suite', body: 'Hit Save to apply everything above. (Event branding below saves on its own.)' },
   { tour: 'suite-branding', icon: '✨', title: 'Event branding (optional)', body: 'Override the look just for this event — logo, colours, sender. Blank fields inherit the client’s branding.' },
 ];
 const LOGINS_TOUR = [
-  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name, email and a temporary password. They’ll be prompted to change it the first time they sign in.' },
+  { tour: 'login-add', icon: '🔑', title: 'Add a login', body: 'Enter the person’s name and email. Leave the password blank to email them a set-password link, or set a temporary one to share directly.' },
   { tour: 'login-role', icon: '🎚️', title: 'Choose their role', body: 'The role controls what this person can see and do. Pick the access level that fits them.' },
   { tour: 'login-link', icon: '🔗', title: 'Or link an existing person', body: 'If someone already has a login on another client, link them here instead of creating a duplicate account.' },
 ];
@@ -1375,13 +1661,22 @@ const BRANDING_TOUR = [
 const TOUR_DEFAULTS = { client: CLIENT_TOUR, scope: SCOPE_TOUR, suites: SUITES_TOUR, logins: LOGINS_TOUR, branding: BRANDING_TOUR };
 
 function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
-  const [i, setI] = useState(0);
+  const root = () => (container && container.current) || document;
+  // Only tour points whose [data-tour] anchor is actually on screen. A point
+  // whose section isn't rendered right now (the client fields that only appear
+  // once the client is created, the login form before "+ Add user" is pressed,
+  // the organiser picker when "All organisers" is ticked…) is SKIPPED instead of
+  // spotlighting nothing. Recomputed every render, so sections that appear
+  // mid-tour join the sequence and the step count stays honest.
+  const anchored = steps.filter((s) => root().querySelector(`[data-tour="${s.tour}"]`));
+  const seq = anchored.length ? anchored : steps; // nothing anchored → old behaviour
+  const [rawI, setI] = useState(0);
   const [rect, setRect] = useState(null);
   const last = useRef(null);
-  const cur = steps[i];
+  const i = Math.min(rawI, seq.length - 1);
+  const cur = seq[i];
 
   useEffect(() => {
-    const root = () => (container && container.current) || document;
     const find = () => root().querySelector(`[data-tour="${cur.tour}"]`);
     const el0 = find();
     if (el0) el0.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1400,7 +1695,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
     return () => cancelAnimationFrame(raf);
   }, [i, cur.tour, container]);
 
-  const isLast = i === steps.length - 1;
+  const isLast = i === seq.length - 1;
   const vw = typeof window !== 'undefined' ? window.innerWidth : 360;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 640;
   const cardW = Math.min(360, vw - 24);
@@ -1417,7 +1712,7 @@ function SectionTour({ steps, container, onClose, zIndex = 4000 }) {
       {rect && <div style={{ position: 'fixed', top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12, border: '2.5px solid var(--brand)', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)', transition: 'top .2s, left .2s, width .2s, height .2s', pointerEvents: 'none' }} />}
       <div style={{ position: 'fixed', top: cardTop, left: cardLeft, width: cardW, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 48px -10px rgba(0,0,0,0.5)', padding: 16, pointerEvents: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {steps.length}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Step {i + 1} of {seq.length}</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }} title="Close guide">✕</button>
         </div>
@@ -1620,10 +1915,12 @@ function StepPreviewModal({ steps, index, onClose }) {
       case 'client': return (<>
         {sec('client-name', <>{lbl('Client name · required')}<div style={{ ...fauxInput, maxWidth: 320 }}>e.g. MTN Bushfire</div></>)}
         {sec('client-logo', <>{lbl('Client logo · optional')}<div style={{ width: 120, height: 44, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>logo</div></>)}
+        {sec('client-later', <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>💱 <b>Reporting currency</b>, 🗣 <b>AI copy language</b>, a <b>vanity login URL</b>, a <b>login background</b> and a <b>custom sending domain</b> can be set here once the client is created.</div>)}
         {sec('client-currency', <>{lbl('Reporting currency')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (ZAR)</div></>)}
         {sec('client-language', <>{lbl('AI copy language')}<div style={{ ...fauxInput, maxWidth: 320 }}>Platform default (English)</div></>)}
         {sec('client-slug', <>{lbl('Vanity login URL')}<div style={{ ...fauxInput, maxWidth: 320 }}>{window.location.host}/kunye</div></>)}
         {sec('client-loginbg', <>{lbl('Login background image')}<div style={{ width: 160, height: 90, border: '1px dashed var(--hairline)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>background</div></>)}
+        {sec('client-sending-domain', <>{lbl('Custom sending domain · optional')}<div style={{ ...fauxInput, maxWidth: 320 }}>mail.brand.com · Verify DNS</div></>)}
       </>);
       case 'scope': return (<>
         {sec('scope-all', <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--hairline)', borderRadius: 10 }}>
@@ -1639,6 +1936,8 @@ function StepPreviewModal({ steps, index, onClose }) {
         {sec('suite-roles', secHead('Dashboard access by role'))}
         {sec('suite-locks', <>{secHead('Locked filters (the event, cashless events…)')}<div style={{ display: 'flex', gap: 8, marginTop: 6 }}><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add locked filter</div><div style={{ ...miniBtn, opacity: 0.8, pointerEvents: 'none' }}>+ Add default filters</div></div></>)}
         {sec('suite-ticket', <>{lbl('Ticket / checkout link')}<div style={fauxInput}>https://tickets.example.com/your-event</div></>)}
+        {sec('suite-howler-id', <>{lbl('Howler event ID')}<div style={fauxInput}>40848</div></>)}
+        {sec('suite-live', <>{lbl('🔴 LIVE button dashboard')}<div style={fauxInput}>Live Ticketing report</div></>)}
         {sec('suite-save', <div style={{ ...saveBtn, display: 'inline-block', opacity: 0.8, pointerEvents: 'none' }}>Save</div>)}
         {sec('suite-branding', secHead('Event branding (logo / colours / sender)'))}
       </>);
@@ -1816,6 +2115,10 @@ function UsersTab() {
     return <span title={names.join(', ')}>{names.length === 1 ? names[0] : `${names.length} clients`}</span>;
   };
   const adminBadge = (u) => u.role === 'admin' && <span style={howlerBadge}>HOWLER</span>;
+  // Who holds the keys: a filled badge on every Super Admin so the holders are
+  // visible at a glance (the role itself is granted in the user editor).
+  const superBadge = (u) => u.role === 'admin' && (u.roles || []).includes('super_admin')
+    && <span style={{ ...howlerBadge, background: 'var(--brand)', color: '#fff' }} title="Super Admin — global billing, integrations, status notices & backup/restore">★ SUPER</span>;
   // 📱 marker when the user has opened Pulse as an installed app (PWA on their phone).
   const installMark = (u) => { const i = installs[u.id]; return i ? <span title={`📱 App installed · last opened ${fmtWhen(i.lastAt)}`} style={{ fontSize: 13, cursor: 'help' }}>📱</span> : null; };
   const lastActiveCell = (u) => (
@@ -1856,7 +2159,7 @@ function UsersTab() {
           {sorted.map((u) => (
             <div key={u.id} className="lift" style={{ ...clientRow, gap: 8 }}>
               <div onClick={() => openUser(u)} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, textAlign: 'left', flex: 1, cursor: 'pointer' }}>
-                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis' }}>{u.fullName || u.email} {adminBadge(u)} {superBadge(u)} {installMark(u)}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.fullName ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Howler admin' : 'Client'} · {clientsOf(u).length || (u.role === 'admin' ? '∞' : 0)} client{clientsOf(u).length === 1 ? '' : 's'}</span>
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{u.mobile ? `${u.mobile} · ` : ''}active {relTime(u.lastActiveAt)}</span>
               </div>
@@ -1877,7 +2180,7 @@ function UsersTab() {
             {sorted.map((u) => (
               <tr key={u.id} className="lift" style={{ cursor: 'pointer' }} onClick={() => openUser(u)}>
                 <td style={td}>
-                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {installMark(u)}</div>
+                  <div style={{ fontWeight: 600 }}>{u.fullName || u.email} {adminBadge(u)} {superBadge(u)} {installMark(u)}</div>
                   {u.fullName && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{u.email}</div>}
                 </td>
                 <td style={td}>{u.role === 'admin' ? (u.howlerRoleLabel ? `Howler · ${u.howlerRoleLabel}` : 'Howler admin') : 'Client'}</td>
@@ -2086,7 +2389,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
   const roleOpts = roles.length ? roles : [{ key: 'owner', label: 'Owner' }];
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const isClient = accountType === 'client';
-  const canSubmit = form.email.trim() && form.password && (!isClient || entityIds.length > 0);
+  const canSubmit = form.email.trim() && (!isClient || entityIds.length > 0); // password optional → email-invite
 
   const submit = async () => {
     setError(''); setBusy(true);
@@ -2125,7 +2428,7 @@ function AddUserForm({ entities, roles, howlerRoles = [], onCancel, onCreated })
           <Field label="Surname"><input style={{ ...input, minWidth: 0 }} value={form.lastName} onChange={set('lastName')} /></Field>
           <Field label="Email"><input style={{ ...input, minWidth: 0 }} value={form.email} onChange={set('email')} autoComplete="off" /></Field>
           <Field label="Mobile"><input style={{ ...input, minWidth: 0 }} value={form.mobile} onChange={set('mobile')} placeholder="+27…" /></Field>
-          <Field label="Temp password"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} placeholder="they can change it" autoComplete="off" /></Field>
+          <Field label="Temp password (optional)"><input style={{ ...input, minWidth: 0 }} type="text" value={form.password} onChange={set('password')} placeholder="blank → email a set-password link" autoComplete="off" /></Field>
         </div>
         {isClient ? (
           <>
@@ -2355,6 +2658,7 @@ function UserDetail({ userId, entities = [], roles = [], install = null, initial
 // Edit an existing user's identity, account type and client links. Per-client
 // roles stay on each client's Logins tab; this covers everything else in one place.
 function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved }) { // eslint-disable-line no-unused-vars
+  const { isSuperAdmin } = useAuth(); // only a Super Admin may grant the super_admin tag (server enforces too)
   const [form, setForm] = useState({ firstName: user.firstName || '', lastName: user.lastName || '', email: user.email, mobile: user.mobile || '', password: '', inventiveWorkspaceId: user.inventiveWorkspaceId || '', howlerRole: user.howlerRole || '', roles: user.roles || [] });
   const [accountType, setAccountType] = useState(user.role === 'admin' ? 'admin' : 'client');
   const [entityIds, setEntityIds] = useState((memberships || []).map((m) => m.entityId));
@@ -2402,9 +2706,14 @@ function UserEditCard({ user, memberships, entities, roles, onCancel, onSaved })
           </>
         )}
         <L>Designations</L>
-        <p style={{ ...hint, marginTop: 2 }}>Extra roles this person holds — a user can have several. <b>Developer</b> makes them assignable to tickets on the product board.</p>
+        <p style={{ ...hint, marginTop: 2 }}>Extra roles this person holds — a user can have several. <b>Developer</b> makes them assignable to tickets on the product board. <b>Super Admin</b> unlocks the global billing, integrations, status-notice and backup controls (Howler admins only).</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 14px' }}>
-          {[['dev', 'Developer']].map(([key, label]) => {
+          {[
+            ['dev', 'Developer'],
+            // Super Admin is only offered on a Howler-admin account, and only a
+            // Super Admin can toggle it (the server strips it otherwise).
+            ...((accountType === 'admin' && isSuperAdmin) ? [['super_admin', 'Super Admin']] : []),
+          ].map(([key, label]) => {
             const on = (form.roles || []).includes(key);
             return (
               <button key={key} onClick={() => setForm({ ...form, roles: on ? form.roles.filter((r) => r !== key) : [...(form.roles || []), key] })}
@@ -2510,6 +2819,67 @@ function SetupNudgeConfig({ entity, clientUsers = [], adminUsers = [] }) {
   );
 }
 
+// The CLIENT's onboarding journey, seen from the AM side: the same four layered
+// phases the client sees on their home page, with live auto-detected progress.
+// The AM can tick manual steps on the client's behalf, send/re-send the welcome
+// pack, and opt the client out of the journey emails.
+function ClientOnboardingJourney({ entity }) {
+  const [data, setData] = useState(null);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { api.getClientOnboarding(entity.id).then(setData).catch(() => setData(null)); }, [entity.id]);
+  if (!data) return <div style={cardStyle}><Muted>Loading…</Muted></div>;
+  const tick = (key, done) => api.setClientOnboardingStep(entity.id, key, done).then(setData).catch(() => {});
+  const toggleMail = async (on) => { try { await api.setClientOnboardingMail(entity.id, on); setData((d) => ({ ...d, mail: { ...d.mail, on } })); } catch (e) { alert(e.message); } };
+  const sendWelcome = async () => {
+    setMsg('Sending…');
+    try { const r = await api.sendOnboardingWelcome(entity.id); setMsg(r.ok ? `✓ Sent to ${(r.sentTo || []).length} recipient${(r.sentTo || []).length === 1 ? '' : 's'}` : '✗ Nothing delivered'); api.getClientOnboarding(entity.id).then(setData).catch(() => {}); }
+    catch (e) { setMsg(`✗ ${e.message || 'Send failed'}`); }
+  };
+  const mail = data.mail || {};
+  const sentLabel = (v) => !v ? 'not yet' : (v === 'baseline' ? 'skipped (pre-dates emails)' : new Date(v).toLocaleDateString());
+  return (
+    <div style={cardStyle}>
+      <p style={{ ...hint, marginTop: 0 }}>What the client sees as “Getting started” on their home page — five layers from fundamentals to full automation. Steps auto-tick from real usage (dashboards opened, app installed, Owl asked, connector used…); tick the manual ones on their behalf if you’ve walked them through it.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {(data.phases || []).map((p, i) => (
+          <div key={p.key}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: p.complete ? 'var(--brand)' : 'var(--text)' }}>{p.complete ? '✅' : p.icon} Phase {i + 1} · {p.title}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)' }}>{p.done}/{p.total}</span>
+              {data.currentPhase === p.key && <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--brand)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>current</span>}
+              {mail.phases?.[p.key] && mail.phases[p.key] !== 'baseline' && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>· congrats email {new Date(mail.phases[p.key]).toLocaleDateString()}</span>}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(data.steps || []).filter((s) => s.phase === p.key).map((s) => (
+                <button key={s.key} type="button" disabled={s.auto} onClick={() => tick(s.key, !s.done)}
+                  title={s.auto ? `${s.title} — auto-detected` : `${s.title} — tap to ${s.done ? 'untick' : 'tick'} on the client’s behalf`}
+                  style={{ ...folderChip, cursor: s.auto ? 'default' : 'pointer', borderColor: s.done ? 'var(--brand)' : 'var(--border)', color: s.done ? 'var(--brand)' : 'var(--muted)', fontWeight: s.done ? 700 : 400, opacity: s.auto && !s.done ? 0.8 : 1 }}>
+                  {s.done ? '✓ ' : ''}{s.icon} {s.title}{s.auto ? '' : ' ✎'}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid var(--hairline)', marginTop: 14, paddingTop: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!mail.on} onChange={(e) => toggleMail(e.target.checked)} />
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>Journey emails for this client</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>· welcome pack + phase congratulations (the account team is cc’d on milestones)</span>
+        </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+          <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Welcome pack: <b style={{ color: 'var(--text)' }}>{sentLabel(mail.welcomeSentAt)}</b></span>
+          <span style={{ flex: 1 }} />
+          <button style={miniBtnOutline} onClick={sendWelcome} disabled={!mail.hasLogins} title={mail.hasLogins ? '' : 'Create a client login first'}>{mail.welcomeSentAt && mail.welcomeSentAt !== 'baseline' ? 'Re-send welcome pack' : 'Send welcome pack now'}</button>
+          {msg && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{msg}</span>}
+        </div>
+        {!mail.hasLogins && <p style={{ ...hint, margin: '8px 0 0' }}>The welcome pack sends automatically (within ~30 min) once the client’s first login exists.</p>}
+        {!mail.enabled && <div style={{ fontSize: 12, color: 'var(--error)', marginTop: 8 }}>⚠ Journey emails are globally turned off (Admin → Onboarding → Journey emails).</div>}
+      </div>
+    </div>
+  );
+}
+
 // Account-level tasks — the client-wide foundation, set once.
 const AM_TASKS = [
   { key: 'client', icon: '🏢', title: 'Set up the client', desc: 'Name, logo and AI context.', section: 'settings', auto: (d) => !!(d.entity.name || '').trim() },
@@ -2519,6 +2889,7 @@ const AM_TASKS = [
   { key: 'logins', icon: '🔑', title: 'Create logins & roles', desc: 'Add the people who sign in and set each one’s role.', section: 'logins', auto: (d) => d.users.length > 0 },
   { key: 'inventive', icon: '✨', title: 'Assign Inventive', desc: 'Link the client’s Inventive analyst workspace.', section: 'integrations', auto: (d) => !!(d.entity.inventiveRefId || d.entity.inventiveName) },
   { key: 'integrations', icon: '🔌', title: 'Add integrations', desc: 'Connect Looker / Meta / TikTok / email as needed.', section: 'integrations' },
+  { key: 'pixel', icon: '🎯', title: 'Install the Pulse Pixel', desc: 'One snippet on their site/ticket shop — remarketing lists build automatically in Meta / Google / TikTok.', section: 'integrations', auto: (d) => !!d.pixelConfigured },
   { key: 'digest', icon: '🗓', title: 'Create a digest', desc: 'Schedule a recurring briefing email to their team.', section: 'digests', auto: (d) => d.digests > 0 },
   { key: 'briefing', icon: '📝', title: 'Tune the briefing', desc: 'Global briefing focus, phase defaults and instructions for the Owl.', section: 'briefing' },
 ];
@@ -2547,16 +2918,18 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
       api.getEntityMailTemplate(entity.id).catch(() => null),
       api.getDigests(entity.id).catch(() => []),
       api.getSetupWizardProgress(entity.id).catch(() => ({ ticks: {} })),
-      Promise.all(suites.map((su) => api.suiteGoals(su.id).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
+      api.getEntityIntegrations(entity.id).catch(() => null),
+      Promise.all(suites.map((su) => api.suiteGoals(su.id, true).then((r) => (Array.isArray(r) ? r : r.goals || [])).catch(() => []))),
       Promise.all(suites.map((su) => api.getSuiteMailTemplate(su.id).catch(() => null))),
       Promise.all(suites.map((su) => api.suiteAlerts(su.id).then((r) => (Array.isArray(r) ? r : r.alerts || [])).catch(() => []))),
-    ]).then(([mt, digests, prog, goalsArr, suiteMtArr, alertsArr]) => {
+    ]).then(([mt, digests, prog, integ, goalsArr, suiteMtArr, alertsArr]) => {
       if (!alive) return;
       const acc = tmplOf(mt);
       setAux({
         brandingSet: hasBranding(acc) || !!entity.logo,
         emailTemplateSet: hasTemplate(acc),
         digests: (digests || []).length,
+        pixelConfigured: !!integ?.pixel?.configured,
         goalsBySuite: Object.fromEntries(suites.map((su, i) => [su.id, (goalsArr[i] || []).length])),
         brandingBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasBranding(tmplOf(suiteMtArr[i]))])),
         templateBySuite: Object.fromEntries(suites.map((su, i) => [su.id, hasTemplate(tmplOf(suiteMtArr[i]))])),
@@ -2572,7 +2945,7 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
     setAux((a) => ({ ...a, ticks: { ...(a?.ticks || {}), [key]: v ? 1 : 0 } }));
     api.setSetupWizardProgress(entity.id, key, v).then((r) => setAux((a) => ({ ...a, ticks: r.ticks || a.ticks }))).catch(() => {});
   };
-  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0 };
+  const accData = { entity, suites, users, brandingSet: aux?.brandingSet, emailTemplateSet: aux?.emailTemplateSet, digests: aux?.digests || 0, pixelConfigured: aux?.pixelConfigured };
   const accAuto = (t) => !!(t.auto && t.auto(accData));
   const accManual = (t) => ticks['amchk_' + t.key] === 1;
   const accDone = (t) => accAuto(t) || accManual(t);
@@ -2629,6 +3002,18 @@ function ClientSetupChecklist({ entity, suites, users, allUsers = [], go, previe
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--brand)', borderRadius: 999, transition: 'width .3s' }} />
         </div>
         <p style={{ ...hint, marginTop: 10, marginBottom: 0 }}>Tap a section to expand it. Tasks auto-tick as you go; tick the manual ones, or hit <b>Go →</b> to jump straight to it. Account setup is done once; the event tasks repeat for every event.</p>
+      </div>
+
+      {/* The client's own onboarding journey — phases, auto-progress, welcome pack */}
+      <div style={{ marginTop: 14 }}>
+        <button onClick={() => toggle('journey')} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--card)', border: '1px solid var(--hairline)', borderRadius: 12, padding: '12px 14px', cursor: 'pointer', color: 'var(--text)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, transform: open.journey ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🚀 Client onboarding journey</span>
+            {!open.journey && <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>The client’s five-phase “Getting started” path — live progress, welcome pack & phase emails.</span>}
+          </span>
+        </button>
+        {open.journey && <div style={{ marginTop: 8 }}><ClientOnboardingJourney entity={entity} /></div>}
       </div>
 
       {/* Reminders — who gets nudged about outstanding setup */}
@@ -2698,7 +3083,8 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  // Merge resolution: staging's Reports entry + main's Surveys + Map Studio — all stay.
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ['map', '🗺️ Map Studio'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -2730,12 +3116,17 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             </>
           )}
           {section === 'messages' && <ClientMessages entity={entity} />}
-          {section === 'fees' && (
-            <div>
-              <p style={hint}>Per-message campaign fees for <b>{entity.name}</b>. Leave a channel blank to inherit the platform master rate (set under the top-level <b>Billing</b> tab).</p>
-              <RateCard scope="admin-client" entityId={entity.id} />
-            </div>
-          )}
+          {section === 'fees' && (() => {
+            // A Super Admin, or the account manager(s) who administer this client
+            // (its Howler support contacts), may edit its fees. Server enforces it too.
+            const canEditFees = (authUser?.roles || []).includes('super_admin') || (entity.howlerSupportIds || []).includes(authUser?.id);
+            return (
+              <div>
+                <p style={hint}>Per-message campaign fees for <b>{entity.name}</b>. Leave a channel blank to inherit the platform master rate (set under the top-level <b>Billing</b> tab).{canEditFees ? '' : ' Only this client’s account manager or a Super Admin can change these.'}</p>
+                <RateCard scope="admin-client" entityId={entity.id} canEdit={canEditFees} />
+              </div>
+            );
+          })()}
           {section === 'campaigns' && (
             <div>
               <p style={hint}>Turn data into action for <b>{entity.name}</b> — e.g. email customers who abandoned checkout. Preview the audience and copy, then explicitly approve the send.</p>
@@ -2748,16 +3139,40 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
               <SegmentManager entityId={entity.id} scope="admin" />
             </div>
           )}
+          {section === 'links' && (
+            <div>
+              <p style={hint}>ChottuLink deep links for <b>{entity.name}</b> — short links into the Howler app, tied to their events, with click counts. Clients manage these themselves in Engage → Links; the key/domain lives under Integrations.</p>
+              <ChottuLinks entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'surveys' && (
+            <div>
+              <p style={hint}>Post-event fan surveys for <b>{entity.name}</b> — designed in Pulse, answered in the Howler app, results back here. Clients manage these themselves in Engage → Surveys once their <b>engage.surveys</b> flag is on (Product → Flags).</p>
+              <SurveyManager entityId={entity.id} scope="admin" />
+            </div>
+          )}
           {section === 'eventops' && (
             <div>
               <p style={hint}>Event Ops pilot for <b>{entity.name}</b> — track devices &amp; stations live at an event. Switch it on per client; they can then run it themselves too.</p>
               <EventOpsAdmin entityId={entity.id} />
             </div>
           )}
+          {section === 'map' && (
+            <div>
+              <p style={hint}>Build &amp; publish the event map for <b>{entity.name}</b> — pins, logos, descriptions, CTAs and filters. Publishing gives a URL for the Howler app's per-event map WebView. Clients with the <code>map.manage</code> permission can build it themselves at /event-map.</p>
+              <MapStudio entityId={entity.id} scope="admin" />
+            </div>
+          )}
           {section === 'digests' && (
             <div>
               <p style={hint}>Scheduled, role-personalised briefing emails for <b>{entity.name}</b>. Clients can also manage these themselves.</p>
               <DigestManager entityId={entity.id} scope="admin" logins={users} />
+            </div>
+          )}
+          {section === 'reports' && (
+            <div>
+              <p style={hint}>Report Studio for <b>{entity.name}</b> — compose shareable reports from their dashboard tiles, text and AI analysis (share link + PDF, one-off or scheduled). Clients can also build these themselves.</p>
+              <ReportStudio entityId={entity.id} scope="admin" logins={users} />
             </div>
           )}
           {section === 'settlements' && <Settlements entityId={entity.id} />}
@@ -3057,12 +3472,38 @@ function ClientSuites({ entity, suites, allEntities, allSets, dashTitle, fields,
   useEffect(() => { api.getEntitySets(entity.id).then((d) => setCustomSets(d.sets || [])).catch(() => setCustomSets([])); }, [entity.id]);
   const sets = [...allSets, ...customSets]; // shared templates + this client's bespoke sets
   const addSuite = async () => { await api.adminCreateSuite({ entityId: entity.id, name: 'New suite', lockedFilters: {}, setIds: [] }); onChange(); };
+  // Drag-to-reorder the suites. Saves the SAME per-client order the client nav
+  // uses (saveSuiteOrder), so admin and client agree. Local mirror = optimistic
+  // reorder; the parent refetch (now order-applied) keeps it after onChange.
+  const [list, setList] = useState(suites);
+  useEffect(() => { setList(suites); }, [suites]);
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const reorder = (from, to) => {
+    if (!from || from === to) return;
+    const ids = list.map((s) => s.id);
+    if (ids.indexOf(from) < 0 || ids.indexOf(to) < 0) return;
+    ids.splice(ids.indexOf(from), 1);
+    ids.splice(ids.indexOf(to), 0, from);
+    const byId = Object.fromEntries(list.map((s) => [s.id, s]));
+    setList(ids.map((id) => byId[id]));
+    api.saveSuiteOrder(entity.id, ids).catch(() => {});
+  };
   return (
     <div>
-      {suites.map((su) => (
-        <SuiteCard key={su.id} suite={su} entities={allEntities} sets={sets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
+      {list.map((su) => (
+        <div key={su.id}
+          onDragOver={(e) => { e.preventDefault(); if (overId !== su.id) setOverId(su.id); }}
+          onDrop={(e) => { e.preventDefault(); reorder(dragId, su.id); setDragId(null); setOverId(null); }}
+          onDragEnd={() => { setDragId(null); setOverId(null); }}
+          style={{ display: 'flex', alignItems: 'flex-start', gap: 6, opacity: dragId === su.id ? 0.45 : 1, boxShadow: (overId === su.id && dragId && dragId !== su.id) ? 'inset 0 3px 0 0 var(--brand)' : 'none', borderRadius: 12 }}>
+          <span draggable onDragStart={(e) => { setDragId(su.id); e.dataTransfer.effectAllowed = 'move'; }} title="Drag to reorder" style={{ cursor: 'grab', color: '#c4c4c8', fontSize: 16, lineHeight: 1, paddingTop: 20, userSelect: 'none', flexShrink: 0 }}>⠿</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SuiteCard suite={su} entities={allEntities} sets={sets} dashTitle={dashTitle} fields={fields} onChange={onChange} />
+          </div>
+        </div>
       ))}
-      {suites.length === 0 && <Muted>No suites yet.</Muted>}
+      {list.length === 0 && <Muted>No suites yet.</Muted>}
       <button style={addBtn} onClick={addSuite}>+ Add suite</button>
     </div>
   );
@@ -3231,7 +3672,11 @@ function EntityLogins({ entity, users, allUsers = [], onChange }) {
                       </select>}
                 </td>
                 <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <button style={miniBtnOutline} onClick={() => removeAccess(u)}>Remove access</button>
+                  {u.role !== 'admin' && (
+                    <button style={miniBtnOutline} title="See Pulse exactly as this user does (their role, dashboards, flags). A banner with Exit brings you back."
+                      onClick={() => api.impersonateUser(u.id).then(() => { window.location.href = '/'; }).catch((e) => alert(e.message))}>👁 View as</button>
+                  )}
+                  <button style={{ ...miniBtnOutline, marginLeft: 6 }} onClick={() => removeAccess(u)}>Remove access</button>
                   <button style={{ ...delBtn, marginLeft: 6 }} onClick={() => del(u)}>Delete</button>
                 </td>
               </tr>
@@ -3603,6 +4048,8 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   const [excluded, setExcluded] = useState(suite.excludedDashboards || []);
   const [dashLocks, setDashLocks] = useState(suite.dashboardLocks || {});
   const [eventUrl, setEventUrl] = useState(suite.eventUrl || '');
+  const [howlerEventId, setHowlerEventId] = useState(suite.howlerEventId || '');
+  const [liveDashboardId, setLiveDashboardId] = useState(suite.liveDashboardId || '');
   const [saved, setSaved] = useState(false);
   const toggleDash = (did) => setExcluded((cur) => (cur.includes(did) ? cur.filter((x) => x !== did) : [...cur, did]));
   const setDashLock = (did, map) => setDashLocks((cur) => {
@@ -3638,7 +4085,8 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     setSetIds((cur) => { const n = cur.slice(); const [m] = n.splice(from, 1); n.splice(i, 0, m); return n; });
     dragFrom.current = i; setDragOver(i);
   };
-  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl }); flash(setSaved); onChange(); };
+  const [expanded, setExpanded] = useState(false); // collapsed by default — header is the listing row, click ▶ to open details
+  const save = async () => { await api.adminUpdateSuite(suite.id, { name, icon, entityId, setIds, lockedFilters: locks, excludedDashboards: excluded, dashboardLocks: dashLocks, eventUrl, howlerEventId, liveDashboardId }); flash(setSaved); onChange(); };
   // Sets grouped by their library folder (item: show folder → set → dashboards),
   // named folders first then the ungrouped bucket.
   const setsByFolder = (() => { const m = {}; for (const s of sets) { const f = s.folder || ''; (m[f] = m[f] || []).push(s); } return m; })();
@@ -3651,6 +4099,14 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
     return out;
   })();
   const remove = async () => { if (confirm(`Delete suite "${suite.name}"?`)) { await api.adminDeleteSuite(suite.id); onChange(); } };
+  // Stand up a new event just like this one: clones the sets + client-owned
+  // dashboards (ids remapped), then the AM renames + repoints the event.
+  const duplicate = async () => {
+    const nm = prompt('Name for the duplicated suite:', `${suite.name} (copy)`);
+    if (nm == null) return; // cancelled
+    try { await api.adminDuplicateSuite(suite.id, { name: nm.trim() || undefined }); onChange(); }
+    catch (e) { alert('Could not duplicate: ' + e.message); }
+  };
   // Open this suite exactly as the client sees it (preview), jumping to its
   // first dashboard. Uses the client suite endpoint (admins can read any suite).
   const preview = async () => {
@@ -3667,10 +4123,13 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
   return (
     <div style={cardStyle}>
       <Row>
-        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name — e.g. Bushfire 2026" />
+        <button onClick={() => setExpanded((v) => !v)} title={expanded ? 'Collapse' : 'Open details'} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted)', fontSize: 12, padding: '0 6px 0 0', flexShrink: 0, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}>▶</button>
+        <input data-tour="suite-name" style={{ ...input, fontWeight: 700, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} onFocus={() => setExpanded(true)} placeholder="Suite name — e.g. Bushfire 2026" />
         <button style={previewBtn} onClick={preview} title="Preview as the client sees it">👁 Preview</button>
+        <button style={previewBtn} onClick={duplicate} title="Clone this suite (sets + dashboards) as a new one">⧉ Duplicate</button>
         <button style={delBtn} onClick={remove}>Delete</button>
       </Row>
+      {expanded && (<>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Client"><select style={input} value={entityId} onChange={(e) => setEntityId(e.target.value)}>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></Field>
         <div data-tour="suite-icon"><Field label="Icon"><IconPicker value={icon} onChange={setIcon} /></Field></div>
@@ -3770,7 +4229,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         </Section>
       )}
       <Section tour="suite-locks" title="Locked filters (the event, cashless events…)" defaultOpen>
-        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+        <LockedFilterEditor value={locks} onChange={setLocks} fields={fields} categories={lockCategories} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} entityId={entityId} />
       </Section>
       {includedDashboards.length > 0 && (
         <Section title="Per-dashboard locked filters (override the suite locks for one dashboard)">
@@ -3788,7 +4247,7 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
                   </div>
                   {open && (
                     <div style={{ marginTop: 8 }}>
-                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} />
+                      <LockedFilterEditor value={dashLocks[d.id] || {}} onChange={(m) => setDashLock(d.id, m)} fields={fields} categories={[]} clientOrganiser={organiserValsFromLocks(entities.find((e) => e.id === entityId)?.lockedFilters)} entityId={entityId} />
                     </div>
                   )}
                 </div>
@@ -3802,11 +4261,25 @@ function SuiteCard({ suite, entities, sets, dashTitle = {}, fields, onChange }) 
         <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's buy / checkout URL. Campaigns linked to this event auto-fill it as the call-to-action link.</div>
         <input style={{ ...input, width: '100%' }} value={eventUrl} onChange={(e) => setEventUrl(e.target.value)} placeholder="https://tickets.example.com/your-event" />
       </div>
+      <div data-tour="suite-howler-id" style={{ marginTop: 12 }}>
+        <L>Howler event ID</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The event's number on <b>howler.co.za</b> (e.g. <b>40848</b> — pasting the event URL works too). Deep links and link templates auto-fill their destinations from it. Manual for now; the Howler integration will fill it automatically later.</div>
+        <input style={{ ...input, width: '100%' }} value={howlerEventId} onChange={(e) => setHowlerEventId(e.target.value)} placeholder="40848" inputMode="numeric" />
+      </div>
+      <div data-tour="suite-live" style={{ marginTop: 12 }}>
+        <L>🔴 LIVE button dashboard</L>
+        <div style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>Pick the live-ticketing report. A red <b>LIVE</b> button appears on this event's row in the sidebar and jumps straight to it — one tap to live sales, no drill-down.</div>
+        <select style={{ ...input, width: '100%' }} value={liveDashboardId} onChange={(e) => setLiveDashboardId(e.target.value)}>
+          <option value="">No LIVE button</option>
+          {includedDashboards.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+        </select>
+      </div>
       <div data-tour="suite-save"><SaveRow onSave={save} saved={saved} id={suite.id} /></div>
       <Section tour="suite-branding" title="Event branding (logo / colours / sender)">
         <p style={hint}>Override this <b>event's</b> look — its logo, colours and sender name — used for this event's campaigns and single-event digests, and the in-app theme while viewing it. Anything left blank inherits <b>{entities.find((e) => e.id === entityId)?.name || 'the client'}</b>'s branding. Saved on its own (separate from the suite settings above).</p>
         <MailTemplateEditor scope="admin-suite" entityId={entityId} suiteId={suite.id} />
       </Section>
+      </>)}
     </div>
   );
 }
@@ -3841,7 +4314,7 @@ const organiserValsFromLocks = (locks) => Object.entries(locks || {})
   .filter(([k]) => k.toLowerCase() === 'organiser name' || ORG_NAME_RE.test(k))
   .flatMap(([, v]) => splitVals(v));
 
-function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null, clientOrganiser = [] }) {
+function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = null, clientOrganiser = [], entityId = null }) {
   // restrictTo limits the offered filters (e.g. the organiser-level editor only
   // exposes Organiser Name — scope is set once per client there).
   const PRESETS = restrictTo ? LOCK_PRESETS.filter((p) => restrictTo.includes(p.title)) : LOCK_PRESETS;
@@ -4055,7 +4528,7 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
                 {preset?.feeds && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>also fills {preset.feeds.join(', ')}</span>}
                 {orgScope && <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>↳ showing only {orgVals.join(', ')} events</span>}
               </div>
-              <ValuePicker meta={meta} value={r.vals} extraFilters={orgScope} onChange={(v) => setRow(i, { vals: v })} />
+              <ValuePicker meta={meta} value={r.vals} extraFilters={orgScope} entityId={entityId} onChange={(v) => setRow(i, { vals: v })} />
               <button style={delBtn} onClick={() => removeRow(i)} title="Remove">✕</button>
             </div>
           );
@@ -4071,7 +4544,7 @@ function LockedFilterEditor({ value, onChange, fields, categories, restrictTo = 
 
 // Value picker for a locked filter: selected values shown as chips, plus a
 // search box that queries Looker server-side (works with thousands of values).
-function ValuePicker({ meta, value, onChange, extraFilters = null }) {
+function ValuePicker({ meta, value, onChange, extraFilters = null, entityId = null }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState([]);
@@ -4085,12 +4558,12 @@ function ValuePicker({ meta, value, onChange, extraFilters = null }) {
     let alive = true;
     setLoading(true);
     const t = setTimeout(async () => {
-      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true, filters: extraFilters || undefined }); if (alive) setResults(d.suggestions || []); }
+      try { const d = await api.filterSuggest({ model: meta.model, explore: meta.explore, field: meta.field, q, pair: true, filters: extraFilters || undefined, entityId: entityId || undefined }); if (alive) setResults(d.suggestions || []); }
       catch { if (alive) setResults([]); }
       finally { if (alive) setLoading(false); }
     }, 300);
     return () => { alive = false; clearTimeout(t); };
-  }, [q, open, canSuggest, meta, JSON.stringify(extraFilters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, open, canSuggest, meta, JSON.stringify(extraFilters), entityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const add = (s) => { if (s && !selected.includes(s)) onChange([...selected, s].join(',')); };
   const remove = (s) => onChange(selected.filter((x) => x !== s).join(','));
@@ -4764,7 +5237,12 @@ function AdminIntegrations() {
     <div>
       <p style={hint}>Accounts (Looker · Anthropic · Email · <b>Inventive</b>) is open below; other sections are collapsed — tap to open. Accounts override the values in <code>.env</code>; clients can set their own Looker/Anthropic (Client → Integrations), which take precedence for their data.</p>
       <Section title="🔑 Accounts — Looker · Anthropic · Email · Inventive">
-        <IntegrationsForm value={value} collapsible showResend showInventive clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+        <IntegrationsForm value={value} collapsible showResend showInventive showMetaHouse showChottu showQueueit showSocialPlus clients={clients} canManageLock lockableKeys={['looker', 'anthropic', 'resend', 'inventive', 'meta', 'chottu', 'queueit', 'socialplus']} locks={value.locks || {}} onToggleLock={async (k, locked) => setValue(await api.setAdminIntegrationLock(k, locked))} onTestEmail={() => api.sendMailTest()} onSave={async (p) => setValue(await api.saveAdminIntegrations(p))} />
+      </Section>
+      <Section title="📱 PostHog — app analytics">
+        <p style={hint}>One platform connection to Howler's PostHog project. Powers the 📲 App analytics tab and every client's App page (scoped to their events by the <code>eventID</code> property). Event/metric mapping lives on the App analytics tab.</p>
+        <PosthogSettingsCard />
+        <PosthogFeedCard />
       </Section>
       <Section title="✨ Inventive workspaces">
         <InventiveWorkspaces />
@@ -5068,8 +5546,15 @@ function ClientIntegrations({ entity }) {
         showMeta
         showTikTok
         showSlack
+        showChottu
+        showQueueit
+        showPixel
+        pixelEntityId={entity.id}
+        onPixelStatus={() => api.getPixelStatus(entity.id)}
+        onCreatePixelAudiences={(channel) => api.createPixelAudiences(entity.id, channel)}
+        showSocialPlus
         canManageLock
-        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack']}
+        lockableKeys={['looker', 'anthropic', 'meta', 'tiktok', 'slack', 'chottu', 'pixel', 'queueit', 'socialplus']}
         locks={value.locks || {}}
         onTestSlack={() => api.testEntitySlack(entity.id)}
         onToggleLock={async (k, locked) => setValue(await api.setEntityIntegrationLock(entity.id, k, locked))}
@@ -5077,6 +5562,8 @@ function ClientIntegrations({ entity }) {
       />
       <ApiKeysCard entityId={entity.id} scope="admin-client" />
       <MetaConnectCard entityId={entity.id} scope="admin-client" />
+      <QueueItCard entityId={entity.id} scope="admin-client" />
+      <SocialPlusPanel entityId={entity.id} scope="admin-client" />
       <DriveSourcesCard entityId={entity.id} scope="admin-client" />
     </div>
   );
@@ -5088,6 +5575,29 @@ function ClientIntegrations({ entity }) {
 // local → production, and as an ongoing backup.
 function BackupRestore() {
   const [busy, setBusy] = useState('');
+  const [snap, setSnap] = useState(null); // GET /api/admin/backups — nightly snapshot status
+  const [opsInfo, setOpsInfo] = useState(null); // GET /api/admin/ops — Slack alerting configured?
+  useEffect(() => {
+    api.backupStatus().then(setSnap).catch(() => setSnap({ error: true }));
+    api.opsStatus().then(setOpsInfo).catch(() => setOpsInfo(null));
+  }, []);
+  async function doTestAlert() {
+    setBusy('opstest');
+    try {
+      const r = await api.opsTestAlert();
+      alert(r.sent ? 'Test alert sent — check the ops Slack channel now.' : `Test alert NOT delivered: ${r.error}`);
+    } catch (e) { alert('Test alert failed: ' + e.message); }
+    finally { setBusy(''); }
+  }
+  async function doRunNow() {
+    setBusy('snapshot');
+    try {
+      const r = await api.runBackupNow();
+      if (!r.ok) alert('Snapshot failed: ' + (r.error || 'unknown error'));
+      setSnap(await api.backupStatus());
+    } catch (e) { alert('Snapshot failed: ' + e.message); }
+    finally { setBusy(''); }
+  }
   async function doExport() {
     setBusy('export');
     try {
@@ -5118,6 +5628,31 @@ function BackupRestore() {
   return (
     <div>
       <p style={hint}>Download a full snapshot of everything (clients, suites, sets, dashboards, logins, settings, tile library), or restore one. Use it to move your local setup to production, or as a backup.</p>
+      {snap && !snap.error && (
+        <div style={{ ...cardStyle, borderColor: snap.offBoxConfigured ? 'var(--border)' : 'var(--error)', background: snap.offBoxConfigured ? undefined : 'rgba(220,60,60,0.06)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>💾 Nightly database snapshots {snap.offBoxConfigured ? '— protected off-box ✅' : '— ⚠️ NOT protected off-box'}</div>
+          {!snap.offBoxConfigured && (
+            <div style={{ fontSize: 13, color: 'var(--error)', fontWeight: 600, marginBottom: 8 }}>{snap.warning}</div>
+          )}
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+            Last successful snapshot: {snap.lastSuccessAt ? new Date(snap.lastSuccessAt).toLocaleString() : 'never'}
+            {snap.runs?.[0] && <> · latest run: {snap.runs[0].status}{snap.runs[0].status === 'ok' ? (snap.runs[0].uploaded ? ', copied off-box' : ', local disk only') : ''}</>}
+            {' '}· {snap.local?.length || 0} snapshot{(snap.local?.length || 0) === 1 ? '' : 's'} on disk
+          </div>
+          <button style={saveBtn} onClick={doRunNow} disabled={!!busy}>{busy === 'snapshot' ? 'Running…' : 'Run snapshot now'}</button>
+        </div>
+      )}
+      {opsInfo && (
+        <div style={{ ...cardStyle, borderColor: opsInfo.configured ? 'var(--border)' : 'var(--error)', background: opsInfo.configured ? undefined : 'rgba(220,60,60,0.06)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>🔔 Ops alerts (Slack) {opsInfo.configured ? '— configured' : '— ⚠️ NOT configured'}</div>
+          <div style={{ fontSize: 13, color: opsInfo.configured ? 'var(--muted)' : 'var(--error)', marginBottom: 12 }}>
+            {opsInfo.configured
+              ? 'Background failures (backups, mailer, disk) page the internal Slack channel. Send a test to prove the channel actually works.'
+              : 'Background failures currently die in the server log stream — nobody is paged. Set OPS_SLACK_WEBHOOK_URL in Render → Environment to fix this.'}
+          </div>
+          <button style={saveBtn} onClick={doTestAlert} disabled={!!busy}>{busy === 'opstest' ? 'Sending…' : 'Send test alert'}</button>
+        </div>
+      )}
       <div style={cardStyle}>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>⬇ Export</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Saves a JSON backup of this server's data to your computer.</div>

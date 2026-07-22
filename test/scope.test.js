@@ -83,6 +83,45 @@ test('an admin previewing a client suite is scoped to THAT client', async () => 
   assert.deepEqual(scope, { [h.ORG_FIELD]: 'B-org' });
 });
 
+// ── Scoping by entityId (the event picker while CREATING a new suite) ──
+// A suite has no id until it's saved, so the "locked filters" event picker can't
+// pass a suiteId. It passes the target client's entityId instead; the server must
+// still force that client's organiser scope (issue #61 — events were leaking
+// across organisers because an admin with no suiteId resolved to "see all").
+
+test('an admin creating a suite is scoped to the target client via entityId', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const admin = h.makeAdmin('picker-admin@admin.test');
+  // No suiteId (the suite doesn't exist yet) — only the entityId the suite is for.
+  const scope = await h.auth.scopeForQuery(Q(), admin, null, ent.id);
+  assert.deepEqual(scope, { [h.ORG_FIELD]: 'Ultra South Africa' });
+});
+
+test('entityId scoping cannot be widened by a browser-supplied organiser value', async () => {
+  const ent = h.makeEntity('Ultra SA', 'Ultra South Africa');
+  const admin = h.makeAdmin('picker-admin2@admin.test');
+  const q = Q({ filters: { [h.ORG_FIELD]: 'Rocking the Daisies' } });
+  const scope = await h.auth.scopeForQuery(q, admin, null, ent.id);
+  const finalFilters = { ...q.filters, ...scope };
+  assert.equal(finalFilters[h.ORG_FIELD], 'Ultra South Africa');
+});
+
+test('a client cannot pass another client\'s entityId to the picker', async () => {
+  const entA = h.makeEntity('A', 'A-org');
+  const entB = h.makeEntity('B', 'B-org');
+  const userA = h.makeClient('picker-client@client.test', [entA.id]);
+  // userA tries to scope the picker to entity B (which they don't belong to).
+  const scope = await h.auth.scopeForQuery(Q(), userA, null, entB.id);
+  assert.equal(scope, false); // blocked — no access to that client
+});
+
+test('entityId scoping fails CLOSED when that client has no organiser', async () => {
+  const ent = h.makeEntity('Misconfigured Co', null); // no organiser lock
+  const admin = h.makeAdmin('picker-admin3@admin.test');
+  const scope = await h.auth.scopeForQuery(Q(), admin, null, ent.id);
+  assert.equal(scope, false);
+});
+
 test('fails CLOSED on an explore with no resolvable organiser field (no Looker)', async () => {
   const ent = h.makeEntity('A', 'A-org');
   const user = h.makeClient('i@client.test', [ent.id]);

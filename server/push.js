@@ -138,4 +138,9 @@ function sendToEntity(entityId, payload, type) {
   return deliver(rows, payload);
 }
 
-module.exports = { mount, sendToUser, sendToEntity, isEnabled: enabled };
+// Generic transport for modules that own their own subscription table (e.g. the
+// token-gated staff portal, whose "users" are staff ids, not accounts).
+function sendRaw(subs, payload) { return deliver(subs || [], payload); }
+function vapidPublicKey() { return _db ? _db.getSetting('vapid_public', '') : ''; }
+
+module.exports = { mount, sendToUser, sendToEntity, sendRaw, vapidPublicKey, isEnabled: enabled };

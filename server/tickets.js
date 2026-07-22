@@ -18,6 +18,7 @@
 // The AI prompt (TICKET_DRAFT_SYSTEM) is exported so insights.promptRegistry() can
 // surface it in the Admin AI audit without bloating insights.js (see owlChat).
 
+const { serverError } = require('./http'); // sanitized 500s: logs full detail, client gets a generic message
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +29,7 @@ const express = require('express');
 // insights.promptRegistry() so the "Everything the AI is told" audit stays complete.
 const TICKET_DRAFT_SYSTEM = `You turn a rough, internal product report into a clean, actionable engineering ticket for Howler Pulse (a multi-tenant, white-label events analytics + client-engagement platform; Node/Express + SQLite backend, React SPA frontend; mobile-first).
 
-You are given a report's TYPE (bug | improvement | idea), the reporter's short title, the in-app SCREEN/area they were on, and what they wrote. Rewrite it into a crisp ticket a developer (or Claude) could pick up and build.
+You are given a report's TYPE (bug | improvement | idea), the reporter's short title, the in-app SCREEN/area they were on, the specific dashboard TILE they flagged (if any — reports filed from a dashboard can name the offending tile), and what they wrote. Rewrite it into a crisp ticket a developer (or Claude) could pick up and build. When a tile is named, treat it as the primary locus of the issue and reference it in the Affected area.
 
 Respond with ONLY strict JSON (no markdown fences) of the form:
 {
@@ -122,6 +123,17 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat)
     add('github_pr_number', 'github_pr_number INTEGER NOT NULL DEFAULT 0');
     add('github_pr_url', "github_pr_url TEXT NOT NULL DEFAULT ''");
+    // A report filed from a dashboard can pinpoint the specific tile it's about,
+    // so triage doesn't have to guess which chart/table is affected.
+    add('tile_id', "tile_id TEXT NOT NULL DEFAULT ''");     // the tile's id on the dashboard
+    add('tile_name', "tile_name TEXT NOT NULL DEFAULT ''"); // its human title (for display)
+    // Which environment this ticket is built into: 'staging' (test first, then
+    // promote) or 'production' (straight to main). Legacy rows default to production.
+    add('target', "target TEXT NOT NULL DEFAULT 'production'");
+    // A parked "go test it" notification waiting for the deploy to land (JSON:
+    // {env, since, base}) — see the deploy-aware notify sweep below.
+    add('notify_wait', "notify_wait TEXT NOT NULL DEFAULT ''");
+    add('ai_error', "ai_error TEXT NOT NULL DEFAULT ''"); // why the AI draft failed (surfaced so it's diagnosable, not a bare "failed")
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
   // Comments gained a visibility flag (internal dev note vs public reply the
   // reporter sees + gets notified about) after launch — ALTER for existing DBs.
@@ -131,15 +143,18 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   const requireOn = (req, res, next) => (enabled() ? next() : res.status(404).json({ error: 'The product board is disabled' }));
   // Reports can carry base64 screenshots/images/short videos — bigger than the
   // app-wide 5mb JSON cap (index.js excludes /api/my/tickets from the global parser).
-  const bigJson = express.json({ limit: '150mb' });
+  // 60mb, matched to the client's caps (ReportForm: 20MB/file, 40MB total,
+  // ~1.37× base64): the old 150mb meant two concurrent big uploads could OOM
+  // the 512MB instance — body + parse copies is ~3× the wire size.
+  const bigJson = express.json({ limit: '60mb' });
   const isAdmin = (u) => u && u.role === 'admin';
 
   const TYPES = ['bug', 'improvement', 'idea'];
   const URGENCIES = ['low', 'normal', 'high', 'urgent'];
-  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'shipped', 'approved', 'rejected', 'declined'];
+  const STATUSES = ['inbox', 'triaged', 'accepted', 'in_progress', 'staging', 'shipped', 'approved', 'rejected', 'declined'];
   const STATUS_LABELS = {
     inbox: 'New', triaged: 'Triaged', accepted: 'Accepted', in_progress: 'In progress',
-    shipped: 'Shipped — awaiting review', approved: 'Approved', rejected: 'Rejected — reopen', declined: 'Declined',
+    staging: 'On staging — verify', shipped: 'Shipped — awaiting review', approved: 'Live 🚀', rejected: 'Rejected — reopen', declined: 'Declined',
   };
   const clamp = (s, n) => String(s || '').slice(0, n);
 
@@ -171,13 +186,15 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   function ticketRow(r) {
     return {
       id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      tileId: r.tile_id || '', tileName: r.tile_name || '',
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status, priority: r.priority,
       reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
-      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, source: r.source || 'widget',
+      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, aiError: r.ai_error || '', source: r.source || 'widget',
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '', prNumber: r.github_pr_number || 0, prUrl: r.github_pr_url || '',
+      target: r.target || 'production',
       attachments: attList(r.id), createdAt: r.created_at, updatedAt: r.updated_at,
     };
   }
@@ -185,9 +202,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   function myTicketRow(r) {
     return {
       id: r.id, type: r.type, title: r.title, body: r.body, screen: r.screen, urgency: r.urgency,
+      tileId: r.tile_id || '', tileName: r.tile_name || '',
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status,
       aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status,
-      shipNote: r.ship_note || '', testUrl: r.test_url || '',
+      shipNote: r.ship_note || '', testUrl: r.test_url || '', target: r.target || 'production',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       attachments: attList(r.id), comments: comments(r.id, { publicOnly: true }), createdAt: r.created_at, updatedAt: r.updated_at,
     };
@@ -208,28 +226,34 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // ── AI drafting ───────────────────────────────────────────────────────────────
   // Turn the raw report into a structured ticket. Uses the shared insights client +
   // resilient JSON parser (no prompt in insights.js — see TICKET_DRAFT_SYSTEM above).
-  async function draftTicket({ type, title, body, screen }) {
+  async function draftTicket({ type, title, body, screen, tile }) {
     const apiKey = adminAnthropicKey ? adminAnthropicKey() : (process.env.ANTHROPIC_API_KEY || '');
     const c = insights.requireClient(apiKey); // throws NO_API_KEY when unset (caller handles)
     const user = [
       `Type: ${type}`,
       `Reporter's title: ${title || '(none given)'}`,
       `Screen / area: ${screen || '(unknown)'}`,
+      ...(tile ? [`Affected tile: ${tile}`] : []),
       '',
       'What they wrote:',
       body || '(no description)',
     ].join('\n');
     const resp = await c.messages.create({
       model: insights.MODEL,
-      max_tokens: 1400,
+      max_tokens: 4000, // adaptive thinking shares this budget; 1400 could run out before the JSON, yielding an unparseable draft
       thinking: { type: 'adaptive' },
       output_config: { effort: 'low' },
       system: insights.systemWith(TICKET_DRAFT_SYSTEM, db.getSetting('ai_instructions')),
       messages: [{ role: 'user', content: user }],
     });
-    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-    const parsed = await insights.parseModelJsonResilient(c, text, 'ticket');
-    return { title: clamp(parsed?.title || '', 160), summary: String(parsed?.ticket || parsed?.summary || '') };
+    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+    // Prefer the structured JSON, but never hard-fail a valid response over parsing:
+    // fall back to the raw model text so the draft is usable instead of "failed".
+    let parsed = null;
+    try { parsed = await insights.parseModelJsonResilient(c, text, 'ticket'); } catch { /* fall back to raw text below */ }
+    const summary = String((parsed && (parsed.ticket || parsed.summary)) || text || '').trim();
+    if (!summary) throw new Error(`AI returned an empty draft (stop: ${resp.stop_reason || 'unknown'})`);
+    return { title: clamp((parsed && parsed.title) || title || '', 160), summary };
   }
   // Draft in the background after a report is filed; write the result back. Never
   // throws into the request path — a failed/absent AI just leaves the raw report.
@@ -240,14 +264,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('skipped', id);
       return;
     }
-    draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen })
+    draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name })
       .then(({ title, summary }) => {
-        sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=? WHERE id=?')
+        sql.prepare("UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, ai_error='' WHERE id=?")
           .run(title, summary, 'ready', id);
       })
       .catch((e) => {
         console.error('[tickets] AI draft failed:', e.message);
-        sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('error', id);
+        sql.prepare('UPDATE tickets SET ai_status=?, ai_error=? WHERE id=?').run('error', String(e.message || 'AI draft failed').slice(0, 300), id);
       });
   }
 
@@ -255,16 +279,23 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // agent needs to pick the ticket up: the structured spec, where it lives, the
   // acceptance bar, and the house rules (mobile-first, dual-surface, ratcheted
   // module budgets, push to branch + main).
+  // The branch a build for this ticket should target: the staging branch when the
+  // ticket is aimed at staging (test-first), otherwise production (main).
+  const prodBranch = () => github?.prodBranch?.() || 'main';
+  const stagingBranch = () => github?.stagingBranch?.() || 'staging';
+  const baseBranchFor = (t) => (t.target === 'staging' ? stagingBranch() : prodBranch());
   function claudeBrief(t) {
     const spec = (t.ai_status === 'ready' && t.ai_summary) ? t.ai_summary
       : `**${t.type} report (unstructured — AI draft unavailable):**\n\n${t.body || '(no description)'}`;
     const heading = t.ai_title || t.title || `${t.type} report`;
+    const base = baseBranchFor(t);
     const atts = attList(t.id);
     return [
       `# Build ticket: ${heading}`,
       '',
       `- **Type:** ${t.type}`,
       `- **Screen / area:** ${t.screen || 'unknown'}`,
+      t.tile_name ? `- **Affected tile:** ${t.tile_name}${t.tile_id ? ` (tile id: ${t.tile_id})` : ''}` : '',
       `- **Urgency:** ${t.urgency}`,
       `- **Reported by:** ${t.reporter_name || t.reporter_email}${t.entity_id ? ` (client: ${db.getEntity(t.entity_id)?.name || t.entity_id})` : ''}`,
       `- **Ticket id:** ${t.id}`,
@@ -277,15 +308,17 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       '',
       spec,
       '',
+      `- **Deploy target:** ${t.target === 'staging' ? `staging (test first) — open the pull request against the \`${base}\` branch` : `production — open the pull request against the \`${base}\` branch`}`,
+      '',
       '## How to build it',
       '',
       '1. Work in the Howler Pulse repo. Read `CLAUDE.md` + `PROJECT_OVERVIEW.md` first for conventions.',
       '2. Keep it **mobile-first**; if it is client-facing, ship **both** an admin surface and client self-service (the dual-surface rule).',
       '3. Prefer a small, self-contained module over growing a god-file; respect the server line budgets.',
       '4. Implement the acceptance criteria above, then verify (tests / run the app).',
-      '5. Commit with a clear message and push to the working branch **and** `main` (Render deploys from `main`).',
+      `5. Commit with a clear message and open the pull request against the **\`${base}\`** branch (${t.target === 'staging' ? 'it deploys to the staging server so this can be tested before production' : 'production — Render deploys from it'}).`,
       '',
-      '_When done, mark this ticket **In review** (then **Shipped**) on the Pulse product board so the reporter is notified._',
+      '_When done, the merged PR auto-updates this ticket on the Pulse product board so the reporter is notified._',
     ].join('\n');
   }
 
@@ -298,12 +331,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // people prefer. Pre-drafted aiTitle/aiSummary (the Owl already structured it in
   // chat) skip the background AI draft. Entity is derived from the reporter: an
   // admin may target a client; a client is locked to one they own. Throws on empty.
-  function createTicket({ user, type, title, body, screen, urgency, entityId, attachments, source = 'widget', aiTitle, aiSummary }) {
+  function createTicket({ user, type, title, body, screen, urgency, entityId, attachments, source = 'widget', aiTitle, aiSummary, tileId, tileName }) {
     const t = TYPES.includes(type) ? type : 'bug';
     const urg = URGENCIES.includes(urgency) ? urgency : 'normal';
     const ti = clamp(title, 200).trim();
     const bo = clamp(body, 8000).trim();
     const sc = clamp(screen, 300).trim();
+    const tileI = clamp(tileId, 100).trim();     // the flagged tile (optional; dashboards only)
+    const tileN = clamp(tileName, 300).trim();
     if (!bo && !ti) { const e = new Error('Add a title or a description.'); e.code = 'EMPTY'; throw e; }
     const admin = isAdmin(user);
     const eid = admin
@@ -313,9 +348,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     const ts = now();
     const preDrafted = !!(aiTitle || aiSummary);
     sql.prepare(`INSERT INTO tickets
-      (id, type, title, body, screen, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, t, ti, bo, sc, urg, 'inbox', 0, user.id, user.email, userName(user),
+      (id, type, title, body, screen, tile_id, tile_name, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, t, ti, bo, sc, tileI, tileN, urg, 'inbox', 0, user.id, user.email, userName(user),
         admin ? 'admin' : 'client', eid, source === 'owl' ? 'owl' : 'widget',
         clamp(aiTitle || '', 200), String(aiSummary || '').slice(0, 20000), preDrafted ? 'ready' : 'pending', ts, ts);
     saveAttachments(id, attachments); // screenshots / images / short video
@@ -326,7 +361,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
     const b = req.body || {};
     try {
-      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, source: 'widget' });
+      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, tileId: b.tileId, tileName: b.tileName, source: 'widget' });
       res.status(201).json({ ticket });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
@@ -385,9 +420,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   // If GitHub isn't configured, hand back a prefilled new-issue URL so the admin's
   // browser can file it manually — the feature works with zero server credentials.
   app.post('/api/admin/tickets/:id/github-issue', auth.requireAdmin, requireOn, async (req, res) => {
-    const t = getTicket(req.params.id);
+    let t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     if (t.github_url) return res.json({ ticket: ticketRow(t), alreadyLinked: true });
+    // Deploy target chosen at send time: 'staging' (test first, then promote) or
+    // 'production' (straight to main). Default staging — safer, promote once verified.
+    const target = (req.body || {}).target === 'production' ? 'production' : 'staging';
+    if (target !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(target, now(), t.id); t = getTicket(t.id); }
+    const base = baseBranchFor(t);
     const title = t.ai_title || t.title || `${t.type} report`;
     let body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
     // Dispatch mode: 'build' → @claude builds + opens a PR; 'plan' → @claude posts a
@@ -396,8 +436,12 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     // which (unlike GITHUB_TOKEN) does trigger the Claude Code Action.
     const mode = (req.body || {}).mode;
     const doBuild = mode === 'build' || (!mode && !!github?.dispatchEnabled?.());
-    if (mode === 'plan') body += '\n\n@claude review this ticket and reply with a short implementation plan and any clarifying questions as a comment. Do NOT write code or open a pull request yet — wait for a follow-up "@claude go ahead" before building.';
-    else if (doBuild) body += '\n\n@claude please implement this ticket and open a pull request.';
+    // The action's sandbox may clone with a limited ref set and not see `base` —
+    // it must fetch it rather than concluding the branch doesn't exist (issue #61
+    // stalled exactly this way: "no staging branch" when staging was live + synced).
+    const baseNote = `The \`${base}\` branch exists on the remote — if it isn't visible in your clone, run \`git fetch origin ${base}\` before concluding otherwise.`;
+    if (mode === 'plan') body += `\n\n@claude review this ticket and reply with a short implementation plan and any clarifying questions as a comment. Do NOT write code or open a pull request yet — wait for a follow-up "@claude go ahead" before building. When you do build, open the PR against the \`${base}\` branch. ${baseNote}`;
+    else if (doBuild) body += `\n\n@claude please implement this ticket and open a pull request against the \`${base}\` branch. ${baseNote}`;
     const dispatched = doBuild || mode === 'plan';
     if (!github?.isConfigured?.()) {
       return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
@@ -405,7 +449,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     try {
       const issue = await github.createIssue({ title, body });
       sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
-      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number}${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number} → ${target} (\`${base}\`)${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
       // Sending to GitHub IS the acceptance act — advance early-stage tickets so the
       // board reflects it (the reporter gets the "accepted" nudge). Later stages stay.
       if (['inbox', 'triaged'].includes(t.status)) {
@@ -416,7 +460,68 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
-      res.status(500).json({ error: e.message });
+      serverError(res, e);
+    }
+  });
+
+  // Promote to production: open (or reuse) the release PR that merges the staging
+  // branch into production. Release-train — merging it ships EVERY ticket currently
+  // on staging (the webhook flips verified ones to Done on merge). Honest about
+  // that: the response lists how many staging tickets ride along. No per-ticket
+  // cherry-pick — a shared staging branch can't cleanly un-merge one change.
+  app.post('/api/admin/tickets/:id/promote', auth.requireAdmin, requireOn, async (req, res) => {
+    const t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (!github?.isConfigured?.()) return res.status(400).json({ error: 'Connect GitHub (token + repo) to promote.' });
+    const staged = sql.prepare("SELECT id, ai_title, title, github_issue_number, client_verdict FROM tickets WHERE status='staging'").all();
+    // The gate: EVERY ticket riding this release must be verified by its reporter
+    // first (approve on staging). Unverified work never reaches production via Pulse.
+    const unverified = staged.filter((s) => s.client_verdict !== 'approved');
+    if (unverified.length) {
+      return res.status(400).json({ error: `Not yet — ${unverified.length} ticket${unverified.length === 1 ? ' on staging is' : 's on staging are'} still waiting for the reporter to test and approve: ${unverified.map((s) => `“${s.ai_title || s.title || s.id}”`).join(', ')}. Everything on staging ships together, so all of it must be verified first.` });
+    }
+    const lines = staged.map((s) => `- ${s.ai_title || s.title || s.id}${s.github_issue_number ? ` (#${s.github_issue_number})` : ''} — ✅ verified by the reporter`);
+    const body = [`Promote staging → production (release).`, '', `Ships ${staged.length} reporter-verified ticket${staged.length === 1 ? '' : 's'} now on staging:`, ...lines, '', '_Opened from Howler Pulse._'].join('\n');
+    try {
+      const pr = await github.openReleasePr({ title: `Release: promote ${stagingBranch()} → ${prodBranch()}`, body });
+      if (pr.nothingToPromote) return res.json({ nothingToPromote: true, staged: staged.length });
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `${pr.created ? 'Opened' : 'Using open'} release PR #${pr.number} to promote staging → production (${staged.length} ticket${staged.length === 1 ? '' : 's'}): ${pr.url}` });
+      res.json({ releasePr: pr, staged: staged.length });
+    } catch (e) {
+      console.error('[tickets] promote failed:', e.message);
+      serverError(res, e);
+    }
+  });
+
+  // Re-send a ticket to Claude on its EXISTING issue — the rework path. When the
+  // reporter sends work back (or a build stalled), this posts the refreshed brief
+  // (it leads with what still needs fixing) plus an @claude ask as an issue
+  // comment, so the Action rebuilds on the same thread instead of a duplicate
+  // issue. `target` may switch staging ↔ production for the rework.
+  app.post('/api/admin/tickets/:id/redispatch', auth.requireAdmin, requireOn, async (req, res) => {
+    let t = getTicket(req.params.id);
+    if (!t) return res.status(404).json({ error: 'Ticket not found' });
+    if (!t.github_issue_number) return res.status(400).json({ error: 'This ticket has no GitHub issue yet — use Send to GitHub first.' });
+    if (!github?.isConfigured?.()) return res.status(400).json({ error: 'Connect GitHub (token + repo) to re-send.' });
+    const reqTarget = (req.body || {}).target;
+    const target = reqTarget === 'production' || reqTarget === 'staging' ? reqTarget : t.target;
+    if (target !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(target, now(), t.id); t = getTicket(t.id); }
+    const base = baseBranchFor(t);
+    const body = `${claudeBrief(t)}\n\n@claude please rework this ticket — the **Sent back by the reporter** section above is what still needs fixing. Open a NEW pull request against the \`${base}\` branch. The \`${base}\` branch exists on the remote — if it isn't visible in your clone, run \`git fetch origin ${base}\` before concluding otherwise.`;
+    try {
+      const c = await github.createIssueComment(t.github_issue_number, body);
+      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Re-sent to Claude on issue #${t.github_issue_number} → ${target} (\`${base}\`): ${c.url}` });
+      // A rejected (or still-early) ticket goes back in the build queue.
+      if (['rejected', 'inbox', 'triaged'].includes(t.status)) {
+        const prev = t.status;
+        sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
+        logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[prev] || prev} → ${STATUS_LABELS.accepted} (re-sent to Claude)` });
+        notifyReporter(getTicket(t.id), prev);
+      }
+      res.json({ ticket: ticketRow(getTicket(t.id)), comment: c });
+    } catch (e) {
+      console.error('[tickets] redispatch failed:', e.message);
+      serverError(res, e);
     }
   });
 
@@ -505,13 +610,14 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       return res.status(400).json({ error: 'Set an Anthropic API key in Admin → Integrations to draft tickets.' });
     }
     try {
-      const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen });
-      sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, updated_at=? WHERE id=?')
+      const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name });
+      sql.prepare("UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, ai_error='', updated_at=? WHERE id=?")
         .run(title, summary, 'ready', now(), t.id);
       res.json({ ticket: ticketRow(getTicket(t.id)) });
     } catch (e) {
       console.error('[tickets] redraft failed:', e.message);
-      res.status(500).json({ error: 'Could not draft this ticket — please try again.' });
+      sql.prepare('UPDATE tickets SET ai_status=?, ai_error=?, updated_at=? WHERE id=?').run('error', String(e.message || 'AI draft failed').slice(0, 300), now(), t.id);
+      res.status(500).json({ error: `Could not draft this ticket: ${e.message || 'unknown error'}` });
     }
   });
 
@@ -528,13 +634,23 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     parts.push('Review it under Product → My reports and let us know — approve it, or send it back with what still needs fixing.');
     return parts.join('\n');
   }
+  // The staging review ask: test it on the staging site, approve → we push it live.
+  function stagingBody(t) {
+    const parts = [`Your ${t.type} “${label(t)}” is built and running on our staging site (a safe preview) — please test it.`, ''];
+    if (t.test_url) parts.push(`Try it: ${t.test_url}`, '');
+    parts.push('Approve it under Product → My reports and we’ll push it live — or send it back with what still needs fixing.');
+    return parts.join('\n');
+  }
   // Reporter-facing message per new status. Statuses not listed here don't notify
-  // (e.g. approved/rejected are the reporter's OWN actions; inbox is the start).
+  // (rejected is the reporter's OWN action; inbox is the start). 'approved' fires
+  // when a staging-verified ticket goes live via a release (or an admin closes it).
   function reporterMessage(t) {
     switch (t.status) {
       case 'triaged': return { title: 'We’re reviewing your report', body: `Your ${t.type} “${label(t)}” has been logged and is being reviewed.` };
       case 'accepted': return { title: 'Your report was accepted ✅', body: `Good news — we’ve accepted your ${t.type} “${label(t)}” and it’s queued to build.` };
       case 'in_progress': return { title: 'We’ve started building 🔨', body: `Work has started on your ${t.type} “${label(t)}”.` };
+      case 'staging': return { title: 'Ready for you to test 🧪', body: stagingBody(t), priority: 'needs_reply' };
+      case 'approved': return { title: 'It’s live 🎉', body: `Your ${t.type} “${label(t)}” is now live in production. Thanks for testing and approving it!` };
       case 'shipped': return { title: 'Shipped — please review 🎉', body: shipBody(t), priority: 'needs_reply' };
       case 'declined': return { title: 'Update on your report', body: `We won’t be taking your ${t.type} “${label(t)}” forward${t.decline_reason ? `: ${t.decline_reason}` : ' for now.'}` };
       default: return null;
@@ -567,30 +683,88 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   }
 
   // Notify the team (as a ticket comment) when the reporter approves or rejects a
-  // shipped ticket, so the board reflects the outcome without a webhook.
+  // shipped/staged ticket, so the board reflects the outcome without a webhook.
   function notifyTeamOnVerdict(t) {
     const who = t.reporter_name || t.reporter_email || 'The reporter';
-    if (t.client_verdict === 'approved') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `✅ ${who} approved the shipped work.` });
+    if (t.client_verdict === 'approved') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: t.status === 'staging' ? `✅ ${who} verified it on staging — cleared to promote to production.` : `✅ ${who} approved the shipped work.` });
     else if (t.client_verdict === 'rejected') logComment(t.id, { authorEmail: t.reporter_email, authorRole: 'client', kind: 'status', body: `↩️ ${who} sent it back: ${t.client_verdict_note || '(no reason given)'}` });
   }
 
-  // Client self-service: approve or reject the SHIPPED work. Only the reporter, only
-  // while shipped. Approve → 'approved' (done). Reject → 'rejected' (dev reopens);
-  // a reason is required so the team knows what to fix.
+  // Client self-service: approve or reject the work — while SHIPPED (production
+  // review: approve = done) or while ON STAGING (pre-release verification: approve
+  // stays on staging but clears it to promote; the release then takes it live).
+  // Reject → 'rejected' either way (dev reopens); a reason is required.
   app.post('/api/my/tickets/:id/verdict', auth.requireAuth, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
     if (t.reporter_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
-    if (t.status !== 'shipped') return res.status(400).json({ error: 'This report is not awaiting your review.' });
+    if (t.status !== 'shipped' && t.status !== 'staging') return res.status(400).json({ error: 'This report is not awaiting your review.' });
     const verdict = (req.body || {}).verdict;
     if (verdict !== 'approved' && verdict !== 'rejected') return res.status(400).json({ error: 'verdict must be approved or rejected' });
     const note = clamp((req.body || {}).note, 4000).trim();
     if (verdict === 'rejected' && !note) return res.status(400).json({ error: 'Please say what still needs fixing.' });
+    const nextStatus = verdict === 'rejected' ? 'rejected' : (t.status === 'staging' ? 'staging' : 'approved');
     sql.prepare('UPDATE tickets SET status=?, client_verdict=?, client_verdict_note=?, client_verdict_at=?, updated_at=? WHERE id=?')
-      .run(verdict === 'approved' ? 'approved' : 'rejected', verdict, note, now(), now(), t.id);
+      .run(nextStatus, verdict, note, now(), now(), t.id);
     notifyTeamOnVerdict(getTicket(t.id));
     res.json({ ticket: myTicketRow(getTicket(t.id)) });
   });
+
+  // ── Deploy-aware notifications ──────────────────────────────────────────────
+  // A merged PR flips the ticket on the board immediately, but the reporter's
+  // "go test it" message would point at the OLD build — Render still needs a few
+  // minutes to deploy. So the notify is PARKED (tickets.notify_wait) and this
+  // sweep releases it once the target environment really runs newer code:
+  // staging is polled via its public /health/build stamp (commit changed or it
+  // rebooted after the merge); production = this very process restarted after
+  // the merge (the deploy replaced us — restart-safe because the flag is in the
+  // DB). A hard timeout sends anyway: late beats never.
+  const BOOT_AT = new Date().toISOString();
+  const NOTIFY_TIMEOUT_MS = 25 * 60_000;     // give up confirming, send anyway
+  const NO_URL_FALLBACK_MS = 5 * 60_000;     // no staging URL configured → short grace
+  async function stagingBuild() {
+    const url = (github?.stagingUrl?.() || '').replace(/\/$/, '');
+    if (!url) return null;
+    try {
+      const r = await fetch(`${url}/health/build`, { signal: AbortSignal.timeout(6000) });
+      return r.ok ? await r.json() : null; // { commit, startedAt }
+    } catch { return null; }
+  }
+  // Fire-and-forget from the (sync) webhook path — never throws.
+  function deferNotify(id, env) {
+    (env === 'staging' ? stagingBuild() : Promise.resolve(null))
+      .then((b) => sql.prepare('UPDATE tickets SET notify_wait=? WHERE id=?')
+        .run(JSON.stringify({ env, since: now(), base: b?.commit || '' }), id))
+      .catch((e) => console.error('[tickets] deferNotify failed:', e.message));
+  }
+  async function sweepDeferred() {
+    const rows = sql.prepare("SELECT id, notify_wait FROM tickets WHERE notify_wait != ''").all();
+    if (!rows.length) return;
+    const waits = rows.map((r) => ({ id: r.id, w: JSON.parse(r.notify_wait) }));
+    const sb = waits.some(({ w }) => w.env === 'staging') ? await stagingBuild() : null;
+    for (const { id, w } of waits) {
+      const age = Date.now() - new Date(w.since).getTime();
+      let how = age > NOTIFY_TIMEOUT_MS ? 'timed out — sent anyway' : '';
+      if (!how) {
+        if (w.env === 'production') { if (BOOT_AT > w.since) how = 'deploy confirmed'; }
+        else if (sb) { if ((w.base && sb.commit && sb.commit !== w.base) || sb.startedAt > w.since) how = 'deploy confirmed'; }
+        else if (!(github?.stagingUrl?.()) && age > NO_URL_FALLBACK_MS) how = 'no staging URL to confirm — sent after a grace period';
+      }
+      if (!how) continue;
+      sql.prepare("UPDATE tickets SET notify_wait='' WHERE id=?").run(id);
+      const t = getTicket(id);
+      if (!t) continue;
+      // The world may have moved on while we waited (reporter already approved
+      // from the app, admin re-routed the ticket) — a stale ask helps no one.
+      if ((w.env === 'staging' && (t.status !== 'staging' || t.client_verdict === 'approved'))
+        || (w.env === 'production' && !['shipped', 'approved'].includes(t.status))) continue;
+      notifyReporter(t, '');
+      logComment(t.id, { authorEmail: 'system', authorRole: 'system', kind: 'system', body: `🔔 Reporter notified (${w.env} ${how}).` });
+    }
+  }
+  const notifyTimer = setInterval(() => sweepDeferred().catch(() => {}), 45_000);
+  if (notifyTimer.unref) notifyTimer.unref();
+  setTimeout(() => sweepDeferred().catch(() => {}), 30_000); // shortly after boot — catches production deploys
 
   // ── GitHub webhook: PR events → auto-update the linked ticket ──────────────────
   // A merged PR auto-Ships its ticket (and notifies the reporter); an opened PR
@@ -611,20 +785,54 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     const pr = payload.pull_request;
     if (!pr) return;
     const action = payload.action;
+    const base = String(pr.base?.ref || '');
+    const head = String(pr.head?.ref || '');
+    const prod = prodBranch(), staging = stagingBranch();
+
+    // Release promotion: merging the staging branch into production ships everything
+    // sitting on staging at once (a release train). The release PR carries no
+    // per-ticket issue refs, so we flip by status, not by issue number. Tickets the
+    // reporter already verified on staging go straight to Done ("it's live" notify);
+    // any unverified stragglers (a release merged outside Pulse, bypassing the
+    // promote gate) fall back to Shipped so they still get the normal review ask.
+    if (action === 'closed' && pr.merged && head === staging && staging !== prod && base === prod) {
+      for (const t of sql.prepare("SELECT * FROM tickets WHERE status='staging'").all()) {
+        const verified = t.client_verdict === 'approved';
+        const note = (t.ship_note || '').trim() || `Verified on staging, promoted to production via release PR #${pr.number}.`;
+        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run(verified ? 'approved' : 'shipped', note.slice(0, 8000), now(), t.id);
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `Release PR #${pr.number} merged — live in production${verified ? ' (reporter verified on staging — done)' : ', awaiting the reporter’s review'}.` });
+        deferNotify(t.id, 'production'); // notify once the production deploy has actually landed
+      }
+      return;
+    }
+
     for (const t of ticketsForIssues(issueNumbersFromPr(pr))) {
       if (String(t.github_pr_url || '') !== String(pr.html_url || '')) {
         sql.prepare('UPDATE tickets SET github_pr_number=?, github_pr_url=?, updated_at=? WHERE id=?').run(pr.number, pr.html_url, now(), t.id);
       }
       if (action === 'closed' && pr.merged) {
         if (t.status === 'shipped' || t.status === 'approved') continue; // already done
-        const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);
-        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note, now(), t.id);
-        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged — auto-shipped.` });
-        notifyReporter(getTicket(t.id), t.status);
+        // A PR into the staging branch lands the ticket "on staging" to verify; a PR
+        // into production ships it. The PR's actual base branch is the source of truth.
+        const toStaging = base === staging && staging !== prod;
+        if (toStaging) {
+          if (t.status === 'staging') continue; // already there
+          // Fresh landing on staging = fresh review: clear any earlier verdict and
+          // point the test link at the staging site (unless a dev set one already).
+          const testUrl = (t.test_url || '').trim() || (github?.stagingUrl?.() || '');
+          sql.prepare("UPDATE tickets SET status='staging', client_verdict='', client_verdict_note='', client_verdict_at='', test_url=?, updated_at=? WHERE id=?").run(testUrl, now(), t.id);
+          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — on staging, reporter asked to verify once it deploys.` });
+          deferNotify(t.id, 'staging'); // "go test it" waits for the staging deploy to land
+        } else {
+          const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);
+          sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note, now(), t.id);
+          logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — auto-shipped.` });
+          deferNotify(t.id, 'production'); // review ask waits for the production deploy to land
+        }
       } else if (action === 'closed' && !pr.merged) {
         logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} closed without merging.` });
       } else if (['opened', 'reopened', 'ready_for_review'].includes(action)) {
-        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} opened: ${pr.html_url}` });
+        logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'system', body: `PR #${pr.number} opened${base ? ` → \`${base}\`` : ''}: ${pr.html_url}` });
         if (['inbox', 'triaged', 'accepted'].includes(t.status)) {
           const prev = t.status;
           sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('in_progress', now(), t.id);

@@ -4,7 +4,7 @@
 > commitments or final specs. Each item keeps the original note verbatim
 > (*italic*) plus a first-pass description and how it ties to the
 > [Experience OS vision](EXPERIENCE_OS_BRIEF.md) and what's already built.
-> Last updated 2026-07-02.
+> Last updated 2026-07-07.
 
 Legend: **Effort** S/M/L/XL · **Status** 💡 idea · 🏗️ in progress ·
 ✅ shipped · ⏸️ parked · **Ties to** = existing module or vision layer.
@@ -98,6 +98,26 @@ page, `FanOwlAdmin` on both surfaces (Admin → client tab + Settings → Fan Ow
 funnel/FAQ-gap/leads reporting, persona in `promptRegistry()`. Next: pilot on
 Retreat Yourself, then crawl-suggest page mapping, live availability from the
 Howler API, in-widget checkout (phases 2–3).
+
+### 1.5 💡 Support Owl — the customer support agent
+*"The Fan Owl sells; the Support Owl cares."*
+An AI support agent for end-customers (ticket-buyers) across **email, the event
+website and WhatsApp** — the Owl's **fourth door**. Grounded in a two-tier
+knowledge base (Howler's help docs, synced from HelpDocs, platform-wide +
+each client's own FAQs/policies, client tier winning), escalating to humans on
+a draft-first autonomy ladder. **Freshdesk stays** as the human queue: phase 0
+**AI-triages tickets to clients** (replacing today's brittle rule flags on the
+single shared inbox) and drafts replies as private notes (webhook in, API out)
+while
+Pulse manages the agent — knowledge, per-client config, escalation rules,
+monitoring and AI metering. Later phases: support mode in the Fan Owl widget,
+auto-send in bounds, WhatsApp path, verification-first order lookups. Spec
+(brainstorm): **`docs/specs/SUPPORT_OWL_SPEC.md`** (2026-07-17). Effort: L
+staged (phase 0 Freshdesk drafts: M).
+**Status:** 🏗️ — **P0a (knowledge spine) on staging 2026-07-17**:
+`server/supportOwl.js` (support_knowledge, HelpDocs sync + nightly refresh,
+two-tier retrieval, kill switch) + Admin → Product → 🛟 Support Owl. Workshop
+questions (spec §9) still open; next: P0b Freshdesk webhook + AI triage.
 
 ---
 
@@ -340,6 +360,25 @@ Integrate Chotu Links (link shortening / tracking) so campaign + share links are
 shortened and click-tracked through it. **Confirm scope:** which product, API
 available, and whether it replaces or augments the current tracked-link/`/c/`
 redirect. Effort: S–M (pending confirmation).
+
+### 4.10 💡 Spotify channel — tracked links + purchase attribution
+*"We enabled buying tickets from a Spotify artist page — can Pulse show clicks
+and purchases from it?"* (Shai, 2026-07-07)
+Spotify gives partners **no** click/conversion reporting, and the curated
+Looker catalogue has **no UTM/referrer dimension** (checked 2026-07-07) — so
+Spotify-driven sales are invisible today. Three parts: **A** — standalone
+tracked channel links (`/x/:code` mint-per-event×channel, clicks + UTM stamp;
+new `server/channelLinks.js`, dual admin + `/api/my` surfaces) — Pulse-only,
+buildable now, useful for every channel (bios, posters, QRs). **B** — the real
+unlock, a Howler-core ask: capture `utm_source` at checkout → expose on
+`core_orders` in the explore → tick into the catalogue (Pulse side ~zero
+code). **C** — a Channels report (clicks × orders × revenue × conversion, the
+`metaAds.js` pattern) + Owl tool `getChannelPerformance`. Stopgap today:
+Spotify-only promo code (promo code IS already queryable). Overlaps 4.4
+(Chotu) on shortening — decide build-vs-Chotu when 4.4's scope is confirmed.
+**Spec:** `docs/specs/SPOTIFY_CHANNEL_SPEC.md` (incl. Spotify platform
+research + why fan-taste segmentation is off the table). Effort: M (A) +
+S–M (C); B is external.
 
 ---
 
