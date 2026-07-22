@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (📮 Reporters emailed when their report is resolved — branded, opt-out aware) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -987,6 +987,14 @@ see "The continuous comms loop" above.)*
   a **"Copy for Claude"** hand-off that hands the whole ticket to the AI to develop. Clients can
   track their own reports under **Settings → My reports**, and get a heads-up when what they
   flagged ships. Closes Pulse's *insight → action → results* loop on the product itself.
+- **2026-07-22** — **Reporters emailed when their report is resolved** ✅: when the team marks a
+  reported bug/improvement/idea **shipped** (or **declined**), Pulse now emails the **original
+  reporter** directly — carrying the **report title**, the **resolution note** the admin wrote
+  (what changed / why not), and a **link back to review it**. It's **white-labelled per client**
+  (their logo, colour and sender), reaches **staff reporters too** (who have no client inbox), and
+  is a **single** send — no duplicate with the in-app inbox update. Reporters can **opt out** under
+  **Settings → Notifications → “Report updates.”** Turns the reporting flow into a real closed loop:
+  people who flag things now hear back when they're fixed.
 - **2026-06-30** — **Owl data catalogue is now editable in Pulse** 🧪: a new **Admin → Owl data
   catalogue** screen lists **every field** in the Active Tickets explore (measures + dimensions,
   incl. payments & orders if they're in the explore) with a **checkbox to include it for the

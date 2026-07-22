@@ -878,6 +878,7 @@ const NOTIFY_TYPES = [
   { key: 'goals', label: 'Goals', desc: 'Weekly goal-progress nudges' },
   { key: 'alerts', label: 'Alerts', desc: 'Campaign & data alerts that need attention' },
   { key: 'messages', label: 'Messages', desc: 'New messages from Howler in your inbox' },
+  { key: 'reports', label: 'Report updates', desc: 'When a bug, improvement or idea you reported is resolved' },
 ];
 function getNotifyTypes(userId) {
   let stored = {};

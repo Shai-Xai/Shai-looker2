@@ -483,7 +483,7 @@ app.delete('/api/admin/sets/:id', auth.requireAdmin, (req, res) => { db.deleteSe
 require('./releaseNotes').mount(app, { db, auth, insights, adminAnthropicKey });
 require('./version').mount(app, { auth }); // build stamp for the profile footer → server/version.js
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
-const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }); // product board → server/tickets.js (kill switch: tickets_enabled)
+const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, mailer }); // product board → server/tickets.js (kill switch: tickets_enabled)
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
 // Disposable module: suite/set/dashboard model, /api/my/suites navigation, saved
