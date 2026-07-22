@@ -12,10 +12,12 @@ const { startApp } = require('./http');
 
 const store = require('../server/store');
 const looker = require('../server/looker');
+const { convertDashboard, reconcileDashboard } = require('../server/convert');
 const query = require('../server/query')({ looker, auth: h.auth });
 
 let lastRun = null; // captures the (path, body) the route hands to Looker
 let runResult = { data: [], fields: {} };
+let fetchSource = null; // what the stubbed fetchDashboard returns (for re-sync)
 
 let app;
 before(async () => {
@@ -25,9 +27,10 @@ before(async () => {
       store,
       db: h.db,
       auth: h.auth,
-      looker,
-      convertDashboard: () => ({}),
-      fetchDashboard: async () => ({}),
+      looker: { ...looker, resolveElementQueries: async () => {} },
+      convertDashboard,
+      reconcileDashboard,
+      fetchDashboard: async () => fetchSource,
       parseDrillUrl: () => null,
       runLookerQuery: async (path, body) => { lastRun = { path, body }; return runResult; },
       applyScope: query.applyScope,
@@ -124,5 +127,50 @@ test('folder move is admin-only', async () => {
   const client = h.makeClient('mv-client@test.local', [h.makeEntity('MV Co', 'mv-org').id], 'owner');
   h.db.createDashboard({ title: 'Y', folder: 'Foo' });
   const res = await app.req('POST', '/api/admin/folders/move', { as: client, body: { from: 'Foo', parent: '' } });
+  assert.equal(res.status, 403);
+});
+
+// ─── Re-sync from Looker (idempotent reconcile) ─────────────────────────────────
+const lkEl = (id, title) => ({ id, type: 'vis', title, query: { model: 'm', view: 'v', fields: ['v.count'] }, vis_config: { type: 'looker_bar' } });
+const lkSource = (elements) => ({ dashboard: { id: 'LK1', title: 'D' }, elements, filters: [], layouts: [] });
+
+test('re-sync reconciles in place — no duplicate tiles on repeat syncs', async () => {
+  const admin = h.makeAdmin('resync-admin@test.local');
+  fetchSource = lkSource([lkEl('e1', 'Sales'), lkEl('e2', 'Refunds')]);
+  const created = h.db.createDashboard({ ...convertDashboard(fetchSource), source: { lookerDashboardId: 'LK1' } });
+
+  const r1 = await app.req('POST', `/api/dashboards/${created.id}/resync`, { as: admin, body: created });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.body.tiles.length, 2, 'no duplicates');
+  assert.equal(r1.body.stats.added, 0);
+  assert.equal(r1.body.stats.updated, 2);
+
+  const r2 = await app.req('POST', `/api/dashboards/${created.id}/resync`, { as: admin, body: r1.body });
+  assert.equal(r2.body.tiles.length, 2, 'still no duplicates on a second re-sync');
+});
+
+test('re-sync appends a genuinely new Looker tile', async () => {
+  const admin = h.makeAdmin('resync-admin2@test.local');
+  fetchSource = lkSource([lkEl('e1', 'Sales')]);
+  const created = h.db.createDashboard({ ...convertDashboard(fetchSource), source: { lookerDashboardId: 'LK1' } });
+  fetchSource = lkSource([lkEl('e1', 'Sales'), lkEl('e2', 'New tile')]); // Looker gained a tile
+  const res = await app.req('POST', `/api/dashboards/${created.id}/resync`, { as: admin, body: created });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.tiles.length, 2);
+  assert.equal(res.body.stats.added, 1);
+});
+
+test('re-sync 400s for a dashboard not imported from Looker', async () => {
+  const admin = h.makeAdmin('resync-admin3@test.local');
+  const created = h.db.createDashboard({ title: 'Hand-built', tiles: [] }); // no source
+  const res = await app.req('POST', `/api/dashboards/${created.id}/resync`, { as: admin, body: created });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /not imported from Looker/);
+});
+
+test('re-sync is admin-only', async () => {
+  const client = h.makeClient('resync-client@test.local', [h.makeEntity('RS Co', 'rs-org').id], 'owner');
+  const created = h.db.createDashboard({ title: 'Z', source: { lookerDashboardId: 'LK1' } });
+  const res = await app.req('POST', `/api/dashboards/${created.id}/resync`, { as: client, body: created });
   assert.equal(res.status, 403);
 });

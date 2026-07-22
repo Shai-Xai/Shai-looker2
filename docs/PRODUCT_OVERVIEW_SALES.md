@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-03 (⚡ Live updates: event-day multi-metric mini reports on a cadence, with WhatsApp + last-year comparison) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-22 (↻ Re-sync a Looker-imported dashboard from the editor — idempotent, no duplicate tiles) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -86,6 +86,11 @@ longer they use Pulse, the better it gets."
   staff can "Save as new" from that client's view to spin off a **client-owned
   version** (choosing its folder + set) that only they see — and edit it freely
   without touching anyone else. One click reverts it back to the template.
+- **Re-sync from Looker** ✅ — for a dashboard imported from Looker, staff can pull
+  the latest tiles & filters in one click from the editor. It reconciles
+  **idempotently**: existing tiles refresh in place, genuinely new tiles are added,
+  and nothing is duplicated — so keeping a dashboard current no longer means
+  cleaning up duplicate tiles by hand.
 
 **Pitch:** "Your data, read for you — no digging. Open the app and you already
 know what changed and what to do."
@@ -769,6 +774,13 @@ see "The continuous comms loop" above.)*
 ## Changelog (newest first)
 > Keep this current — add a dated line whenever a client-relevant feature ships.
 
+- **2026-07-22** — **↻ Re-sync from Looker** ✅ (fix + feature): the dashboard
+  editor gains a "Re-sync from Looker" button for imported dashboards. It pulls the
+  latest tiles & filters and reconciles them **idempotently** — matching each Looker
+  element to its existing tile by a stable key, refreshing in place and appending
+  only genuinely-new tiles. Fixes a bug where re-syncing **duplicated some tiles**
+  (tiles carried no stable link to their Looker source, so a sync appended instead
+  of updating). Admin build tool; clients still only view dashboards.
 - **2026-07-03** — **⚡ Live updates (event-day mini report)** 🧪 (new): the Alerts
   page gains a **Live updates** tab — while the event runs, Pulse sends the team a
   compact multi-metric snapshot every 15–120 min (gates in with **+change** and

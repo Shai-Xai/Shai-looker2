@@ -11,7 +11,7 @@ const store = require('./store');
 const auth = require('./auth');
 const db = require('./db');
 const migrate = require('./migrate');
-const { convertDashboard } = require('./convert');
+const { convertDashboard, reconcileDashboard } = require('./convert');
 const { recreateDashboard, fetchDashboard } = require('./recreate');
 const { parseDrillUrl } = require('./drill');
 const insights = require('./insights');
@@ -496,7 +496,7 @@ require('./clientModel').mount(app, { db, auth, store, looker, fetchDashboard, c
 // cache + scope boundary stay singular across the app.
 require('./dashboards').mount(app, {
   store, db, auth, looker,
-  convertDashboard, fetchDashboard, parseDrillUrl,
+  convertDashboard, reconcileDashboard, fetchDashboard, parseDrillUrl,
   runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache: query.clearCache,
 });
 

@@ -47,6 +47,7 @@ export default function EditorPage() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [showAiContext, setShowAiContext] = useState(false);
   const [showDaysSync, setShowDaysSync] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [filterValues, setFilterValues] = useState({});
 
   useEffect(() => {
@@ -103,6 +104,25 @@ export default function EditorPage() {
     setDirty(false);
     setShowSaveAs(false);
     navigate(`/suite/${suiteId}/d/${out.dashboard.id}/edit`, { replace: true });
+  }
+
+  // Pull the latest tiles/filters from the source Looker dashboard and reconcile
+  // them into the working copy. The server matches by a stable source key so
+  // existing tiles refresh in place and nothing is duplicated; we apply the
+  // reconciled def locally and mark dirty so the admin reviews before saving.
+  async function resyncFromLooker() {
+    if (!def?.source?.lookerDashboardId || resyncing) return;
+    setResyncing(true);
+    try {
+      const out = await api.resyncDashboard(id, def);
+      mutate((d) => ({ ...d, tiles: out.tiles, carousels: out.carousels || [], filters: out.filters }));
+      const s = out.stats || {};
+      alert(`Re-synced from Looker.\n${s.updated || 0} tile(s) updated, ${s.added || 0} added.` + ((s.added || s.addedFilters) ? '\n\nReview the layout, then Save.' : '\n\nEverything was already up to date.'));
+    } catch (e) {
+      alert('Re-sync failed: ' + e.message);
+    } finally {
+      setResyncing(false);
+    }
   }
 
   // Discard this client version and point the suite back at the shared template.
@@ -363,6 +383,11 @@ export default function EditorPage() {
         )}
         {canRevert && (
           <button style={btn} onClick={revertToTemplate} title="Discard this client version and use the shared template again">↩ Revert to template</button>
+        )}
+        {def.source?.lookerDashboardId && (
+          <button style={btn} onClick={resyncFromLooker} disabled={resyncing} title="Pull the latest tiles & filters from the source Looker dashboard. Existing tiles update in place; new ones are added — nothing is duplicated. Review, then Save.">
+            {resyncing ? '↻ Re-syncing…' : '↻ Re-sync from Looker'}
+          </button>
         )}
         <button style={btn} onClick={() => addTile('vis')}>+ Visualization</button>
         <button style={btn} onClick={() => setShowLibrary(true)}>+ From library</button>
