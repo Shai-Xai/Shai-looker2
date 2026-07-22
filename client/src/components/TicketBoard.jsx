@@ -442,12 +442,18 @@ function TicketDetail({ id, onClose, onChange }) {
             <Section title={
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 AI ticket
-                <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}>
+                <span style={{ fontSize: 11, fontWeight: 400, color: t.aiStatus === 'error' ? 'var(--error,#ef4444)' : 'var(--muted)' }}
+                  title={t.aiStatus === 'error' && t.aiError ? t.aiError : undefined}>
                   {t.aiStatus === 'ready' ? 'drafted' : t.aiStatus === 'pending' ? 'drafting…' : t.aiStatus === 'error' ? 'failed' : 'not drafted'}
                 </span>
                 <button onClick={redraft} disabled={busy === 'redraft'} style={miniBtn}>{busy === 'redraft' ? '…' : '↻ Redraft'}</button>
               </span>
             }>
+              {t.aiStatus === 'error' && t.aiError && (
+                <div style={{ fontSize: 12, color: 'var(--error,#ef4444)', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '7px 10px', marginBottom: 8 }}>
+                  <b>Draft failed:</b> {t.aiError}
+                </div>
+              )}
               <textarea className="fld" value={aiEdit} onChange={(e) => setAiEdit(e.target.value)} rows={10}
                 placeholder="The AI draft of this ticket will appear here."
                 style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, resize: 'vertical', fontFamily: 'ui-monospace, monospace' }} />

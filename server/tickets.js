@@ -133,6 +133,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     // A parked "go test it" notification waiting for the deploy to land (JSON:
     // {env, since, base}) — see the deploy-aware notify sweep below.
     add('notify_wait', "notify_wait TEXT NOT NULL DEFAULT ''");
+    add('ai_error', "ai_error TEXT NOT NULL DEFAULT ''"); // why the AI draft failed (surfaced so it's diagnosable, not a bare "failed")
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
   // Comments gained a visibility flag (internal dev note vs public reply the
   // reporter sees + gets notified about) after launch — ALTER for existing DBs.
@@ -189,7 +190,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       status: r.status, statusLabel: STATUS_LABELS[r.status] || r.status, priority: r.priority,
       reporterEmail: r.reporter_email, reporterName: r.reporter_name, reporterRole: r.reporter_role,
       entityId: r.entity_id, entityName: r.entity_id ? (db.getEntity(r.entity_id)?.name || '') : '',
-      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, source: r.source || 'widget',
+      assignee: r.assignee, aiTitle: r.ai_title, aiSummary: r.ai_summary, aiStatus: r.ai_status, aiError: r.ai_error || '', source: r.source || 'widget',
       shipNote: r.ship_note || '', testUrl: r.test_url || '',
       clientVerdict: r.client_verdict || '', clientVerdictNote: r.client_verdict_note || '', clientVerdictAt: r.client_verdict_at || '', declineReason: r.decline_reason || '',
       githubIssue: r.github_issue_number || 0, githubUrl: r.github_url || '', prNumber: r.github_pr_number || 0, prUrl: r.github_pr_url || '',
@@ -239,15 +240,20 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     ].join('\n');
     const resp = await c.messages.create({
       model: insights.MODEL,
-      max_tokens: 1400,
+      max_tokens: 4000, // adaptive thinking shares this budget; 1400 could run out before the JSON, yielding an unparseable draft
       thinking: { type: 'adaptive' },
       output_config: { effort: 'low' },
       system: insights.systemWith(TICKET_DRAFT_SYSTEM, db.getSetting('ai_instructions')),
       messages: [{ role: 'user', content: user }],
     });
-    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-    const parsed = await insights.parseModelJsonResilient(c, text, 'ticket');
-    return { title: clamp(parsed?.title || '', 160), summary: String(parsed?.ticket || parsed?.summary || '') };
+    const text = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+    // Prefer the structured JSON, but never hard-fail a valid response over parsing:
+    // fall back to the raw model text so the draft is usable instead of "failed".
+    let parsed = null;
+    try { parsed = await insights.parseModelJsonResilient(c, text, 'ticket'); } catch { /* fall back to raw text below */ }
+    const summary = String((parsed && (parsed.ticket || parsed.summary)) || text || '').trim();
+    if (!summary) throw new Error(`AI returned an empty draft (stop: ${resp.stop_reason || 'unknown'})`);
+    return { title: clamp((parsed && parsed.title) || title || '', 160), summary };
   }
   // Draft in the background after a report is filed; write the result back. Never
   // throws into the request path — a failed/absent AI just leaves the raw report.
@@ -260,12 +266,12 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     }
     draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name })
       .then(({ title, summary }) => {
-        sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=? WHERE id=?')
+        sql.prepare("UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, ai_error='' WHERE id=?")
           .run(title, summary, 'ready', id);
       })
       .catch((e) => {
         console.error('[tickets] AI draft failed:', e.message);
-        sql.prepare('UPDATE tickets SET ai_status=? WHERE id=?').run('error', id);
+        sql.prepare('UPDATE tickets SET ai_status=?, ai_error=? WHERE id=?').run('error', String(e.message || 'AI draft failed').slice(0, 300), id);
       });
   }
 
@@ -601,12 +607,13 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     }
     try {
       const { title, summary } = await draftTicket({ type: t.type, title: t.title, body: t.body, screen: t.screen, tile: t.tile_name });
-      sql.prepare('UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, updated_at=? WHERE id=?')
+      sql.prepare("UPDATE tickets SET ai_title=?, ai_summary=?, ai_status=?, ai_error='', updated_at=? WHERE id=?")
         .run(title, summary, 'ready', now(), t.id);
       res.json({ ticket: ticketRow(getTicket(t.id)) });
     } catch (e) {
       console.error('[tickets] redraft failed:', e.message);
-      res.status(500).json({ error: 'Could not draft this ticket — please try again.' });
+      sql.prepare('UPDATE tickets SET ai_status=?, ai_error=?, updated_at=? WHERE id=?').run('error', String(e.message || 'AI draft failed').slice(0, 300), now(), t.id);
+      res.status(500).json({ error: `Could not draft this ticket: ${e.message || 'unknown error'}` });
     }
   });
 
