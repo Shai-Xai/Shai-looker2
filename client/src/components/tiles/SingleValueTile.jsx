@@ -28,7 +28,6 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const scale = useMetricScale(); // brand-configurable KPI number size (1 = default)
   const fields = data.fields || {};
   const rows = data.data || [];
-  if (!rows.length) return <Empty />;
 
   // Looker hides some fields (e.g. a raw measure) and displays only the visible
   // one (often a table calculation like "% change"). Honour hidden_fields so we
@@ -42,7 +41,16 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   if (!primaryField) return <Empty />;
 
   const pivots = data.pivots || [];
-  const primaryCell = resolvePivotCell(rows[0][primaryField.name], pivots);
+  const hasRow = rows.length > 0;
+  // A metric tile whose measure query comes back with no rows is a ZERO
+  // aggregate: a count/sum over nothing is 0, and Looker's single_value shows 0
+  // — not "No data". So synthesise a 0 cell, which keeps the tile's title
+  // rendering and shows 0 as the valid data point it is. (A tile with no
+  // measure at all and no rows is genuinely empty → keep "No data".)
+  if (!hasRow && !measures.length) return <Empty />;
+  const primaryCell = hasRow
+    ? resolvePivotCell(rows[0][primaryField.name], pivots)
+    : { value: 0, rendered: formatNumber(0, primaryField.value_format) };
   const primaryValue = cellText(primaryCell);
   // Big figures don't need cents: ≥1000 drops the decimals everywhere
   // (1,882,360.00 → 1,882,360); small numbers (36.50, 3.1 — averages) and
@@ -53,8 +61,9 @@ export default function SingleValueTile({ data, visConfig = {}, label }) {
   const shownValue = isMobile ? compactNumber(plainValue, primaryCell?.value) : plainValue;
 
   // Comparison against a second measure, when present and not disabled.
+  // Only meaningful when we actually have a row to compare.
   const compField = measures[1] || null;
-  const showComparison = compField && visConfig.show_comparison !== false;
+  const showComparison = hasRow && compField && visConfig.show_comparison !== false;
   let comparison = null;
   if (showComparison) {
     const compCell = resolvePivotCell(rows[0][compField.name], pivots);
