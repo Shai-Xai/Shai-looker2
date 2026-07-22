@@ -436,8 +436,12 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     // which (unlike GITHUB_TOKEN) does trigger the Claude Code Action.
     const mode = (req.body || {}).mode;
     const doBuild = mode === 'build' || (!mode && !!github?.dispatchEnabled?.());
-    if (mode === 'plan') body += `\n\n@claude review this ticket and reply with a short implementation plan and any clarifying questions as a comment. Do NOT write code or open a pull request yet — wait for a follow-up "@claude go ahead" before building. When you do build, open the PR against the \`${base}\` branch.`;
-    else if (doBuild) body += `\n\n@claude please implement this ticket and open a pull request against the \`${base}\` branch.`;
+    // The action's sandbox may clone with a limited ref set and not see `base` —
+    // it must fetch it rather than concluding the branch doesn't exist (issue #61
+    // stalled exactly this way: "no staging branch" when staging was live + synced).
+    const baseNote = `The \`${base}\` branch exists on the remote — if it isn't visible in your clone, run \`git fetch origin ${base}\` before concluding otherwise.`;
+    if (mode === 'plan') body += `\n\n@claude review this ticket and reply with a short implementation plan and any clarifying questions as a comment. Do NOT write code or open a pull request yet — wait for a follow-up "@claude go ahead" before building. When you do build, open the PR against the \`${base}\` branch. ${baseNote}`;
+    else if (doBuild) body += `\n\n@claude please implement this ticket and open a pull request against the \`${base}\` branch. ${baseNote}`;
     const dispatched = doBuild || mode === 'plan';
     if (!github?.isConfigured?.()) {
       return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
@@ -503,7 +507,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
     const target = reqTarget === 'production' || reqTarget === 'staging' ? reqTarget : t.target;
     if (target !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(target, now(), t.id); t = getTicket(t.id); }
     const base = baseBranchFor(t);
-    const body = `${claudeBrief(t)}\n\n@claude please rework this ticket — the **Sent back by the reporter** section above is what still needs fixing. Open a NEW pull request against the \`${base}\` branch.`;
+    const body = `${claudeBrief(t)}\n\n@claude please rework this ticket — the **Sent back by the reporter** section above is what still needs fixing. Open a NEW pull request against the \`${base}\` branch. The \`${base}\` branch exists on the remote — if it isn't visible in your clone, run \`git fetch origin ${base}\` before concluding otherwise.`;
     try {
       const c = await github.createIssueComment(t.github_issue_number, body);
       logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Re-sent to Claude on issue #${t.github_issue_number} → ${target} (\`${base}\`): ${c.url}` });
