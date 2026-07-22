@@ -200,10 +200,14 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
   const [text, setText] = useState('');
   const [cta, setCta] = useState(emptyCta);
   const [memberId, setMemberId] = useState('');
+  // Reply-from-the-portal: quotes the tapped fan message (parentId threading —
+  // the app renders the quoted bubble above the organiser's reply).
+  const [replyTo, setReplyTo] = useState(null);
   const loadMsgs = () => api.chatChannelMessages(scope, entityId, c.id).then((r) => setMessages(r.messages || [])).catch(() => setMessages([]));
   const toggle = () => { setOpen((v) => !v); if (!open && messages === null) loadMsgs(); };
-  const send = () => api.chatSendMessage(scope, entityId, c.id, { text, ...buildCta(cta, eventId) })
-    .then(() => { setText(''); setCta(emptyCta); loadMsgs(); }).catch((e) => onError(e.message || 'Send failed'));
+  const send = () => api.chatSendMessage(scope, entityId, c.id, { text, ...(replyTo ? { parentId: replyTo.id } : {}), ...buildCta(cta, eventId) })
+    .then(() => { setText(''); setCta(emptyCta); setReplyTo(null); loadMsgs(); }).catch((e) => onError(e.message || 'Send failed'));
+  const byId = Object.fromEntries((messages || []).map((m) => [m.id, m]));
   const reported = (messages || []).filter((m) => m.reported && !m.deleted).length;
   return (
     <div style={{ ...card, marginBottom: 0 }}>
@@ -226,8 +230,16 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
       </div>
       {open && (
         <div style={{ marginTop: 10 }}>
+          {replyTo && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(11,107,203,0.08)', border: '1px solid rgba(11,107,203,0.25)', borderRadius: 8, padding: '5px 10px', marginBottom: 6, fontSize: 12 }}>
+              <span style={{ color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                ↩ Replying to <strong>{replyTo.author.name}</strong>: {replyTo.text}
+              </span>
+              <button style={tiny} onClick={() => setReplyTo(null)}>✕</button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-            <input style={{ ...input, flex: 1, minWidth: isMobile ? '100%' : 180, ...(isMobile ? { fontSize: 16, padding: '12px 14px' } : {}) }} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message #${c.name} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
+            <input style={{ ...input, flex: 1, minWidth: isMobile ? '100%' : 180, ...(isMobile ? { fontSize: 16, padding: '12px 14px' } : {}) }} value={text} onChange={(e) => setText(e.target.value)} placeholder={replyTo ? `Reply to ${replyTo.author.name} as the organiser…` : `Message #${c.name} as the organiser…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
             <CtaFields cta={cta} setCta={setCta} eventId={eventId} />
             <button style={{ ...mini, opacity: text.trim() ? 1 : 0.5 }} disabled={!text.trim()} onClick={send}>Send</button>
           </div>
@@ -235,6 +247,11 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
             {(messages || []).map((m) => (
               <div key={m.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', background: m.reported && !m.deleted ? 'rgba(198,40,40,0.07)' : 'rgba(128,128,128,0.06)', borderRadius: 8, padding: '6px 9px', fontSize: 12.5 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
+                  {m.parentId && byId[m.parentId] && (
+                    <p style={{ margin: '0 0 2px', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      ↩ {byId[m.parentId].deleted ? 'a deleted message' : `${byId[m.parentId].author.name}: ${byId[m.parentId].text}`}
+                    </p>
+                  )}
                   <span style={{ fontWeight: 700 }}>{m.deleted ? '—' : m.author.name}</span>
                   {m.authorType === 'organiser' && !m.deleted && <span style={pill('rgba(11,107,203,0.14)', '#0b6bcb')}>org</span>}
                   {m.pinned && <span style={pill('rgba(245,179,1,0.16)', '#8a6d00')}>📌</span>}
@@ -244,6 +261,7 @@ function ChannelRow({ scope, entityId, channel: c, eventId, onChanged, onError, 
                 </div>
                 {!m.deleted && (
                   <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', gap: 4 }}>
+                    <button style={tiny} title="Reply as the organiser" onClick={() => setReplyTo(m)}>↩</button>
                     <button style={tiny} title={m.pinned ? 'Unpin' : 'Pin'} onClick={() => act(api.chatModerate(scope, entityId, m.id, m.pinned ? 'unpin' : 'pin').then(loadMsgs))}>📌</button>
                     <button style={{ ...tiny, color: '#c62828' }} title="Delete" onClick={() => act(api.chatModerate(scope, entityId, m.id, 'delete').then(loadMsgs))}>🗑</button>
                   </span>
