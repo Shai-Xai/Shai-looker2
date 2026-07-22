@@ -363,6 +363,15 @@ export const api = {
       body: JSON.stringify(def),
     }).then(json),
   deleteDashboard: (id) => fetch(`/api/dashboards/${id}`, { method: 'DELETE' }),
+  // Re-sync an imported dashboard from Looker. Reconciles the latest Looker
+  // tiles/filters into the working `def` idempotently (no duplicates) and
+  // returns { tiles, carousels, filters, stats } for the editor to apply + Save.
+  resyncDashboard: (id, def) =>
+    fetch(`/api/dashboards/${id}/resync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(def),
+    }).then(json),
   // Fork a shared dashboard into a client-owned version for this suite. `payload`
   // carries the (edited) def + optional { title, folder, setId, newSetName }.
   forkSuiteDashboard: (suiteId, dashboardId, payload) =>

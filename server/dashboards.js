@@ -13,7 +13,7 @@ const fx = require('./filterExpression'); // combined-field OR → Looker filter
 
 function mount(app, {
   store, db, auth, looker,
-  convertDashboard, fetchDashboard, parseDrillUrl,
+  convertDashboard, reconcileDashboard, fetchDashboard, parseDrillUrl,
   runLookerQuery, applyScope, stripAnyValue, currentFirstEventSort, clearCache,
 }) {
 // Admin: hard-wipe the server's query cache (all dashboards). The client's
@@ -88,6 +88,31 @@ app.post('/api/dashboards/import', auth.requireAdmin, async (req, res) => {
     res.status(201).json(created);
   } catch (err) {
     console.error('[POST /api/dashboards/import]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Re-sync an imported dashboard from its source Looker dashboard, IDEMPOTENTLY.
+// Reconciles the latest Looker tiles/filters into the current definition —
+// matched tiles update in place, new ones are appended, nothing is duplicated
+// (see reconcileDashboard). The editor's unsaved working copy rides in the body
+// so layout edits survive; the source Looker id is taken from the STORED record
+// (not the body) so it can't be tampered with. Returns the reconciled def for
+// the editor to apply and Save — this endpoint never writes on its own.
+app.post('/api/dashboards/:id/resync', auth.requireAdmin, async (req, res) => {
+  const stored = store.get(req.params.id);
+  if (!stored) return res.status(404).json({ error: 'Dashboard not found' });
+  const lookerId = stored.source?.lookerDashboardId;
+  if (!lookerId) return res.status(400).json({ error: 'This dashboard was not imported from Looker, so there is nothing to re-sync.' });
+  const body = req.body || {};
+  const working = Array.isArray(body.tiles) ? body : stored; // editor's live copy, else stored
+  try {
+    const source = await fetchDashboard(lookerId);
+    await looker.resolveElementQueries(source.elements);
+    const { tiles, carousels, filters, stats } = reconcileDashboard(working, source);
+    res.json({ tiles, carousels, filters, stats });
+  } catch (err) {
+    console.error('[POST /api/dashboards/:id/resync]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
