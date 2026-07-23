@@ -1,6 +1,13 @@
 # Pulse: The Experience Operating System
 **Working brief — tasks, comms & the Owl knowledge layer · June 2026 · internal**
 
+> **Status (23 Jul 2026):** the Owl layer of this brief has largely shipped —
+> agentic chat with grounded, citing answers; "CC the Owl" ingestion; WhatsApp,
+> portal-embed and Fan Owl doors; scheduled skills. The comms Spine exists as
+> the inbox (threads, acknowledgements, per-event context). The **Playbook**
+> (reusable task templates + per-event instances, data-verified tasks) is the
+> remaining layer. Current platform state: `PROJECT_OVERVIEW.md`.
+
 ## The one-liner
 Pulse becomes the operating system for the Howler–organiser relationship: every number, document, task and **conversation** about an event in one place — tracked, searchable, actionable. Organisers keep talking wherever they already talk (email, WhatsApp, Slack); **the Owl is always in the room**, collecting it into the event's single source of truth.
 
