@@ -29,7 +29,7 @@
 // TO REMOVE: delete this file + mount line + flag rows, drop social_chat_*.
 
 const crypto = require('crypto');
-const { HttpError, asyncHandler } = require('./http');
+const { HttpError, asyncHandler, jsonWithEtag } = require('./http');
 const flags = require('./flags');
 const appAuth = require('./appAuth');
 const moderation = require('./moderation'); // phase-1 rule engine on every fan write (docs/specs/MODERATION_CONTRACT.md)
@@ -297,7 +297,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const all = eventChannels(eventId).filter((c) => flagOn(c.entity_id));
     const visible = all.filter((c) => c.kind === 'official' || memberRow(c.id, user.id));
     const tickets = await viewerTickets(req, visible);
-    res.json({ contractVersion: 1, channels: visible.map((c) => channelRow(c, { userId: user.id, tickets })) });
+    jsonWithEtag(req, res, { contractVersion: 1, channels: visible.map((c) => channelRow(c, { userId: user.id, tickets })) });
   }));
 
   // Every channel the user can chat in, ACROSS events — the app's chat tab.
@@ -322,7 +322,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     }
     const channels = [...byId.values()].map((c) => channelRow(c, { userId: user.id, tickets }));
     channels.sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')));
-    res.json({ contractVersion: 1, channels });
+    jsonWithEtag(req, res, { contractVersion: 1, channels });
   }));
 
   // Member list — visible to anyone who can read the channel.
@@ -423,7 +423,9 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const reacts = reactionsFor(rows.map((r) => r.id), user.id);
     const hasOlder = rows.length > 0 && !!sql.prepare(`SELECT 1 FROM social_chat_messages WHERE channel_id=? AND ${msgMod} AND created_at<? LIMIT 1`).get(c.id, uid, rows[0].created_at);
     const myPins = new Set(sql.prepare('SELECT u.message_id FROM social_chat_user_pins u JOIN social_chat_messages m ON m.id=u.message_id WHERE m.channel_id=? AND u.howler_user_id=?').all(c.id, String(user.id)).map((r) => r.message_id));
-    res.json({
+    // ETag/304: the app polls this every few seconds per open chat —
+    // unchanged channels cost headers only.
+    jsonWithEtag(req, res, {
       contractVersion: 1,
       channel: channelRow(c, { userId: user.id, tickets }),
       canPost: canPost(c, user, false),
