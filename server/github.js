@@ -175,7 +175,22 @@ function mount(app, { db, auth }) {
   }
 
   console.log('[github] issue bridge mounted', isConfigured() ? '(configured)' : '(needs token + repo)');
-  return { isConfigured, createIssue, createIssueComment, openReleasePr, newIssueUrl, listCommits, repo, dispatchEnabled, verifyWebhook, stagingBranch, stagingUrl, prodBranch, webhookSecretSet: () => !!webhookSecret() };
+  // Read side for the Code health panel (server/codeHealth.js): find the rolling
+  // review issue and pull its comments, so admins read the daily reports inside
+  // Pulse instead of logging into GitHub.
+  async function findOpenIssueByTitle(fragment) {
+    const resp = await ghFetch('/issues?state=open&per_page=100');
+    if (!resp.ok) throw new Error(`GitHub issues list failed (HTTP ${resp.status})`);
+    const found = (await resp.json()).find((i) => !i.pull_request && String(i.title || '').includes(fragment));
+    return found ? { number: found.number, title: found.title, url: found.html_url, body: found.body || '', updatedAt: found.updated_at } : null;
+  }
+  async function listIssueComments(issueNumber) {
+    const resp = await ghFetch(`/issues/${Number(issueNumber)}/comments?per_page=100`);
+    if (!resp.ok) throw new Error(`GitHub comments list failed (HTTP ${resp.status})`);
+    return (await resp.json()).map((c) => ({ id: c.id, author: c.user?.login || '', body: c.body || '', url: c.html_url, createdAt: c.created_at }));
+  }
+
+  return { isConfigured, createIssue, createIssueComment, openReleasePr, newIssueUrl, listCommits, findOpenIssueByTitle, listIssueComments, repo, dispatchEnabled, verifyWebhook, stagingBranch, stagingUrl, prodBranch, webhookSecretSet: () => !!webhookSecret() };
 }
 
 module.exports = { mount };

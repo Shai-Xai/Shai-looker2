@@ -37,6 +37,7 @@ const OwlEmbedPage = lazy(() => import('./pages/OwlEmbedPage.jsx'));
 const FanOwlEmbedPage = lazy(() => import('./pages/FanOwlEmbedPage.jsx'));
 const EventOpsPage = lazy(() => import('./pages/EventOpsPage.jsx'));
 const MapStudioPage = lazy(() => import('./pages/MapStudioPage.jsx'));
+const EventMediaPage = lazy(() => import('./pages/EventMediaPage.jsx'));
 const EventOpsPortalPage = lazy(() => import('./pages/EventOpsPortalPage.jsx'));
 const EventOpsCallPage = lazy(() => import('./pages/EventOpsCallPage.jsx'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'));
@@ -337,6 +338,7 @@ function Shell() {
                 {/* Community moved out of the Engage tab row into Engage → App. */}
                 <Route path="/engage/community" element={<RedirectTo to="/engage/app/posts" />} />
                 <Route path="/event-map" element={<MapStudioPage />} />
+                <Route path="/event-media" element={<EventMediaPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />
@@ -375,6 +377,7 @@ function Shell() {
                 {/* Community moved out of the Engage tab row into Engage → App. */}
                 <Route path="/engage/community" element={<RedirectTo to="/engage/app/posts" />} />
                 <Route path="/event-map" element={<MapStudioPage />} />
+                <Route path="/event-media" element={<EventMediaPage />} />
                 <Route path="/engage/:tab" element={<EngagePage />} />
                 <Route path="/actions" element={<RedirectTo to="/engage/campaigns" />} />
                 <Route path="/segments" element={<RedirectTo to="/engage/segments" />} />

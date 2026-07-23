@@ -102,6 +102,7 @@ export default function ClientLayout() {
   useEffect(() => { api.eventopsEnabled().then((r) => setEopEntities(r.entities || [])).catch(() => {}); }, []);
   const onEventOps = location.pathname.startsWith('/event-ops');
   const onEventMap = location.pathname.startsWith('/event-map');
+  const onEventMedia = location.pathname.startsWith('/event-media');
   const onGoals = location.pathname.startsWith('/goals');
   const onAlerts = location.pathname.startsWith('/alerts');
   const onSocial = location.pathname.startsWith('/social');
@@ -586,6 +587,17 @@ export default function ClientLayout() {
             <span style={ellip}>Event Map</span>
           </button>
           )}
+          {fl('eventassets') && can(PERMS.MAP_MANAGE) && (
+          <button
+            ref={onEventMedia ? activeRef : null}
+            className={`nav-row${onEventMedia ? ' active' : ''}`}
+            style={{ ...rowBtn, fontWeight: onEventMedia ? 600 : 500 }}
+            onClick={() => { if (!onEventMedia) vtNavigate(navigate, '/event-media'); if (isMobile) setNavOpen(false); }}
+          >
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🖼️</span>
+            <span style={ellip}>Event Media</span>
+          </button>
+          )}
           {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (
           <button
             ref={onDigests ? activeRef : null}
@@ -856,6 +868,16 @@ export default function ClientLayout() {
                   >
                     <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🗺️</span>
                     <span style={ellip}>Event Map</span>
+                  </button>
+                  )}
+                  {fl('eventassets') && can(PERMS.MAP_MANAGE) && (
+                  <button
+                    className={`nav-row${onEventMedia ? ' active' : ''}`}
+                    style={{ ...mRowSuite, fontWeight: onEventMedia ? 700 : 500 }}
+                    onClick={() => { if (!onEventMedia) vtNavigate(navigate, '/event-media'); setNavOpen(false); }}
+                  >
+                    <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🖼️</span>
+                    <span style={ellip}>Event Media</span>
                   </button>
                   )}
                   {!opsOnly && fl('digests') && can(PERMS.DIGESTS_MANAGE) && (

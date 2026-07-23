@@ -25,12 +25,14 @@ import ChottuLinks from '../components/ChottuLinks.jsx';
 import SurveyManager from '../components/SurveyManager.jsx';
 import EventOpsAdmin from '../components/EventOpsAdmin.jsx';
 import MapStudio from '../components/MapStudio.jsx';
+import EventAssets from '../components/EventAssets.jsx';
 import RateCard from '../components/RateCard.jsx';
 import { BriefingConfigForm } from '../components/BriefingTuneModal.jsx';
 import StatusNoticesAdmin from '../components/StatusNoticesAdmin.jsx';
 import DataHealthAdmin from '../components/DataHealthAdmin.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import TicketBoard from '../components/TicketBoard.jsx';
+import CodeHealthPanel from '../components/CodeHealthPanel.jsx';
 import FlagsMatrix from '../components/FlagsMatrix.jsx';
 import ModerationManager from '../components/ModerationManager.jsx';
 import HelpBotAdmin from '../components/HelpBotAdmin.jsx';
@@ -749,7 +751,7 @@ function StatusBadge({ status }) {
 // The Product section: everything about the product in one place, split into tabs —
 // the live Tickets board (bug/feature reports), the feature matrix + sales overview,
 // and the daily release notes.
-const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['moderation', '🛡️ Moderation'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge'], ['supportowl', '🛟 Support Owl']];
+const PRODUCT_TABS = [['tickets', '🎟️ Tickets'], ['flags', '🚩 Flags'], ['moderation', '🛡️ Moderation'], ['matrix', '🧩 Feature matrix'], ['releases', '📝 Release notes'], ['helpbot', '💬 Help knowledge'], ['health', '🩺 Code health'], ['supportowl', '🛟 Support Owl']];
 function Product() {
   const [sub, setSub] = useState('tickets');
   return (
@@ -765,6 +767,7 @@ function Product() {
       {sub === 'matrix' && <ProductMatrixTab />}
       {sub === 'releases' && <ProductReleaseNotes />}
       {sub === 'helpbot' && <HelpBotAdmin />}
+      {sub === 'health' && <CodeHealthPanel />}
       {sub === 'supportowl' && <SupportOwlAdmin />}
     </div>
   );
@@ -3083,8 +3086,8 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
   // by the "Preview account" button and the goals/alerts tasks, which are set up
   // inside the client experience, not the admin panels.
   const previewAccount = (path = '/') => { setProfile(entity.id, { name: entity.name, logo: entity.logo }); navigate(path); };
-  // Merge resolution: staging's Reports entry + main's Surveys + Map Studio — all stay.
-  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ['map', '🗺️ Map Studio'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
+  // Merge resolution: staging's Reports entry + main's Surveys/Map Studio/Event Media — all stay.
+  const nav = [['checklist', '✅ Setup checklist'], ['settings', 'Settings'], ['suites', `Suites (${suites.length})`], ['sets', 'Custom sets'], ['briefing', 'Briefing'], ['messages', 'Messages'], ['digests', 'Digests'], ['reports', 'Reports'], ['campaigns', 'Campaigns'], ['segments', 'Segments'], ['links', '🔗 Deep links'], ['surveys', '📋 Surveys'], ['skills', '🤖 Skills'], ['eventops', 'Event Ops'], ['map', '🗺️ Map Studio'], ['media', '🖼️ Event Media'], ...(showFanOwl ? [['fanowl', '🦉 Fan Owl']] : []), ['fees', 'Fees'], ['settlements', 'Settlements'], ['logins', `Logins (${users.length})`], ['integrations', 'Integrations'], ['email', 'Branding']];
   return (
     <div>
       <AdminBack onBack={onBack}>All clients</AdminBack>
@@ -3161,6 +3164,12 @@ function ClientDetail({ entity, fields, allEntities, allSets, dashTitle, suites,
             <div>
               <p style={hint}>Build &amp; publish the event map for <b>{entity.name}</b> — pins, logos, descriptions, CTAs and filters. Publishing gives a URL for the Howler app's per-event map WebView. Clients with the <code>map.manage</code> permission can build it themselves at /event-map.</p>
               <MapStudio entityId={entity.id} scope="admin" />
+            </div>
+          )}
+          {section === 'media' && (
+            <div>
+              <p style={hint}>The media the Howler app shows for <b>{entity.name}</b>'s events — header image/video and logo, published from Pulse and overlaid on the event's Howler data (no app release). Needs the <b>eventassets</b> flag on (Product → Flags) and the suite's Howler event ID set. Clients with <code>map.manage</code> can manage it themselves at /event-media.</p>
+              <EventAssets entityId={entity.id} scope="admin" />
             </div>
           )}
           {section === 'digests' && (
