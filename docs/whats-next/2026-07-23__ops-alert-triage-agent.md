@@ -60,6 +60,34 @@ review the code daily and flag bugs before they ever alert.
   ride the tier) and new `test/ticketsDispatch.test.js` (8: plan/build issue
   bodies, alreadyLinked rail, needsConfig, ops-verdict rules).
 
+## Shipped this session (Phase 3 — LIVE)
+- **Require-contract guard** (`test/requireContracts.test.js`): every property a
+  server module uses on a `require()`d sibling must actually be exported by it —
+  the deterministic net for the `listJourneys` class of bug (call site survives
+  a revert/rename that removed the export). Loads each module's REAL export
+  surface at runtime (spreads included), then statically scans all `binding.prop`
+  accesses, destructured requires and inline `require('./x').prop` uses.
+  Zero-false-positive by construction: comment-stripped source, shadowed
+  bindings skipped, `?.` optional access respected, String/Array method names
+  ignored. Includes a self-test that replays the exact listJourneys bug shape —
+  and was verified against the real thing (removing the export fails the suite).
+  Rides the existing CI test job; no new workflow.
+- **Daily code-health review** (`.github/workflows/code-health.yml`): 05:15 SAST
+  daily (+ manual dispatch), Claude reviews the last 24h of commits plus a
+  deterministic rotating 4-module slice of `server/`, and posts ranked findings
+  (file:line, failure mode, suggested fix, confidence) as one comment per day on
+  the single rolling issue **"🩺 Code health — daily review"**. Read-only by
+  design — no code, no PRs; accepted findings go to the product board by hand,
+  then the normal dispatch flow applies. Guards: never writes the bot's
+  at-mention (no recursive triggers), dedupes against earlier comments, "no
+  findings" is a valid two-sentence report. Same ANTHROPIC_API_KEY secret as
+  claude.yml.
+
+## Still open (future rounds)
+- Feed **GitHub workflow failures** (CI, sync-staging) into the ops_alerts
+  ledger as a triage source — needs the repo webhook extended to workflow_run
+  events, pointed at production Pulse.
+
 ## Why this is close, not far
 
 The two ends of the loop already exist:
