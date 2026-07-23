@@ -34,11 +34,21 @@ export default function QueueItCard({ entityId, scope = 'my' }) {
   const [err, setErr] = useState('');
   const [open, setOpen] = useState(''); // expanded room id
   const [testState, setTestState] = useState('');
+  const [credsRev, setCredsRev] = useState(0); // bumped when the form above saves creds
+
+  // Credentials are resolved once on mount — so when the Queue-it section of
+  // IntegrationsForm (a sibling on this page) saves a new pair, it fires this
+  // event and we re-check instead of showing stale state until a page refresh.
+  useEffect(() => {
+    const onSaved = () => setCredsRev((n) => n + 1);
+    window.addEventListener('queueit:creds-saved', onSaved);
+    return () => window.removeEventListener('queueit:creds-saved', onSaved);
+  }, []);
 
   useEffect(() => {
-    setStatus(null); setRoomsData(null); setErr(''); setOpen('');
+    setStatus(null); setRoomsData(null); setErr(''); setOpen(''); setTestState('');
     api.queueitStatus(entityId, scope).then(setStatus).catch(() => setStatus(null));
-  }, [entityId, scope]);
+  }, [entityId, scope, credsRev]);
   useEffect(() => {
     if (!status?.configured) return;
     api.queueitRooms(entityId, scope).then(setRoomsData).catch((e) => setErr(e.message));

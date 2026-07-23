@@ -165,7 +165,12 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
       if (!only || only === 'tiktok') { setTtToken(''); setClearTtToken(false); }
       if (!only || only === 'slack') { setSlackWebhook(''); setSlackBotToken(''); setClearSlackWebhook(false); setClearSlackBot(false); }
       if (!only || only === 'chottu') { setChottuKey(''); setClearChottuKey(false); }
-      if (!only || only === 'queueit') { setQitKey(''); setClearQitKey(false); }
+      if (!only || only === 'queueit') {
+        setQitKey(''); setClearQitKey(false);
+        // QueueItCard is a sibling on the same page and checks credentials once on
+        // mount — nudge it so fresh keys show up without a manual page refresh.
+        window.dispatchEvent(new CustomEvent('queueit:creds-saved'));
+      }
       if (!only || only === 'socialplus') { setSpKey(''); setClearSpKey(false); }
       setSavedKey(only || 'all'); setTimeout(() => setSavedKey(''), 1600);
     } catch (e) { alert('Save failed: ' + e.message); }
@@ -476,7 +481,9 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           {value?.queueit?.keySet && (
             <label style={clearRow}><input type="checkbox" checked={clearQitKey} onChange={(e) => setClearQitKey(e.target.checked)} /> Remove this key</label>
           )}
-          {value?.queueit?.keySet && value?.queueit?.customerId && <div style={{ ...note, color: 'var(--success, #10b981)', marginTop: 8 }}>✓ Connected — live queue stats appear on the client's Queue-it card (Integrations).</div>}
+          {/* Presence only — nothing here has talked to Queue-it. The real check is
+              the stats card's "Test connection", which does a live API round-trip. */}
+          {value?.queueit?.keySet && value?.queueit?.customerId && <div style={{ ...note, marginTop: 8 }}>✓ Customer ID + key saved. Verify them with <b>Test connection</b> on the Queue-it stats card (it appears below once credentials resolve).</div>}
           <SaveRow k="queueit" />
         </Section>
       )}

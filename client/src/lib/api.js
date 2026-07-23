@@ -13,9 +13,12 @@ async function json(res) {
   if (!res.ok) {
     // Gateway errors mean the server is briefly unavailable — almost always the
     // ~1-minute window while a deploy swaps the instance. Show a reassuring
-    // "updating" message instead of a raw "Request failed (502)".
+    // "updating" message instead of a raw "Request failed (502)" — but only when
+    // the body carries no message of its own: our server also returns 502s with a
+    // deliberate, client-safe explanation (e.g. "Could not reach Queue-it"), and
+    // masking those sends people debugging a deploy that isn't happening.
     if (res.status === 502 || res.status === 503 || res.status === 504) {
-      throw new Error('Pulse is updating — this usually takes under a minute. Please wait a moment and try again.');
+      throw new Error(data.error || 'Pulse is updating — this usually takes under a minute. Please wait a moment and try again.');
     }
     throw new Error(data.error || `Request failed (${res.status})`);
   }
