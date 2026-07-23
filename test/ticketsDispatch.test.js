@@ -207,3 +207,26 @@ test('repeated failures of the same workflow+branch collapse to one fingerprint 
   assert.equal(a, b, 'same defect, different run id → one ledger row');
   assert.notEqual(a, c, 'a different workflow is a different row');
 });
+
+// ── Re-shipped-after-rejection tickets re-enter the review-reminder sweep ─────
+// Found by the daily code-health review (issue #77): the shipped transitions
+// kept a stale client_verdict='rejected', so the 24h re-nudge sweep (which
+// selects client_verdict='') skipped exactly the tickets on their SECOND
+// review round.
+test('a rejected ticket whose fix PR merges to production gets a fresh verdict slate', async () => {
+  const ent = h.makeEntity('Reship Co', 'reship-org');
+  const reporter = h.makeClient(`reship-${Date.now()}@test.local`, [ent.id]);
+  const t = tickets.createTicket({ user: reporter, type: 'bug', title: 'Reship bug', body: 'broken', entityId: ent.id });
+  sql.prepare("UPDATE tickets SET github_issue_number=41, status='rejected', client_verdict='rejected', client_verdict_note='still broken', client_verdict_at='2026-07-22T00:00:00Z' WHERE id=?").run(t.id);
+  const payload = { action: 'closed', pull_request: { number: 9, merged: true, title: 'fix: reship', html_url: 'https://github.test/pr/9', body: 'Fixes #41', base: { ref: 'main' }, head: { ref: 'claude/fix-41' } } };
+  const req = { _body: true, headers: { 'x-github-event': 'pull_request' }, get(h2) { return this.headers[h2.toLowerCase()]; }, body: Buffer.from(JSON.stringify(payload)), params: {} };
+  const r = await call('POST /api/github/webhook', req);
+  assert.equal(r.status, 200);
+  const row = sql.prepare('SELECT * FROM tickets WHERE id=?').get(t.id);
+  assert.equal(row.status, 'shipped');
+  assert.equal(row.client_verdict, '', 'stale rejection cleared — fresh production review');
+  assert.equal(row.client_verdict_note, '');
+  // The essence of the fix: the row is back inside the re-nudge sweep's SELECT.
+  const swept = sql.prepare("SELECT id FROM tickets WHERE status IN ('shipped','staging') AND client_verdict=''").all().map((x) => x.id);
+  assert.ok(swept.includes(t.id), 'sweep covers the re-shipped ticket again');
+});

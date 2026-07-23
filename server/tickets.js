@@ -1029,7 +1029,11 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
       for (const t of sql.prepare("SELECT * FROM tickets WHERE status='staging'").all()) {
         const verified = t.client_verdict === 'approved';
         const note = (t.ship_note || '').trim() || `Verified on staging, promoted to production via release PR #${pr.number}.`;
-        sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run(verified ? 'approved' : 'shipped', note.slice(0, 8000), now(), t.id);
+        // Unverified straggler → Shipped is a fresh production review: clear any
+        // stale verdict so the re-nudge sweep covers it (same reset as the other
+        // fresh-review transitions). Verified tickets keep 'approved' — they're done.
+        if (verified) sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('approved', note.slice(0, 8000), now(), t.id);
+        else sql.prepare("UPDATE tickets SET status='shipped', ship_note=?, client_verdict='', client_verdict_note='', client_verdict_at='', updated_at=? WHERE id=?").run(note.slice(0, 8000), now(), t.id);
         logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `Release PR #${pr.number} merged — live in production${verified ? ' (reporter verified on staging — done)' : ', awaiting the reporter’s review'}.` });
         deferNotify(t.id, 'production'); // notify once the production deploy has actually landed
       }
@@ -1055,7 +1059,13 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
           deferNotify(t.id, 'staging'); // "go test it" waits for the staging deploy to land
         } else {
           const note = (t.ship_note || '').trim() || `Shipped via PR #${pr.number}: ${String(pr.title || '').trim()}`.slice(0, 8000);
-          sql.prepare('UPDATE tickets SET status=?, ship_note=?, updated_at=? WHERE id=?').run('shipped', note, now(), t.id);
+          // Fresh landing in production = fresh review — clear any earlier verdict,
+          // exactly like the staging path above. Without this, a REJECTED ticket
+          // whose fix ships keeps client_verdict='rejected' and the daily review
+          // re-nudge sweep (which selects client_verdict='') skips it forever —
+          // on the second review round, where chasing matters most. (Found by the
+          // daily code-health review, issue #77.)
+          sql.prepare("UPDATE tickets SET status=?, ship_note=?, client_verdict='', client_verdict_note='', client_verdict_at='', updated_at=? WHERE id=?").run('shipped', note, now(), t.id);
           logComment(t.id, { authorEmail: 'github', authorRole: 'system', kind: 'status', body: `PR #${pr.number} merged into \`${base}\` — auto-shipped.` });
           deferNotify(t.id, 'production'); // review ask waits for the production deploy to land
         }
