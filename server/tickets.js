@@ -47,7 +47,7 @@ Rules:
 - Keep it tight and skimmable — short sentences, bullets over prose. No preamble, no sign-off, no emojis.
 - Remember Pulse's principles: mobile-first, and every client-facing feature ships with both an admin surface and client self-service. Flag it in the ticket if the request would need both.`;
 
-function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push }) {
+function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, mailer }) {
   const sql = db.db;                 // raw better-sqlite3 handle
   const now = () => new Date().toISOString();
   const uuid = () => crypto.randomUUID();
@@ -622,10 +622,11 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
   });
 
   // Tell the reporter their ticket moved. Fires on every meaningful status change
-  // (not just shipped). Two channels: a web-push notification straight to the
+  // (not just shipped). Three channels: a web-push notification straight to the
   // reporting USER (works for any role — this is what reaches staff who reported a
-  // bug, and drives the on-device banner), plus — for client reporters tied to an
-  // entity — an in-app Pulse inbox thread via the OS spine (with email/push fanout).
+  // bug, and drives the on-device banner), a branded EMAIL per stage (any role),
+  // plus — for client reporters tied to an entity — an in-app Pulse inbox thread
+  // via the OS spine (push/Slack only; email is the dedicated send above).
   const label = (t) => t.ai_title || t.title || 'your report';
   function shipBody(t) {
     const overview = (t.ship_note || '').trim() || (t.ai_summary || '').trim() || `We've built the ${t.type} you reported.`;
@@ -656,16 +657,69 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push })
       default: return null;
     }
   }
+  // Email subject per status — the stage the report just reached, with the report
+  // title so a reporter's inbox reads as a timeline of their ticket.
+  function reporterSubject(t) {
+    switch (t.status) {
+      case 'triaged': return `We’re reviewing “${label(t)}”`;
+      case 'accepted': return `Accepted: “${label(t)}” — queued to build`;
+      case 'in_progress': return `In progress: “${label(t)}”`;
+      case 'staging': return `Ready to test: “${label(t)}” — please review`;
+      case 'approved': return `Live: “${label(t)}”`;
+      case 'shipped': return `Resolved: “${label(t)}” — please review`;
+      case 'declined': return `Update on your report: “${label(t)}”`;
+      default: return `Update on “${label(t)}”`;
+    }
+  }
+  // Email the ORIGINAL reporter directly at EVERY stage their report moves through
+  // (triaged → accepted → building → test/review → live, or declined) — the one
+  // channel that reaches every reporter, including staff with no entity. Tenant-
+  // aware (white-label branding + sender per client; platform brand otherwise),
+  // opt-out aware (the per-user 'reports' preference, client self-service under
+  // Settings → Notifications), and a no-op when there's no valid address or no
+  // mailer. The inbox fan-out drops its own email so each stage emails exactly once.
+  function emailReporter(t, msg) {
+    if (!mailer?.isConfigured?.()) return false;
+    const to = String(t.reporter_email || '').trim();
+    if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;      // no valid email → skip
+    if (t.reporter_id && db.notifyTypeOn && !db.notifyTypeOn(t.reporter_id, 'reports', 'email')) return false; // opted out
+    const branding = mailer.resolveBranding(t.entity_id || '') || {};
+    const { html, text } = mailer.notificationEmail({
+      title: msg.title,
+      body: msg.body,
+      ctaText: 'View your report',
+      ctaPath: '/product',
+      // entityId resolves the client's branding in the shell; assetScope points
+      // logo <img> at a Pulse-hosted URL (data-URL logos are stripped by mail
+      // clients). Staff reports (no entity) fall back to the platform brand.
+      entityId: t.entity_id || undefined,
+      assetScope: t.entity_id || 'platform',
+    });
+    try {
+      mailer.send({ to, subject: reporterSubject(t), html, text, fromName: branding.senderName, kind: 'ticket', entity: t.entity_id || '' });
+    } catch (e) { console.error('[tickets] reporter email failed:', e.message); }
+    return true;
+  }
+
   function notifyReporter(t, prevStatus) {
     if (!t || t.status === prevStatus) return;
     const msg = reporterMessage(t);
     if (!msg) return;
     // 1) Direct push to the reporting user — the universal channel (any role).
-    try { push?.sendToUser?.(t.reporter_id, { title: msg.title, body: String(msg.body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'messages'); } catch (e) { console.error('[tickets] push failed:', e.message); }
-    // 2) Client reporters (tied to an entity) also get an in-app inbox thread.
+    try { push?.sendToUser?.(t.reporter_id, { title: msg.title, body: String(msg.body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'reports'); } catch (e) { console.error('[tickets] push failed:', e.message); }
+    // 2) Direct email to the reporter for THIS stage (branded, opt-out aware).
+    emailReporter(t, msg);
+    // 3) Client reporters (tied to an entity) also get an in-app inbox thread. The
+    // dedicated reporter email above already covers email, so drop it from the
+    // thread's fan-out (push + Slack still fire) — one email per stage, and the
+    // 'reports' opt-out isn't undercut by the inbox's 'messages' channel.
     if (t.entity_id && os?.announce) {
       try {
-        os.announce({ entityId: t.entity_id, title: msg.title, body: msg.body, priority: msg.priority || 'fyi', createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id });
+        os.announce({
+          entityId: t.entity_id, title: msg.title, body: msg.body, priority: msg.priority || 'fyi',
+          createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id,
+          channels: ['push', 'slack'],
+        });
       } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
     }
   }

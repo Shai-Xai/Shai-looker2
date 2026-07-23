@@ -40,7 +40,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { HttpError, asyncHandler } = require('./http');
+const { HttpError, asyncHandler, jsonWithEtag } = require('./http');
 const flags = require('./flags'); // per-client gate: `community` (default OFF, beta)
 const appAuth = require('./appAuth'); // shared Howler-JWT introspection (see server/appAuth.js)
 const moderation = require('./moderation'); // phase-1 rule engine on every fan write (docs/specs/MODERATION_CONTRACT.md)
@@ -308,6 +308,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   }
   const reactionCount = (postId) => sql.prepare('SELECT COUNT(*) n FROM social_feed_reactions WHERE post_id=?').get(postId).n;
   const commentCount = (postId) => sql.prepare("SELECT COUNT(*) n FROM social_feed_comments WHERE post_id=? AND moderation_status='visible'").get(postId).n;
+  // Feed hot path: ONE query per page per signal instead of four per POST.
+  // postRow uses this when passed as `state`; management paths keep the
+  // simple per-row helpers above (a handful of rows, not a request storm).
+  function batchPostState(rows, viewerId) {
+    const state = { reactions: {}, comments: {}, mine: new Set(), pins: new Set() };
+    const ids = [...new Set(rows.map((r) => r.id))];
+    if (!ids.length) return state;
+    const ph = ids.map(() => '?').join(',');
+    for (const r of sql.prepare(`SELECT post_id, COUNT(*) n FROM social_feed_reactions WHERE post_id IN (${ph}) GROUP BY post_id`).all(...ids)) state.reactions[r.post_id] = r.n;
+    for (const r of sql.prepare(`SELECT post_id, COUNT(*) n FROM social_feed_comments WHERE moderation_status='visible' AND post_id IN (${ph}) GROUP BY post_id`).all(...ids)) state.comments[r.post_id] = r.n;
+    if (viewerId) {
+      for (const r of sql.prepare(`SELECT post_id FROM social_feed_reactions WHERE howler_user_id=? AND post_id IN (${ph})`).all(String(viewerId), ...ids)) state.mine.add(r.post_id);
+      for (const r of sql.prepare(`SELECT post_id FROM social_feed_user_pins WHERE howler_user_id=? AND post_id IN (${ph})`).all(String(viewerId), ...ids)) state.pins.add(r.post_id);
+    }
+    return state;
+  }
   function commentRow(r, { viewerId = null } = {}) {
     // Moderation states ride the shape when set; a removed comment collapses
     // to a stub ("Removed by moderators" in the app) — the author-only read
@@ -391,7 +407,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   const hasReacted = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_reactions WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   const hasPinned = (postId, howlerUserId) => !!sql.prepare('SELECT 1 FROM social_feed_user_pins WHERE post_id=? AND howler_user_id=?').get(postId, String(howlerUserId));
   // viewerId: the VERIFIED app user (or null) — adds per-user hasReacted state.
-  function postRow(r, community, { viewerId = null } = {}) {
+  function postRow(r, community, { viewerId = null, state = null } = {}) {
     return {
       id: r.id, communityId: r.community_id,
       community: community ? { id: community.id, name: community.name, type: community.type, avatarUrl: communityAvatar(community) || null, ...(() => { const br = communityBrand(community); return { brandColor: br.brandColor || null, secondaryColor: br.secondaryColor || null }; })() } : undefined,
@@ -400,11 +416,15 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       toParent: !!r.to_parent,
       audience: audienceOf(r),
       author: { name: r.author_name || community?.name || '' },
-      reactionCount: reactionCount(r.id),
-      commentCount: commentCount(r.id),
+      reactionCount: state ? (state.reactions[r.id] || 0) : reactionCount(r.id),
+      commentCount: state ? (state.comments[r.id] || 0) : commentCount(r.id),
       // canEdit: the viewer authored this post from the app — unlocks the
       // app's own edit/delete affordance (server-enforced on the endpoints).
-      ...(viewerId ? { hasReacted: hasReacted(r.id, viewerId), pinnedByMe: hasPinned(r.id, viewerId), canEdit: r.author_email === `app:${viewerId}` } : {}),
+      ...(viewerId ? {
+        hasReacted: state ? state.mine.has(r.id) : hasReacted(r.id, viewerId),
+        pinnedByMe: state ? state.pins.has(r.id) : hasPinned(r.id, viewerId),
+        canEdit: r.author_email === `app:${viewerId}`,
+      } : {}),
       // Held/removed states (author-only rows — the read filters did the gating).
       ...(r.moderation_status && r.moderation_status !== 'visible' ? { moderation: { status: r.moderation_status } } : {}),
       // CTA button (app renders it via its existing PostCtaResolver vocabulary,
@@ -909,14 +929,19 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const stripRows = before ? { pinned: [], myPins: [] } : pinnedStripRows('global=1', [], viewer?.id);
     const allowed = await allowedGlobalEntities([...rows, ...stripRows.pinned, ...stripRows.myPins], req, viewer);
     const visible = (r) => flagOn(r.entity_id) && (allowed === null || allowed.has(r.entity_id));
-    const shape = (r) => postRow(r, getCommunity(r.community_id), { viewerId: viewer?.id });
+    const state = batchPostState([...rows, ...stripRows.pinned, ...stripRows.myPins], viewer?.id);
+    // Community lookups repeat per page — memoise for the request.
+    const comms = new Map();
+    const comm = (id) => { if (!comms.has(id)) comms.set(id, getCommunity(id)); return comms.get(id); };
+    const shape = (r) => postRow(r, comm(r.community_id), { viewerId: viewer?.id, state });
     const posts = rows.filter(visible).map(shape);
     const strips = before ? {} : {
       pinned: stripRows.pinned.filter(visible).map(shape),
       myPins: stripRows.myPins.filter(visible).map(shape),
     };
     logImpressions(posts.map((p) => p.id), viewer?.id, 'delivered');
-    res.json({ contractVersion: 1, posts, ...strips, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
+    // ETag/304: the app polls this — unchanged feeds cost headers only.
+    jsonWithEtag(req, res, { contractVersion: 1, posts, ...strips, nextCursor: rows.length === limit ? rows[rows.length - 1].published_at : null });
   }));
 
   // Which entity is "Howler's own voice" on the global feed (platform admin).
@@ -966,7 +991,8 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // Rolled-up child posts keep their HOME community for labels + ticket
     // targeting (the audience matches against the EVENT's tickets).
     const home = (r) => (r.community_id === c.id ? c : getCommunity(r.community_id));
-    const shape = (r) => postRow(r, home(r), { viewerId: viewer?.id });
+    const state = batchPostState([...rows, ...stripRows.pinned, ...stripRows.myPins], viewer?.id);
+    const shape = (r) => postRow(r, home(r), { viewerId: viewer?.id, state });
     const seen = (r) => postVisible(r, home(r), tickets);
     const posts = rows.filter(seen).map(shape);
     const strips = page.before ? {} : {
@@ -978,7 +1004,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       canPost: viewer ? !!posterRow(c.entity_id, viewer.id) : null,
     });
     logImpressions(posts.map((p) => p.id), viewer?.id, 'delivered');
-    res.json({ contractVersion: 1, community, posts, ...strips, nextCursor: rows.length === page.limit ? rows[rows.length - 1].published_at : null });
+    jsonWithEtag(req, res, { contractVersion: 1, community, posts, ...strips, nextCursor: rows.length === page.limit ? rows[rows.length - 1].published_at : null });
   }));
 
   // Tier-2 impressions from the app, batched + best-effort: which cards were
@@ -1055,7 +1081,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       || ((b.entityId === house) - (a.entityId === house))
       || (b.hasTicket - a.hasTicket)
       || (a.lastPostAt < b.lastPostAt ? 1 : -1));
-    res.json({ contractVersion: 1, rail: items.slice(0, 20) });
+    jsonWithEtag(req, res, { contractVersion: 1, rail: items.slice(0, 20) });
   }));
 
   // Mark a community's feed seen (clears its unseen ring on the rail).

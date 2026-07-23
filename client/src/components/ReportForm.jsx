@@ -1,6 +1,14 @@
 // The report form modal (bug / improvement / idea + attachments). Shared by the
 // app-wide floating ReportWidget and the "+ New report" button in the Product
 // section, so there's one form and one submit path. Controlled via `open`.
+//
+// Because the form is a full-screen overlay it would hide the very screen the
+// user wants to capture. Two escapes avoid losing a half-filled form:
+//   • Minimize — collapse to a small floating pill so the screen underneath is
+//     visible/recordable (works everywhere, incl. mobile → OS screen recorder),
+//     then tap the pill to restore with all state intact.
+//   • Record the screen — getDisplayMedia capture that auto-minimizes while it
+//     runs, then attaches the clip for you (desktop browsers).
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api.js';
 import { useIsMobile } from '../lib/useIsMobile.js';
@@ -31,6 +39,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [minimized, setMinimized] = useState(false); // collapsed to a pill so the screen shows
   // Which dashboard tile this is about (published by the dashboard view). Empty =
   // whole screen / not tile-specific. `tiles` is the pickable list for this screen.
   const [tiles, setTiles] = useState([]);
@@ -67,7 +76,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
 
   function reset() {
     setType('bug'); setTitle(''); setBody(''); setUrgency('normal'); setFiles([]);
-    setTileId(''); setBusy(false); setDone(false); setError('');
+    setTileId(''); setBusy(false); setDone(false); setError(''); setMinimized(false);
   }
   const tileName = () => (tiles.find((t) => t.id === tileId) || {}).title || '';
 
@@ -118,6 +127,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
       stream.getTracks().forEach((t) => t.stop());
       recRef.current = null;
       setRecording(false); setRecSecs(0);
+      setMinimized(false); // bring the form back so they can see it attached
       const blob = new Blob(chunks, { type: mime });
       if (!blob.size) return;
       if (blob.size > MAX_MB * 1024 * 1024) { setError(`Recording is over ${MAX_MB}MB — keep it shorter.`); return; }
@@ -136,12 +146,14 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
     recRef.current = { rec, timer };
     rec.start();
     setRecording(true); setRecSecs(0);
+    setMinimized(true); // get out of the way so the screen is recordable
   }
   function stopRecording() {
     const r = recRef.current;
     if (r?.rec && r.rec.state !== 'inactive') { try { r.rec.stop(); } catch { /* already stopping */ } }
   }
 
+  function handleClose() { stopRecording(); onClose?.(); }
   async function submit() {
     if (!body.trim() && !title.trim()) { setError('Add a title or a description.'); return; }
     if (recording) stopRecording();
@@ -157,13 +169,40 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
 
   if (!open) return null;
 
+  // Collapsed: a small floating pill so the underlying screen is visible/recordable.
+  if (minimized) {
+    return (
+      <div style={{
+        position: 'fixed', zIndex: 200, bottom: 'calc(16px + env(safe-area-inset-bottom))',
+        left: isMobile ? 12 : 'auto', right: isMobile ? 12 : 20,
+        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+        borderRadius: 999, background: 'var(--card)', border: '1px solid var(--hairline)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
+      }}>
+        {recording ? (
+          <>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#e5484d', flexShrink: 0, animation: 'pulse-rec 1s ease-in-out infinite' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>Recording {fmt(recSecs)}</span>
+            <button onClick={stopRecording} style={{ ...btnPrimary, padding: '7px 12px', fontSize: 13 }}>⏹ Stop &amp; attach</button>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>📝 Report paused</span>
+            <button onClick={() => setMinimized(false)} style={{ ...btnPrimary, padding: '7px 12px', fontSize: 13 }}>Resume</button>
+          </>
+        )}
+        <style>{'@keyframes pulse-rec{0%,100%{opacity:1}50%{opacity:.35}}'}</style>
+      </div>
+    );
+  }
+
   const bodyLabel = type === 'bug'
     ? 'What went wrong? What did you expect instead?'
     : "What's the objective? What outcome do you want?";
 
   return (
     <div
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.45)',
         display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
@@ -191,14 +230,19 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
               </p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                 <button onClick={reset} style={btnGhost}>Report another</button>
-                <button onClick={onClose} style={btnPrimary}>Done</button>
+                <button onClick={handleClose} style={btnPrimary}>Done</button>
               </div>
             </div>
           ) : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 700 }}>Report</h3>
-                <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <button onClick={() => setMinimized(true)} aria-label="Minimize to see the screen"
+                    title="Minimize to see/record the screen"
+                    style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>—</button>
+                  <button onClick={handleClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+                </div>
               </div>
               <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
                 On <strong style={{ color: 'var(--text)' }}>{screen}</strong>. Tell us what's up — a person and the AI will pick it up.
@@ -270,6 +314,20 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
                 )}
               </div>
 
+              {/* Capture a recording of the buggy screen without losing this form. */}
+              {files.length < MAX_FILES && !recording && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <button onClick={() => setMinimized(true)} style={{ ...btnGhost, padding: '8px 12px', fontSize: 13 }}>
+                    — Minimize to record
+                  </button>
+                </div>
+              )}
+              <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: -2, marginBottom: 12 }}>
+                {canScreenRecord
+                  ? '🎥 Record attaches a clip automatically. Or minimize to capture with your own recorder, then attach it.'
+                  : 'Minimize the form to record the screen with your device, then reopen and attach the clip.'}
+              </p>
+
               {type === 'bug' && (
                 <>
                   <label style={lbl}>How urgent is it?</label>
@@ -294,7 +352,13 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
   );
 }
 
-// Read a file straight to a data-URL (used for video, kept as-is).
+// mm:ss for the recording timer.
+function fmt(secs) {
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Read a file/blob straight to a data-URL (used for video, kept as-is).
 function readAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

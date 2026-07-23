@@ -83,4 +83,22 @@ function securityHeaders(_req, res, next) {
   next();
 }
 
-module.exports = { HttpError, asyncHandler, errorMiddleware, serverError, allowInlineScripts, securityHeaders };
+// Poll-friendly JSON response: hash the payload into a strong ETag and answer
+// If-None-Match with an empty 304 when nothing changed. The app polls feeds
+// and chats — at thousands of users most polls ARE unchanged, so this turns
+// the request storm into headers-only traffic. The query still runs (SQLite
+// reads are cheap); what it saves is serialisation bytes + client re-parses.
+function jsonWithEtag(req, res, payload) {
+  const body = JSON.stringify(payload);
+  const etag = `"${require('crypto').createHash('sha1').update(body).digest('base64url')}"`;
+  if (res.set) res.set('ETag', etag);
+  if ((req.headers || {})['if-none-match'] === etag) {
+    res.status(304);
+    return res.end ? res.end() : res.send('');
+  }
+  // Real Express: send the already-serialised string (no double stringify).
+  // Test doubles without .type() fall back to res.json with the object.
+  return res.type ? res.type('application/json').send(body) : res.json(payload);
+}
+
+module.exports = { HttpError, asyncHandler, errorMiddleware, serverError, allowInlineScripts, securityHeaders, jsonWithEtag };

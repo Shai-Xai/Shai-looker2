@@ -40,12 +40,17 @@ function create({ sql, now, appUserName }) {
     );
   `);
 
+  const impressionUpsert = sql.prepare(`INSERT INTO social_feed_impressions (post_id, howler_user_id, kind, day, n) VALUES (?,?,?,?,1)
+      ON CONFLICT(post_id, howler_user_id, kind, day) DO UPDATE SET n=n+1`);
+  // ONE transaction per page, not one auto-commit per post — every feed GET
+  // logs a 'delivered' impression per rendered post, so at scale this is the
+  // single hottest write path in the module.
+  const impressionsTx = sql.transaction((postIds, viewerId, kind, day) => {
+    for (const id of postIds) impressionUpsert.run(String(id), String(viewerId || ''), kind, day);
+  });
   function logImpressions(postIds, viewerId, kind) {
     if (!postIds.length) return;
-    const day = new Date().toISOString().slice(0, 10);
-    const stmt = sql.prepare(`INSERT INTO social_feed_impressions (post_id, howler_user_id, kind, day, n) VALUES (?,?,?,?,1)
-      ON CONFLICT(post_id, howler_user_id, kind, day) DO UPDATE SET n=n+1`);
-    for (const id of postIds) stmt.run(String(id), String(viewerId || ''), kind, day);
+    impressionsTx(postIds, viewerId, kind, new Date().toISOString().slice(0, 10));
   }
 
   // Per-post rollup for the management surfaces: delivered count + unique
