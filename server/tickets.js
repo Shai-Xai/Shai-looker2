@@ -133,6 +133,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     // A parked "go test it" notification waiting for the deploy to land (JSON:
     // {env, since, base}) — see the deploy-aware notify sweep below.
     add('notify_wait', "notify_wait TEXT NOT NULL DEFAULT ''");
+    // Daily review-reminder clock: when the reporter was ASKED to review (entered
+    // shipped/staging + got notified), and when the last reminder went out.
+    add('review_asked_at', "review_asked_at TEXT NOT NULL DEFAULT ''");
+    add('review_reminder_at', "review_reminder_at TEXT NOT NULL DEFAULT ''");
     add('ai_error', "ai_error TEXT NOT NULL DEFAULT ''"); // why the AI draft failed (surfaced so it's diagnosable, not a bare "failed")
   } catch (e) { console.error('[tickets] ship-review migration skipped:', e.message); }
   // Comments gained a visibility flag (internal dev note vs public reply the
@@ -711,7 +715,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   // opt-out aware (the per-user 'reports' preference, client self-service under
   // Settings → Notifications), and a no-op when there's no valid address or no
   // mailer. The inbox fan-out drops its own email so each stage emails exactly once.
-  function emailReporter(t, msg) {
+  function emailReporter(t, msg, subject) {
     if (!mailer?.isConfigured?.()) return false;
     const to = String(t.reporter_email || '').trim();
     if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return false;      // no valid email → skip
@@ -729,7 +733,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
       assetScope: t.entity_id || 'platform',
     });
     try {
-      mailer.send({ to, subject: reporterSubject(t), html, text, fromName: branding.senderName, kind: 'ticket', entity: t.entity_id || '' });
+      mailer.send({ to, subject: subject || reporterSubject(t), html, text, fromName: branding.senderName, kind: 'ticket', entity: t.entity_id || '' });
     } catch (e) { console.error('[tickets] reporter email failed:', e.message); }
     return true;
   }
@@ -739,6 +743,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     if (t.source === 'ops') return; // machine-filed: no human reporter to push/email (verdicts come from an admin on the board)
     const msg = reporterMessage(t);
     if (!msg) return;
+    // Entering a review stage starts (or restarts) the daily-reminder clock.
+    if (t.status === 'shipped' || t.status === 'staging') {
+      sql.prepare("UPDATE tickets SET review_asked_at=?, review_reminder_at='' WHERE id=?").run(now(), t.id);
+    }
     // 1) Direct push to the reporting user — the universal channel (any role).
     try { push?.sendToUser?.(t.reporter_id, { title: msg.title, body: String(msg.body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'reports'); } catch (e) { console.error('[tickets] push failed:', e.message); }
     // 2) Direct email to the reporter for THIS stage (branded, opt-out aware).
@@ -858,6 +866,50 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   if (notifyTimer.unref) notifyTimer.unref();
   setTimeout(() => sweepDeferred().catch(() => {}), 30_000); // shortly after boot — catches production deploys
 
+  // ── Daily review reminders ─────────────────────────────────────────────────────
+  // A ticket sitting in SHIPPED (production review) or STAGING (test & approve)
+  // without the reporter's verdict re-nudges them every 24h — on every channel a
+  // stage update uses (push + branded email + inbox thread) — until they approve
+  // or send it back. The clock starts when the review ask actually reached them
+  // (notifyReporter stamps review_asked_at; deploy-deferred asks wait their turn).
+  const REVIEW_REMIND_MS = 24 * 60 * 60 * 1000;
+  function reminderMessage(t) {
+    const staging = t.status === 'staging';
+    const parts = [`Just a nudge — your ${t.type} “${label(t)}” is still waiting for your review${staging ? ' on our staging site' : ''}.`, ''];
+    if (t.test_url) parts.push(`Try it: ${t.test_url}`, '');
+    parts.push(staging
+      ? 'Test it, then approve it under Product → My reports and we’ll push it live — or send it back with what still needs fixing.'
+      : 'Review it under Product → My reports — approve it, or send it back with what still needs fixing.');
+    parts.push('', 'We’ll nudge you daily until it’s reviewed.');
+    return { title: staging ? 'Reminder: ready for you to test 🧪' : 'Reminder: shipped — please review ⏳', body: parts.join('\n') };
+  }
+  function sweepReviewReminders() {
+    const rows = sql.prepare("SELECT * FROM tickets WHERE status IN ('shipped','staging') AND client_verdict=''").all();
+    for (const t of rows) {
+      if (t.source === 'ops') continue;   // machine-filed: no human reporter to nudge
+      if (t.notify_wait) continue;        // the review ask itself hasn't gone out yet
+      if (!t.review_asked_at) {           // predates this feature — start the clock now
+        sql.prepare('UPDATE tickets SET review_asked_at=? WHERE id=?').run(now(), t.id);
+        continue;
+      }
+      const last = t.review_reminder_at || t.review_asked_at;
+      if (Date.now() - new Date(last).getTime() < REVIEW_REMIND_MS) continue;
+      const msg = reminderMessage(t);
+      try { push?.sendToUser?.(t.reporter_id, { title: msg.title, body: String(msg.body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'reports'); } catch (e) { console.error('[tickets] push failed:', e.message); }
+      emailReporter(t, msg, `Reminder: “${label(t)}” is waiting for your review`);
+      if (t.entity_id && os?.announce) {
+        try {
+          os.announce({ entityId: t.entity_id, title: msg.title, body: msg.body, priority: 'needs_reply', createdBy: 'Product', authorType: 'system', subjectType: 'ticket', subjectId: t.id, channels: ['push', 'slack'] });
+        } catch (e) { console.error('[tickets] reporter notify failed:', e.message); }
+      }
+      sql.prepare('UPDATE tickets SET review_reminder_at=? WHERE id=?').run(now(), t.id);
+      logComment(t.id, { authorEmail: 'system', authorRole: 'system', kind: 'system', body: '🔔 Daily review reminder sent to the reporter.' });
+    }
+  }
+  const remindTimer = setInterval(() => { try { sweepReviewReminders(); } catch (e) { console.error('[tickets] reminder sweep failed:', e.message); } }, 60 * 60_000);
+  if (remindTimer.unref) remindTimer.unref();
+  setTimeout(() => { try { sweepReviewReminders(); } catch (e) { console.error('[tickets] reminder sweep failed:', e.message); } }, 60_000); // shortly after boot
+
   // ── GitHub webhook: PR events → auto-update the linked ticket ──────────────────
   // A merged PR auto-Ships its ticket (and notifies the reporter); an opened PR
   // links it + nudges the board forward. Verified by HMAC (github.verifyWebhook)
@@ -945,7 +997,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
-  return { draftInBackground, createTicket, sendTicketToGitHub };
+  return { draftInBackground, createTicket, sendTicketToGitHub, sweepReviewReminders };
 }
 
 module.exports = { mount, TICKET_DRAFT_SYSTEM };

@@ -169,3 +169,87 @@ test('a same-status update does not re-email', () => {
   setStatus(app, admin, t.id, { status: 'accepted' }); // no transition
   assert.equal(sent.length, 1, 'only the real transition emails');
 });
+
+// ── Daily review reminders ──────────────────────────────────────────────────────
+// A ticket sitting in shipped/staging with no verdict re-nudges the reporter on
+// every channel each 24h until they approve or send it back.
+
+const backdate = (id, col, hoursAgo) => db.db.prepare(`UPDATE tickets SET ${col}=? WHERE id=?`)
+  .run(new Date(Date.now() - hoursAgo * 3600_000).toISOString(), id);
+
+test('a shipped ticket awaiting review re-nudges the reporter daily on all channels', () => {
+  const { app, mod, sent, announced, pushes } = mountTickets();
+  const admin = makeAdmin('rem1@test.local');
+  const ent = makeEntity('Delta Live', 'delta');
+  const reporter = makeClient('await@delta.test', [ent.id]);
+  const t = mod.createTicket({ user: reporter, type: 'bug', title: 'Broken totals', body: 'x', entityId: ent.id });
+  ship(app, admin, t.id);
+  const base = { sent: sent.length, announced: announced.length, pushes: pushes.length };
+
+  // Fresh ask (review_asked_at just stamped) → no reminder yet.
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent, 'no reminder within 24h of the ask');
+
+  // 25h after the ask → one reminder on every channel.
+  backdate(t.id, 'review_asked_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 1, 'reminder email sent');
+  assert.match(sent[sent.length - 1].subject, /Reminder: .*waiting for your review/);
+  assert.equal(pushes.length, base.pushes + 1, 'reminder push sent');
+  assert.equal(pushes[pushes.length - 1].type, 'reports');
+  assert.equal(announced.length, base.announced + 1, 'reminder inbox thread sent');
+  assert.deepEqual(announced[announced.length - 1].channels, ['push', 'slack']);
+
+  // Sweeping again straight away → nothing (next nudge is 24h out).
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 1, 'no double reminder');
+
+  // Another 24h with no verdict → nudges again.
+  backdate(t.id, 'review_reminder_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 2, 'daily repeat until reviewed');
+});
+
+test('a staging ticket reminder carries the test link; a verdict stops reminders', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('rem2@test.local');
+  const staff = makeAdmin('stagewait@test.local');
+  const t = mod.createTicket({ user: staff, type: 'improvement', title: 'New filter', body: 'x' });
+  setStatus(app, admin, t.id, { status: 'staging', testUrl: 'https://staging.test/app' });
+
+  backdate(t.id, 'review_asked_at', 25);
+  const before = sent.length;
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before + 1);
+  assert.match(sent[sent.length - 1].text, /staging site/);
+  assert.match(sent[sent.length - 1].text, /https:\/\/staging\.test\/app/);
+
+  // The reporter approves on staging (verdict set, status stays staging) → done.
+  db.db.prepare("UPDATE tickets SET client_verdict='approved' WHERE id=?").run(t.id);
+  backdate(t.id, 'review_reminder_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before + 1, 'no reminders after a verdict');
+});
+
+test('reminders wait for a deferred review ask, and adopt pre-feature tickets gently', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('rem3@test.local');
+  const staff = makeAdmin('deferwait@test.local');
+  const t = mod.createTicket({ user: staff, type: 'bug', title: 'Old one', body: 'x' });
+  ship(app, admin, t.id);
+
+  // Deploy-deferred ask still pending → no reminder even if the clock is old.
+  backdate(t.id, 'review_asked_at', 30);
+  db.db.prepare("UPDATE tickets SET notify_wait=? WHERE id=?").run('{"env":"production"}', t.id);
+  const before = sent.length;
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before, 'no reminder while the ask itself is deferred');
+
+  // A ticket shipped before the feature existed (no clock): the sweep starts the
+  // clock instead of firing immediately.
+  db.db.prepare("UPDATE tickets SET notify_wait='', review_asked_at='' WHERE id=?").run(t.id);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before, 'first sweep only starts the clock');
+  const row = db.db.prepare('SELECT review_asked_at FROM tickets WHERE id=?').get(t.id);
+  assert.ok(row.review_asked_at, 'clock initialised');
+});
