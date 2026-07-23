@@ -416,17 +416,18 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     res.json({ ticket: ticketRow(t), comments: comments(t.id), claudeBrief: claudeBrief(t) });
   });
 
-  // Create a GitHub issue from this ticket (the build brief becomes the issue body).
-  // If GitHub isn't configured, hand back a prefilled new-issue URL so the admin's
-  // browser can file it manually — the feature works with zero server credentials.
-  app.post('/api/admin/tickets/:id/github-issue', auth.requireAdmin, requireOn, async (req, res) => {
-    let t = getTicket(req.params.id);
-    if (!t) return res.status(404).json({ error: 'Ticket not found' });
-    if (t.github_url) return res.json({ ticket: ticketRow(t), alreadyLinked: true });
+  // Core dispatch: build the brief, create the GitHub issue (with the @claude
+  // ask per mode), link it and advance the board. Shared by the admin route and
+  // the ops-triage agent's auto-dispatch tier (Phase 2) — one path, one set of
+  // side effects, whoever the sender is. Throws on GitHub API failure.
+  async function sendTicketToGitHub(ticketId, { mode, target, actorEmail = 'system' } = {}) {
+    let t = getTicket(ticketId);
+    if (!t) return { notFound: true };
+    if (t.github_url) return { ticket: ticketRow(t), alreadyLinked: true };
     // Deploy target chosen at send time: 'staging' (test first, then promote) or
     // 'production' (straight to main). Default staging — safer, promote once verified.
-    const target = (req.body || {}).target === 'production' ? 'production' : 'staging';
-    if (target !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(target, now(), t.id); t = getTicket(t.id); }
+    const tgt = target === 'production' ? 'production' : 'staging';
+    if (tgt !== t.target) { sql.prepare('UPDATE tickets SET target=?, updated_at=? WHERE id=?').run(tgt, now(), t.id); t = getTicket(t.id); }
     const base = baseBranchFor(t);
     const title = t.ai_title || t.title || `${t.type} report`;
     let body = `${claudeBrief(t)}\n\n---\n_Filed from Howler Pulse · ticket ${t.id}_`;
@@ -434,7 +435,6 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     // plan + questions and waits (good for big/fuzzy tickets); omitted → the global
     // "Ask Claude to build it" toggle decides. Pulse issues are created via a PAT,
     // which (unlike GITHUB_TOKEN) does trigger the Claude Code Action.
-    const mode = (req.body || {}).mode;
     const doBuild = mode === 'build' || (!mode && !!github?.dispatchEnabled?.());
     // The action's sandbox may clone with a limited ref set and not see `base` —
     // it must fetch it rather than concluding the branch doesn't exist (issue #61
@@ -444,20 +444,29 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     else if (doBuild) body += `\n\n@claude please implement this ticket and open a pull request against the \`${base}\` branch. ${baseNote}`;
     const dispatched = doBuild || mode === 'plan';
     if (!github?.isConfigured?.()) {
-      return res.json({ needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' });
+      return { needsConfig: true, prefillUrl: github?.newIssueUrl?.({ title, body }) || '' };
     }
+    const issue = await github.createIssue({ title, body });
+    sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
+    logComment(t.id, { authorEmail: actorEmail, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number} → ${tgt} (\`${base}\`)${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
+    // Sending to GitHub IS the acceptance act — advance early-stage tickets so the
+    // board reflects it (the reporter gets the "accepted" nudge). Later stages stay.
+    if (['inbox', 'triaged'].includes(t.status)) {
+      sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
+      logComment(t.id, { authorEmail: actorEmail, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status]} → ${STATUS_LABELS.accepted} (sent to GitHub)` });
+      notifyReporter(getTicket(t.id), t.status);
+    }
+    return { ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' };
+  }
+
+  // Create a GitHub issue from this ticket (the build brief becomes the issue body).
+  // If GitHub isn't configured, hand back a prefilled new-issue URL so the admin's
+  // browser can file it manually — the feature works with zero server credentials.
+  app.post('/api/admin/tickets/:id/github-issue', auth.requireAdmin, requireOn, async (req, res) => {
     try {
-      const issue = await github.createIssue({ title, body });
-      sql.prepare('UPDATE tickets SET github_issue_number=?, github_url=?, updated_at=? WHERE id=?').run(issue.number, issue.url, now(), t.id);
-      logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'system', body: `Created GitHub issue #${issue.number} → ${target} (\`${base}\`)${mode === 'plan' ? ' and asked Claude to plan it' : doBuild ? ' and asked Claude to build it' : ''}: ${issue.url}` });
-      // Sending to GitHub IS the acceptance act — advance early-stage tickets so the
-      // board reflects it (the reporter gets the "accepted" nudge). Later stages stay.
-      if (['inbox', 'triaged'].includes(t.status)) {
-        sql.prepare('UPDATE tickets SET status=?, updated_at=? WHERE id=?').run('accepted', now(), t.id);
-        logComment(t.id, { authorEmail: req.user.email, authorRole: 'admin', kind: 'status', body: `${STATUS_LABELS[t.status]} → ${STATUS_LABELS.accepted} (sent to GitHub)` });
-        notifyReporter(getTicket(t.id), t.status);
-      }
-      res.status(201).json({ ticket: ticketRow(getTicket(t.id)), issue, dispatched, planned: mode === 'plan' });
+      const r = await sendTicketToGitHub(req.params.id, { mode: (req.body || {}).mode, target: (req.body || {}).target, actorEmail: req.user.email });
+      if (r.notFound) return res.status(404).json({ error: 'Ticket not found' });
+      res.status(r.issue ? 201 : 200).json(r);
     } catch (e) {
       console.error('[tickets] github issue failed:', e.message);
       serverError(res, e);
@@ -703,6 +712,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
 
   function notifyReporter(t, prevStatus) {
     if (!t || t.status === prevStatus) return;
+    if (t.source === 'ops') return; // machine-filed: no human reporter to push/email (verdicts come from an admin on the board)
     const msg = reporterMessage(t);
     if (!msg) return;
     // 1) Direct push to the reporting user — the universal channel (any role).
@@ -727,6 +737,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   // reporters — mirrored into the SAME inbox thread as their status updates. The
   // ticket's conversation (Product → My reports) is the canonical place to reply.
   function notifyReporterComment(t, body) {
+    if (t.source === 'ops') return; // machine-filed: nobody behind the reporter address
     const title = `💬 New reply on “${label(t)}”`;
     try { push?.sendToUser?.(t.reporter_id, { title, body: String(body).slice(0, 180), url: '/product', tag: `ticket-${t.id}` }, 'messages'); } catch (e) { console.error('[tickets] push failed:', e.message); }
     if (t.entity_id && os?.announce) {
@@ -751,7 +762,10 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   app.post('/api/my/tickets/:id/verdict', auth.requireAuth, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
-    if (t.reporter_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+    // Ops-filed tickets have a machine reporter that can never log in — any admin
+    // stands in as the verifier, so a staged ops ticket can't jam the release train.
+    const opsAdminVerdict = t.source === 'ops' && isAdmin(req.user);
+    if (t.reporter_id !== req.user.id && !opsAdminVerdict) return res.status(403).json({ error: 'Not allowed' });
     if (t.status !== 'shipped' && t.status !== 'staging') return res.status(400).json({ error: 'This report is not awaiting your review.' });
     const verdict = (req.body || {}).verdict;
     if (verdict !== 'approved' && verdict !== 'rejected') return res.status(400).json({ error: 'verdict must be approved or rejected' });
@@ -907,7 +921,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
-  return { draftInBackground, createTicket };
+  return { draftInBackground, createTicket, sendTicketToGitHub };
 }
 
 module.exports = { mount, TICKET_DRAFT_SYSTEM };

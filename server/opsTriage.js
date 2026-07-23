@@ -17,8 +17,16 @@
 // Rails: kill switch `ops_triage_enabled`, cadence `ops_triage_cadence_min`
 // (default 30), daily auto-ticket cap `ops_triage_daily_cap` (default 5; rows
 // that hit the cap park as 'capped' and file first next day, no re-classify).
-// The agent FILES tickets into the inbox — dispatching to Claude/GitHub stays a
-// human decision on the board (Phase 2 may gate an auto-dispatch tier).
+//
+// Phase 2 — auto-dispatch tier (`ops_triage_dispatch`: off | plan | build,
+// default 'plan'): a HIGH-CONFIDENCE bug ticket is also sent straight to
+// GitHub for Claude. 'plan' asks Claude to comment a diagnosis + plan (no
+// code); 'build' lets high-severity + high-confidence bugs go straight to a
+// build (everything else still gets plan mode). Auto-dispatch ALWAYS targets
+// staging — the existing safety geometry (reporter verification on staging,
+// human promote-to-production release train) is untouched; for ops tickets any
+// admin stands in as the verifier. Capped at `ops_triage_dispatch_cap`/day
+// (default 3), and only ever at filing time — re-dispatch stays human.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -146,11 +154,21 @@ function mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets, srcDi
   )`);
   // status: 'new' (awaiting triage) → 'ticketed' | 'action' | 'noise' | 'capped'
   // (bug verdict parked on the daily cap) | 'ignored' (human said stop).
+  { // add-column migrations (the table already exists on deployed instances)
+    const cols = sql.prepare('PRAGMA table_info(ops_alerts)').all().map((c) => c.name);
+    if (!cols.includes('dispatch')) sql.exec("ALTER TABLE ops_alerts ADD COLUMN dispatch TEXT NOT NULL DEFAULT ''");          // '' | 'plan' | 'build'
+    if (!cols.includes('dispatched_at')) sql.exec("ALTER TABLE ops_alerts ADD COLUMN dispatched_at TEXT NOT NULL DEFAULT ''");
+  }
 
   const now = () => new Date().toISOString();
   const enabled = () => db.getSetting('ops_triage_enabled', '1') !== '0';
-  const cadenceMin = () => Math.max(5, Number(db.getSetting('ops_triage_cadence_min', '30')) || 30);
-  const dailyCap = () => Math.max(0, Number(db.getSetting('ops_triage_daily_cap', '5')) || 5);
+  // Numeric setting reader that respects an explicit 0 (`n || dflt` would turn
+  // "cap 0 = never" back into the default).
+  const numSetting = (key, dflt) => { const raw = String(db.getSetting(key, '') || ''); const n = Number(raw); return raw !== '' && Number.isFinite(n) ? Math.max(0, Math.floor(n)) : dflt; };
+  const cadenceMin = () => Math.max(5, numSetting('ops_triage_cadence_min', 30));
+  const dailyCap = () => numSetting('ops_triage_daily_cap', 5);
+  const dispatchTier = () => { const v = db.getSetting('ops_triage_dispatch', 'plan'); return ['off', 'plan', 'build'].includes(v) ? v : 'plan'; };
+  const dispatchCap = () => numSetting('ops_triage_dispatch_cap', 3);
 
   const upsert = sql.prepare(`INSERT INTO ops_alerts (id, kind, pattern, sample, count, first_seen, last_seen)
     VALUES (?,?,?,?,1,?,?)
@@ -202,25 +220,54 @@ function mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets, srcDi
   const OPS_REPORTER = { id: 'ops-triage-agent', email: 'ops-triage@pulse.internal', name: 'Pulse Ops Agent', role: 'admin', entityIds: [] };
 
   function fileTicket(row, v) {
-    const body = [
-      `Auto-filed by the ops-alert triage agent from a recurring production alert.`,
+    // The spec doubles as the Claude build brief (claudeBrief() leads with
+    // ai_summary), so it carries the full diagnosis: raw alert, occurrence
+    // pattern, and the code-grounded hypothesis — a dispatched build starts
+    // from the diagnosis, not the bare error message.
+    const spec = [
+      `**Production ops alert (auto-filed by the triage agent).**`,
       '',
-      `Alert kind: ${row.kind}`,
-      `Latest message: ${row.sample}`,
-      `Occurrences: ${row.count} (first ${row.first_seen}, last ${row.last_seen})`,
-      `Triage: severity ${v.severity}, confidence ${v.confidence}`,
+      `- **Alert kind:** ${row.kind}`,
+      `- **Latest message:** ${row.sample}`,
+      `- **Occurrences:** ${row.count} (first ${row.first_seen}, last ${row.last_seen})`,
+      `- **Triage verdict:** bug — severity ${v.severity}, confidence ${v.confidence}`,
       '',
-      'Root-cause hypothesis (AI triage, grounded in the server source):',
+      '**Root-cause hypothesis (AI triage, grounded in the server source):**',
+      '',
       v.hypothesis || '(none)',
+      '',
+      '**Acceptance criteria:** the alert stops recurring — fix the root cause (verify the hypothesis first; it is a strong lead, not gospel) and add a regression test that pins the fix.',
     ].join('\n');
     const t = tickets.createTicket({
       user: OPS_REPORTER, type: 'bug', source: 'ops',
       title: v.title || `[ops] ${row.pattern.slice(0, 120)}`,
-      body, screen: 'ops-alert',
+      body: spec, screen: 'ops-alert',
       urgency: v.severity === 'high' ? 'high' : 'normal',
-      aiTitle: v.title, aiSummary: v.hypothesis, // pre-drafted — skips the background draft
+      aiTitle: v.title, aiSummary: spec, // pre-drafted — skips the background draft
     });
     return t;
+  }
+
+  // Phase 2: auto-dispatch a just-filed HIGH-CONFIDENCE bug ticket to Claude on
+  // GitHub. Tier 'plan' → Claude comments a plan and waits for a human
+  // "@claude go ahead"; tier 'build' → high-severity bugs go straight to a
+  // build (the rest still plan). Always targets STAGING; capped per day; only
+  // ever called at filing time (no auto-redispatch). Fail-soft: a dispatch
+  // error leaves a normal inbox ticket, exactly as if the tier were off.
+  const dispatchedToday = () =>
+    sql.prepare("SELECT COUNT(*) AS n FROM ops_alerts WHERE dispatch != '' AND substr(dispatched_at, 1, 10) = ?").get(now().slice(0, 10)).n;
+  async function maybeDispatch(row, v, ticketId) {
+    const tier = dispatchTier();
+    if (tier === 'off' || v.confidence !== 'high') return '';
+    if (dispatchedToday() >= dispatchCap()) return '';
+    const mode = tier === 'build' && v.severity === 'high' ? 'build' : 'plan';
+    try {
+      const r = await tickets.sendTicketToGitHub(ticketId, { mode, target: 'staging', actorEmail: OPS_REPORTER.email });
+      if (!r || !r.issue) return ''; // GitHub not configured / already linked — nothing dispatched
+      sql.prepare('UPDATE ops_alerts SET dispatch = ?, dispatched_at = ? WHERE id = ?').run(mode, now(), row.id);
+      ops.notify(`🤖 [pulse:triage] Auto-dispatched to Claude in ${mode.toUpperCase()} mode (staging): ${r.issue.url}`);
+      return mode;
+    } catch (e) { console.error('[opsTriage] auto-dispatch failed:', e.message); return ''; }
   }
 
   // One triage pass: classify up to `batch` fingerprints, file bug tickets up
@@ -228,15 +275,17 @@ function mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets, srcDi
   async function runPass({ force = false, batch = 5 } = {}) {
     if (!enabled() && !force) return { skipped: 'disabled' };
     if (!insights.isConfigured(adminAnthropicKey())) return { skipped: 'ai-not-configured' };
-    const out = { classified: 0, ticketed: 0, actions: 0, noise: 0, capped: 0 };
+    const out = { classified: 0, ticketed: 0, dispatched: 0, actions: 0, noise: 0, capped: 0 };
 
     // Yesterday's cap parkings first — verdict already stored, no AI needed.
     for (const row of sql.prepare("SELECT * FROM ops_alerts WHERE status = 'capped' ORDER BY last_seen DESC").all()) {
       if (ticketsFiledToday() >= dailyCap()) break;
-      const t = fileTicket(row, { title: row.pattern.slice(0, 120), hypothesis: row.hypothesis, severity: row.severity, confidence: row.confidence });
+      const stored = { title: row.pattern.slice(0, 120), hypothesis: row.hypothesis, severity: row.severity, confidence: row.confidence };
+      const t = fileTicket(row, stored);
       sql.prepare("UPDATE ops_alerts SET status = 'ticketed', ticket_id = ?, triaged_at = ? WHERE id = ?").run(t.id, now(), row.id);
       ops.notify(`🎫 [pulse:triage] Filed parked bug ticket "${row.pattern.slice(0, 90)}" → board ticket ${t.id}`);
       out.ticketed += 1;
+      out.dispatched += (await maybeDispatch(row, stored, t.id)) ? 1 : 0;
     }
 
     const fresh = sql.prepare("SELECT * FROM ops_alerts WHERE status = 'new' ORDER BY last_seen DESC LIMIT ?").all(batch);
@@ -258,6 +307,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets, srcDi
           sql.prepare(`${base}, ticket_id = ? WHERE id = ?`).run(stamp.c, stamp.s, stamp.cf, v.hypothesis, v.opsAction, now(), 'ticketed', t.id, row.id);
           ops.notify(`🎫 [pulse:triage] Bug (${v.severity}/${v.confidence}): "${v.title}" — filed on the product board (${row.count}× seen). Ticket ${t.id}`);
           out.ticketed += 1;
+          out.dispatched += (await maybeDispatch(row, v, t.id)) ? 1 : 0;
         }
       } else if (v.classification === 'noise') {
         sql.prepare(`${base} WHERE id = ?`).run(stamp.c, stamp.s, stamp.cf, v.hypothesis, v.opsAction, now(), 'noise', row.id);
@@ -290,7 +340,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets, srcDi
   // future ledger view + manual control) ─────────────────────────────────────
   app.get('/api/admin/ops-alerts', auth.requireAdmin, (_req, res) => {
     const alerts = sql.prepare('SELECT * FROM ops_alerts ORDER BY last_seen DESC LIMIT 200').all();
-    res.json({ enabled: enabled(), cadenceMin: cadenceMin(), dailyCap: dailyCap(), filedToday: ticketsFiledToday(), alerts });
+    res.json({ enabled: enabled(), cadenceMin: cadenceMin(), dailyCap: dailyCap(), filedToday: ticketsFiledToday(), dispatchTier: dispatchTier(), dispatchCap: dispatchCap(), dispatchedToday: dispatchedToday(), alerts });
   });
   app.post('/api/admin/ops-alerts/run', auth.requireAdmin, asyncHandler(async (_req, res) => {
     res.json(await runPass({ force: true }));

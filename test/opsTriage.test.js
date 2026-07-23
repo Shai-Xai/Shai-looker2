@@ -32,8 +32,15 @@ const fakeInsights = {
   systemWith: (base) => base,
   parseModelJsonResilient: async (_c, text) => JSON.parse(text),
 };
+const dispatches = [];
+let dispatchShouldFail = false;
 const fakeTickets = {
   createTicket: (args) => { createdTickets.push(args); return { id: `T${createdTickets.length}` }; },
+  sendTicketToGitHub: async (ticketId, opts) => {
+    if (dispatchShouldFail) throw new Error('test: github down');
+    dispatches.push({ ticketId, ...opts });
+    return { issue: { number: dispatches.length, url: `https://github.test/issues/${dispatches.length}` } };
+  },
 };
 
 const api = opsTriage.mount(fakeApp, {
@@ -42,7 +49,7 @@ const api = opsTriage.mount(fakeApp, {
 });
 const sql = h.db.db;
 const rows = () => sql.prepare('SELECT * FROM ops_alerts ORDER BY first_seen').all();
-const reset = () => { sql.exec('DELETE FROM ops_alerts'); notifications.length = 0; createdTickets.length = 0; classifyCalls = 0; verdictQueue = []; h.db.setSetting('ops_triage_daily_cap', '5'); h.db.setSetting('ops_triage_enabled', '1'); };
+const reset = () => { sql.exec('DELETE FROM ops_alerts'); notifications.length = 0; createdTickets.length = 0; dispatches.length = 0; dispatchShouldFail = false; classifyCalls = 0; verdictQueue = []; h.db.setSetting('ops_triage_daily_cap', '5'); h.db.setSetting('ops_triage_enabled', '1'); h.db.setSetting('ops_triage_dispatch', 'off'); h.db.setSetting('ops_triage_dispatch_cap', '3'); };
 
 const BUG = { classification: 'bug', severity: 'high', confidence: 'high', title: 'Fix listJourneys crash on the recipes route', hypothesis: 'journeys.js calls actionTemplates.listJourneys() but actionTemplates.js does not export it.', opsAction: '' };
 
@@ -182,4 +189,88 @@ test('promptRegistry exposes the triage prompt for the Admin → AI audit', () =
   const [p] = opsTriage.promptRegistry();
   assert.equal(p.key, 'opsTriage');
   assert.ok(p.label && p.scope && p.text.length > 100);
+});
+
+// ── Phase 2: auto-dispatch tier ───────────────────────────────────────────────
+test('plan tier: a HIGH-confidence bug is auto-dispatched to Claude in plan mode, on staging', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'plan');
+  api.record('http5xx', 'planTier fooBar is not a function');
+  verdictQueue = [BUG]; // high severity, high confidence
+  const out = await api.runPass({ force: true });
+  assert.equal(out.ticketed, 1);
+  assert.equal(out.dispatched, 1);
+  assert.equal(dispatches.length, 1);
+  assert.equal(dispatches[0].mode, 'plan', 'plan tier never sends build');
+  assert.equal(dispatches[0].target, 'staging', 'auto-dispatch always targets staging');
+  assert.equal(dispatches[0].ticketId, 'T1');
+  assert.equal(rows()[0].dispatch, 'plan');
+  assert.ok(notifications.some((n) => n.includes('PLAN mode')), 'dispatch announced in the ops channel');
+});
+
+test('medium confidence never auto-dispatches — the ticket just waits in the inbox', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'plan');
+  api.record('http5xx', 'mediumConfidence bug here');
+  verdictQueue = [{ ...BUG, confidence: 'medium' }];
+  const out = await api.runPass({ force: true });
+  assert.equal(out.ticketed, 1);
+  assert.equal(out.dispatched, 0);
+  assert.equal(dispatches.length, 0);
+});
+
+test('build tier: high severity + high confidence goes straight to build; lesser severity still plans', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'build');
+  api.record('http5xx', 'buildTier alpha is not a function');
+  api.record('http5xx', 'buildTier beta failed differently');
+  verdictQueue = [
+    { ...BUG, title: 'Fix alpha', severity: 'high' },
+    { ...BUG, title: 'Fix beta', severity: 'medium' },
+  ];
+  const out = await api.runPass({ force: true });
+  assert.equal(out.dispatched, 2);
+  const modes = dispatches.map((d) => d.mode).sort();
+  assert.deepEqual(modes, ['build', 'plan']);
+});
+
+test('dispatch cap: beyond the daily cap tickets still file but stay undispached', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'plan');
+  h.db.setSetting('ops_triage_dispatch_cap', '1');
+  api.record('http5xx', 'capA is not a function');
+  api.record('http5xx', 'capB is not a function');
+  verdictQueue = [{ ...BUG, title: 'Fix A' }, { ...BUG, title: 'Fix B' }];
+  const out = await api.runPass({ force: true });
+  assert.equal(out.ticketed, 2, 'ticket filing is not capped by the dispatch cap');
+  assert.equal(out.dispatched, 1, 'only one auto-dispatch today');
+  assert.equal(dispatches.length, 1);
+});
+
+test('a dispatch failure is fail-soft: the ticket still lands in the inbox', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'plan');
+  dispatchShouldFail = true;
+  api.record('http5xx', 'ghDown is not a function');
+  verdictQueue = [BUG];
+  const out = await api.runPass({ force: true });
+  assert.equal(out.ticketed, 1, 'filing unaffected');
+  assert.equal(out.dispatched, 0);
+  assert.equal(rows()[0].status, 'ticketed');
+  assert.equal(rows()[0].dispatch, '', 'no dispatch recorded');
+});
+
+test('a parked (capped) bug that files next window also rides the dispatch tier', async () => {
+  reset();
+  h.db.setSetting('ops_triage_dispatch', 'plan');
+  h.db.setSetting('ops_triage_daily_cap', '0'); // everything parks
+  api.record('http5xx', 'parkedDispatch is not a function');
+  verdictQueue = [BUG];
+  await api.runPass({ force: true });
+  assert.equal(rows()[0].status, 'capped');
+  h.db.setSetting('ops_triage_daily_cap', '5'); // window opens
+  const out = await api.runPass({ force: true });
+  assert.equal(out.ticketed, 1);
+  assert.equal(out.dispatched, 1);
+  assert.equal(dispatches[0].mode, 'plan');
 });
