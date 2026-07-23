@@ -65,3 +65,25 @@ test('no prefer returns the full catalogue unchanged (gallery scans everything)'
   assert.equal(scoped.length, CATALOGUE.length);
   assert.equal(at.resolveAudience(abandonTpl, scoped).ready, true);
 });
+
+// ── Journey recipes ────────────────────────────────────────────────────────────
+// Regression: the Journeys revert (45fa7f8d) removed JOURNEY_RECIPES /
+// listJourneys() from this module, but journeys.js kept calling it after the
+// feature returned to main — GET /api/journeys/:entityId/recipes 500'd
+// ("actionTemplates.listJourneys is not a function") on every Journeys-tab open.
+test('listJourneys returns the starter recipes in the shape the wizard renders', () => {
+  const recipes = at.listJourneys();
+  assert.ok(Array.isArray(recipes) && recipes.length >= 4, 'has the starter recipe set');
+  for (const r of recipes) {
+    assert.ok(r.key && r.label && r.summary, `recipe ${r.key || '?'} carries key/label/summary`);
+    assert.ok(Array.isArray(r.nodes) && r.nodes.length, `recipe ${r.key} has a node tree`);
+    for (const n of r.nodes) assert.ok(n.type === 'message' || n.type === 'decision', 'nodes are message/decision');
+  }
+  assert.equal(at.getJourney(recipes[0].key)?.key, recipes[0].key);
+  assert.equal(at.getJourney('nope'), null);
+});
+
+test('journey recipe copy follows house style (no em dashes in user-visible text)', () => {
+  const flat = JSON.stringify(at.listJourneys());
+  assert.ok(!flat.includes('—'), 'no em dashes in recipe copy');
+});
