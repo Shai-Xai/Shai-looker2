@@ -1,0 +1,79 @@
+# Phase 3 of the ops-triage loop (docs/whats-next/2026-07-23__ops-alert-triage-agent.md):
+# find bugs BEFORE they page the ops channel. Once a day Claude reviews what
+# changed in the last 24h plus a rotating slice of the server, and reports to a
+# single rolling issue — "🩺 Code health — daily review" — findings ranked by
+# risk. Read-only by design: it never writes code or opens PRs; a human reads
+# the findings and forwards the ones they accept to the product board (where
+# the normal dispatch → staging → verify → promote flow takes over).
+#
+# Uses the same ANTHROPIC_API_KEY secret as the @claude mention workflow
+# (claude.yml). Costs one bounded Claude run per day; disable by deleting this
+# file or via Actions → Code health → disable workflow.
+name: Code health — daily review
+
+on:
+  schedule:
+    - cron: '15 3 * * *'   # 05:15 SAST, daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: code-health
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — the review reads the last 24h of commits
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--allowedTools "Bash(gh issue:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(node --test:*),Read,Grep,Glob" --max-turns 60'
+          prompt: |
+            You are the daily code-health reviewer for this repo (Howler Pulse).
+            Read CLAUDE.md first for the project's conventions. You are READ-ONLY:
+            never modify files, never commit, never open PRs, and NEVER write the
+            literal at-mention of the Claude bot ("@" + "claude") anywhere you
+            post — it would recursively trigger the mention workflow. Refer to it
+            as "the Claude action" if needed.
+
+            Review two things:
+            1. RECENT CHANGES: every commit on this branch from the last 24 hours
+               (git log --since="24 hours ago" -p). Look for real defects:
+               contract drift (a call site using an export that no longer exists),
+               unhandled async rejections in Express handlers (missing
+               asyncHandler), missing auth/entity-scoping on new routes, raw
+               error text leaking to clients, state that grows unbounded,
+               convention violations that will bite (per CLAUDE.md).
+            2. ROTATING SLICE: pick 4 server/*.js modules deterministically —
+               sort all server/*.js names alphabetically and take 4 starting at
+               offset (day-of-year × 4) mod count — and read them fully with
+               fresh eyes for latent bugs of the same classes. Name the slice in
+               your report so coverage is visible over time.
+
+            Then report to the SINGLE rolling issue titled exactly
+            "🩺 Code health — daily review":
+            - Find it: gh issue list --state open --search "Code health — daily review in:title"
+            - If it does not exist, create it (gh issue create) with a short body
+              explaining what this issue is.
+            - Post ONE comment for today: findings ranked most-severe first, each
+              with file:line, what breaks and when, a suggested fix, and your
+              confidence (high/medium/low). End with the slice you reviewed and a
+              one-line verdict. If you found nothing significant, say exactly
+              that in two sentences — do not pad. Never duplicate a finding
+              already reported in an earlier comment of the issue (read them
+              first); if it is still unfixed, add one line under "Still open".
+
+            Judgement bar: report only findings a senior engineer would act on.
+            Style nits, hygiene warnings and speculation are noise here — the
+            test suite and ESLint own those.
