@@ -83,10 +83,22 @@ review the code daily and flag bugs before they ever alert.
   findings" is a valid two-sentence report. Same ANTHROPIC_API_KEY secret as
   claude.yml.
 
-## Still open (future rounds)
-- Feed **GitHub workflow failures** (CI, sync-staging) into the ops_alerts
-  ledger as a triage source — needs the repo webhook extended to workflow_run
-  events, pointed at production Pulse.
+## Shipped this session (CI failures → the ledger)
+- The `/api/github/webhook` handler (production Pulse) now accepts
+  **workflow_run** events: a run that completes with failure / timed_out /
+  startup_failure **on main or staging** raises `ops.alert('github-ci', …)` —
+  from there the normal triage machine takes over (fingerprint collapses
+  repeated runs of the same workflow+branch to one row; classification knows
+  the github-ci kind: sync-staging conflicts → config with the manual-merge
+  recipe as the action, red CI on main → bug with the run URL in the
+  hypothesis, capped confidence since logs aren't visible). claude/** and PR
+  failures are deliberately excluded — the PR/ticket flow already surfaces
+  those.
+- **ONE manual step remains (repo settings, human-only):** GitHub →
+  https://github.com/Shai-Xai/Shai-looker2/settings/hooks → edit the existing
+  Pulse webhook → "Let me select individual events" → tick **Workflow runs**
+  (keep Pull requests) → Save. Until then GitHub simply doesn't send the
+  events; everything else is live and waiting.
 
 ## Why this is close, not far
 

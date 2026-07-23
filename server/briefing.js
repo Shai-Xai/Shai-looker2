@@ -63,6 +63,85 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     return Object.fromEntries(PHASES.map((p) => [p.key, (saved[p.key] || '').trim() || PHASE_DEFAULTS[p.key]]));
   }
 
+  // ─── Post-event cool-down (coverage) ────────────────────────────────────────
+  // A finished event gets a short wrap-up window after it ends — the cool-down —
+  // and then drops out of the DEFAULT briefing/digest scope, so daily sends stop
+  // re-reviewing a past event forever. Admin-configurable (Admin → AI → Home
+  // briefing); an explicit event selection (digest suiteIds / a reader's Tune
+  // picks) still overrides — choosing a past event on purpose keeps covering it.
+  const COOLDOWN_DEFAULT_DAYS = 3;
+  function cooldownDays() {
+    const raw = String(db.getSetting('briefing_cooldown_days', '') ?? '').trim();
+    if (!raw) return COOLDOWN_DEFAULT_DAYS; // unset → default (Number('') would be 0)
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.min(60, Math.round(n)) : COOLDOWN_DEFAULT_DAYS;
+  }
+  // Whether an event is still covered by default briefings/digests.
+  //  - covered: inside the event run or within cooldownDays of the end date.
+  //  - No end date at all → fail OPEN (covered) — we can't tell it ended — unless
+  //    the phase was manually set to post_event (an explicit "it's done").
+  function suiteCoverage(cfg = {}, nowMs = Date.now()) {
+    const day = 864e5;
+    const t = (s) => (s ? new Date(`${s}T00:00:00`).getTime() : null);
+    const end = t(cfg.eventEnd) ?? t(cfg.eventStart);
+    const phase = resolvePhase(cfg, nowMs).key;
+    const ended = phase === 'post_event' || phase === 'day_after' || (end != null && nowMs > end + day);
+    const daysSinceEnd = end != null && nowMs > end ? Math.floor((nowMs - end) / day) : 0;
+    const covered = end != null
+      ? nowMs <= end + (1 + cooldownDays()) * day // event day itself + the cool-down
+      : phase !== 'post_event'; // no dates: only a manual post_event flag ends coverage
+    return { phase, ended, daysSinceEnd, covered };
+  }
+
+  // ─── Data freshness (computed, not inferred) ────────────────────────────────
+  // The latest calendar date that actually appears in a set of fact tiles' rows —
+  // so the AI can be TOLD how far the data runs instead of guessing. Future dates
+  // (event-date dimensions, forecasts) are ignored: freshness is about the most
+  // recent OBSERVED data point, capped at tomorrow.
+  const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+  function latestDataDate(tiles, nowMs = Date.now()) {
+    const cap = nowMs + 864e5;
+    let latest = null;
+    for (const tile of tiles || []) {
+      for (const row of tile.rows || []) {
+        for (const cell of Object.values(row || {})) {
+          const v = cell && typeof cell === 'object' ? cell.value : cell;
+          if (typeof v !== 'string') continue;
+          const m = ISO_DATE_RE.exec(v);
+          if (!m) continue;
+          const ms = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00`);
+          if (!Number.isFinite(ms) || ms > cap) continue;
+          if (latest == null || ms > latest) latest = ms;
+        }
+      }
+    }
+    return latest == null ? null : new Date(latest).toISOString().slice(0, 10);
+  }
+  // A per-event DATA FRESHNESS block for the AI prompt. `groups` =
+  // [{ suiteName, tiles }]. Returns '' when nothing useful was found. Events
+  // whose data lags more than STALE_AFTER_DAYS get an explicit STALE flag with
+  // marching orders — this is what stops a July digest narrating "data to 30
+  // June" as if it were yesterday's trading.
+  const STALE_AFTER_DAYS = 2;
+  function freshnessSummary(groups, nowMs = Date.now()) {
+    const lines = [];
+    for (const g of groups || []) {
+      const latest = latestDataDate(g.tiles, nowMs);
+      if (!latest) continue;
+      const behind = Math.max(0, Math.floor((nowMs - new Date(`${latest}T00:00:00`).getTime()) / 864e5));
+      const name = g.suiteName ? `"${g.suiteName}"` : 'This event';
+      lines.push(behind > STALE_AFTER_DAYS
+        ? `- ${name}: latest data point is ${latest} — ${behind} days before today. STALE.`
+        : `- ${name}: data is current (latest point ${latest}).`);
+    }
+    if (!lines.length) return '';
+    return [
+      'DATA FRESHNESS (computed from the actual tile rows — trust this over any impression of recency):',
+      ...lines,
+      'For any event marked STALE: its feed has stopped or the event is over. Say the data runs to that date, keep its coverage to a short wrap-up, and NEVER present that last data day as "yesterday"/"today" or as current trading.',
+    ].join('\n');
+  }
+
   // Time-of-day lens: a reader wants different things at 8am, 1pm and 7pm. The
   // client sends its local hour; the segment shapes the briefing's angle and
   // splits the cache so each part of the day gets a fresh generation.
@@ -631,5 +710,5 @@ module.exports = function createBriefingEngine({ db, store, query }) {
     return { tiles: out, catalogue, dropped };
   }
 
-  return { PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults, clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority, BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel };
+  return { PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults, clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority, BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel, cooldownDays, suiteCoverage, latestDataDate, freshnessSummary };
 };

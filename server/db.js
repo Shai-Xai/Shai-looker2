@@ -880,69 +880,9 @@ function setNotificationPrefs(userId, prefs = {}) {
   db.prepare('UPDATE users SET notify_email=?, notify_push=? WHERE id=?').run(email, push, userId);
   return { email: email !== 0, push: push !== 0 };
 }
-// Per-type notification preferences — a granular layer under the email/push
-// channel switches. A user can mute a whole category (digests, goals, alerts,
-// messages) regardless of channel. Stored as JSON in user_prefs; default ON, so
-// existing users keep getting everything until they opt out.
-const NOTIFY_TYPES = [
-  { key: 'digest', label: 'Digests', desc: 'When your scheduled briefing is ready' },
-  { key: 'goals', label: 'Goals', desc: 'Weekly goal-progress nudges' },
-  { key: 'alerts', label: 'Alerts', desc: 'Campaign & data alerts that need attention' },
-  { key: 'messages', label: 'Messages', desc: 'New messages from Howler in your inbox' },
-  { key: 'reports', label: 'Report updates', desc: 'Progress on bugs, improvements & ideas you reported — every stage from triage to live' },
-];
-function getNotifyTypes(userId) {
-  let stored = {};
-  try { stored = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { stored = {}; }
-  const out = {};
-  for (const t of NOTIFY_TYPES) out[t.key] = stored[t.key] !== false; // default on
-  return out;
-}
-function setNotifyTypes(userId, partial = {}) {
-  const cur = getNotifyTypes(userId);
-  for (const t of NOTIFY_TYPES) if (t.key in partial) cur[t.key] = !!partial[t.key];
-  setUserPref(userId, 'notify_types', JSON.stringify(cur));
-  return cur;
-}
-// Per-CHANNEL per-type matrix — the granular layer. A user can switch a category
-// (digests/goals/alerts/messages) off for ONE channel (e.g. no goal emails) while
-// keeping it on for another (push). Stored as { email:{key:bool}, push:{key:bool} }
-// in user_prefs. Defaults ON; a legacy flat `notify_types` mute seeds BOTH channels
-// so existing opt-outs carry over until a per-channel pref is set.
-const NOTIFY_CHANNELS = ['email', 'push'];
-function getNotifyMatrix(userId) {
-  let stored = {}; let legacy = {};
-  try { stored = JSON.parse(getUserPref(userId, 'notify_matrix', '') || '{}'); } catch { stored = {}; }
-  try { legacy = JSON.parse(getUserPref(userId, 'notify_types', '') || '{}'); } catch { legacy = {}; }
-  const out = {};
-  for (const ch of NOTIFY_CHANNELS) {
-    out[ch] = {};
-    for (const t of NOTIFY_TYPES) {
-      const v = stored?.[ch]?.[t.key];
-      out[ch][t.key] = v !== undefined ? v !== false : (legacy[t.key] !== false);
-    }
-  }
-  return out;
-}
-function setNotifyMatrix(userId, partial = {}) {
-  const cur = getNotifyMatrix(userId);
-  for (const ch of NOTIFY_CHANNELS) {
-    if (partial[ch] && typeof partial[ch] === 'object') {
-      for (const t of NOTIFY_TYPES) if (t.key in partial[ch]) cur[ch][t.key] = !!partial[ch][t.key];
-    }
-  }
-  setUserPref(userId, 'notify_matrix', JSON.stringify(cur));
-  return cur;
-}
-// Is a category on for this user on a given channel? With no channel, allow if it's
-// on for ANY channel (safe default for legacy callers). Unknown/blank type ⇒ allowed.
-function notifyTypeOn(userId, type, channel) {
-  if (!type) return true;
-  const m = getNotifyMatrix(userId);
-  if (channel && NOTIFY_CHANNELS.includes(channel)) return m[channel]?.[type] !== false;
-  return NOTIFY_CHANNELS.some((ch) => m[ch]?.[type] !== false);
-}
-
+// Per-user notification category × channel preferences (+ the pause-all switch)
+// live in their own factory module — see server/notifyPrefs.js.
+const { NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn, getNotifyPause, setNotifyPause, mountRoutes: mountNotifyPrefRoutes } = require('./notifyPrefs')({ getUserPref, setUserPref });
 function listUsers() {
   // One query for all memberships, grouped in memory — no per-user N+1.
   const byUser = new Map();
@@ -1571,7 +1511,7 @@ module.exports = {
   getSuiteMailBranding, setSuiteMailBranding,
   ensureInboxToken, regenerateInboxToken, findEntityByInboxToken,
   listUsers, getUser, getUserByEmail, createUser, updateUser, deleteUser, verifyCredentials, publicUser, setUserEntities, setNotificationPrefs, touchLastLogin, bumpTokenVersion,
-  NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn,
+  NOTIFY_TYPES, NOTIFY_CHANNELS, getNotifyTypes, setNotifyTypes, getNotifyMatrix, setNotifyMatrix, notifyTypeOn, getNotifyPause, setNotifyPause, mountNotifyPrefRoutes,
   createAuthToken, consumeAuthToken, clearAuthTokens,
   membershipsForUser, roleForMembership, setMembershipRole, removeMembership,
   listDashboards, getDashboard, createDashboard, updateDashboard, removeDashboard, dashboardPoolFor, sharedDashboards,

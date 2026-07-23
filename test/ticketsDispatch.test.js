@@ -28,6 +28,7 @@ const fakeGithub = {
   newIssueUrl: ({ title }) => `https://github.test/new?title=${encodeURIComponent(title)}`,
   prodBranch: () => 'main',
   stagingBranch: () => 'staging',
+  verifyWebhook: () => true, // signature validity is github.js's concern, not this test's
 };
 const fakeInsights = { isConfigured: () => false }; // no background AI drafting in tests
 
@@ -173,4 +174,59 @@ test('submit with a reviewed draft lands pre-drafted (ai_status ready, reporter-
   assert.equal(row.ai_title, 'Polished title');
   assert.match(row.ai_summary, /reporter-edited/);
   assert.equal(row.body, 'raw words', 'original words preserved alongside');
+});
+
+// ── CI failures → the ops-triage ledger (workflow_run webhook) ────────────────
+const opsTriageMod = require('../server/opsTriage');
+test('a failed workflow run on main becomes a github-ci ops alert', async () => {
+  const alerts = [];
+  require('../server/ops').onAlert((kind, msg) => alerts.push({ kind, msg }));
+  const payload = { action: 'completed', workflow_run: { name: 'CI', conclusion: 'failure', head_branch: 'main', html_url: 'https://github.com/x/y/actions/runs/111' } };
+  const req = { _body: true, headers: { 'x-github-event': 'workflow_run', 'x-hub-signature-256': 'sig' }, get(h) { return this.headers[h.toLowerCase()]; }, body: Buffer.from(JSON.stringify(payload)), params: {} };
+  const r = await call('POST /api/github/webhook', req);
+  assert.equal(r.status, 200);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].kind, 'github-ci');
+  assert.match(alerts[0].msg, /workflow "CI" failure on main/);
+  assert.match(alerts[0].msg, /actions\/runs\/111/);
+});
+
+test('successful runs and claude/** branch failures never reach the ledger', async () => {
+  const alerts = [];
+  require('../server/ops').onAlert((kind) => alerts.push(kind));
+  const mk = (run) => ({ _body: true, headers: { 'x-github-event': 'workflow_run' }, get(h) { return this.headers[h.toLowerCase()]; }, body: Buffer.from(JSON.stringify({ action: 'completed', workflow_run: run })), params: {} });
+  await call('POST /api/github/webhook', mk({ name: 'CI', conclusion: 'success', head_branch: 'main', html_url: 'u' }));
+  await call('POST /api/github/webhook', mk({ name: 'CI', conclusion: 'failure', head_branch: 'claude/some-branch', html_url: 'u' }));
+  assert.equal(alerts.length, 0);
+});
+
+test('repeated failures of the same workflow+branch collapse to one fingerprint (run ids normalised)', () => {
+  const a = opsTriageMod.fingerprintOf('github-ci', 'workflow "CI" failure on main: https://github.com/x/y/actions/runs/29998512987');
+  const b = opsTriageMod.fingerprintOf('github-ci', 'workflow "CI" failure on main: https://github.com/x/y/actions/runs/30001240553');
+  const c = opsTriageMod.fingerprintOf('github-ci', 'workflow "Sync staging with main" failure on main: https://github.com/x/y/actions/runs/30001240553');
+  assert.equal(a, b, 'same defect, different run id → one ledger row');
+  assert.notEqual(a, c, 'a different workflow is a different row');
+});
+
+// ── Re-shipped-after-rejection tickets re-enter the review-reminder sweep ─────
+// Found by the daily code-health review (issue #77): the shipped transitions
+// kept a stale client_verdict='rejected', so the 24h re-nudge sweep (which
+// selects client_verdict='') skipped exactly the tickets on their SECOND
+// review round.
+test('a rejected ticket whose fix PR merges to production gets a fresh verdict slate', async () => {
+  const ent = h.makeEntity('Reship Co', 'reship-org');
+  const reporter = h.makeClient(`reship-${Date.now()}@test.local`, [ent.id]);
+  const t = tickets.createTicket({ user: reporter, type: 'bug', title: 'Reship bug', body: 'broken', entityId: ent.id });
+  sql.prepare("UPDATE tickets SET github_issue_number=41, status='rejected', client_verdict='rejected', client_verdict_note='still broken', client_verdict_at='2026-07-22T00:00:00Z' WHERE id=?").run(t.id);
+  const payload = { action: 'closed', pull_request: { number: 9, merged: true, title: 'fix: reship', html_url: 'https://github.test/pr/9', body: 'Fixes #41', base: { ref: 'main' }, head: { ref: 'claude/fix-41' } } };
+  const req = { _body: true, headers: { 'x-github-event': 'pull_request' }, get(h2) { return this.headers[h2.toLowerCase()]; }, body: Buffer.from(JSON.stringify(payload)), params: {} };
+  const r = await call('POST /api/github/webhook', req);
+  assert.equal(r.status, 200);
+  const row = sql.prepare('SELECT * FROM tickets WHERE id=?').get(t.id);
+  assert.equal(row.status, 'shipped');
+  assert.equal(row.client_verdict, '', 'stale rejection cleared — fresh production review');
+  assert.equal(row.client_verdict_note, '');
+  // The essence of the fix: the row is back inside the re-nudge sweep's SELECT.
+  const swept = sql.prepare("SELECT id FROM tickets WHERE status IN ('shipped','staging') AND client_verdict=''").all().map((x) => x.id);
+  assert.ok(swept.includes(t.id), 'sweep covers the re-shipped ticket again');
 });

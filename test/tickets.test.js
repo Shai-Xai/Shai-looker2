@@ -169,3 +169,140 @@ test('a same-status update does not re-email', () => {
   setStatus(app, admin, t.id, { status: 'accepted' }); // no transition
   assert.equal(sent.length, 1, 'only the real transition emails');
 });
+
+// ── Daily review reminders ──────────────────────────────────────────────────────
+// A ticket sitting in shipped/staging with no verdict re-nudges the reporter on
+// every channel each 24h until they approve or send it back.
+
+const backdate = (id, col, hoursAgo) => db.db.prepare(`UPDATE tickets SET ${col}=? WHERE id=?`)
+  .run(new Date(Date.now() - hoursAgo * 3600_000).toISOString(), id);
+
+test('a shipped ticket awaiting review re-nudges the reporter daily on all channels', () => {
+  const { app, mod, sent, announced, pushes } = mountTickets();
+  const admin = makeAdmin('rem1@test.local');
+  const ent = makeEntity('Delta Live', 'delta');
+  const reporter = makeClient('await@delta.test', [ent.id]);
+  const t = mod.createTicket({ user: reporter, type: 'bug', title: 'Broken totals', body: 'x', entityId: ent.id });
+  ship(app, admin, t.id);
+  const base = { sent: sent.length, announced: announced.length, pushes: pushes.length };
+
+  // Fresh ask (review_asked_at just stamped) → no reminder yet.
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent, 'no reminder within 24h of the ask');
+
+  // 25h after the ask → one reminder on every channel.
+  backdate(t.id, 'review_asked_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 1, 'reminder email sent');
+  assert.match(sent[sent.length - 1].subject, /Reminder: .*waiting for your review/);
+  assert.equal(pushes.length, base.pushes + 1, 'reminder push sent');
+  assert.equal(pushes[pushes.length - 1].type, 'reports');
+  assert.equal(announced.length, base.announced + 1, 'reminder inbox thread sent');
+  assert.deepEqual(announced[announced.length - 1].channels, ['push', 'slack']);
+
+  // Sweeping again straight away → nothing (next nudge is 24h out).
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 1, 'no double reminder');
+
+  // Another 24h with no verdict → nudges again.
+  backdate(t.id, 'review_reminder_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, base.sent + 2, 'daily repeat until reviewed');
+});
+
+test('a staging ticket reminder carries the test link; a verdict stops reminders', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('rem2@test.local');
+  const staff = makeAdmin('stagewait@test.local');
+  const t = mod.createTicket({ user: staff, type: 'improvement', title: 'New filter', body: 'x' });
+  setStatus(app, admin, t.id, { status: 'staging', testUrl: 'https://staging.test/app' });
+
+  backdate(t.id, 'review_asked_at', 25);
+  const before = sent.length;
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before + 1);
+  assert.match(sent[sent.length - 1].text, /staging site/);
+  assert.match(sent[sent.length - 1].text, /https:\/\/staging\.test\/app/);
+
+  // The reporter approves on staging (verdict set, status stays staging) → done.
+  db.db.prepare("UPDATE tickets SET client_verdict='approved' WHERE id=?").run(t.id);
+  backdate(t.id, 'review_reminder_at', 25);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before + 1, 'no reminders after a verdict');
+});
+
+test('reminders wait for a deferred review ask, and adopt pre-feature tickets gently', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('rem3@test.local');
+  const staff = makeAdmin('deferwait@test.local');
+  const t = mod.createTicket({ user: staff, type: 'bug', title: 'Old one', body: 'x' });
+  ship(app, admin, t.id);
+
+  // Deploy-deferred ask still pending → no reminder even if the clock is old.
+  backdate(t.id, 'review_asked_at', 30);
+  db.db.prepare("UPDATE tickets SET notify_wait=? WHERE id=?").run('{"env":"production"}', t.id);
+  const before = sent.length;
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before, 'no reminder while the ask itself is deferred');
+
+  // A ticket shipped before the feature existed (no clock): the sweep starts the
+  // clock instead of firing immediately.
+  db.db.prepare("UPDATE tickets SET notify_wait='', review_asked_at='' WHERE id=?").run(t.id);
+  mod.sweepReviewReminders();
+  assert.equal(sent.length, before, 'first sweep only starts the clock');
+  const row = db.db.prepare('SELECT review_asked_at FROM tickets WHERE id=?').get(t.id);
+  assert.ok(row.review_asked_at, 'clock initialised');
+});
+
+// ── Pause all notifications + the daily board digest ───────────────────────────
+
+test('pausing notifications silences stage emails until resumed', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('pause1@test.local');
+  const staff = makeAdmin('pausedreporter@test.local');
+  const t = mod.createTicket({ user: staff, type: 'bug', title: 'Paused case', body: 'x' });
+
+  db.setNotifyPause(staff.id, new Date(Date.now() + 7 * 86400_000).toISOString());
+  setStatus(app, admin, t.id, { status: 'accepted' });
+  assert.equal(sent.length, 0, 'paused → no email');
+
+  db.setNotifyPause(staff.id, ''); // resume
+  setStatus(app, admin, t.id, { status: 'in_progress' });
+  assert.equal(sent.length, 1, 'resumed → emails again');
+});
+
+test('a pause in the past never sticks', () => {
+  const staff = makeAdmin('expiredpause@test.local');
+  db.setNotifyPause(staff.id, new Date(Date.now() - 60_000).toISOString());
+  assert.equal(db.getNotifyPause(staff.id), '', 'past date = not paused');
+  assert.ok(db.notifyTypeOn(staff.id, 'reports', 'email'), 'notifications flow');
+});
+
+test('the daily board digest goes to managed subscribers with new/moved/waiting sections', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('dig1@test.local');
+  const sub = makeAdmin('subscriber@test.local');
+  const t = mod.createTicket({ user: admin, type: 'bug', title: 'Digest case', body: 'x' });
+  ship(app, admin, t.id);
+
+  // Subscribe via the board route; unknown emails are dropped.
+  const saved = invoke(app, 'PUT', '/api/admin/tickets/digest', { user: admin, body: { subscribers: [sub.email, 'ghost@nowhere.test'], hourUtc: 5 } });
+  assert.deepEqual(saved.body.subscribers, [sub.email]);
+  assert.equal(saved.body.hourUtc, 5);
+
+  const r = invoke(app, 'POST', '/api/admin/tickets/digest/send', { user: admin });
+  assert.equal(r.body.sent, 1);
+  const e = sent[sent.length - 1];
+  assert.equal(e.to, sub.email);
+  assert.match(e.subject, /Product board/);
+  assert.match(e.text, /New reports \(/);
+  assert.match(e.text, /Moved \(/);
+  assert.match(e.text, /Waiting for review \(/);
+  assert.match(e.text, /Digest case/, 'the new + waiting ticket is listed');
+
+  // A paused subscriber is skipped (email side).
+  db.setNotifyPause(sub.id, new Date(Date.now() + 86400_000).toISOString());
+  const r2 = invoke(app, 'POST', '/api/admin/tickets/digest/send', { user: admin });
+  assert.equal(r2.body.sent, 0, 'paused subscriber gets no digest email');
+  db.setNotifyPause(sub.id, '');
+});

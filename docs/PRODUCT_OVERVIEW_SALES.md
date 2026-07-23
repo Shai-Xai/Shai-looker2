@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-23 (📝 Report a bug: review the AI-tidied ticket before it sends — edit the title and spec so what lands on the board is exactly what you approved · previously 2026-07-22: Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile · Report a bug: record the screen — or minimize the form — without losing what you've typed · 📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-23 (⏸️ Pause all notifications: one switch in Settings → Notifications silences every email & push for a chosen period — the "on leave" mode · 🗞️ Product-board daily summary: a once-a-day recap of what's new, what moved and what's waiting for review, with subscribers managed right on the board · 🗓 Digests & briefings: post-event cool-down + computed data freshness — finished events stop being re-reviewed · ⏰ Daily review reminders: a report waiting on your approval — shipped or on staging — re-nudges you every 24h on email, push and inbox until you approve or send it back · 📝 Report a bug: review the AI-tidied ticket before it sends — edit the title and spec so what lands on the board is exactly what you approved · previously 2026-07-22: Editable tile sorting: multiple sort fields, asc/desc, reorder + remove, saved to the tile · Report a bug: record the screen — or minimize the form — without losing what you've typed · 📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -312,7 +312,15 @@ shoulder when it's worth your time."
 - Automated **email digests** (e.g. morning briefing) written for a **named role**
   (exec / marketing / finance / ops), with headline KPIs, a short narrative and
   suggested actions.
-- Configurable cadence and focus; dates are anchored to the **send day**.
+- Configurable cadence and focus; dates are anchored to the **send day**, and the
+  analyst is told each event's **actual latest data date** — a lagging feed reads
+  as "data to the 30th", never as yesterday's trading.
+- **Post-event cool-down** — a finished event gets a short wrap-up window (default
+  3 days after its end date, adjustable by Howler) and then **drops out of
+  all-events digests and the home briefing automatically**; no more daily reviews
+  of a past event. Explicitly selecting the event in the digest's Events (or the
+  reader's briefing Tune) keeps covering it. If every event is past the window,
+  the digest **skips quietly** instead of sending stale news.
 - **Content modes:** *AI-led* (the analyst picks the story) or *curated* (pick the
   exact tiles). Either way you can also **include saved tiles** — the tiles a client
   has 📌 pinned or ⭐ followed, chosen from a checklist — and optionally render them
@@ -1235,6 +1243,20 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 
+- **2026-07-23** — **⏸️ Pause all notifications & 🗞️ board daily summary** ✅: two additions
+  to keep the noise right. **Pause all notifications** (Settings → Notifications) silences
+  every Pulse email and push for 1 week / 2 weeks / 1 month / until you resume — perfect for
+  leave — then switches everything back on automatically. And the **product board daily
+  summary**: a once-a-day recap of the board (new reports, what moved lanes, what's waiting
+  for review and for how long, lane counts) emailed + pushed to a subscriber list managed on
+  the board itself (Admin → Tickets → 🗞️ Daily summary), with a pickable send hour and a
+  Send-now test. Digest sends honour each person's notification settings, including pause.
+- **2026-07-23** — **⏰ Daily review reminders** ✅: a report that's **waiting for your
+  review** — shipped to production, or on staging for you to test — now **re-nudges you
+  every 24 hours** on every channel (branded email, push and your Pulse inbox) until you
+  approve it or send it back. Reminders carry the test link where there is one, start
+  from the moment the review ask actually reached you, respect the **Report updates**
+  opt-out, and each nudge is logged on the ticket's activity trail.
 - **2026-07-23** — **📝 Report a bug: review your ticket before it sends** ✅: when you file
   a report, the AI now tidies it into a clear, structured ticket **while you watch — and
   hands it back to you first**. A new review step shows the drafted title and spec, fully
@@ -1271,6 +1293,14 @@ see "The continuous comms loop" above.)*
   list + cross-client queue), with a live "would this be caught?" test box and
   the audit trail. Wire contract in docs/specs/MODERATION_CONTRACT.md.
 > Keep this current — add a dated line whenever a client-relevant feature ships.
+
+- **2026-07-23** — **🗓 Post-event cool-down + data freshness for digests & briefings** ✅:
+  a finished event now stays in default digests/briefings only for a short wrap-up
+  window (default 3 days after its end date, adjustable in Admin → AI → Home
+  briefing) and then drops out automatically — explicitly selecting it keeps it.
+  A digest whose events are all past the window skips instead of sending. The
+  analyst is also told each event's actual latest data date, so lagging data is
+  reported as "data to the Nth", never narrated as yesterday's trading.
 
 - **2026-07-22** — **Editable tile sorting** ✅ (improved): the tile editor's "Sort by"
   control now supports **multiple sort fields** (add/remove), each **asc/desc**, with

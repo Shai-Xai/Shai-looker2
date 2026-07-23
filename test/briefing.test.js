@@ -13,13 +13,13 @@ const stubQuery = {
   tileQueryBody: () => {}, daysBeforeOverlayFor: () => {},
 };
 
-function makeEngine({ suites = [], sets = {}, dashboards = {}, prefs = {}, query = stubQuery } = {}) {
+function makeEngine({ suites = [], sets = {}, dashboards = {}, prefs = {}, settings = {}, query = stubQuery } = {}) {
   const db = {
     listSuitesForEntity: () => suites,
     getSuite: (id) => suites.find((s) => s.id === id) || null,
     getSet: (id) => sets[id] || null,
     getUserPref: (_uid, key) => prefs[key] || '',
-    getSetting: (_k, d) => d ?? '{}',
+    getSetting: (k, d) => (k in settings ? settings[k] : (d ?? '{}')),
     listMarks: () => [],
     lockedFiltersForSuite: () => ({}),
     getFilterView: () => null,
@@ -195,4 +195,66 @@ test('phaseDefaults / timeDefaults expose editable text for every phase + segmen
   for (const p of e.PHASES) assert.ok((pd[p.key] || '').length > 10, `phase ${p.key} has default guidance`);
   const td = e.timeDefaults();
   for (const t of e.TIMES) assert.ok((td[t.key] || '').length > 10, `segment ${t.key} has default guidance`);
+});
+
+// ─── Post-event cool-down (suiteCoverage) + data freshness ──────────────────────
+// The engine's answer to "a finished event keeps being reviewed every day": a
+// short wrap-up window after the end date, then the event drops out of default
+// briefing/digest scope; and a computed latest-data-date so the AI is TOLD when
+// a feed is stale instead of narrating June data as "yesterday".
+
+test('cooldownDays: default 3, honours the setting, clamps garbage', () => {
+  assert.equal(makeEngine().cooldownDays(), 3, 'unset → built-in default');
+  assert.equal(makeEngine({ settings: { briefing_cooldown_days: '7' } }).cooldownDays(), 7);
+  assert.equal(makeEngine({ settings: { briefing_cooldown_days: '0' } }).cooldownDays(), 0, 'zero is a valid choice');
+  assert.equal(makeEngine({ settings: { briefing_cooldown_days: '999' } }).cooldownDays(), 60, 'clamped to 60');
+  assert.equal(makeEngine({ settings: { briefing_cooldown_days: 'nope' } }).cooldownDays(), 3, 'garbage → default');
+});
+
+test('suiteCoverage: covered through the event and the cool-down, dropped after', () => {
+  const e = makeEngine(); // cooldown = default 3 days
+  // AT = 2026-06-15 12:00. Live event → covered.
+  assert.equal(e.suiteCoverage({ eventStart: '2026-06-14', eventEnd: '2026-06-16' }, AT).covered, true);
+  // Ended 2 days ago (post_event) but inside the 3-day cool-down → still covered, flagged ended.
+  const wrap = e.suiteCoverage({ eventStart: '2026-06-12', eventEnd: '2026-06-13' }, AT);
+  assert.equal(wrap.ended, true);
+  assert.equal(wrap.covered, true, 'wrap-up window still covers it');
+  // Ended two weeks ago → out of coverage.
+  const old = e.suiteCoverage({ eventStart: '2026-05-30', eventEnd: '2026-06-01' }, AT);
+  assert.equal(old.ended, true);
+  assert.equal(old.covered, false, 'past the cool-down → dropped');
+});
+
+test('suiteCoverage: a longer configured cool-down keeps an ended event covered', () => {
+  const e = makeEngine({ settings: { briefing_cooldown_days: '30' } });
+  assert.equal(e.suiteCoverage({ eventEnd: '2026-06-01' }, AT).covered, true, '14 days ago < 30-day cool-down');
+});
+
+test('suiteCoverage: no dates fails open; a manual post_event flag ends coverage', () => {
+  const e = makeEngine();
+  assert.equal(e.suiteCoverage({}, AT).covered, true, 'undated events cannot be judged — keep covering');
+  assert.equal(e.suiteCoverage({ manualPhase: 'post_event' }, AT).covered, false, 'an explicit "it is done" drops it');
+});
+
+test('latestDataDate: max observed ISO date across tiles, ignoring future dates', () => {
+  const e = makeEngine();
+  const tiles = [
+    { rows: [{ d: { value: '2026-05-28' }, v: { value: 100 } }, { d: { value: '2026-06-12' }, v: { value: 90 } }] },
+    { rows: [{ d: { value: '2026-06-01' } }, { ev: { value: '2026-09-01' } }] }, // event-date dimension: future, ignored
+  ];
+  assert.equal(e.latestDataDate(tiles, AT), '2026-06-12');
+  assert.equal(e.latestDataDate([{ rows: [{ v: { value: 42 } }] }], AT), null, 'no dates anywhere → null');
+});
+
+test('freshnessSummary: stale events get an explicit STALE flag, fresh ones read as current', () => {
+  const e = makeEngine();
+  const groups = [
+    { suiteName: 'June Fest', tiles: [{ rows: [{ d: { value: '2026-05-30' } }] }] }, // 16 days behind
+    { suiteName: 'Live Fest', tiles: [{ rows: [{ d: { value: '2026-06-14' } }] }] }, // yesterday
+  ];
+  const s = e.freshnessSummary(groups, AT);
+  assert.match(s, /June Fest.*2026-05-30.*STALE/);
+  assert.match(s, /Live Fest.*current/);
+  assert.match(s, /NEVER present that last data day/i, 'carries the marching orders');
+  assert.equal(e.freshnessSummary([{ suiteName: 'X', tiles: [] }], AT), '', 'nothing computable → empty (no prompt noise)');
 });

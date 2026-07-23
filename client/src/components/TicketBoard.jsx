@@ -68,6 +68,7 @@ export default function TicketBoard() {
       </div>
 
       <GithubConfig />
+      <DigestConfig />
 
       {error && <p style={{ color: 'var(--brand)', fontSize: 13 }}>{error}</p>}
       {!data ? <p style={{ color: 'var(--muted)' }}>Loading…</p> : (
@@ -235,6 +236,79 @@ function Card({ t, onOpen }) {
     </button>
   );
 }
+
+// 🗞️ Daily board summary: who gets the once-a-day digest (what's new, what
+// moved, what's waiting for review) and at which hour. Subscribers are picked
+// from the same admin/dev list as assignees — add anyone who should keep an
+// eye on the board without living in it.
+function DigestConfig() {
+  const [cfg, setCfg] = useState(null);
+  const [people, setPeople] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    api.adminTicketDigest().then(setCfg).catch(() => setCfg({ subscribers: [], hourUtc: 5 }));
+    api.adminTicketAssignees().then((r) => setPeople(r.assignees || [])).catch(() => setPeople([]));
+  }, []);
+  if (!cfg) return null;
+  const subs = cfg.subscribers || [];
+  const flash = (m) => { setMsg(m); setTimeout(() => setMsg(''), 1800); };
+  const save = async (patch) => {
+    setBusy(true);
+    try { setCfg(await api.adminTicketDigestSave(patch)); } catch { /* keep old */ }
+    setBusy(false);
+  };
+  const toggle = (email) => save({ subscribers: subs.includes(email) ? subs.filter((x) => x !== email) : [...subs, email] });
+  const localHour = (h) => { const d = new Date(); d.setUTCHours(h, 0, 0, 0); return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+  return (
+    <div style={{ border: '1px solid var(--hairline)', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 12.5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700 }}>🗞️ Daily summary</span>
+        <span style={{ color: 'var(--muted)' }}>
+          {subs.length
+            ? `${subs.length} subscriber${subs.length === 1 ? '' : 's'} · daily at ${localHour(cfg.hourUtc)}`
+            : 'off — add a subscriber to get a daily board recap'}
+        </span>
+        {msg && <span style={{ color: '#16a34a', fontWeight: 600 }}>{msg}</span>}
+        <span style={{ flex: 1 }} />
+        <button onClick={() => setOpen((o) => !o)} style={miniBtn}>{open ? 'Close' : 'Manage'}</button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 460 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>Who receives it</div>
+          {people.map((p2) => (
+            <label key={p2.email} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', minHeight: 40 }}>
+              <input type="checkbox" checked={subs.includes(p2.email)} disabled={busy} onChange={() => toggle(p2.email)} />
+              <span style={{ fontWeight: 600 }}>{p2.name || p2.email}</span>
+              <span style={{ color: 'var(--muted)' }}>{p2.name ? p2.email : ''}</span>
+            </label>
+          ))}
+          {people.length === 0 && <p style={{ color: 'var(--muted)' }}>No admins/devs found.</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600 }}>Send at</span>
+            <select className="fld" value={cfg.hourUtc} disabled={busy} onChange={(e) => save({ hourUtc: Number(e.target.value) })}>
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>{String(h).padStart(2, '0')}:00 UTC ({localHour(h)} local)</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={miniBtn} disabled={busy || !subs.length}
+              onClick={async () => { setBusy(true); try { const r = await api.adminTicketDigestSend(); flash(`Sent to ${r.sent}`); } catch { flash('Send failed'); } setBusy(false); }}>
+              Send now
+            </button>
+            {cfg.lastSent && <span style={{ color: 'var(--muted)', alignSelf: 'center' }}>Last sent {cfg.lastSent}</span>}
+          </div>
+          <p style={{ color: 'var(--muted)', fontSize: 11.5, margin: 0 }}>
+            What's new, what moved, and what's waiting for review — email + push, honouring each person's notification settings (including pause).
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function TicketDetail({ id, onClose, onChange }) {
   const isMobile = useIsMobile();

@@ -16,6 +16,7 @@ let failSends = false;
 let rowAtSendTime = null; // snapshot of the job row taken INSIDE mailer.send
 
 let currentJobId = '';
+let contentError = null; // set to make generateContent throw (e.g. a digest_skipped)
 const mailer = {
   send: async ({ to }) => {
     rowAtSendTime = sql.prepare('SELECT status, next_run_at, last_status FROM scheduled_jobs WHERE id=?').get(currentJobId);
@@ -33,14 +34,14 @@ before(async () => {
   app = await startApp((expressApp) => {
     sched = require('../server/scheduler').mount(expressApp, {
       db: h.db, auth: h.auth, mailer, messaging: null, push: null,
-      generateContent: async () => ({ subject: 'Digest', headline: 'H', narrative: ['n'], kpis: [] }),
+      generateContent: async () => { if (contentError) throw contentError; return { subject: 'Digest', headline: 'H', narrative: ['n'], kpis: [] }; },
       roleLenses: { exec: { label: 'Executive' }, marketing: { label: 'Marketing' }, finance: { label: 'Finance' }, ops: { label: 'Ops' } },
       recordDigest: () => '', feedbackUrl: () => '', replyTo: () => null,
     });
   });
 });
 after(async () => { if (app) await app.close(); });
-beforeEach(() => { sentTo.length = 0; failSends = false; rowAtSendTime = null; });
+beforeEach(() => { sentTo.length = 0; failSends = false; rowAtSendTime = null; contentError = null; });
 
 // A due job, inserted directly (columns per scheduled_jobs in scheduler.js).
 function makeDueJob(cadence = 'daily') {
@@ -100,4 +101,27 @@ test('computeNextRun-driven reschedule lands on a future slot for weekly jobs to
   const next = new Date(r.next_run_at);
   assert.ok(next > new Date());
   assert.ok(next <= new Date(Date.now() + 8 * 24 * 3600 * 1000), 'within the next 8 days');
+});
+
+test("a digest whose events are all past their cool-down is recorded as 'skipped', not an error", async () => {
+  const id = makeDueJob('daily');
+  const skip = new Error('All of this client\'s events ended more than 3 day(s) ago — nothing current to report.');
+  skip.code = 'digest_skipped'; // what buildDigestContent throws when the default scope is empty
+  contentError = skip;
+  await sched._tick();
+  assert.equal(sentTo.length, 0, 'nothing was sent');
+  const r = jobRow(id);
+  assert.match(r.last_status, /^skipped: All of this client's events ended/);
+  assert.ok(new Date(r.next_run_at) > new Date(), 'still rescheduled — it resumes automatically if an event comes back in scope');
+});
+
+test('a skipped digest does not raise an ops alert (a real error still would)', async () => {
+  // The mount above passes no notifyOps — this pins the shape at the runJob level:
+  // skips go down the 'skipped' branch, so notifyOps (when present) is not called.
+  const id = makeDueJob('daily');
+  const skip = new Error('nothing current');
+  skip.code = 'digest_skipped';
+  contentError = skip;
+  const res = await sched._runJob({ id, entityId: jobRow(id).entity_id, role: 'exec', recipients: ['client@x.com'], channel: 'email' }, { manual: true });
+  assert.equal(res.status, 'skipped');
 });
