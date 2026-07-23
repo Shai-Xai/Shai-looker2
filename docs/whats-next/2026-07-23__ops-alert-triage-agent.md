@@ -1,0 +1,85 @@
+# What's next — 2026-07-23 · ops-alert-triage-agent
+
+**Idea (Shai):** stop hand-reporting #pulse-monitoring alerts. An agent should
+watch the alerts, decide which are legitimate bugs, file them on the product
+board with a suggested fix, in some cases fix them itself — and, down the line,
+review the code daily and flag bugs before they ever alert.
+
+## Why this is close, not far
+
+The two ends of the loop already exist:
+
+- **Every alert flows through ONE funnel** — `ops.alert(kind, message)` in
+  `server/ops.js` (throttled Slack post to #pulse-monitoring). Nothing else to
+  instrument; a hook there sees 100% of alerts.
+- **The product board already automates the back half** — `server/tickets.js`:
+  AI ticket drafting (`draftTicket`), dispatch to Claude via GitHub issue
+  (`@claude` → PR against `staging`), reporter verification on staging, and the
+  promote-to-production release train. A ticket filed by an agent rides the
+  exact same rails as one filed by a human.
+
+The missing piece is only the bridge: alert → classified → ticket.
+
+**Proof of concept (yesterday, done by hand):** of 4 alert types on 2026-07-22,
+2 were real bugs (journeys `listJourneys` regression; empty-content AI-JSON
+repair call — both fixed in `9ea0f2c5`), 1 was billing (Anthropic credits), 1
+was backpressure (Looker queue). Exactly the triage split this agent would make.
+
+## Phase 1 — Alert ledger + auto-triage → ticket
+
+New disposable module `server/opsTriage.js` (+ a small hook in `ops.js`):
+
+1. **Ledger.** `ops.alert()` also inserts into an `ops_alerts` table:
+   kind, message, `fingerprint`, count, first/last seen. Fingerprint =
+   kind + message with volatile parts normalised (UUIDs, numeric ids,
+   `req_...` refs, numbers → placeholders), so yesterday's three separate
+   journeys alerts collapse to ONE signature. Slack behaviour unchanged.
+2. **Triage pass.** On the scheduler tick (30–60 min cadence, kill switch
+   setting `ops_triage_enabled`), take fingerprints not yet triaged and ask the
+   AI to classify: `bug | capacity | billing | config | noise`, severity, and a
+   root-cause hypothesis. **Grounding trick:** the deployed service has its own
+   source on disk — grep `server/` for the error string / route named in the
+   alert and include the surrounding code in the prompt, so classification
+   reads the actual code, not just the message.
+3. **File tickets.** Classification `bug` → `createTicket({ source: 'ops',
+   type: 'bug', ... })` with the hypothesis in the body; ONE ticket per
+   fingerprint (recurrences bump a counter / comment on the existing ticket,
+   never duplicates). Non-bug classes (billing, capacity) never become tickets —
+   they go into a short daily "ops actions" Slack summary instead (yesterday's
+   credit-balance alert is an action for a human, not a ticket).
+4. **Rails.** Cap auto-filed tickets/day, dedupe by fingerprint, kill switch,
+   and tickets land in `inbox` for a human to triage — the agent files, it does
+   not dispatch.
+
+## Phase 2 — Suggest-a-fix / self-fix tier (flag-gated)
+
+- The triage hypothesis flows into `claudeBrief()` so a dispatched build starts
+  from the diagnosis, not the raw alert.
+- **Auto-dispatch, opt-in per tier:** high-confidence bugs auto-Send-to-GitHub
+  in **plan mode** first (Claude comments a plan, no code); a stricter
+  allowlist (e.g. severity ≥ high AND confidence high) may go straight to
+  build mode. The existing safety geometry is untouched: PRs target `staging`,
+  the reporter must approve on staging, promotion to production stays a human
+  release train. "Fixes itself" = fix waiting on staging for a verdict — never
+  straight to prod.
+- Budget rails: max N auto-dispatches/day; never for billing/capacity classes;
+  no automatic redispatch loops — a sent-back ticket needs a human.
+
+## Phase 3 — Daily proactive review (before it alerts)
+
+- A scheduled daily run (natural home: a cron workflow in the repo next to the
+  existing `@claude` Action) reviews the last 24h of commits + a rotating slice
+  of the codebase and updates a single rolling "Code health — daily review"
+  issue/ticket, findings ranked by risk. Accepted findings become tickets via
+  the normal flow.
+- Cheap deterministic complement worth doing regardless: a CI lint that checks
+  every `require`d module property used actually exists — the `listJourneys`
+  class of bug (call site survives a revert that removed the export) is
+  statically catchable, no AI needed.
+
+## Open decisions
+
+- Triage cadence + who gets the daily ops-actions summary (Slack channel?).
+- Phase 2 thresholds: what qualifies for plan-mode auto-dispatch vs build-mode.
+- Whether ops tickets appear on the client-visible board or an internal-only
+  lane (suggest: internal-only; `source: 'ops'` makes filtering trivial).
