@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse: Every feature</title>
+<meta name="description" content="The complete, living feature index of Pulse, the Experience OS for live events by Howler.">
+<style>
+:root{
+  --brand:#FF385C;
+  --g:linear-gradient(120deg,#FF385C 0%,#FF6B35 45%,#7C3AED 100%);
+  --ink:#1d1d1f; --muted:#6e6e73; --line:#ececef; --bg:#fff; --soft:#f7f7f9;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;
+}
+
+header.bar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.84);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line);}
+.bar .wrap{display:flex;align-items:center;gap:12px;max-width:1060px;margin:0 auto;padding:13px 22px;}
+.mark{width:34px;height:34px;border-radius:10px;background:var(--g);box-shadow:0 8px 22px -8px rgba(124,58,237,.55);flex:none;}
+.bar b{font-size:16px;font-weight:800;letter-spacing:-.02em;}
+.bar .sub{font-size:12px;color:var(--muted);font-weight:600;}
+.bar nav{margin-left:auto;display:flex;gap:8px;}
+.bar nav a{font-size:13px;font-weight:700;text-decoration:none;color:var(--ink);padding:9px 14px;border-radius:980px;min-height:40px;display:inline-flex;align-items:center;}
+.bar nav a.solid{background:var(--ink);color:#fff;}
+
+main{max-width:1060px;margin:0 auto;padding:20px 22px 90px;}
+.head{margin:34px 0 6px;text-align:center;}
+.head h1{font-size:clamp(26px,5vw,40px);letter-spacing:-.028em;font-weight:850;}
+.head h1 .grad{background:var(--g);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.head p{color:var(--muted);font-size:14.5px;margin-top:8px;max-width:560px;margin-left:auto;margin-right:auto;}
+.legend{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:18px 0 26px;}
+.grid{display:grid;grid-template-columns:1fr;gap:16px;}
+@media(min-width:700px){.grid{grid-template-columns:1fr 1fr;}}
+.sec{border:1px solid var(--line);border-radius:18px;padding:20px;background:#fff;box-shadow:0 10px 30px -24px rgba(29,29,31,.25);}
+.sec h3{font-size:17px;letter-spacing:-.01em;font-weight:800;display:flex;align-items:center;gap:9px;}
+.sec h3 .e{font-size:20px;}
+.sec p.blurb{font-size:13.5px;color:var(--muted);margin:7px 0 12px;}
+.sec ul{list-style:none;}
+.sec li{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:13.5px;color:#2c2c30;border-top:1px solid var(--soft);}
+.sec li:first-child{border-top:none;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:980px;font-size:10.5px;font-weight:750;white-space:nowrap;flex:none;margin-top:1px;}
+.badge.live{color:#1a8a4a;background:rgba(26,138,74,.12);}
+.badge.setup{color:#9a6a00;background:rgba(214,158,46,.16);}
+.badge.beta{color:#7C3AED;background:rgba(124,58,237,.12);}
+.badge.soon{color:#5a6270;background:rgba(110,110,115,.14);}
+
+.closing{margin-top:56px;text-align:center;background:var(--g);border-radius:24px;padding:42px 24px;color:#fff;}
+.closing h2{font-size:clamp(20px,3.8vw,28px);letter-spacing:-.02em;font-weight:840;}
+.closing p{opacity:.92;max-width:480px;margin:10px auto 20px;font-size:14.5px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 22px;border-radius:980px;font-size:14.5px;font-weight:750;text-decoration:none;background:#fff;color:var(--ink);}
+footer{max-width:1060px;margin:0 auto;padding:26px 22px 60px;color:var(--muted);font-size:12.5px;text-align:center;}
+footer a{color:var(--muted);}
+
+.state{display:flex;align-items:center;justify-content:center;min-height:30vh;flex-direction:column;gap:14px;color:var(--muted);}
+.spinner{width:30px;height:30px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <div class="mark"></div>
+    <div>
+      <b>Pulse</b>
+      <div class="sub">by Howler</div>
+    </div>
+    <nav>
+      <a href="/sales">← The story</a>
+      <a class="solid" href="/">Log in</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="head">
+    <h1>Every feature, <span class="grad">honestly labelled.</span></h1>
+    <p>The complete, living index of what Pulse does, updated as features ship. For the short
+    version, read <a href="/sales" style="color:var(--brand);text-decoration:none;font-weight:700;">the story</a> first.</p>
+  </div>
+  <div class="legend" id="legend" hidden>
+    <span class="badge live">✅ Live</span>
+    <span class="badge setup">🟡 Live, needs connection</span>
+    <span class="badge beta">🧪 Beta</span>
+    <span class="badge soon">🔜 Coming soon</span>
+  </div>
+  <div class="grid" id="grid">
+    <div class="state" style="grid-column:1/-1;"><div class="spinner"></div><div>Loading the feature map…</div></div>
+  </div>
+
+  <div class="closing">
+    <h2>Rather see it than read it?</h2>
+    <p>A 30-minute walkthrough with your own data on screen. Talk to your Howler account manager, or ask us for a demo.</p>
+    <a class="btn" href="mailto:support@howler.co.za?subject=Pulse%20demo">Request a demo</a>
+  </div>
+</main>
+
+<footer>
+  Pulse · the Experience OS by <a href="https://howler.co.za" rel="noopener">Howler</a> ·
+  <span id="updated"></span>
+</footer>
+
+<script>
+(async function () {
+  const grid = document.getElementById('grid');
+  const BADGE = {
+    live: ['live', '✅ Live'],
+    setup: ['setup', '🟡 Needs connection'],
+    beta: ['beta', '🧪 Beta'],
+    soon: ['soon', '🔜 Coming soon'],
+  };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  try {
+    const res = await fetch('/api/product/site', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    grid.innerHTML = (data.sections || []).map((s) => (
+      '<section class="sec">' +
+        '<h3><span class="e">' + esc(s.emoji || '•') + '</span>' + esc(s.title) + '</h3>' +
+        (s.blurb ? '<p class="blurb">' + esc(s.blurb) + '</p>' : '') +
+        '<ul>' + s.features.map((f) => {
+          const [cls, label] = BADGE[f.status] || BADGE.live;
+          return '<li><span class="badge ' + cls + '">' + label + '</span><span>' + esc(f.label) + '</span></li>';
+        }).join('') + '</ul>' +
+      '</section>'
+    )).join('');
+    document.getElementById('legend').hidden = false;
+    if (data.updatedAt) {
+      const d = new Date(data.updatedAt);
+      if (!isNaN(d)) document.getElementById('updated').textContent = 'feature map updated ' + d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+  } catch (e) {
+    grid.innerHTML = '<div class="state" style="grid-column:1/-1;"><div>Couldn’t load the feature map. Please refresh.</div></div>';
+  }
+})();
+</script>
+</body>
+</html>

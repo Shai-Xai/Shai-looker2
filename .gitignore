@@ -1,3 +1,25 @@
 node_modules/
 .env
 *.log
+
+# Runtime data
+server/data/
+client/dist/
+
+# Dev screenshot helper (throwaway)
+shot.mjs
+dbg.mjs
+dnd.mjs
+*.shot.mjs
+shot*.mjs
+st.mjs
+
+# Throwaway curl scratch: cookie jars + response dumps (never commit — may hold
+# live session tokens). See the *.txt cookie jars / bare response blobs.
+*.cookies
+cookies.txt
+*.cookie
+# Single-letter scratch files (c.txt was a committed curl cookie jar once —
+# a real session JWT reached the repo; never again).
+[a-z].txt
+

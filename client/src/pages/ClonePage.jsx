@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../lib/api.js';
 
 export default function ClonePage() {
   const navigate = useNavigate();
@@ -9,6 +10,7 @@ export default function ClonePage() {
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
 
   async function handlePreview() {
@@ -16,7 +18,7 @@ export default function ClonePage() {
     setPreviewing(true);
     setPreview(null);
     try {
-      const res = await fetch(`/api/dashboard/${encodeURIComponent(sourceId.trim())}`);
+      const res = await fetch(`/api/looker-dashboard/${encodeURIComponent(sourceId.trim())}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Unknown error');
       setPreview({ ok: true, data });
@@ -24,6 +26,19 @@ export default function ClonePage() {
       setPreview({ ok: false, error: err.message });
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  async function handleImportHere() {
+    if (!sourceId.trim()) return;
+    setImporting(true);
+    try {
+      const d = await api.importDashboard(sourceId.trim(), newTitle.trim() || undefined);
+      navigate(`/d/${d.id}/edit`);
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -62,11 +77,14 @@ export default function ClonePage() {
 
   return (
     <main style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 24px' }}>
-      <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12, boxShadow: '0 2px 16px rgba(0,0,0,0.08)', width: '100%', maxWidth: 560, padding: '36px 40px' }}>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Recreate a Dashboard</div>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 2px 16px rgba(0,0,0,0.08)', width: '100%', maxWidth: 560, padding: '36px 40px' }}>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Clone a Dashboard inside Looker</div>
         <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 32, lineHeight: 1.5 }}>
-          Copy a Looker dashboard — tiles, filters, layout — into a new dashboard.
-          Or <button onClick={() => navigate('/view/' + sourceId.trim())} style={linkBtnStyle} disabled={!sourceId.trim()}>view it here</button> without Looker.
+          Copy a Looker dashboard — tiles, filters, layout — into a new <em>Looker</em> dashboard.
+          To build a fully editable copy in this app instead,{' '}
+          <button onClick={handleImportHere} style={linkBtnStyle} disabled={!sourceId.trim() || importing}>
+            {importing ? 'importing…' : 'import & edit here'}
+          </button>.
         </div>
 
         <form onSubmit={handleSubmit} noValidate>
@@ -86,7 +104,7 @@ export default function ClonePage() {
             )}
           </Field>
 
-          <hr style={{ border: 'none', borderTop: '1px solid #e0e0e0', margin: '28px 0' }} />
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '28px 0' }} />
 
           <Field label="New Dashboard Title" hint="name for the copy">
             <Input value={newTitle} onChange={setNewTitle} placeholder="e.g. Howler — Glastonbury 2025" />
@@ -102,7 +120,7 @@ export default function ClonePage() {
         </form>
 
         {result && (
-          <div style={{ marginTop: 24, borderRadius: 10, overflow: 'hidden', border: '1px solid #e0e0e0' }}>
+          <div style={{ marginTop: 24, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
             <div style={{ padding: '14px 18px', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, ...(allOk ? { background: '#f0fdf4', color: 'var(--success)', borderBottom: '1px solid #bbf7d0' } : result.ok ? { background: '#fffbeb', color: 'var(--warn)', borderBottom: '1px solid #fde68a' } : { background: '#fff5f5', color: 'var(--error)', borderBottom: '1px solid #fecaca' }) }}>
               {allOk ? '✓ Dashboard recreated successfully!' : result.ok ? '⚠ Recreated with some errors' : '✗ Failed'}
             </div>
@@ -120,8 +138,16 @@ export default function ClonePage() {
                   )}
                   {result.data.dashboardId && (
                     <div>
-                      <button onClick={() => navigate(`/view/${result.data.dashboardId}`)} style={{ ...submitBtnStyle, marginTop: 4, fontSize: 13, padding: '9px 16px', width: 'auto' }}>
-                        View here →
+                      <button
+                        onClick={async () => {
+                          try {
+                            const d = await api.importDashboard(String(result.data.dashboardId), newTitle.trim() || undefined);
+                            navigate(`/d/${d.id}/edit`);
+                          } catch (e) { alert('Import failed: ' + e.message); }
+                        }}
+                        style={{ ...submitBtnStyle, marginTop: 4, fontSize: 13, padding: '9px 16px', width: 'auto' }}
+                      >
+                        Import & edit here →
                       </button>
                     </div>
                   )}
@@ -162,7 +188,7 @@ function Input({ value, onChange, placeholder }) {
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
       autoComplete="off"
-      style={{ width: '100%', padding: '10px 14px', border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 14, outline: 'none' }}
+      style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 14, outline: 'none' }}
     />
   );
 }
@@ -182,8 +208,8 @@ const submitBtnStyle = {
 };
 
 const previewBtnStyle = {
-  flexShrink: 0, padding: '10px 16px', background: '#f7f7f7',
-  border: '1.5px solid #e0e0e0', borderRadius: 8, fontSize: 13, fontWeight: 600,
+  flexShrink: 0, padding: '10px 16px', background: 'var(--elevated)',
+  border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, fontWeight: 600,
   cursor: 'pointer', whiteSpace: 'nowrap',
 };
 

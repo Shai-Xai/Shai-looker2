@@ -1,0 +1,44 @@
+name: Claude Code
+
+# Lets Claude pick up work from GitHub: when an issue or comment mentions @claude,
+# Claude implements it and opens a pull request. Howler Pulse's product board can
+# create issues that @claude automatically (Admin → Product → Tickets → GitHub →
+# "Ask Claude to build it"), so accepting a ticket can dispatch the build.
+#
+# Requires (one-time, by a repo admin):
+#   1. Install the Claude GitHub App on this repo — https://github.com/apps/claude
+#   2. Add an ANTHROPIC_API_KEY secret (Settings → Secrets and variables → Actions)
+# Until both are done this workflow is inert (it only runs on an @claude mention).
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned, labeled]
+
+jobs:
+  claude:
+    # Only spin up when someone (or Pulse) actually mentions @claude — normal issues
+    # and comments never trigger a run.
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

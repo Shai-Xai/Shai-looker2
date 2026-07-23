@@ -1,0 +1,125 @@
+# Render Blueprint for Howler : Pulse
+# Render → New → Blueprint → connect this repo. Review, then set the secret
+# env vars (marked sync:false) in the dashboard and deploy.
+#
+# Notes:
+#  - A persistent disk holds the SQLite database (DATA_DIR), so data survives
+#    redeploys. This requires a paid instance type (free tier has no disk and
+#    spins down).
+#  - Run ONE instance (SQLite is single-file). Don't scale to >1 until you
+#    migrate storage to Postgres (see DEPLOY.md).
+#  - Render injects PORT automatically; the server already reads process.env.PORT.
+services:
+  - type: web
+    name: howler-pulse
+    runtime: node
+    plan: starter
+    branch: main
+    # Root install is production-only (the server needs no devDeps). Installing
+    # root devDeps pulls Playwright, which downloads a ~150MB browser on every
+    # deploy — the slow build. The client build DOES need its devDeps (Vite), so
+    # keep --include=dev there.
+    # The litestream download is best-effort — if GitHub is unreachable the
+    # build continues and start.sh falls back to plain node (no replication).
+    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build && (curl -fsSL https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar xz || echo "litestream download failed — continuing without")
+    # Continuous SQLite replication to R2 when BACKUP_S3_* is set (seconds of
+    # data loss instead of last-night's snapshot) — scripts/litestream/README.md.
+    startCommand: bash scripts/litestream/start.sh
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1
+    disk:
+      name: pulse-data
+      mountPath: /var/lib/pulse
+      # 5GB: the DB grows with settlements/attachments/audit tables, and the
+      # nightly backup needs transient headroom (a raw DB copy + retained gzips)
+      # on the SAME disk. 1GB was marginal; server/diskGuard.js alerts ops at
+      # 80% and fails /health at 95% so a filling disk is loud, not silent.
+      # (Render disks grow in place but can never shrink.)
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/lib/pulse
+      - key: SESSION_SECRET
+        generateValue: true        # Render generates a strong secret once
+      - key: MASTER_KEY
+        generateValue: true        # encrypts integration secrets at rest (server/secretbox.js).
+                                    # KEEP A COPY: restoring a backup needs this exact value.
+      - key: ADMIN_EMAIL
+        sync: false                # set in dashboard (first-boot admin login)
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOOKER_BASE_URL
+        sync: false                # or set later in Admin → Integrations
+      - key: LOOKER_CLIENT_ID
+        sync: false
+      - key: LOOKER_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Off-box DB backups (server/backup.js). Local nightly snapshots always run;
+      # set these to also copy them off the disk (Cloudflare R2 / S3 / B2) — the
+      # disk is a single point of failure until you do.
+      - key: BACKUP_S3_ENDPOINT
+        sync: false               # e.g. https://<accountid>.r2.cloudflarestorage.com
+      - key: BACKUP_S3_BUCKET
+        sync: false
+      - key: BACKUP_S3_ACCESS_KEY
+        sync: false
+      - key: BACKUP_S3_SECRET_KEY
+        sync: false
+      # Internal ops alerts (server/ops.js): a Howler-internal Slack incoming
+      # webhook — backup/digest/mailer failures page a human instead of only
+      # writing to the log stream.
+      - key: OPS_SLACK_WEBHOOK_URL
+        sync: false
+
+  # ── STAGING ────────────────────────────────────────────────────────────────
+  # A second, isolated copy for testing deploys before they reach customers.
+  # Deploys from the `staging` branch; has its OWN disk/database, its OWN secrets,
+  # and — critically — OUTBOUND_DISABLED=1, which hard-kills all email/SMS/push/
+  # Slack sending so a test run (or a scheduler tick) can NEVER reach a real
+  # customer, even if you load production-like data. Workflow: merge to `staging`
+  # → auto-deploys here → test → then merge `staging` → `main` for production.
+  # See docs/STAGING.md. (This is a second paid instance + disk — extra cost.)
+  - type: web
+    name: howler-pulse-staging
+    runtime: node
+    plan: starter
+    branch: staging
+    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1
+    disk:
+      name: pulse-data-staging
+      mountPath: /var/lib/pulse
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production          # still 'production' so cookies are Secure behind Render HTTPS
+      - key: OUTBOUND_DISABLED
+        value: "1"                 # SAFETY: no email/SMS/push/Slack ever leaves staging
+      - key: DATA_DIR
+        value: /var/lib/pulse
+      - key: SESSION_SECRET
+        generateValue: true        # staging's own — separate from production
+      - key: MASTER_KEY
+        generateValue: true        # staging's own secrets key (its DB is separate)
+      - key: ADMIN_EMAIL
+        sync: false                # a staging-only admin login
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOOKER_BASE_URL
+        sync: false                # ideally a read-only Looker connection
+      - key: LOOKER_CLIENT_ID
+        sync: false
+      - key: LOOKER_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false                # a separate (or spend-capped) key is wise for staging
+      # Leave BACKUP_S3_* and OPS_SLACK_WEBHOOK_URL UNSET on staging — no off-box
+      # backups or ops pages needed for a throwaway environment.

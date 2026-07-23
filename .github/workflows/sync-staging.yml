@@ -1,0 +1,101 @@
+# Keep the staging branch current with main.
+#
+# The two-environment deploy (see CLAUDE.md "Git") assumes staging = main + the
+# tickets currently being verified there. Work also lands on main directly
+# (interactive sessions, production-targeted tickets), so without this sync
+# staging drifts behind — and a ticket built on stale staging can't see recent
+# features (it'll rebuild things that already exist). This workflow merges main
+# into staging on every push to main.
+#
+# SELF-HEALING (2026-07-23): a merge conflict no longer just fails red. The
+# clean merge is still plain git; on conflict, the Claude action resolves it in
+# THIS run (keep-both doctrine, full test suite must pass before it pushes),
+# and a final verification step only lets the run go green if origin/staging
+# really contains origin/main afterward. If Claude can't resolve it or tests
+# fail, the run still FAILS LOUDLY (red → the workflow_run webhook → the
+# ops-triage ledger) and the manual recipe applies:
+#   git checkout staging && git merge main   (resolve keep-both, test, push)
+# Both manual resolutions on 2026-07-23 were this exact procedure — that
+# experience is encoded in the self-heal prompt below.
+name: Sync staging with main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: sync-staging
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+      - name: Merge main into staging (fast path)
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge origin/main --no-edit -m "Sync staging with main (auto)"; then
+            git push origin staging
+            echo "conflicted=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "conflicted=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Merge conflict — handing to the Claude action to resolve (self-heal)."
+          fi
+      - name: Self-heal the conflict (Claude resolves, tests, pushes)
+        if: steps.merge.outputs.conflicted == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--allowedTools "Bash(git:*),Bash(npm:*),Bash(node:*),Edit,Write,Read,Grep,Glob" --max-turns 80'
+          prompt: |
+            You are resolving a merge conflict between origin/main and the
+            staging branch of this repo (Howler Pulse). The checkout is already
+            on staging with full history; git user.name/email are configured.
+            Read CLAUDE.md first for conventions.
+
+            Do exactly this:
+            1. git merge origin/main (it will conflict — that is why you are here).
+            2. Resolve EVERY conflict with the keep-both doctrine: staging
+               carries product-board tickets mid-verification, main carries
+               production work — both sides are legitimate features and NEITHER
+               may be dropped. Known hot spots from previous conflicts:
+               - docs/PRODUCT_OVERVIEW_SALES.md: the "Last updated" header line
+                 (merge both sides' feature mentions into one line, newest
+                 first) and the Changelog section (keep BOTH entries, newest
+                 first — they are independent inserts at the same spot).
+               - server/index.js: module mount lines in the composition root —
+                 keep both sides' mounts as separate statements.
+            3. Run npm ci and the full test suite (npm test). It MUST pass. If
+               a resolution broke something, fix the resolution — never skip,
+               delete or weaken a test.
+            4. Only when the suite is green: commit (message "Sync staging with
+               main (auto-resolved by Claude)") and push to origin staging.
+
+            HARD RULES: never push to main or any other branch; never force
+            push; if you cannot resolve a conflict without guessing which
+            side's BEHAVIOUR to keep (the same logic changed differently on
+            both sides), or the suite will not go green, DO NOT push — stop
+            with a clear explanation instead; the verification step will fail
+            the run and a human takes over with your output as context.
+      - name: Verify staging now contains main (green only if truly synced)
+        if: steps.merge.outputs.conflicted == 'true'
+        run: |
+          git fetch origin main staging
+          if git merge-base --is-ancestor origin/main refs/remotes/origin/staging; then
+            echo "Self-heal complete — origin/staging contains origin/main."
+          else
+            echo "::error::Self-heal did not complete — resolve manually: git checkout staging && git merge main (keep both sides, run npm test, push)."
+            exit 1
+          fi
