@@ -26,9 +26,25 @@ module.exports = [
     ],
   },
 
+  // ── k6 load scripts — ESM, run inside k6's runtime (not Node) ────────────────
+  // *.k6.js files import from 'k6/...' and use k6 globals (__ENV). They parse as
+  // modules; without this block the CommonJS server config below claims them and
+  // ESLint dies with "'import' may appear only with sourceType: module" — the
+  // parse ERROR that turned the whole CI lint gate red on every push.
+  {
+    files: ['scripts/**/*.k6.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: { __ENV: 'readonly', __VU: 'readonly', __ITER: 'readonly', open: 'readonly' },
+    },
+    rules: { ...js.configs.recommended.rules, ...hygiene },
+  },
+
   // ── Server / tests / scripts — CommonJS, Node ────────────────────────────────
   {
     files: ['server/**/*.js', 'test/**/*.js', 'scripts/**/*.js', 'eslint.config.js'],
+    ignores: ['scripts/**/*.k6.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',

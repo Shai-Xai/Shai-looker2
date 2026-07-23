@@ -1,6 +1,14 @@
 # Pulse: The Experience Operating System
 **Team overview — what we're building, why, and how we'll deliver it**
 
+> **Status (23 Jul 2026):** this brief is from June and much of it has since
+> shipped — the Owl is live as a full agentic analyst (in-app chat, WhatsApp,
+> portal embed, Fan Owl), "CC the Owl" ingestion of inbound mail + attachments
+> works, and the inbox carries must-acknowledge announcements. The **Playbook**
+> (per-event task templates, `docs/specs/EVENT_TASKS_SPEC.md`) is the main
+> piece still to build. For the current state of the platform read
+> `PROJECT_OVERVIEW.md`; the vision below still stands.
+
 ---
 
 ## Where we are today

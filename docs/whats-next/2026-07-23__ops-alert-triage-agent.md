@@ -5,6 +5,61 @@ watch the alerts, decide which are legitimate bugs, file them on the product
 board with a suggested fix, in some cases fix them itself — and, down the line,
 review the code daily and flag bugs before they ever alert.
 
+## Shipped this session (Phase 1 — LIVE)
+- **`server/opsTriage.js`** — new disposable module: `ops_alerts` ledger table,
+  fingerprinting (UUIDs/req-refs/numbers normalised → one row per defect), the
+  AI triage pass grounded by grepping the server's OWN source for the
+  route/symbol in the alert, auto-filing bug tickets on the product board
+  (`source: 'ops'`, reporter "Pulse Ops Agent", pre-drafted title/summary),
+  ops-action notifications for billing/capacity/config, silence for noise.
+- **Rails, all live:** kill switch `ops_triage_enabled` (default on), cadence
+  `ops_triage_cadence_min` (default 30), daily cap `ops_triage_daily_cap`
+  (default 5 — extra bugs park as 'capped' and file next window without
+  re-classifying), one ticket per fingerprint forever (recurrences bump the
+  count), loop guard (its own alerts are never ledgered), failed
+  classifications stay 'new' and retry.
+- **`server/ops.js`** — `onAlert(fn)` listener hook (fires per occurrence,
+  BEFORE Slack throttling, isolated so it can never break alerting) +
+  `notify(text)` (unthrottled, un-⚠'d channel post for triage verdicts).
+- **`server/tickets.js`** — `source: 'ops'` accepted alongside widget/owl.
+- **Admin API** (board is the UI; these power a future ledger view):
+  `GET /api/admin/ops-alerts`, `POST /api/admin/ops-alerts/run` (force a pass),
+  `POST /api/admin/ops-alerts/:id/ignore` / `:id/reopen`.
+- **Auditability:** `OPS_TRIAGE_SYSTEM` exposed via `promptRegistry()` →
+  Admin → AI "Everything the AI is told".
+- **Tests:** `test/opsTriage.test.js` (12) — fingerprint collapse on the real
+  journeys-alert messages from 2026-07-22, ticket filing, no-duplicate
+  recurrence, billing→action-not-ticket, noise silence, cap parking + no
+  re-classify, kill switch, loop guard, code grounding.
+
+## Shipped this session (Phase 2 — LIVE)
+- **Auto-dispatch tier** (`ops_triage_dispatch`: off | plan | **build**, default
+  `plan`): a HIGH-CONFIDENCE bug ticket is also sent straight to GitHub for
+  Claude at filing time. Plan tier → Claude comments a diagnosis + plan and
+  waits for a human "@claude go ahead". Build tier → high-severity AND
+  high-confidence bugs go straight to a build; everything else still plans.
+  Auto-dispatch ALWAYS targets `staging`; capped at `ops_triage_dispatch_cap`
+  per day (default 3, 0 = never); fail-soft (a GitHub error leaves a normal
+  inbox ticket); only ever fires at filing time — re-dispatch stays human.
+- **The diagnosis IS the brief:** ops tickets' `ai_summary` now carries the
+  full spec (raw alert, occurrence pattern, code-grounded hypothesis,
+  acceptance criteria incl. "add a regression test") — `claudeBrief()` leads
+  with it, so a dispatched build starts from the diagnosis, not the bare error.
+- **`tickets.js`:** the GitHub-issue route's core extracted as
+  `sendTicketToGitHub(ticketId, { mode, target, actorEmail })` (route + agent
+  share one path); returned from `mount` alongside `createTicket`.
+- **Ops tickets can't jam the release train:** the machine reporter can never
+  log in, so on `source: 'ops'` tickets ANY admin may pass the staging/shipped
+  verdict (human tickets keep the strict reporter-only rule); reporter
+  notifications (push/email/inbox) are skipped for ops tickets — no mail to
+  `ops-triage@pulse.internal`.
+- **Bug fix caught by tests:** numeric settings now honour an explicit 0
+  (`Number('0') || 5` was silently turning "cap 0 = never" into the default).
+- **Tests:** +6 dispatch-tier tests in `test/opsTriage.test.js` (tier gating,
+  confidence gate, build-vs-plan split, dispatch cap, fail-soft, parked rows
+  ride the tier) and new `test/ticketsDispatch.test.js` (8: plan/build issue
+  bodies, alreadyLinked rail, needsConfig, ops-verdict rules).
+
 ## Why this is close, not far
 
 The two ends of the loop already exist:

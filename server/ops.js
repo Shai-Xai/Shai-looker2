@@ -17,6 +17,12 @@ let db = null;
 const THROTTLE_MS = 15 * 60 * 1000;
 const recent = new Map(); // kind -> { at, suppressed }
 
+// Alert listeners (the ops-triage ledger subscribes here). Called for EVERY
+// alert occurrence — before Slack throttling — so counts stay honest. A
+// listener must never break alerting: each call is isolated in its own catch.
+const listeners = [];
+function onAlert(fn) { listeners.push(fn); }
+
 function init(deps) { db = deps.db; }
 
 const webhook = () =>
@@ -29,6 +35,7 @@ const isConfigured = () => !!webhook();
 function alert(kind, message) {
   const text = `⚠️ [pulse:${kind}] ${String(message || '').slice(0, 1500)}`;
   console.error(text); // always keep the log-stream trail
+  for (const fn of listeners) { try { fn(kind, String(message || '')); } catch { /* a listener must never break alerting */ } }
   const url = webhook();
   if (!url) return;
 
@@ -46,6 +53,23 @@ function alert(kind, message) {
     body: JSON.stringify({ text: body }),
     signal: AbortSignal.timeout(10000),
   }).catch((e) => console.error('[ops] alert delivery failed:', e.message));
+}
+
+// Informational post to the ops channel — NOT an alert: no ⚠ framing, no
+// throttle, not fed to alert listeners (so the triage ledger never records its
+// own verdicts). Used for triage outcomes ("filed ticket …", "billing action …").
+// Fire-and-forget like alert(); unconfigured → log stream only.
+function notify(text) {
+  const line = String(text || '').slice(0, 1500);
+  console.log(`[ops] ${line}`);
+  const url = webhook();
+  if (!url) return;
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: line }),
+    signal: AbortSignal.timeout(10000),
+  }).catch((e) => console.error('[ops] notify delivery failed:', e.message));
 }
 
 // Deliberate test send: bypasses the throttle and AWAITS the Slack response so
@@ -76,4 +100,4 @@ function mount(app, { auth }) {
   return module.exports;
 }
 
-module.exports = { init, mount, alert, isConfigured, sendTest, _recent: recent };
+module.exports = { init, mount, alert, notify, onAlert, isConfigured, sendTest, _recent: recent };

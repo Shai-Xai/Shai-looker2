@@ -39,6 +39,13 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  // Pre-submit AI review: 'compose' → (AI tidies the report) → 'review' where the
+  // reporter edits the drafted ticket before it's filed. If the preview fails or
+  // AI is off, we submit directly — a report is never blocked on the drafter.
+  const [step, setStep] = useState('compose');
+  const [aiTitle, setAiTitle] = useState('');
+  const [aiSummary, setAiSummary] = useState('');
+  const [reviewed, setReviewed] = useState(false);
   const [minimized, setMinimized] = useState(false); // collapsed to a pill so the screen shows
   // Which dashboard tile this is about (published by the dashboard view). Empty =
   // whole screen / not tile-specific. `tiles` is the pickable list for this screen.
@@ -77,6 +84,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
   function reset() {
     setType('bug'); setTitle(''); setBody(''); setUrgency('normal'); setFiles([]);
     setTileId(''); setBusy(false); setDone(false); setError(''); setMinimized(false);
+    setStep('compose'); setAiTitle(''); setAiSummary(''); setReviewed(false);
   }
   const tileName = () => (tiles.find((t) => t.id === tileId) || {}).title || '';
 
@@ -154,12 +162,35 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
   }
 
   function handleClose() { stopRecording(); onClose?.(); }
+  // Step 1: the AI tidies the raw report into the ticket the team will work
+  // from, and the reporter gets to see + edit it BEFORE it's filed. Fail-soft:
+  // no draft (AI off / error) → submit directly, exactly the old behaviour.
   async function submit() {
     if (!body.trim() && !title.trim()) { setError('Add a title or a description.'); return; }
     if (recording) stopRecording();
     setBusy(true); setError('');
     try {
-      await api.submitTicket({ type, title: title.trim(), body: body.trim(), urgency, screen, tileId, tileName: tileName(), attachments: files.map((f) => ({ name: f.name, mime: f.mime, data: f.data })) });
+      const d = await api.previewTicket({ type, title: title.trim(), body: body.trim(), screen, tile: tileName() });
+      if (d && (d.aiTitle || '').trim() && (d.aiSummary || '').trim()) {
+        setAiTitle(d.aiTitle); setAiSummary(d.aiSummary);
+        setStep('review'); setBusy(false);
+        return;
+      }
+    } catch { /* preview is best-effort — fall through to a direct submit */ }
+    await sendFinal(false);
+  }
+
+  // Step 2 (or the direct path): actually file it. withDraft = the reporter
+  // reviewed/edited the AI draft, which then lands as the ticket's canonical spec.
+  async function sendFinal(withDraft) {
+    setBusy(true); setError('');
+    try {
+      await api.submitTicket({
+        type, title: title.trim(), body: body.trim(), urgency, screen, tileId, tileName: tileName(),
+        ...(withDraft && aiSummary.trim() ? { aiTitle: aiTitle.trim(), aiSummary: aiSummary.trim() } : {}),
+        attachments: files.map((f) => ({ name: f.name, mime: f.mime, data: f.data })),
+      });
+      setReviewed(!!withDraft);
       setDone(true);
       onSubmitted?.();
     } catch (e) {
@@ -224,15 +255,48 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
               <div style={{ fontSize: 40, marginBottom: 10 }}>🙌</div>
               <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Thank you — logged.</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 18 }}>
-                {type === 'bug'
-                  ? 'The team can see it on the product board and will pick it up.'
-                  : "We're turning your note into a clear ticket now — the team will review it on the board."}
+                {reviewed
+                  ? 'It’s on the board exactly as you approved it — the team will pick it up.'
+                  : type === 'bug'
+                    ? 'The team can see it on the product board and will pick it up.'
+                    : "We're turning your note into a clear ticket now — the team will review it on the board."}
               </p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                 <button onClick={reset} style={btnGhost}>Report another</button>
                 <button onClick={handleClose} style={btnPrimary}>Done</button>
               </div>
             </div>
+          ) : step === 'review' ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <h3 style={{ fontSize: 18, fontWeight: 700 }}>Review your ticket</h3>
+                <button onClick={handleClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--muted)', cursor: 'pointer', lineHeight: 1 }}>×</button>
+              </div>
+              <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+                We tidied your report into the ticket the team will work from. Edit anything — what you send is what they see.
+              </p>
+
+              <label style={lbl}>Title</label>
+              <input className="fld" value={aiTitle} onChange={(e) => setAiTitle(e.target.value)}
+                style={{ width: '100%', marginBottom: 12, boxSizing: 'border-box' }} />
+
+              <label style={lbl}>Ticket</label>
+              <textarea className="fld" value={aiSummary} onChange={(e) => setAiSummary(e.target.value)}
+                rows={isMobile ? 10 : 13}
+                style={{ width: '100%', marginBottom: 8, boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.45, fontSize: 13.5 }} />
+              <p style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 14 }}>
+                Your original words{files.length ? ' and attachments' : ''} travel with the ticket too.
+              </p>
+
+              {error && <p style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 10 }}>{error}</p>}
+
+              <div style={{ display: 'flex', gap: 8, flexDirection: isMobile ? 'column-reverse' : 'row' }}>
+                <button onClick={() => { setStep('compose'); setError(''); }} disabled={busy} style={{ ...btnGhost, flex: isMobile ? 'none' : '0 0 auto' }}>← Edit report</button>
+                <button onClick={() => sendFinal(true)} disabled={busy} style={{ ...btnPrimary, flex: 1, opacity: busy ? 0.6 : 1 }}>
+                  {busy ? 'Sending…' : 'Send report'}
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -342,7 +406,7 @@ export default function ReportForm({ open, onClose, screen, onSubmitted, prefill
               {error && <p style={{ color: 'var(--brand)', fontSize: 13, marginBottom: 10 }}>{error}</p>}
 
               <button onClick={submit} disabled={busy} style={{ ...btnPrimary, width: '100%', opacity: busy ? 0.6 : 1 }}>
-                {busy ? 'Sending…' : 'Submit'}
+                {busy ? 'Tidying it into a ticket…' : 'Continue'}
               </button>
             </>
           )}
