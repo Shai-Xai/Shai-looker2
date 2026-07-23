@@ -4,7 +4,7 @@
 > what Pulse does and the value to pitch. For the technical/architecture view see
 > `PROJECT_OVERVIEW.md`; for the vision see `docs/EXPERIENCE_OS_BRIEF.md`.
 >
-> **Last updated:** 2026-07-23 (⏸️ Pause all notifications: one switch in Settings → Notifications silences every email & push for a chosen period — the "on leave" mode · 🗞️ Product-board daily summary: a once-a-day recap of what's new, what moved and what's waiting for review, with subscribers managed right on the board · 🗓 Digests & briefings: post-event cool-down + computed data freshness — finished events stop being re-reviewed · ⏰ Daily review reminders: a report waiting on your approval — shipped or on staging — re-nudges you every 24h on email, push and inbox until you approve or send it back · 📝 Report a bug: review the AI-tidied ticket before it sends — edit the title and spec so what lands on the board is exactly what you approved · previously 2026-07-22: Report a bug: record the screen — or minimize the form — without losing what you've typed · 📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
+> **Last updated:** 2026-07-23 (🖼️ Event Media pilot: an event's app media — header image/video, logo — uploaded & published in Pulse, overlaid live by the Howler app with no app release · ⏸️ Pause all notifications: one switch in Settings → Notifications silences every email & push for a chosen period — the "on leave" mode · 🗞️ Product-board daily summary: a once-a-day recap of what's new, what moved and what's waiting for review, with subscribers managed right on the board · 🗓 Digests & briefings: post-event cool-down + computed data freshness — finished events stop being re-reviewed · ⏰ Daily review reminders: a report waiting on your approval — shipped or on staging — re-nudges you every 24h on email, push and inbox until you approve or send it back · 📝 Report a bug: review the AI-tidied ticket before it sends — edit the title and spec so what lands on the board is exactly what you approved · previously 2026-07-22: Report a bug: record the screen — or minimize the form — without losing what you've typed · 📣 Report updates by email at every stage: reporters get a branded email each time their bug/improvement/idea moves forward — triage, accepted, building, testing, live or declined — with a self-service opt-out under Settings → Notifications · previously 2026-07-21: 🗺️ Map Studio: self-service event maps published straight into the Howler app's map WebView · previously 2026-07-20: 🛡 Social moderation phase 1: banned lists + held-for-review enforcement on every fan write, review-queue API, post reports · 📲 Engage → App: Community suite gets its own section — Posts · Channels · Communities · Share links tabs, composer-first Channels, App Analytics rename, CTA buttons on organiser comment replies, app-style mobile posting · previously 2026-07-19: 📌 Pins across feed + chat: organiser pins for everyone, personal pins for fans, shared pins in fan groups · previously 2026-07-18: 📰 Community feed spike: Howler-native communities + feed posts managed in Pulse, served to the app — the Social+ replacement begins · 🦉📱 Fan Owl super-app groundwork: "Allow in Howler app" switch + app chat mode with native-checkout handoff · ◇ Meta agency path: client approves one partner-share, Howler's house token does the rest · guide Copy/Share buttons · previously 2026-07-17: 📋 Fan surveys: post-event feedback answered in the Howler app, results in Pulse · previously 2026-07-16: Campaigns: test send now matches the preview for drip sequences · 🔍 Inspect query is now an edit-mode tool with a Looker-Explore-style view — fields-in-use rail, filter chips, bar visualization and the results grid · Download as branded PDF: shareable dashboard export carrying the client's logo, colours and active filters/date range · 🦉 Fan Owl: docked side panel (page shifts over) · desktop main/side chat views · half-drawer suggestions · homepage hero chat · persistent ask bar · quick-nav button modes · widget theming (brand-inherit + light/dark) · ticket-site catalogue reader · fan-language auto-switch · per-site personality (face, voice, dos & don'ts, tips) + in-chat site navigation + uploaded catalogue images · previously: 🎯 App-audience groups → Engage segments · 🎟 App audience ↔ buyers email join) · **Maintained:** updated as features ship (see the
 > Changelog at the bottom). If a date here is stale, check the Changelog for the
 > latest entry.
 >
@@ -1016,6 +1016,30 @@ attendees' phones on the next open.
 - Per-client switch: **Admin → Product → Flags → Map Studio** (off by default while
   in beta; off also stops serving that client's published maps).
 
+## 13b. Event Media — the app's event look, managed in Pulse  🧪
+The Phase-1 pilot of managing event **setup** from Pulse: upload the media the
+Howler app shows for an event — the **header image**, **header video** and **event
+logo** — preview it, and hit **Publish**. The app overlays these on the event's
+Howler data the next time a fan opens it: **no app update, no app-store release,
+no Howler-admin round-trip**. Anything not published in Pulse simply falls back to
+the event's existing Howler media, so there's zero risk in trying it.
+- **Change the look live** 🧪 — swap the header image mid-campaign (or mid-event)
+  and phones pick it up within a minute of publish.
+- **Self-service both sides** 🧪 — Admin → client → **🖼️ Event Media** for Howler;
+  the client team does the same at **Event Media** in their sidebar (permission:
+  `map.manage`).
+- **Draft-safe** 🧪 — uploads are drafts until published; the app only ever sees
+  the published set.
+- Needs the event's **Howler event ID** set on the suite (paste the event URL in
+  Admin → client → events) — the same link Map Studio uses.
+- Per-client switch: **Admin → Product → Flags → Event media** (off by default
+  while in beta; off also stops serving that client's published assets — the app
+  falls back instantly). Requires a Howler-app build that checks Pulse for event
+  assets (staging pilot first).
+- The roadmap from here: config-driven asset checklists per event (lineup photos,
+  ticket/product images, info-hub pages), copy editing, and a live phone-preview
+  editor — Pulse as the event's full presentation layer.
+
 ## 14. Pulse API & AI-agent access (MCP)  🧪
 **The pitch:** "Your Pulse data isn't locked in — read it from your own tools,
 or point an AI agent (like Claude) at it and ask questions in plain language."
@@ -1239,6 +1263,11 @@ see "The continuous comms loop" above.)*
 
 ## Changelog (newest first)
 
+- **2026-07-23** — **🖼️ Event Media (pilot)** 🧪: upload an event's app media — header
+  image, header video, logo — in Pulse and publish; the Howler app overlays it on the
+  event's Howler data with no app release (staging pilot; needs the suite's Howler event
+  ID + the **eventassets** flag; dual-surface: Admin → client → Event Media / client
+  **Event Media** page). Phase-1 of event setup moving into Pulse.
 - **2026-07-23** — **⏸️ Pause all notifications & 🗞️ board daily summary** ✅: two additions
   to keep the noise right. **Pause all notifications** (Settings → Notifications) silences
   every Pulse email and push for 1 week / 2 weeks / 1 month / until you resume — perfect for

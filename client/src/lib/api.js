@@ -1084,6 +1084,15 @@ export const api = {
   mapstudioAnalytics: (suiteId) => fetch(`/api/mapstudio/suites/${suiteId}/analytics`).then(json),
   mapstudioSetToken: (token) => fetch('/api/mapstudio/token', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).then(json),
 
+  // ── Event Media (per-event app assets → server/eventAssets.js) ──
+  eventAssetsEnabled: () => fetch('/api/eventassets/enabled').then(json), // which of my entities can use it
+  eventAssetsSuites: (entityId) => fetch(`/api/eventassets/entities/${entityId}/suites`).then(json),
+  eventAssetsGet: (suiteId) => fetch(`/api/eventassets/suites/${suiteId}`).then(json),
+  eventAssetsUpload: (suiteId, b) => fetch(`/api/eventassets/suites/${suiteId}/media`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventAssetsSetSlot: (suiteId, slot, b) => fetch(`/api/eventassets/suites/${suiteId}/slots/${slot}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json),
+  eventAssetsPublish: (suiteId) => fetch(`/api/eventassets/suites/${suiteId}/publish`, { method: 'POST' }).then(json),
+  eventAssetsUnpublish: (suiteId) => fetch(`/api/eventassets/suites/${suiteId}/unpublish`, { method: 'POST' }).then(json),
+
   eventopsEnabled: () => fetch('/api/eventops/enabled').then(json), // which of my entities have it on
   eventopsSetEnabled: (entityId, enabled) => fetch(`/api/eventops/entities/${entityId}/enabled`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }).then(json),
   eventopsGetEnabled: (entityId) => fetch(`/api/eventops/entities/${entityId}/enabled`).then(json),
