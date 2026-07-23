@@ -358,10 +358,34 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     return myTicketRow(getTicket(id));
   }
 
+  // Pre-submit AI preview: turn the raw report into the structured ticket the
+  // team (and a dispatched Claude build) will actually work from, and hand it
+  // BACK to the reporter to review/edit BEFORE it's filed — previously the
+  // redraft happened in the background after submit and the reporter never saw
+  // it. Best-effort by design: AI unconfigured or erroring returns empty fields
+  // and the widget submits the old way (a report must never be blocked on AI).
+  // Rate-limited per user — this is an LLM call on a public-to-all-users path.
+  const previewLimit = require('./ratelimit')({ windowMs: 60_000, max: 6, by: 'user', scope: 'ticket-preview', message: 'Give the drafter a moment and try again.' });
+  app.post('/api/my/tickets/preview', bigJson, auth.requireAuth, requireOn, previewLimit, async (req, res) => {
+    const b = req.body || {};
+    if (!String(b.body || '').trim() && !String(b.title || '').trim()) return res.status(400).json({ error: 'Add a title or a description.' });
+    try {
+      const d = await draftTicket({ type: TYPES.includes(b.type) ? b.type : 'bug', title: clamp(b.title, 200), body: clamp(b.body, 8000), screen: clamp(b.screen, 300), tile: clamp(b.tile, 300) });
+      res.json({ aiTitle: d.title, aiSummary: d.summary });
+    } catch (e) {
+      console.error('[tickets] preview draft failed:', e.message);
+      res.json({ aiTitle: '', aiSummary: '' }); // fail-soft — the widget submits without a review step
+    }
+  });
+
   app.post('/api/my/tickets', bigJson, auth.requireAuth, requireOn, (req, res) => {
     const b = req.body || {};
     try {
-      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, tileId: b.tileId, tileName: b.tileName, source: 'widget' });
+      // aiTitle/aiSummary: the reporter-approved (possibly edited) preview draft —
+      // same trust level as body (their own report), and it makes the ticket land
+      // pre-drafted (ai_status 'ready') so the background redraft is skipped and
+      // what the reporter approved is exactly what the board shows.
+      const ticket = createTicket({ user: req.user, type: b.type, title: b.title, body: b.body, screen: b.screen, urgency: b.urgency, entityId: b.entityId, attachments: b.attachments, tileId: b.tileId, tileName: b.tileName, source: 'widget', aiTitle: b.aiTitle, aiSummary: b.aiSummary });
       res.status(201).json({ ticket });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });

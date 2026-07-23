@@ -143,3 +143,34 @@ test("verdict on a NORMAL ticket still requires the reporter — admins can't ov
   const r = await call('POST /api/my/tickets/:id/verdict', { params: { id: t.id }, user: admin, body: { verdict: 'approved' } });
   assert.equal(r.status, 403, 'the reporter-owns-the-verdict rule holds for human tickets');
 });
+
+// ── Pre-submit AI preview (reporter reviews the redraft BEFORE it files) ──────
+test('preview is fail-soft: AI unavailable returns empty fields, never an error', async () => {
+  const ent = h.makeEntity('Preview Co', 'preview-org');
+  const client = h.makeClient(`preview-${Date.now()}@test.local`, [ent.id]);
+  const r = await call('POST /api/my/tickets/preview', { _body: true, params: {}, user: client, body: { type: 'bug', title: 'Broken thing', body: 'It broke' }, headers: {} });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json, { aiTitle: '', aiSummary: '' }, 'widget falls back to a direct submit');
+});
+
+test('preview rejects an empty report', async () => {
+  const ent = h.makeEntity('Preview2 Co', 'preview2-org');
+  const client = h.makeClient(`preview2-${Date.now()}@test.local`, [ent.id]);
+  const r = await call('POST /api/my/tickets/preview', { _body: true, params: {}, user: client, body: {}, headers: {} });
+  assert.equal(r.status, 400);
+});
+
+test('submit with a reviewed draft lands pre-drafted (ai_status ready, reporter-approved text)', async () => {
+  const ent = h.makeEntity('Draft Co', 'draft-org');
+  const client = h.makeClient(`draft-${Date.now()}@test.local`, [ent.id]);
+  const r = await call('POST /api/my/tickets', {
+    _body: true, params: {}, user: client, headers: {},
+    body: { type: 'bug', title: 'raw title', body: 'raw words', aiTitle: 'Polished title', aiSummary: '## Spec\nThe polished, reporter-edited version.' },
+  });
+  assert.equal(r.status, 201);
+  const row = sql.prepare('SELECT * FROM tickets WHERE id=?').get(r.json.ticket.id);
+  assert.equal(row.ai_status, 'ready', 'background redraft skipped');
+  assert.equal(row.ai_title, 'Polished title');
+  assert.match(row.ai_summary, /reporter-edited/);
+  assert.equal(row.body, 'raw words', 'original words preserved alongside');
+});
