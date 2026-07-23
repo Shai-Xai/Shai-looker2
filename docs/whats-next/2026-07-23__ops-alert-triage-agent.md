@@ -100,6 +100,19 @@ review the code daily and flag bugs before they ever alert.
   (keep Pull requests) → Save. Until then GitHub simply doesn't send the
   events; everything else is live and waiting.
 
+## Shipped this session (self-healing staging sync)
+- `.github/workflows/sync-staging.yml`: a merge conflict no longer just fails
+  red. Fast path unchanged (plain git merge + push). On conflict, the Claude
+  action resolves it IN the same run — keep-both doctrine with the two known
+  hot spots (sales-overview header/changelog, index.js mounts) encoded from
+  the 2026-07-23 manual resolutions — and may only push after the FULL test
+  suite passes. A final verification step (`git merge-base --is-ancestor`)
+  lets the run go green only if origin/staging truly contains origin/main;
+  Claude stuck or tests red → the run still fails loudly → workflow_run
+  webhook → ops-triage ledger → the manual recipe. Hard rules in the prompt:
+  staging pushes only, no force push, stop-don't-guess when both sides changed
+  the same BEHAVIOUR differently.
+
 ## Why this is close, not far
 
 The two ends of the loop already exist:
