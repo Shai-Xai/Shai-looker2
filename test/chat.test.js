@@ -244,6 +244,37 @@ test('portal reply: organiser message quotes a fan message via parentId', async 
   assert.equal(wrong.code, 400);
 });
 
+test('SSE doorbell: writes in the channel ping subscribed streams', async () => {
+  const writes = [];
+  const streamRes = {
+    set() { return streamRes; },
+    flushHeaders() {},
+    write(s) { writes.push(s); return true; },
+    status() { return streamRes; },
+    json() { return streamRes; },
+    end() {},
+  };
+  const streamReq = { params: { id: state.main.id }, query: {}, body: {}, ip: '9.9.9.9', headers: { authorization: 'Bearer tok-661779' }, on: () => {} };
+  for (const h of routes['GET /api/app/social/chat/channels/:id/stream']) {
+    let nextCalled = false;
+    await h(streamReq, streamRes, () => { nextCalled = true; });
+    if (!nextCalled) break;
+  }
+  assert.ok(writes.some((w) => w.includes(': connected')));
+  const changes = () => writes.filter((w) => w.includes('event: change')).length;
+
+  // Fan message → ding. Portal reply → ding. Broadcast → ding (via each channel).
+  await call('POST /api/app/social/chat/channels/:id/messages', { token: 'tok-662076', params: { id: state.main.id }, body: { text: 'is the gate open yet?' } });
+  assert.equal(changes(), 1);
+  await call('POST /api/admin/entities/:entityId/social/chat/channels/:id/messages', { user: admin, params: { entityId: entity.id, id: state.main.id }, body: { text: 'Opens 14:00!' } });
+  assert.equal(changes(), 2);
+  await call('POST /api/admin/entities/:entityId/social/chat/broadcast', { user: admin, params: { entityId: entity.id }, body: { eventId: EVENT, text: 'Doorbell broadcast' } });
+  assert.equal(changes(), 3);
+  // A write in a DIFFERENT channel does not ping this stream.
+  await call('POST /api/app/social/chat/channels/:id/messages', { token: 'tok-661779', params: { id: state.lineup.id }, body: { text: 'other room' } });
+  assert.equal(changes(), 3);
+});
+
 test('flag off / kill switch hide everything', async () => {
   setFlag(entity.id, 'community.chat', 'off');
   const list = await call('GET /api/app/social/chat/channels', { token: 'tok-661779', query: { eventId: EVENT } });
