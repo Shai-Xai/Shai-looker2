@@ -188,27 +188,8 @@ function meUser(user) {
 // step-up) → server/authRoutes.js. Owns loginGuard + mounts twofactor.
 require('./authRoutes').mount(app, { auth, db, mailer, rateLimit, ops, meUser }); require('./flags').mount(app, { db, auth }); require('./impersonate').mount(app, { db, auth }); const posthogApi = require('./posthog').mount(app, { db, auth, runLookerQuery, tickets: (eid, user) => appMatchApi.holdingsForScope(eid, user), ai: { keyFor: (eid) => anthropicKeyForEntity(eid), instructionsFor: (eid) => aiInstructionsFor(null, eid), meter: (kind, eid, fn) => require('./aiUsage').run({ entityId: eid || null, kind }, fn) } }); const socialplus = require('./socialplus').mount(app, { db, auth, appQuery: posthogApi }); const appMatchApi = require('./appMatch').mount(app, { db, auth, posthog: posthogApi, segments: () => segmentsApi }); require('./feeds').mount(app, { db, auth, runLookerQuery }); const appAudienceFor = async (eid) => { try { if (!require('./flags').enabled(eid, 'appanalytics') || !posthogApi.isConfigured()) return null; const ids = await posthogApi.eventIdsForEntity(eid); if (!ids.length) return null; const actives = await posthogApi.windowUniques(ids, { days: 28 }); if (!actives) return null; let communities = 0, members = 0; try { const t = socialplus.summary(eid).totals || {}; communities = Number(t.communities) || 0; members = Number(t.members) || 0; } catch { /* Social+ optional */ } return { actives, communities, members }; } catch { return null; } }; // 📲 app-audience fact for briefing + digest (flag-gated, fail-soft) · 🎟 app↔buyer email join (server/appMatch.js) + 📤 PostHog warehouse bridge feed (server/feeds.js) · 🚩 per-client feature flags + 👁 view-as-user (mounts EARLY so route gates register before feature modules) + 📱 App analytics via PostHog (posthogApi feeds the getAppAnalytics Owl tool) + 👥 Social+ in-app community analytics (both after flags so their appanalytics gates apply) → server/flags.js, server/posthog.js, server/socialplus.js
 
-// Per-user notification channel preferences (self-service).
-app.get('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
-  const u = auth.publicUser(db.getUser(req.user.id));
-  res.json({
-    email: u?.notifyEmail !== false, push: u?.notifyPush !== false, pushAvailable: push.isEnabled(),
-    types: db.getNotifyTypes(req.user.id), typeCatalog: db.NOTIFY_TYPES,
-    matrix: db.getNotifyMatrix(req.user.id), channels: db.NOTIFY_CHANNELS,
-  });
-});
-app.put('/api/my/notification-prefs', auth.requireAuth, (req, res) => {
-  const { email, push: wantPush, types, matrix } = req.body || {};
-  const next = db.setNotificationPrefs(req.user.id, {
-    ...(email != null ? { email: !!email } : {}),
-    ...(wantPush != null ? { push: !!wantPush } : {}),
-  });
-  // `matrix` is the per-channel layer; `types` kept for older clients (applied to
-  // every channel via the matrix's legacy seed).
-  if (types && typeof types === 'object') db.setNotifyTypes(req.user.id, types);
-  if (matrix && typeof matrix === 'object') db.setNotifyMatrix(req.user.id, matrix);
-  res.json({ ...(next || { email: true, push: true }), types: db.getNotifyTypes(req.user.id), matrix: db.getNotifyMatrix(req.user.id) });
-});
+// Per-user notification prefs (channels, categories, pause) → server/notifyPrefs.js
+db.mountNotifyPrefRoutes(app, { db, auth, push });
 
 // ─── Client self-service team management (team.manage) → server/team.js ────────
 // A client Owner manages their own team's logins + roles, scoped to their entity.

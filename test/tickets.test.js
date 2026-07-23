@@ -253,3 +253,56 @@ test('reminders wait for a deferred review ask, and adopt pre-feature tickets ge
   const row = db.db.prepare('SELECT review_asked_at FROM tickets WHERE id=?').get(t.id);
   assert.ok(row.review_asked_at, 'clock initialised');
 });
+
+// ── Pause all notifications + the daily board digest ───────────────────────────
+
+test('pausing notifications silences stage emails until resumed', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('pause1@test.local');
+  const staff = makeAdmin('pausedreporter@test.local');
+  const t = mod.createTicket({ user: staff, type: 'bug', title: 'Paused case', body: 'x' });
+
+  db.setNotifyPause(staff.id, new Date(Date.now() + 7 * 86400_000).toISOString());
+  setStatus(app, admin, t.id, { status: 'accepted' });
+  assert.equal(sent.length, 0, 'paused → no email');
+
+  db.setNotifyPause(staff.id, ''); // resume
+  setStatus(app, admin, t.id, { status: 'in_progress' });
+  assert.equal(sent.length, 1, 'resumed → emails again');
+});
+
+test('a pause in the past never sticks', () => {
+  const staff = makeAdmin('expiredpause@test.local');
+  db.setNotifyPause(staff.id, new Date(Date.now() - 60_000).toISOString());
+  assert.equal(db.getNotifyPause(staff.id), '', 'past date = not paused');
+  assert.ok(db.notifyTypeOn(staff.id, 'reports', 'email'), 'notifications flow');
+});
+
+test('the daily board digest goes to managed subscribers with new/moved/waiting sections', () => {
+  const { app, mod, sent } = mountTickets();
+  const admin = makeAdmin('dig1@test.local');
+  const sub = makeAdmin('subscriber@test.local');
+  const t = mod.createTicket({ user: admin, type: 'bug', title: 'Digest case', body: 'x' });
+  ship(app, admin, t.id);
+
+  // Subscribe via the board route; unknown emails are dropped.
+  const saved = invoke(app, 'PUT', '/api/admin/tickets/digest', { user: admin, body: { subscribers: [sub.email, 'ghost@nowhere.test'], hourUtc: 5 } });
+  assert.deepEqual(saved.body.subscribers, [sub.email]);
+  assert.equal(saved.body.hourUtc, 5);
+
+  const r = invoke(app, 'POST', '/api/admin/tickets/digest/send', { user: admin });
+  assert.equal(r.body.sent, 1);
+  const e = sent[sent.length - 1];
+  assert.equal(e.to, sub.email);
+  assert.match(e.subject, /Product board/);
+  assert.match(e.text, /New reports \(/);
+  assert.match(e.text, /Moved \(/);
+  assert.match(e.text, /Waiting for review \(/);
+  assert.match(e.text, /Digest case/, 'the new + waiting ticket is listed');
+
+  // A paused subscriber is skipped (email side).
+  db.setNotifyPause(sub.id, new Date(Date.now() + 86400_000).toISOString());
+  const r2 = invoke(app, 'POST', '/api/admin/tickets/digest/send', { user: admin });
+  assert.equal(r2.body.sent, 0, 'paused subscriber gets no digest email');
+  db.setNotifyPause(sub.id, '');
+});

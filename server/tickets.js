@@ -438,6 +438,27 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     res.json({ assignees });
   });
 
+  // ── Daily board digest: settings + send-now ────────────────────────────────────
+  // Who receives the daily board summary, and at what UTC hour. Subscribers are
+  // Pulse users (validated against the user table); managed right on the board.
+  // Declared before the :id route so "digest" isn't read as a ticket id.
+  app.get('/api/admin/tickets/digest', auth.requireAdmin, requireOn, (_req, res) => {
+    res.json({ ...digestCfg(), lastSent: db.getSetting('ticket_digest_last', '') });
+  });
+  app.put('/api/admin/tickets/digest', auth.requireAdmin, requireOn, (req, res) => {
+    const b = req.body || {};
+    const cur = digestCfg();
+    const subs = Array.isArray(b.subscribers)
+      ? [...new Set(b.subscribers.map((x) => String(x || '').trim().toLowerCase()).filter((x) => x && db.getUserByEmail(x)))]
+      : cur.subscribers;
+    const hour = Number.isInteger(b.hourUtc) && b.hourUtc >= 0 && b.hourUtc <= 23 ? b.hourUtc : cur.hourUtc;
+    db.setSetting('ticket_digest', JSON.stringify({ subscribers: subs.slice(0, 50), hourUtc: hour }));
+    res.json({ ...digestCfg(), lastSent: db.getSetting('ticket_digest_last', '') });
+  });
+  app.post('/api/admin/tickets/digest/send', auth.requireAdmin, requireOn, (_req, res) => {
+    res.json(sendBoardDigest());
+  });
+
   app.get('/api/admin/tickets/:id', auth.requireAdmin, requireOn, (req, res) => {
     const t = getTicket(req.params.id);
     if (!t) return res.status(404).json({ error: 'Ticket not found' });
@@ -910,6 +931,71 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   if (remindTimer.unref) remindTimer.unref();
   setTimeout(() => { try { sweepReviewReminders(); } catch (e) { console.error('[tickets] reminder sweep failed:', e.message); } }, 60_000); // shortly after boot
 
+  // ── Daily board digest ─────────────────────────────────────────────────────────
+  // A once-a-day summary of the whole board — what's NEW (last 24h), what MOVED
+  // (status changes, from the activity trail), what's WAITING for a reporter's
+  // review, and the lane counts — emailed + pushed to a subscriber list managed
+  // on the board itself. Each send rides the 'reports' preference, so a
+  // subscriber's opt-out or pause is honoured.
+  const digestCfg = () => {
+    let c = {};
+    try { c = JSON.parse(db.getSetting('ticket_digest', '') || '{}'); } catch { c = {}; }
+    const hour = Number.isInteger(c.hourUtc) && c.hourUtc >= 0 && c.hourUtc <= 23 ? c.hourUtc : 5; // default 05:00 UTC = 07:00 SAST
+    return { subscribers: Array.isArray(c.subscribers) ? c.subscribers : [], hourUtc: hour };
+  };
+  function buildBoardDigest() {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const all = sql.prepare('SELECT * FROM tickets').all();
+    const fresh = all.filter((t) => t.created_at >= since);
+    const moves = sql.prepare("SELECT c.body, t.type, t.title, t.ai_title FROM ticket_comments c JOIN tickets t ON t.id=c.ticket_id WHERE c.kind='status' AND c.created_at>=? ORDER BY c.created_at").all(since);
+    const waiting = all.filter((t) => (t.status === 'shipped' || t.status === 'staging') && !t.client_verdict && t.source !== 'ops');
+    const daysOld = (iso) => Math.max(0, Math.floor((Date.now() - new Date(iso || Date.now()).getTime()) / 86400_000));
+    const lines = [`🆕 New reports (${fresh.length})`];
+    if (!fresh.length) lines.push('  — none');
+    for (const t of fresh.slice(0, 12)) lines.push(`  • [${t.type}] “${label(t)}” — ${t.reporter_name || t.reporter_email || 'unknown'}`);
+    lines.push('', `🔀 Moved (${moves.length})`);
+    if (!moves.length) lines.push('  — none');
+    for (const m of moves.slice(0, 15)) lines.push(`  • “${m.ai_title || m.title}”: ${m.body}`);
+    lines.push('', `⏳ Waiting for review (${waiting.length})`);
+    if (!waiting.length) lines.push('  — none');
+    for (const t of waiting) lines.push(`  • “${label(t)}” — ${t.status === 'staging' ? 'on staging' : 'shipped'} ${daysOld(t.review_asked_at || t.updated_at)}d, on ${t.reporter_name || t.reporter_email}`);
+    const counts = {};
+    for (const t of all) counts[t.status] = (counts[t.status] || 0) + 1;
+    lines.push('', `📊 ${STATUSES.filter((k) => counts[k]).map((k) => `${STATUS_LABELS[k] || k}: ${counts[k]}`).join(' · ') || 'board is empty'}`);
+    const quiet = !fresh.length && !moves.length && !waiting.length;
+    return { title: quiet ? 'Product board: all quiet' : `Product board: ${fresh.length} new · ${moves.length} moved · ${waiting.length} awaiting review`, body: lines.join('\n'), quiet };
+  }
+  function sendBoardDigest() {
+    const cfg = digestCfg();
+    if (!cfg.subscribers.length) return { sent: 0 };
+    const d = buildBoardDigest();
+    let sent = 0;
+    for (const email of cfg.subscribers) {
+      const u = db.getUserByEmail(email);
+      if (!u) continue; // subscriber account was removed
+      try { push?.sendToUser?.(u.id, { title: d.title, body: String(d.body).slice(0, 180), url: '/admin', tag: 'ticket-digest' }, 'reports'); } catch (e) { console.error('[tickets] digest push failed:', e.message); }
+      if (!mailer?.isConfigured?.()) continue;
+      if (db.notifyTypeOn && !db.notifyTypeOn(u.id, 'reports', 'email')) continue; // opted out or paused
+      const { html, text } = mailer.notificationEmail({ title: d.title, body: d.body, ctaText: 'Open the board', ctaPath: '/admin', assetScope: 'platform' });
+      try { mailer.send({ to: email, subject: `🗞️ ${d.title}`, html, text, kind: 'ticket', entity: '' }); sent += 1; } catch (e) { console.error('[tickets] digest email failed:', e.message); }
+    }
+    return { sent, title: d.title };
+  }
+  // Fire once per day at the configured UTC hour; a date stamp makes this safe to
+  // check as often as we like (and across restarts).
+  function sweepBoardDigest() {
+    const cfg = digestCfg();
+    if (!cfg.subscribers.length) return;
+    const nowD = new Date();
+    if (nowD.getUTCHours() !== cfg.hourUtc) return;
+    const today = nowD.toISOString().slice(0, 10);
+    if (db.getSetting('ticket_digest_last', '') === today) return;
+    db.setSetting('ticket_digest_last', today);
+    sendBoardDigest();
+  }
+  const digestTimer = setInterval(() => { try { sweepBoardDigest(); } catch (e) { console.error('[tickets] digest sweep failed:', e.message); } }, 10 * 60_000);
+  if (digestTimer.unref) digestTimer.unref();
+
   // ── GitHub webhook: PR events → auto-update the linked ticket ──────────────────
   // A merged PR auto-Ships its ticket (and notifies the reporter); an opened PR
   // links it + nudges the board forward. Verified by HMAC (github.verifyWebhook)
@@ -1016,7 +1102,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
   });
 
   console.log('[tickets] Product board mounted', enabled() ? '(enabled)' : '(disabled — set tickets_enabled=1)');
-  return { draftInBackground, createTicket, sendTicketToGitHub, sweepReviewReminders };
+  return { draftInBackground, createTicket, sendTicketToGitHub, sweepReviewReminders, sendBoardDigest, buildBoardDigest };
 }
 
 module.exports = { mount, TICKET_DRAFT_SYSTEM };
