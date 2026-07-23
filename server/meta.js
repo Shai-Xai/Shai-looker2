@@ -72,8 +72,9 @@ function logSync({ entityId, segmentId, audienceId, received, added, removed, st
 // Howler's house system-user token (agency model): clients partner-share their
 // ad account to Howler's Business portfolio, and ONE platform-level token works
 // across all of them. A blank per-client token inherits it — a client's own
-// token, when set, always wins. Ads-scoped only: socialMetrics (Page/IG) keeps
-// its own per-client token on purpose (the house token carries no page perms).
+// token, when set, always wins. socialMetrics inherits it the same way for
+// organic Page/IG insights (needs the page scopes on the token + the Page/IG
+// partner-shared and assigned to the system user).
 function houseToken() { return ((db && db.getSetting ? db.getSetting('meta_house_token', '') : '') || '').trim(); }
 function connection(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};

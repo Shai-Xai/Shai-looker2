@@ -64,7 +64,10 @@ Howler's own credentials do the rest.
    make sure an app exists (Accounts → Apps; create a Business-type app at
    https://developers.facebook.com/apps if empty), then create system user
    `pulse` (Users → System users, role Admin) and generate a **never-expiring**
-   token with `ads_read` + `ads_management` + `business_management`.
+   token with `ads_read` + `ads_management` + `business_management` **plus the
+   page scopes** `pages_read_engagement`, `read_insights`, `instagram_basic`,
+   `instagram_manage_insights` — the same token then powers organic social
+   analytics for partner-shared Pages/IG accounts.
 2. Paste it in Pulse → Admin → Integrations → **◇ Meta — house connection
    (agency)**, together with Howler's Business ID (Business settings →
    Business info). The Business ID is shown to clients inside their
@@ -73,23 +76,29 @@ Howler's own credentials do the rest.
 **Per client (~2 min their side, ~2 min ours):**
 1. Client: Business settings → Users → **Partners** → Add → *Give a partner
    access to your assets* → enter Howler's Business ID → pick their ad account
-   → enable **Manage campaigns**. (The client Meta card's first guide walks
+   → enable **Manage campaigns** — and, for organic social analytics, also
+   share their **Facebook Page** (and **Instagram account**) with
+   insights/analyze access on the same screen. (The client Meta card's first guide walks
    them through it, with Copy/Share buttons to forward to whoever runs their
    ads. Flipped variant: we *request* access to their ad account ID from our
    Business settings and they just approve.)
-2. Howler: assign the newly shared ad account to the `pulse` system user
-   (system user → Add assets → Ad accounts → Manage campaigns), then set the
-   client's **Ad account ID** on their entity — leave their token field
-   BLANK. Blank token = inherits the house token automatically (their own
-   token, when set, always wins).
+2. Howler: assign the newly shared assets to the `pulse` system user
+   (system user → Add assets → Ad accounts → Manage campaigns; Pages/IG →
+   insights access), then set the client's **Ad account ID** (+ **Facebook
+   Page ID** / **Instagram account ID** for social analytics) on their
+   entity — leave their token field BLANK. Blank token = inherits the house
+   token automatically, for ads AND organic social metrics (their own token,
+   when set, always wins).
 3. Verify on the connection, and remind the client to accept the Custom
    Audience ToS once (https://business.facebook.com/ads/manage/customaudiences/tos)
    if audience sync is in play.
 
 Caveats: partner sharing needs the client's ad account to live in a Business
 portfolio (for personal ad accounts, have them add a Howler user by email to
-the ad account and use the OAuth path instead). The house token is ads-scoped —
-organic social metrics (Page/IG) still need the client's own token/IDs.
+the ad account and use the OAuth path instead). Organic social metrics inherit
+the house token too, but ONLY when it carries the page scopes and the client's
+Page/IG is shared + assigned to the system user — otherwise they still need the
+client's own token/IDs.
 
 ---
 

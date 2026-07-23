@@ -91,10 +91,19 @@ function init(deps) {
 }
 
 // ── connection (per client, from entity integrations) ──
+// Agency model: like meta.js, a blank per-client Meta token inherits Howler's
+// house system-user token (setting meta_house_token). For ORGANIC insights the
+// house token only works when (a) it was generated with the page scopes
+// (pages_read_engagement, read_insights, instagram_basic,
+// instagram_manage_insights) and (b) the client partner-shared their Page/IG to
+// Howler's portfolio and it's assigned to the system user — the per-client
+// Page/IG ids below still say WHICH account to read. Own token always wins.
 function connection(entityId) {
   const i = (db && entityId) ? db.getEntityIntegrations(entityId) : {};
+  const own = (i.metaAccessToken || '').trim();
+  const house = own ? '' : (((db && db.getSetting) ? db.getSetting('meta_house_token', '') : '') || '').trim();
   return {
-    metaToken: (i.metaAccessToken || '').trim(),
+    metaToken: own || house,
     pageId: (i.metaPageId || '').trim(),
     igUserId: (i.metaIgUserId || '').trim(),
     tiktokToken: (i.tiktokAccessToken || '').trim(),

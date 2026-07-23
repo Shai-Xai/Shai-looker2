@@ -216,8 +216,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
           </div>
           <HowTo title="One-time setup (Howler side)" steps={[
             <>In <ExtLink href="https://business.facebook.com/settings">Howler's Business settings</ExtLink>, make sure the business has an app (<b>Accounts → Apps</b>; if empty, create a <b>Business</b>-type app at <ExtLink href="https://developers.facebook.com/apps">developers.facebook.com/apps</ExtLink>), then create a system user: <b>Users → System users</b> → Add → name <code>pulse</code>, role <b>Admin</b>.</>,
-            <>On the system user click <b>Generate new token</b> → pick the app → expiration <b>Never</b> → tick <code>ads_read</code>, <code>ads_management</code> and <code>business_management</code> → Generate → paste it below. It never expires.</>,
-            <>When a client approves a partner share, assign their ad account to the system user (<b>Add assets → Ad accounts</b> → enable <b>Manage campaigns</b>) and put their <b>Ad account ID</b> on their entity — their token field stays blank.</>,
+            <>On the system user click <b>Generate new token</b> → pick the app → expiration <b>Never</b> → tick <code>ads_read</code>, <code>ads_management</code>, <code>business_management</code> <b>plus the page scopes</b> <code>pages_read_engagement</code>, <code>read_insights</code>, <code>instagram_basic</code>, <code>instagram_manage_insights</code> (so shared Pages/IG feed the Social page too) → Generate → paste it below. It never expires.</>,
+            <>When a client approves a partner share, assign their assets to the system user (<b>Add assets</b> → Ad accounts → <b>Manage campaigns</b>; Pages/IG → insights access) and put their <b>Ad account ID</b> (+ Page / IG ids for social stats) on their entity — their token field stays blank.</>,
           ]} />
         </>}>
           <Lbl>House system-user token</Lbl>
@@ -247,8 +247,8 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
             <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the account that manages your ads (you need Admin access to the business).</>,
             <>In the left menu open <b>Users → Partners</b> → <b>Add</b> → choose <b>Give a partner access to your assets</b>.</>,
             <>Enter Howler's Business ID{value?.meta?.houseBusinessId ? <>: <code>{value.meta.houseBusinessId}</code></> : ' (ask your Howler contact for it)'} → Next.</>,
-            <>Pick your <b>ad account</b> → switch on <b>Manage campaigns</b> → Save. That's it — no tokens, nothing technical.</>,
-            <>Tell your Howler contact which ad account (or paste its <code>act_…</code> number into <b>Ad account ID</b> below and Save) — we handle the rest on our side.</>,
+            <>Pick your <b>ad account</b> → switch on <b>Manage campaigns</b>. Want organic social stats in Pulse too? On the same screen also share your <b>Facebook Page</b> (and <b>Instagram account</b>) with insights/analyze access. Save. That's it — no tokens, nothing technical.</>,
+            <>Tell your Howler contact which ad account / Page / Instagram you shared (or paste the <code>act_…</code> number into <b>Ad account ID</b> below and Save) — we handle the rest on our side.</>,
           ]} />
           <HowTo title="Prefer to do it yourself? Manual setup, step by step (±10 min)" steps={[
             <>Sign in to <ExtLink href="https://business.facebook.com/settings">Meta Business settings</ExtLink> with the Facebook login that manages your ads. You need <b>Admin</b> access to the business portfolio (if you don't have it, ask whoever set up your Facebook ads).</>,
@@ -279,7 +279,7 @@ export default function IntegrationsForm({ value, onSave, showLooker = true, loo
 
           {/* Organic social metrics (INBOUND) — read Page/IG stats into Pulse. */}
           <div style={{ ...note, marginTop: 14 }}>
-            <b>Social metrics (read-only):</b> to pull <b>organic</b> followers, reach &amp; post engagement into Pulse, add the Page / Instagram account below. The same token is reused — it needs <code>pages_read_engagement</code>, <code>read_insights</code> and (for IG) <code>instagram_basic</code> + <code>instagram_manage_insights</code>.
+            <b>Social metrics (read-only):</b> to pull <b>organic</b> followers, reach &amp; post engagement into Pulse, add the Page / Instagram account below. Shared your Page/IG with Howler (partner share)? Then you're done — no token needed. Using your own token instead? It needs <code>pages_read_engagement</code>, <code>read_insights</code> and (for IG) <code>instagram_basic</code> + <code>instagram_manage_insights</code>.
           </div>
           <Lbl>Facebook Page ID <span style={{ textTransform: 'none', fontWeight: 400 }}>· optional</span></Lbl>
           <input value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} placeholder="e.g. 1029384756" style={input} autoComplete="off" />
