@@ -470,7 +470,39 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
       moderation.recordHold({ contentType: 'chat_message', contentId: id, snapshot: { text, displayName: fallbackName }, authorUserId: user.id, channelId: c.id, entityId: c.entity_id, evidence: { ruleIds: verdict.matches.map((m) => m.id) } });
       return res.status(202).json({ ...messageRow(row, { viewerId: user.id }), moderation: moderation.heldMeta(verdict.reason) });
     }
+    notifyChannel(c.id); // held messages stay author-only — no doorbell
     res.json(messageRow(row, { viewerId: user.id }));
+  }));
+
+  // ── SSE doorbell (scale: replaces tight polling while a chat is OPEN) ──
+  // One stream per open chat. On any change in the channel the server sends a
+  // tiny `change` event; the client then pulls the delta through the existing
+  // after= messages endpoint. Stateless by design: no payloads ride the
+  // stream, so a dropped event can never desync — the poll endpoint stays the
+  // source of truth AND the fallback for clients without SSE.
+  const streams = new Map(); // channelId → Set<res>
+  function notifyChannel(channelId) {
+    const subs = streams.get(channelId);
+    if (!subs) return;
+    for (const s of subs) { try { s.write('event: change\ndata: {}\n\n'); } catch { /* close handler cleans up */ } }
+  }
+  app.get('/api/app/social/chat/channels/:id/stream', readLimit, asyncHandler(async (req, res) => {
+    if (!enabled()) return gone(res);
+    const user = await requireAppUser(req);
+    const c = getChannel(req.params.id);
+    if (!c || !flagOn(c.entity_id)) return gone(res);
+    if (!accessFor(c, user.id, await viewerTickets(req, [c])).ok) throw new HttpError(403, 'Join this channel first');
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders?.();
+    res.write(': connected\n\n');
+    let subs = streams.get(c.id);
+    if (!subs) { subs = new Set(); streams.set(c.id, subs); }
+    subs.add(res);
+    // Heartbeat keeps proxies from reaping the idle connection; unref'd so a
+    // pending ping never holds the process open (tests, shutdown).
+    const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 25000);
+    ping.unref?.();
+    req.on('close', () => { clearInterval(ping); subs.delete(res); if (!subs.size) streams.delete(c.id); });
   }));
 
   // Soft delete own message ("message deleted" placeholder in the app).
@@ -482,6 +514,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (r.author_type === 'organiser' || r.howler_user_id !== String(user.id)) throw new HttpError(403, 'You can only delete your own messages');
     sql.prepare('UPDATE social_chat_messages SET deleted=1, body=\'\', pinned=0 WHERE id=?').run(r.id);
     sql.prepare('DELETE FROM social_chat_user_pins WHERE message_id=?').run(r.id);
+    notifyChannel(r.channel_id);
     res.json({ ok: true });
   }));
 
@@ -670,6 +703,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const id = `msg_${uuid().slice(0, 12)}`;
     sql.prepare("INSERT INTO social_chat_messages (id, channel_id, entity_id, author_type, author_name, body, parent_id, pinned, push, cta_label, cta_destination, created_at) VALUES (?,?,?, 'organiser', ?,?,?,?,?,?,?,?)")
       .run(id, channelId, entityId, authorName, text, parentId, body.pin ? 1 : 0, body.push ? 1 : 0, cta.cta_label, cta.cta_destination, now());
+    notifyChannel(channelId); // broadcast rings each target channel via this path
     return messageRow(sql.prepare('SELECT * FROM social_chat_messages WHERE id=?').get(id));
   }
   // Broadcast: one organiser message into every ACTIVE OFFICIAL channel of the
@@ -688,6 +722,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     if (action === 'delete') { sql.prepare('UPDATE social_chat_messages SET deleted=1, body=\'\', pinned=0 WHERE id=?').run(messageId); sql.prepare('DELETE FROM social_chat_user_pins WHERE message_id=?').run(messageId); }
     if (action === 'pin') sql.prepare('UPDATE social_chat_messages SET pinned=1 WHERE id=?').run(messageId);
     if (action === 'unpin') sql.prepare('UPDATE social_chat_messages SET pinned=0 WHERE id=?').run(messageId);
+    notifyChannel(r.channel_id);
     return { ok: true };
   }
   function closeGroup(entityId, channelId) {

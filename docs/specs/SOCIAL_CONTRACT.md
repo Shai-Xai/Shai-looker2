@@ -219,7 +219,16 @@ per-channel messages (moderation: `pin/unpin/delete`), `members` add,
 wiring lands), `broadcast {eventId,text,pin,push,ctaLabel?,ctaDestination?}` →
 one organiser message into every active OFFICIAL channel (fan groups
 excluded). `push` is a PER-MESSAGE flag — recorded now, delivery activates
-with the Firebase key. Per-channel sends accept `parentId` (2026-07-21):
+with the Firebase key.
+
+SSE doorbell (2026-07-23, scale): `GET .../chat/channels/:id/stream`
+(Bearer JWT, same access checks as messages) is a `text/event-stream` that
+sends a payload-free `event: change` whenever the channel changes (new
+message, organiser send/broadcast, delete, pin). Clients pull the delta via
+the existing `after=` poll on each ding — the poll endpoint stays the source
+of truth and the fallback; heartbeat comment every 25s.
+
+Per-channel sends accept `parentId` (2026-07-21):
 a portal user replies TO a specific fan message — same threading shape as
 fan replies, so the app renders the quoted bubble above the organiser's
 reply. Bad/foreign `parentId` → 400.
