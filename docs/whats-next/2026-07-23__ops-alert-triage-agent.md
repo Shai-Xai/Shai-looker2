@@ -113,6 +113,16 @@ review the code daily and flag bugs before they ever alert.
   staging pushes only, no force push, stop-don't-guess when both sides changed
   the same BEHAVIOUR differently.
 
+## Shipped this session (Code health readable in Pulse)
+- **Admin → Product → 🩺 Code health**: the daily review's rolling GitHub issue
+  mirrored inside Pulse — no GitHub login needed. `server/codeHealth.js`
+  (disposable, read-only) pulls the issue + comments through the GitHub bridge
+  (`github.findOpenIssueByTitle` / `listIssueComments`, new read helpers),
+  5-min cache, stale-copy-on-GitHub-outage, fail-soft copy when GitHub isn't
+  connected or the first run hasn't happened. `CodeHealthPanel.jsx`: one card
+  per day's report (reviewer chip vs follow-up author), newest expanded,
+  lightweight inline markdown, mobile-first accordion, ↻ Refresh + source link.
+
 ## Why this is close, not far
 
 The two ends of the loop already exist:

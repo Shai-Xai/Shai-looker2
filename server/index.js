@@ -440,6 +440,7 @@ require('./version').mount(app, { auth }); // build stamp for the profile footer
 const github = require('./github').mount(app, { db, auth }); // GitHub issue bridge → server/github.js
 const ticketsApi = require('./tickets').mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, mailer }); // product board → server/tickets.js (kill switch: tickets_enabled)
 require('./opsTriage').mount(app, { db, auth, insights, adminAnthropicKey, ops, tickets: ticketsApi }); // ops-alert triage agent: alerts → fingerprinted ledger → AI triage → auto-filed board tickets (kill switch: ops_triage_enabled) → server/opsTriage.js
+require('./codeHealth').mount(app, { auth, github }); // 🩺 Code health panel: the daily automated review's rolling GitHub issue, readable in Admin → Product without logging into GitHub → server/codeHealth.js
 require('./helpBotSeed').applySeed(db, require('./helpBot').mount(app, { db, auth, insights, adminAnthropicKey })); // Product help knowledge: grounds the Owl's productHelp tool (published articles + release notes only) + admin curation + auto-drafts from published release notes → server/helpBot.js; kill switches help_enabled / help_draft_auto
 
 // ─── Client content model & navigation → server/clientModel.js ─────────────────
