@@ -154,7 +154,10 @@ Pagination: pass the previous page's `nextCursor` as `before`. `nextCursor` is
   (community DELETE hard-deletes the community with its posts, comments, likes,
   pins, members and seen marks; an organiser community with nested event
   communities refuses with 400 until the children are deleted first) +
-  `POST .../media` (base64 `{name,mime,data}`, ≤10 MB, `image/*`|`video/*`) +
+  `POST .../media` (base64 `{name,mime,data}`, ≤10 MB, `image/*`|`video/*`;
+  when `SOCIAL_S3_*` is configured the bytes are PUT server-side to the
+  bucket and the returned `url` is the public CDN url — the app disk is only
+  the fallback, 2026-07-23) +
   `POST .../media/presign` (`{name,mime}` → `{uploadUrl,method,headers,publicUrl,kind}`
   presigned PUT; needs `SOCIAL_S3_*` + `SOCIAL_MEDIA_BASE_URL` env) +
   `GET .../media/config` (`{direct}` — whether presigned direct-to-bucket uploads

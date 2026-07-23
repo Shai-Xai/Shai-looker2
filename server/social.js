@@ -774,7 +774,17 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     return commentRow(sql.prepare('SELECT * FROM social_feed_comments WHERE id=?').get(id));
   }
   // Base64 media → persistent disk (dev path). Returns the served URL.
-  function saveMedia(entityId, { name, mime, data }) {
+  // Server-side PUT for INLINE uploads (base64 through Pulse) — same signer
+  // the browser's direct path uses, driven from Node. At scale image bytes
+  // must not live on (or be served from) the app disk; R2+CDN carries them.
+  async function uploadToBucket(entityId, name, mime, buf) {
+    const ext = (String(name || '').match(/\.[a-z0-9]{2,5}$/i) || [''])[0].toLowerCase();
+    const key = `social/${entityId}/${uuid()}${ext}`;
+    const put = await fetch(presignPut({ key }), { method: 'PUT', headers: { 'Content-Type': mime }, body: buf });
+    if (!put.ok) throw new Error(`bucket PUT ${put.status}`);
+    return `${S3.publicBase}/${key}`;
+  }
+  async function saveMedia(entityId, { name, mime, data }) {
     const buf = Buffer.from(String(data || ''), 'base64');
     if (!buf.length) throw new HttpError(400, 'Empty media payload');
     if (buf.length > MAX_MEDIA_BYTES) throw new HttpError(400, `Media over the ${Math.round(MAX_MEDIA_BYTES / 1024 / 1024)}MB direct-upload cap — use the presigned upload`);
@@ -783,11 +793,22 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     // The Howler app's renderer can't decode HEIC/HEIF; the composer converts
     // photos to JPEG in the browser — a raw HEIC reaching us means that failed.
     if (/^image\/hei[cf]/.test(m)) throw new HttpError(400, 'iPhone HEIC photos must be converted first — refresh Pulse and re-pick the photo (it converts to JPEG automatically)');
+    const kind = m.startsWith('video/') ? 'video' : 'image';
+    // Bucket first when configured; the disk stays as the fallback so a
+    // bucket outage degrades to today's behaviour instead of failed posts.
+    if (s3Configured()) {
+      try {
+        const url = await uploadToBucket(entityId, name, m, buf);
+        return { id: uuid(), url, mime: m, size: buf.length, kind };
+      } catch (e) {
+        console.error('[social] bucket upload failed — falling back to disk:', e.message);
+      }
+    }
     const id = uuid();
     fs.writeFileSync(path.join(MEDIA_DIR, id), buf);
     sql.prepare('INSERT INTO social_feed_media (id, entity_id, name, mime, size, created_at) VALUES (?,?,?,?,?,?)')
       .run(id, entityId, String(name || 'media').slice(0, 200), m.slice(0, 100), buf.length, now());
-    return { id, url: `/api/app/social/media/${id}`, mime: m, size: buf.length, kind: m.startsWith('video/') ? 'video' : 'image' };
+    return { id, url: `/api/app/social/media/${id}`, mime: m, size: buf.length, kind };
   }
   function presignMedia(entityId, { name, mime }) {
     if (!s3Configured()) throw new HttpError(400, 'Direct-to-bucket uploads are not configured (SOCIAL_S3_* + SOCIAL_MEDIA_BASE_URL)');
@@ -819,7 +840,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${A}/posters-suggestions`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ suggestions: posterSuggestions() })));
   app.get(`${A}/share-stats`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(shareStats(req.params.entityId))));
   app.get(`${A}/cta-clicks`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(engagement.clickers(req.params.entityId, req.query.kind, req.query.refId))));
-  app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(saveMedia(req.params.entityId, req.body || {}))));
+  app.post(`${A}/media`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(await saveMedia(req.params.entityId, req.body || {}))));
   app.post(`${A}/media/presign`, auth.requireAdmin, asyncHandler(async (req, res) => res.json(presignMedia(req.params.entityId, req.body || {}))));
   app.get(`${A}/media/config`, auth.requireAdmin, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${A}/posts/:id/comments`, auth.requireAdmin, asyncHandler(async (req, res) => res.json({ comments: listComments(req.params.entityId, req.params.id) })));
@@ -848,7 +869,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
   app.get(`${M}/posters-suggestions`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ suggestions: posterSuggestions(eid(req)) })));
   app.get(`${M}/share-stats`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(shareStats(eid(req)))));
   app.get(`${M}/cta-clicks`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json(engagement.clickers(eid(req), req.query.kind, req.query.refId))));
-  app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(saveMedia(eid(req), req.body || {}))));
+  app.post(`${M}/media`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(await saveMedia(eid(req), req.body || {}))));
   app.post(`${M}/media/presign`, auth.requireAuth, manage, asyncHandler(async (req, res) => res.json(presignMedia(eid(req), req.body || {}))));
   app.get(`${M}/media/config`, auth.requireAuth, view, asyncHandler(async (_req, res) => res.json({ direct: s3Configured() })));
   app.get(`${M}/posts/:id/comments`, auth.requireAuth, view, asyncHandler(async (req, res) => res.json({ comments: listComments(eid(req), req.params.id) })));
@@ -1191,7 +1212,7 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     let media = '[]';
     if (body.imageData) {
       if (!community.allow_comment_images) throw new HttpError(400, 'Photos aren’t allowed in comments here');
-      const saved = saveMedia(post.entity_id, { name: 'comment.jpg', mime: String(body.imageMime || 'image/jpeg'), data: body.imageData });
+      const saved = await saveMedia(post.entity_id, { name: 'comment.jpg', mime: String(body.imageMime || 'image/jpeg'), data: body.imageData });
       media = JSON.stringify([{ id: saved.id, kind: 'image', url: saved.url, mime: saved.mime }]);
     }
     if (!text && media === '[]') throw new HttpError(400, 'Write something first');
@@ -1282,16 +1303,17 @@ function mount(app, { db, auth, rateLimit, verifyAppToken = appAuth.defaultVerif
     const poster = posterRow(c.entity_id, user.id);
     if (!poster) throw new HttpError(403, 'You aren’t set up to post here — ask the organiser to add you as an app poster in Pulse');
     const images = Array.isArray(body.images) ? body.images.slice(0, MAX_MEDIA_PER_POST) : [];
-    const media = images.map((img, i) => {
-      const it = img || {};
+    const media = [];
+    for (let i = 0; i < images.length; i++) {
+      const it = images[i] || {};
       // Direct-uploaded item (via /presign): already sitting in the bucket —
       // reference it by url instead of re-uploading through Pulse.
-      if (it.url && !it.data) return validMediaItem(it);
-      const saved = saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String(it.mime || 'image/jpeg'), data: it.data });
+      if (it.url && !it.data) { media.push(validMediaItem(it)); continue; }
+      const saved = await saveMedia(c.entity_id, { name: `app-post-${i}.jpg`, mime: String(it.mime || 'image/jpeg'), data: it.data });
       // validMediaItem re-validates the saved url and carries the reframe
       // focus / poster metadata the composer attached to the inline item.
-      return validMediaItem({ ...it, id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime, data: undefined });
-    });
+      media.push(validMediaItem({ ...it, id: saved.id, kind: saved.kind, url: saved.url, mime: saved.mime, data: undefined }));
+    }
     const text = String(body.text || '').trim().slice(0, MAX_BODY);
     if (!text && media.length === 0) throw new HttpError(400, 'Write something or add a photo first');
     // Moderation (MODERATION_CONTRACT.md §2 #1): screen the text before
