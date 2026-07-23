@@ -126,7 +126,9 @@ Fields:
 - "hypothesis": for bugs, the most likely root cause and where to look (file/function names from the shown code when possible), 2-5 sentences. For non-bugs, one sentence on what is happening.
 - "opsAction": for capacity/billing/config, the concrete action a human should take (top up X, raise env var Y, set webhook Z). Empty for bug/noise.
 
-severity reflects user impact (high = a user-facing feature is broken or all AI calls fail); confidence reflects how sure the evidence makes you. Never invent code that was not shown.`;
+severity reflects user impact (high = a user-facing feature is broken or all AI calls fail); confidence reflects how sure the evidence makes you. Never invent code that was not shown.
+
+Special case — kind "github-ci" (a GitHub Actions workflow failed on a deployable branch). You cannot see the CI logs, only the workflow name, branch and run URL, so keep confidence at most "medium" unless the name alone is conclusive. Guidance: a "Sync staging with main" failure is a MERGE CONFLICT → "config", opsAction = "merge main into staging manually, resolve, push — see the sync-staging workflow header". A failing CI (lint/tests/build) on main usually means a defect just landed → "bug"; put the run URL in the hypothesis so the builder starts from the logs. Deploy-hook or infra errors → "config".`;
 
 function promptRegistry() {
   return [{ key: 'opsTriage', label: 'Ops alert triage', scope: 'Classifies deduplicated production alerts (bug/capacity/billing/config/noise) before auto-filing product-board tickets', text: OPS_TRIAGE_SYSTEM }];

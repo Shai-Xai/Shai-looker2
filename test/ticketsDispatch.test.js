@@ -28,6 +28,7 @@ const fakeGithub = {
   newIssueUrl: ({ title }) => `https://github.test/new?title=${encodeURIComponent(title)}`,
   prodBranch: () => 'main',
   stagingBranch: () => 'staging',
+  verifyWebhook: () => true, // signature validity is github.js's concern, not this test's
 };
 const fakeInsights = { isConfigured: () => false }; // no background AI drafting in tests
 
@@ -173,4 +174,36 @@ test('submit with a reviewed draft lands pre-drafted (ai_status ready, reporter-
   assert.equal(row.ai_title, 'Polished title');
   assert.match(row.ai_summary, /reporter-edited/);
   assert.equal(row.body, 'raw words', 'original words preserved alongside');
+});
+
+// ── CI failures → the ops-triage ledger (workflow_run webhook) ────────────────
+const opsTriageMod = require('../server/opsTriage');
+test('a failed workflow run on main becomes a github-ci ops alert', async () => {
+  const alerts = [];
+  require('../server/ops').onAlert((kind, msg) => alerts.push({ kind, msg }));
+  const payload = { action: 'completed', workflow_run: { name: 'CI', conclusion: 'failure', head_branch: 'main', html_url: 'https://github.com/x/y/actions/runs/111' } };
+  const req = { _body: true, headers: { 'x-github-event': 'workflow_run', 'x-hub-signature-256': 'sig' }, get(h) { return this.headers[h.toLowerCase()]; }, body: Buffer.from(JSON.stringify(payload)), params: {} };
+  const r = await call('POST /api/github/webhook', req);
+  assert.equal(r.status, 200);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].kind, 'github-ci');
+  assert.match(alerts[0].msg, /workflow "CI" failure on main/);
+  assert.match(alerts[0].msg, /actions\/runs\/111/);
+});
+
+test('successful runs and claude/** branch failures never reach the ledger', async () => {
+  const alerts = [];
+  require('../server/ops').onAlert((kind) => alerts.push(kind));
+  const mk = (run) => ({ _body: true, headers: { 'x-github-event': 'workflow_run' }, get(h) { return this.headers[h.toLowerCase()]; }, body: Buffer.from(JSON.stringify({ action: 'completed', workflow_run: run })), params: {} });
+  await call('POST /api/github/webhook', mk({ name: 'CI', conclusion: 'success', head_branch: 'main', html_url: 'u' }));
+  await call('POST /api/github/webhook', mk({ name: 'CI', conclusion: 'failure', head_branch: 'claude/some-branch', html_url: 'u' }));
+  assert.equal(alerts.length, 0);
+});
+
+test('repeated failures of the same workflow+branch collapse to one fingerprint (run ids normalised)', () => {
+  const a = opsTriageMod.fingerprintOf('github-ci', 'workflow "CI" failure on main: https://github.com/x/y/actions/runs/29998512987');
+  const b = opsTriageMod.fingerprintOf('github-ci', 'workflow "CI" failure on main: https://github.com/x/y/actions/runs/30001240553');
+  const c = opsTriageMod.fingerprintOf('github-ci', 'workflow "Sync staging with main" failure on main: https://github.com/x/y/actions/runs/30001240553');
+  assert.equal(a, b, 'same defect, different run id → one ledger row');
+  assert.notEqual(a, c, 'a different workflow is a different row');
 });

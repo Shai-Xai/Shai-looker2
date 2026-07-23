@@ -985,6 +985,22 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
       }
     }
   }
+  // CI/workflow failures → the ops-triage ledger. A failed run on a deployable
+  // branch becomes an ops alert (kind 'github-ci'); the triage agent then
+  // fingerprints, classifies and tickets it like any production alert — so CI
+  // red lands on the product board with a diagnosis instead of only in email.
+  // Run-id digits normalise away in the fingerprint, so repeated failures of
+  // the same workflow+branch collapse to ONE ledger row. Deliberately scoped
+  // to main/staging: claude/** branch and PR failures already surface in the
+  // PR/ticket flow and would only add noise here.
+  function handleWorkflowRun(payload) {
+    if (payload.action !== 'completed') return;
+    const run = payload.workflow_run;
+    if (!run || !['failure', 'timed_out', 'startup_failure'].includes(run.conclusion)) return;
+    const branch = String(run.head_branch || '');
+    if (![prodBranch(), stagingBranch()].includes(branch)) return;
+    try { require('./ops').alert('github-ci', `workflow "${run.name}" ${run.conclusion} on ${branch}: ${run.html_url}`); } catch { /* alerting must never break the webhook */ }
+  }
   // NOT cookie-authed — GitHub signs each delivery; we verify the HMAC signature.
   app.post('/api/github/webhook', rawJson, (req, res) => {
     const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
@@ -992,6 +1008,9 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     let payload; try { payload = JSON.parse(raw.toString('utf8')); } catch { return res.status(400).json({ error: 'bad json' }); }
     if (req.get('x-github-event') === 'pull_request') {
       try { handlePullRequest(payload); } catch (e) { console.error('[tickets] webhook error:', e.message); }
+    }
+    if (req.get('x-github-event') === 'workflow_run') {
+      try { handleWorkflowRun(payload); } catch (e) { console.error('[tickets] webhook error:', e.message); }
     }
     res.json({ ok: true });
   });
