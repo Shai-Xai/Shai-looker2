@@ -19,8 +19,12 @@ services:
     # root devDeps pulls Playwright, which downloads a ~150MB browser on every
     # deploy — the slow build. The client build DOES need its devDeps (Vite), so
     # keep --include=dev there.
-    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build
-    startCommand: node server/index.js
+    # The litestream download is best-effort — if GitHub is unreachable the
+    # build continues and start.sh falls back to plain node (no replication).
+    buildCommand: npm ci --omit=dev && npm --prefix client ci --include=dev && npm --prefix client run build && (curl -fsSL https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz | tar xz || echo "litestream download failed — continuing without")
+    # Continuous SQLite replication to R2 when BACKUP_S3_* is set (seconds of
+    # data loss instead of last-night's snapshot) — scripts/litestream/README.md.
+    startCommand: bash scripts/litestream/start.sh
     healthCheckPath: /health
     autoDeploy: true
     numInstances: 1
