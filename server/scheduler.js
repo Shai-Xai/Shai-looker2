@@ -250,7 +250,11 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
             }
           } catch { /* push is best-effort */ }
         }
-      } catch (e) { result = { status: 'error', detail: e.message }; }
+      } catch (e) {
+        // A digest whose events are all past their post-event cool-down is a SKIP
+        // (nothing current to report — by design), not a failure to alert on.
+        result = e.code === 'digest_skipped' ? { status: 'skipped', detail: e.message } : { status: 'error', detail: e.message };
+      }
     }
     if (!manual) {
       // The run-slot was already claimed by tick() BEFORE the send (next_run_at
@@ -431,7 +435,10 @@ function mount(app, { db, auth, mailer, messaging, push, generateContent, roleLe
         includeGoals: j.includeGoals, suiteIds: j.suiteIds, recipientEmail: recipientEmail || '',
       });
       return condenseDigest(content);
-    } catch (e) { console.error('[scheduler] whatsappDigest failed', e && e.message); return null; }
+    } catch (e) {
+      if (e && e.code !== 'digest_skipped') console.error('[scheduler] whatsappDigest failed', e.message);
+      return null; // skipped or failed → the WhatsApp scheduler falls back to its lightweight summary
+    }
   }
 
   console.log('[scheduler] mounted', enabled() ? '(enabled)' : '(disabled — set scheduler_enabled=1)');

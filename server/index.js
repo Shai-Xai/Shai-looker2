@@ -40,6 +40,7 @@ const {
   PHASES, PHASE_DEFAULTS, resolvePhase, phaseDefaults, TIMES, TIME_DEFAULTS, timeSegment, timeDefaults,
   clientCatalogue, buildLightSnapshot, FACT_MAX_TILES, NOISY_TILE, SUMMARY_TILE, tilePriority,
   BRIEF_CATS, briefingCats, buildFacts, todayLabel, buildFactsFromTiles, factValueLabel, factSpanLabel,
+  cooldownDays, suiteCoverage, freshnessSummary,
 } = require('./briefing')({ db, store, query });
 
 const app = express();
@@ -1683,12 +1684,14 @@ app.get('/api/my/snapshot', auth.requireAuth, (req, res) => {
 // same generation twice. Segmented by the reader's local time of day.
 const briefInflight = new Map(); // key -> Promise
 // ── Multi-event briefing (portfolio overall + per-event sections) ─────────────
-// The selected events for a client's briefing: default = ACTIVE events (phase not
-// post_event); a user pref `briefing_suites:{entityId}` overrides. Returns the
-// full suite list (with active+selected flags) and the resolved selection.
+// The selected events for a client's briefing: default = COVERED events (still
+// running, or ended within the post-event cool-down — see suiteCoverage); a user
+// pref `briefing_suites:{entityId}` overrides, so explicitly picking a past
+// event keeps covering it. Returns the full suite list (with active+selected
+// flags) and the resolved selection.
 function briefingSuites(user, entityId) {
   const raw = clientCatalogue(entityId).suites;
-  const list = raw.map((su) => ({ id: su.id, name: su.name, active: resolvePhase(su.briefing || {}).key !== 'post_event' }));
+  const list = raw.map((su) => { const cov = suiteCoverage(su.briefing || {}); return { id: su.id, name: su.name, active: cov.covered, ended: cov.ended }; });
   const ids = new Set(list.map((s) => s.id));
   let selected = null;
   try { selected = JSON.parse(db.getUserPref(user.id, `briefing_suites:${entityId}`) || 'null'); } catch { selected = null; }
@@ -1730,7 +1733,9 @@ async function generateOverall(user, entityId, segment, { force = false } = {}) 
     if (!groups.length) return { ...base, headline: '', bullets: [] };
     const { catalogue } = clientCatalogue(entityId);
     const tLlm = Date.now();
-    const appAud = await appAudienceFor(entityId); const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey, app: appAud }));
+    const appAud = await appAudienceFor(entityId);
+    const instructions = [briefInstructions(user, entityId, segment), freshnessSummary(groups)].filter(Boolean).join('\n\n');
+    const raw = await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeOverall({ groups, catalogue, capabilities: ACTION_CAPABILITIES, actions: actionsSummaryFor(entityId), today: todayLabel(), instructions, apiKey, app: appAud }));
     const llmMs = Date.now() - tLlm;
     const totalMs = Date.now() - tStart;
     console.log(`[briefing-timing] overall entity=${entityId} force=${!!force} events=${selected.length} total=${totalMs}ms facts=${factsMs}ms llm=${llmMs}ms`);
@@ -1792,7 +1797,7 @@ async function generateEvents(user, entityId, segment, { force = false, debug = 
     const factsMs = Date.now() - tStart;
     const nameById = Object.fromEntries(suites.map((s) => [s.id, s.name]));
     const tLlm = Date.now();
-    const raw = groups.length ? await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeEvents({ groups, today: todayLabel(), instructions: briefInstructions(user, entityId, segment), apiKey })) : { events: [] };
+    const raw = groups.length ? await aiUsage.run({ entityId, kind: 'briefing' }, () => insights.briefHomeEvents({ groups, today: todayLabel(), instructions: [briefInstructions(user, entityId, segment), freshnessSummary(groups)].filter(Boolean).join('\n\n'), apiKey })) : { events: [] };
     console.log(`[briefing-timing] events entity=${entityId} force=${!!force} events=${selected.length} total=${Date.now() - tStart}ms facts=${factsMs}ms llm=${Date.now() - tLlm}ms`);
     const link = (id) => (id && byId[id] ? { dashboardId: id, suiteId: byId[id].suiteId, label: `${byId[id].setName} → ${byId[id].title}` } : null);
     const aiById = Object.fromEntries((raw.events || []).filter((e) => nameById[e.suiteId]).map((e) => [e.suiteId, e]));
@@ -1855,7 +1860,7 @@ async function generateBriefing(user, entityId, segment, { force = false } = {})
       lastVisit: prof.lastVisit,
       top: prof.top.filter((t) => byId[t.dashboardId]).map((t) => ({ title: byId[t.dashboardId].title, count: t.count })),
     };
-    const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment]].filter(Boolean).join('\n\n');
+    const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, suites), timeDefaults()[segment], freshnessSummary([{ suiteName: suites[0]?.name || '', tiles }])].filter(Boolean).join('\n\n');
     const msgs = recentMessages(entityId, user.id);
     const tGoals = Date.now();
     const goals = await goalsP;
@@ -1996,7 +2001,18 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   const allSuites = clientCatalogue(entityId).suites;
   const validSuite = new Set(allSuites.map((s) => s.id));
   let selSuiteIds = Array.isArray(suiteIds) ? [...new Set(suiteIds.map(String).filter((id) => validSuite.has(id)))] : [];
-  if (!selSuiteIds.length) selSuiteIds = allSuites.map((s) => s.id);
+  if (!selSuiteIds.length) {
+    // Default scope = COVERED events only (running, or ended within the post-event
+    // cool-down). A finished event stops being re-reviewed every day; explicitly
+    // scoping the digest to it (suiteIds) is the deliberate way to keep it.
+    const covered = allSuites.filter((su) => suiteCoverage(su.briefing || {}).covered).map((s) => s.id);
+    if (!covered.length) {
+      const err = new Error(`All of this client's events ended more than ${cooldownDays()} day(s) ago — nothing current to report. To keep covering a past event, select it explicitly in the digest's Events.`);
+      err.code = 'digest_skipped'; // scheduler records a skip, not a failure
+      throw err;
+    }
+    selSuiteIds = covered;
+  }
   const selSet = new Set(selSuiteIds);
   const multiClient = allSuites.length > 1;
   const multi = multiClient && selSuiteIds.length > 1;
@@ -2060,7 +2076,12 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
   }
 
   const byId = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-  const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites)].filter(Boolean).join('\n\n');
+  // Per-event data freshness, computed from the fact rows — tells the analyst how
+  // far each event's data actually runs, so stale/finished events read as wrap-ups
+  // ("data to 30 June"), never as current trading.
+  const suiteNameById = Object.fromEntries(allSuites.map((s) => [s.id, s.name]));
+  const freshGroups = selSuiteIds.map((id) => ({ suiteName: suiteNameById[id] || '', tiles: factTilesAll.filter((t) => t.suiteId === id) })).filter((g) => g.tiles.length);
+  const instructions = [aiInstructionsFor(null, entityId), briefingInstructionsFor(user, entityId, clientCatalogue(entityId).suites), freshnessSummary(freshGroups)].filter(Boolean).join('\n\n');
   // Deep links carry the EVENT the content is about (`evSuite`), not byId's
   // last-wins suite — a dashboard shared across events would otherwise link to
   // the wrong one. Per-event sections pass their own suite; the cross-event
@@ -2196,91 +2217,11 @@ async function buildDigestContent({ entityId, role, roleFocus, focusMode, conten
 // factValueLabel / factSpanLabel (the digest facts-inspector helpers) live in
 // server/briefing.js with the rest of the fact-tile layer.
 
-// Selectable tiles per client, grouped by dashboard — drives the curated
-// digest picker. Only data tiles (with fields, not text) can be chosen.
-// People-data heuristic: does a tile's query expose an email or phone/mobile
-// column? Used to offer ONLY tiles with usable contact data when building a
-// segment (a segment needs an email or mobile per person). Name-based, mirroring
-// how CreateSegmentModal guesses the email/phone columns.
-const CONTACT_FIELD_RE = /(e-?mail|phone|mobile|cell|msisdn|contact.?number)/i;
-function tileHasContact(t) {
-  return (t.query?.fields || []).some((f) => CONTACT_FIELD_RE.test(String(f)));
-}
-function digestTileCatalogue(entityId) {
-  const { catalogue } = clientCatalogue(entityId);
-  const dashboards = [];
-  for (const c of catalogue) {
-    const def = store.get(c.dashboardId);
-    if (!def) continue;
-    const tiles = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))]
-      .filter((t) => t.type !== 'text' && t.query?.fields?.length)
-      .map((t) => ({ tileId: t.id, title: t.title || '(untitled)', visType: t.vis?.type || '', hasContact: tileHasContact(t) }));
-    if (tiles.length) dashboards.push({ dashboardId: c.dashboardId, title: c.title, setName: c.setName, suiteId: c.suiteId, suiteName: c.suiteName, tiles });
-  }
-  return { dashboards };
-}
-app.get('/api/admin/entities/:id/digest-tiles', auth.requireAdmin, (req, res) => {
-  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-  res.json(digestTileCatalogue(req.params.id));
-});
-app.get('/api/my/digest-tiles/:entityId', auth.requireAuth, (req, res) => {
-  // Admins can act as any client (preview), so they pass the ownership check.
-  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
-  res.json(digestTileCatalogue(req.params.entityId));
-});
-
-// The client's events (suites) a digest can be scoped to — id, name, and whether
-// the event is still active (on sale). Drives the digest editor's event picker;
-// only shown there for multi-event clients.
-function digestEventList(entityId) {
-  return { events: clientCatalogue(entityId).suites.map((su) => ({ id: su.id, name: su.name, active: resolvePhase(su.briefing || {}).key !== 'post_event' })) };
-}
-app.get('/api/admin/entities/:id/digest-events', auth.requireAdmin, (req, res) => {
-  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-  res.json(digestEventList(req.params.id));
-});
-app.get('/api/my/digest-events/:entityId', auth.requireAuth, (req, res) => {
-  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
-  res.json(digestEventList(req.params.entityId));
-});
+// Digest picker surfaces (curated-tile catalogue, event scope with coverage,
+// saved 📌/⭐ tiles) → server/digestPicker.js. savedTileMarks comes back for
+// buildDigestContent (resolving a digest creator's saved tiles at send time).
+const { savedTileMarks } = require('./digestPicker').mount(app, { db, store, auth, clientCatalogue, suiteCoverage, cooldownDays });
 require('./categories').mount(app, { db, auth }); // custom categories (tags) shared by goals + alerts
-// The SAVED tiles for a viewer — the ones marked as mattering, whether 📌 pinned
-// (shown on home) or ⭐ followed (always read by the briefing). `userId` returns
-// that viewer's own ('user') marks PLUS the client's ('entity') marks — exactly
-// what the home Pinned/briefing sees — so the digest checklist matches what you
-// actually see pinned. Deduped across kinds.
-function savedTileMarks(entityId, userId = '') {
-  const marks = [...db.listMarks({ userId, entityId, kind: 'pin' }), ...db.listMarks({ userId, entityId, kind: 'follow' })];
-  const byKey = new Map();
-  for (const m of marks) {
-    const key = `${m.dashboardId}|${m.tileId}`;
-    if (!byKey.has(key)) byKey.set(key, { dashboardId: m.dashboardId, tileId: m.tileId, kinds: new Set() });
-    byKey.get(key).kinds.add(m.kind === 'follow' ? 'follow' : 'pin');
-  }
-  return [...byKey.values()];
-}
-function followedTilesFor(entityId, userId = '') {
-  const { catalogue } = clientCatalogue(entityId);
-  const meta = Object.fromEntries(catalogue.map((c) => [c.dashboardId, c]));
-  const out = [];
-  for (const m of savedTileMarks(entityId, userId)) {
-    const def = store.get(m.dashboardId);
-    const c = meta[m.dashboardId];
-    if (!def || !c) continue; // only tiles still in this client's catalogue
-    const tile = [...(def.tiles || []), ...((def.carousels || []).flatMap((x) => x.tiles || []))].find((t) => t.id === m.tileId);
-    if (!tile || tile.type === 'text') continue;
-    out.push({ dashboardId: m.dashboardId, tileId: m.tileId, title: tile.title || '(untitled)', visType: tile.vis?.type || '', dashTitle: c.title, setName: c.setName, suiteName: c.suiteName, kinds: [...m.kinds] });
-  }
-  return { tiles: out };
-}
-app.get('/api/admin/entities/:id/followed-tiles', auth.requireAdmin, (req, res) => {
-  if (!db.getEntity(req.params.id)) return res.status(404).json({ error: 'Not found' });
-  res.json(followedTilesFor(req.params.id, req.user.id));
-});
-app.get('/api/my/followed-tiles/:entityId', auth.requireAuth, (req, res) => {
-  if (req.user.role !== 'admin' && !(req.user.entityIds || []).includes(req.params.entityId)) return res.status(403).json({ error: 'Not allowed' });
-  res.json(followedTilesFor(req.params.entityId, req.user.id));
-});
 
 // Home message-card dismissals: per-user, so a handled message can be cleared
 // off the home page without touching the inbox record.
@@ -2552,11 +2493,16 @@ app.get('/api/admin/briefing-settings', auth.requireAdmin, (_req, res) => {
     instructions: db.getSetting('briefing_instructions'),
     phases: PHASES, phaseDefaults: phaseDefaults(), builtIn: PHASE_DEFAULTS,
     times: TIMES, timeDefaults: timeDefaults(), builtInTimes: TIME_DEFAULTS,
+    cooldownDays: cooldownDays(),
   });
 });
 app.put('/api/admin/briefing-settings', auth.requireAdmin, (req, res) => {
-  const { instructions, phaseDefaults: pd, timeDefaults: td } = req.body || {};
+  const { instructions, phaseDefaults: pd, timeDefaults: td, cooldownDays: cd } = req.body || {};
   if (instructions !== undefined) db.setSetting('briefing_instructions', instructions || '');
+  if (cd !== undefined) {
+    const n = Number(cd);
+    if (Number.isFinite(n) && n >= 0) db.setSetting('briefing_cooldown_days', String(Math.min(60, Math.round(n))));
+  }
   if (pd && typeof pd === 'object') {
     const clean = {};
     for (const p of PHASES) if (typeof pd[p.key] === 'string') clean[p.key] = pd[p.key].slice(0, 2000);
@@ -2568,7 +2514,7 @@ app.put('/api/admin/briefing-settings', auth.requireAdmin, (req, res) => {
     db.setSetting('briefing_time_defaults', JSON.stringify(clean));
   }
   briefStore.clearMem();
-  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), times: TIMES, timeDefaults: timeDefaults() });
+  res.json({ instructions: db.getSetting('briefing_instructions'), phases: PHASES, phaseDefaults: phaseDefaults(), times: TIMES, timeDefaults: timeDefaults(), cooldownDays: cooldownDays() });
 });
 
 // Client (and admin): per-event briefing config — dates, phase override,

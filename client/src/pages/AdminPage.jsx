@@ -5088,13 +5088,14 @@ function BriefingSettings() {
   const [instructions, setInstructions] = useState('');
   const [defaults, setDefaults] = useState({});
   const [timeDefs, setTimeDefs] = useState({});
+  const [cooldown, setCooldown] = useState('3');
   const [openPhase, setOpenPhase] = useState(null);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
-    api.getBriefingSettings().then((r) => { setData(r); setInstructions(r.instructions || ''); setDefaults(r.phaseDefaults || {}); setTimeDefs(r.timeDefaults || {}); });
+    api.getBriefingSettings().then((r) => { setData(r); setInstructions(r.instructions || ''); setDefaults(r.phaseDefaults || {}); setTimeDefs(r.timeDefaults || {}); setCooldown(String(r.cooldownDays ?? 3)); });
   }, []);
   if (!data) return null;
-  const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults, timeDefaults: timeDefs }); flash(setSaved); };
+  const save = async () => { await api.saveBriefingSettings({ instructions, phaseDefaults: defaults, timeDefaults: timeDefs, cooldownDays: Number(cooldown) }); flash(setSaved); };
   return (
     <div style={{ ...cardStyle, marginTop: 6 }}>
       <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px' }}>
@@ -5106,6 +5107,17 @@ function BriefingSettings() {
         placeholder={'e.g.\n- Lead with money, then tickets.\n- Always name the ticket tier driving change.\n- Never speculate about causes you can\'t see in the data.'}
         style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
       />
+      <div style={{ marginTop: 12 }}>
+        <L>Post-event cool-down</L>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>
+          How many days after an event ends it stays in default briefings &amp; digests (for the wrap-up), before dropping out automatically.
+          Explicitly selecting a past event — in a digest's Events or a reader's briefing Tune — keeps covering it. Events without an end date never drop out; set their dates in the client's briefing panel.
+        </p>
+        <input
+          type="number" min={0} max={60} value={cooldown} onChange={(e) => setCooldown(e.target.value)}
+          style={{ width: 90, boxSizing: 'border-box', padding: '8px 10px', border: '1.5px solid var(--hairline)', borderRadius: 8, fontSize: 13, outline: 'none' }}
+        /> <span style={{ fontSize: 12, color: 'var(--muted)' }}>days after the event end date</span>
+      </div>
       <div style={{ marginTop: 12 }}>
         <L>Time of day</L>
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '2px 0 6px' }}>The reader's local time shapes the angle: morning recaps, midday tracks today, evening wraps the day.</p>

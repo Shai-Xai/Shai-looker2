@@ -104,7 +104,8 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
   // The client's events (suites) — for the per-event scope picker (multi-event
   // clients only). [] selection = all events.
   const [eventList, setEventList] = useState(null);
-  useEffect(() => { A.events().then((r) => setEventList(r.events || [])).catch(() => setEventList([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [cooldownDays, setCooldownDays] = useState(null); // post-event cool-down (days) — for the picker hint
+  useEffect(() => { A.events().then((r) => { setEventList(r.events || []); setCooldownDays(r.cooldownDays ?? null); }).catch(() => setEventList([])); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState({ html: '', sample: false });
   const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -220,12 +221,14 @@ function DigestEditor({ job, roles, logins, api: A, entityId, onClose, onSaved }
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 34, padding: '5px 12px', borderRadius: 980, cursor: 'pointer',
                           border: `1px solid ${on ? 'var(--brand)' : 'var(--hairline)'}`, background: on ? 'rgba(var(--brand-rgb,255,56,92),0.10)' : 'transparent',
                           color: on ? 'var(--brand)' : 'var(--muted)', fontSize: 12.5, fontWeight: 700 }}>
-                        {on ? '✓ ' : ''}{ev.name}{!ev.active && <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>· past</span>}
+                        {on ? '✓ ' : ''}{ev.name}{!ev.active && <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>{ev.covered === false ? '· ended' : '· past'}</span>}
                       </button>
                     );
                   })}
                 </div>
-                <div style={hintS}>{f.suiteIds.length ? `${selected.length} of ${eventList.length} events` : `All ${eventList.length} events`} · the email leads with a portfolio summary, then one clearly-separated section per event.</div>
+                <div style={hintS}>{f.suiteIds.length ? `${selected.length} of ${eventList.length} events` : `All ${eventList.length} events`} · the email leads with a portfolio summary, then one clearly-separated section per event.
+                  {eventList.some((ev) => ev.covered === false) && <> Ended events drop out of an all-events digest automatically{cooldownDays != null ? ` ${cooldownDays} day${cooldownDays === 1 ? '' : 's'} after they finish` : ''} — select one here explicitly to keep covering it.</>}
+                </div>
               </Field>
             );
           })()}
