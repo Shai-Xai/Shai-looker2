@@ -50,6 +50,18 @@ test('resilient parser does NOT call the model when static repair succeeds', asy
   assert.equal(called, false, 'static repair handled it — no model round-trip');
 });
 
+test('resilient parser never sends an EMPTY response to model repair (API rejects empty content)', async () => {
+  // Regression: an empty model response used to go to repairJsonViaModel as
+  // content: '' → Anthropic 400 "messages.0: user messages must have non-empty
+  // content" (seen in prod ops alerts). It must throw the honest parse error
+  // without an API round-trip.
+  let called = false;
+  const client = { messages: { create: async () => { called = true; return { content: [] }; } } };
+  await assert.rejects(() => parseModelJsonResilient(client, '', 'tile'), /tile/);
+  await assert.rejects(() => parseModelJsonResilient(client, '   \n', 'tile'), /tile/);
+  assert.equal(called, false, 'no doomed repair call for a blank response');
+});
+
 test('resilient parser falls back to model repair when static repair cannot', async () => {
   const client = {
     messages: { create: async () => ({ content: [{ type: 'text', text: '{"fixed":true}' }] }) },

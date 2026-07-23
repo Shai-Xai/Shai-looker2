@@ -100,7 +100,13 @@ async function repairJsonViaModel(c, broken, model) {
 // Parse model JSON with static repairs, then a single model-repair fallback.
 async function parseModelJsonResilient(c, text, what, model) {
   try { return parseModelJson(text, what); }
-  catch { return parseModelJson(await repairJsonViaModel(c, text, model), what); }
+  catch (e) {
+    // A blank response has nothing to repair — sending it would just 400 at the
+    // API ("messages.0: user messages must have non-empty content"). Surface the
+    // real problem (empty model output) instead of a confusing transport error.
+    if (!String(text || '').trim()) throw e;
+    return parseModelJson(await repairJsonViaModel(c, text, model), what);
+  }
 }
 
 module.exports = { parseModelJson, parseModelJsonResilient, JSON_REPAIR_SYSTEM };
