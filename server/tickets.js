@@ -120,7 +120,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
     add('github_issue_number', 'github_issue_number INTEGER NOT NULL DEFAULT 0');
     add('github_url', "github_url TEXT NOT NULL DEFAULT ''");
     add('decline_reason', "decline_reason TEXT NOT NULL DEFAULT ''");
-    add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat)
+    add('source', "source TEXT NOT NULL DEFAULT 'widget'"); // entry point: 'widget' (form) | 'owl' (chat) | 'ops' (alert triage agent)
     add('github_pr_number', 'github_pr_number INTEGER NOT NULL DEFAULT 0');
     add('github_pr_url', "github_pr_url TEXT NOT NULL DEFAULT ''");
     // A report filed from a dashboard can pinpoint the specific tile it's about,
@@ -351,7 +351,7 @@ function mount(app, { db, auth, insights, adminAnthropicKey, os, github, push, m
       (id, type, title, body, screen, tile_id, tile_name, urgency, status, priority, reporter_id, reporter_email, reporter_name, reporter_role, entity_id, source, ai_title, ai_summary, ai_status, created_at, updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(id, t, ti, bo, sc, tileI, tileN, urg, 'inbox', 0, user.id, user.email, userName(user),
-        admin ? 'admin' : 'client', eid, source === 'owl' ? 'owl' : 'widget',
+        admin ? 'admin' : 'client', eid, ['owl', 'ops'].includes(source) ? source : 'widget',
         clamp(aiTitle || '', 200), String(aiSummary || '').slice(0, 20000), preDrafted ? 'ready' : 'pending', ts, ts);
     saveAttachments(id, attachments); // screenshots / images / short video
     if (!preDrafted) draftInBackground(id); // fire-and-forget; the row is already saved

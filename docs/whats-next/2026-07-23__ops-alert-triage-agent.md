@@ -5,6 +5,33 @@ watch the alerts, decide which are legitimate bugs, file them on the product
 board with a suggested fix, in some cases fix them itself — and, down the line,
 review the code daily and flag bugs before they ever alert.
 
+## Shipped this session (Phase 1 — LIVE)
+- **`server/opsTriage.js`** — new disposable module: `ops_alerts` ledger table,
+  fingerprinting (UUIDs/req-refs/numbers normalised → one row per defect), the
+  AI triage pass grounded by grepping the server's OWN source for the
+  route/symbol in the alert, auto-filing bug tickets on the product board
+  (`source: 'ops'`, reporter "Pulse Ops Agent", pre-drafted title/summary),
+  ops-action notifications for billing/capacity/config, silence for noise.
+- **Rails, all live:** kill switch `ops_triage_enabled` (default on), cadence
+  `ops_triage_cadence_min` (default 30), daily cap `ops_triage_daily_cap`
+  (default 5 — extra bugs park as 'capped' and file next window without
+  re-classifying), one ticket per fingerprint forever (recurrences bump the
+  count), loop guard (its own alerts are never ledgered), failed
+  classifications stay 'new' and retry.
+- **`server/ops.js`** — `onAlert(fn)` listener hook (fires per occurrence,
+  BEFORE Slack throttling, isolated so it can never break alerting) +
+  `notify(text)` (unthrottled, un-⚠'d channel post for triage verdicts).
+- **`server/tickets.js`** — `source: 'ops'` accepted alongside widget/owl.
+- **Admin API** (board is the UI; these power a future ledger view):
+  `GET /api/admin/ops-alerts`, `POST /api/admin/ops-alerts/run` (force a pass),
+  `POST /api/admin/ops-alerts/:id/ignore` / `:id/reopen`.
+- **Auditability:** `OPS_TRIAGE_SYSTEM` exposed via `promptRegistry()` →
+  Admin → AI "Everything the AI is told".
+- **Tests:** `test/opsTriage.test.js` (12) — fingerprint collapse on the real
+  journeys-alert messages from 2026-07-22, ticket filing, no-duplicate
+  recurrence, billing→action-not-ticket, noise silence, cap parking + no
+  re-classify, kill switch, loop guard, code grounding.
+
 ## Why this is close, not far
 
 The two ends of the loop already exist:
